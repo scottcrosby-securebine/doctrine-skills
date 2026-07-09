@@ -36,7 +36,7 @@ The doctrine composes with other tooling and **degrades gracefully when somethin
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) — `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content.
 - [superpowers](https://github.com/obra/superpowers) — brainstorming, dispatching-parallel-agents, verification-before-completion.
 - [OpenAI codex plugin](https://github.com/openai/codex) — the default red team (`codex:codex-rescue`). Fallback: a fresh-context subagent prompted to refute.
-- ponytail — simplification review/audit. Fallback: `/simplify` or a manual YAGNI pass.
+- [ponytail](https://github.com/DietrichGebert/ponytail) — simplification review/audit. Fallback: `/simplify` or a manual YAGNI pass.
 - `matts-code-review` — a two-axis (Standards + Spec) review skill. Fallback: `/code-review` or two parallel review subagents.
 
 ## Design notes
