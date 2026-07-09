@@ -1,0 +1,14 @@
+{
+  "name": "doctrine-skills",
+  "owner": {
+    "name": "Scott Crosby",
+    "url": "https://github.com/scottcrosby-securebine"
+  },
+  "plugins": [
+    {
+      "name": "doctrine",
+      "source": "./",
+      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, debugging, auditing, and documentation sweeps."
+    }
+  ]
+}
