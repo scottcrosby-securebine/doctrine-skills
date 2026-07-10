@@ -37,7 +37,7 @@ The doctrine composes with other tooling and **degrades gracefully when somethin
 - [superpowers](https://github.com/obra/superpowers) — brainstorming, dispatching-parallel-agents, verification-before-completion.
 - [OpenAI codex plugin](https://github.com/openai/codex) — the default red team (`codex:codex-rescue`). Fallback: a fresh-context subagent prompted to refute.
 - [ponytail](https://github.com/DietrichGebert/ponytail) — simplification review/audit. Fallback: `/simplify` or a manual YAGNI pass.
-- `matts-code-review` — a two-axis (Standards + Spec) review skill. Fallback: `/code-review` or two parallel review subagents.
+- `matts-code-review` — a two-axis (Standards + Spec) review skill. This is Matt Pocock's `code-review` skill installed under a different name: copy `skills/engineering/code-review/` from his repo into `~/.claude/skills/matts-code-review/` and change the frontmatter `name:` to `matts-code-review` — the rename is required because the original name conflicts with Claude Code's native `/code-review`. Note it's a copy, not a symlink, so re-sync it manually when you update his repo. Fallback: `/code-review` or two parallel review subagents.
 
 ## Design notes
 
