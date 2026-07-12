@@ -5,7 +5,7 @@ description: Use when a doctrine-* wrapper skill invokes it, or when the user as
 
 # Doctrine
 
-An execution posture for substantial agent work. Wrapper skills (`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`) supply the task shape; this skill supplies how the work runs. It layers ON TOP of other skills, notably Matt Pocock's engineering skills: invoke them by name, never fork or restate their content.
+An execution posture for substantial agent work. Wrapper skills (`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`, `doctrine-write`) supply the task shape; this skill supplies how the work runs. It layers ON TOP of other skills, notably Matt Pocock's engineering skills: invoke them by name, never fork or restate their content.
 
 ## Posture
 

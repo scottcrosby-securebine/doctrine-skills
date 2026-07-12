@@ -2,7 +2,7 @@
 
 An execution posture for substantial agent work in Claude Code: **parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity.**
 
-Six skills:
+Seven skills:
 
 | Skill | Use for |
 |---|---|
@@ -12,6 +12,7 @@ Six skills:
 | `doctrine-audit` | Bug hunts and deep code audits: drift, logic issues, over-engineering. |
 | `doctrine-docs` | Documentation sweeps: stale docs, undocumented features, then a PR. |
 | `doctrine-research` | Deep research: dual-engine (Claude + a second independent engine), merged claim table, gap-honest cited report with a grounded recommendation. |
+| `doctrine-write` | Important documents, written or rewritten: one-voice drafting, parallel review lenses (clarity/accuracy/audience/structure), hostile-reader red team. |
 
 ## The posture
 
