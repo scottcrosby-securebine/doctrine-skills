@@ -32,8 +32,10 @@ When a referenced skill isn't installed, degrade gracefully instead of stalling:
 | codex plugin | Fresh-context subagent prompted to refute, with the same verify-from-source rule |
 | ponytail | /simplify, or a manual YAGNI/dead-code pass |
 | matts-code-review | /code-review, or two parallel subagents reviewing Standards and Spec |
+| Matt's `tdd` | Inline red-green-refactor: failing test first, minimal code to green, refactor |
+| Matt's `diagnosing-bugs` | Inline discipline: build the feedback loop/repro first, test one hypothesis at a time on evidence, regression test before the fix |
 | Matt's `implement` / `improve-codebase-architecture` (not model-invocable even when installed) | Read `~/.claude/skills/<name>/SKILL.md` if present; otherwise the wrapper states the inline fallback |
-| superpowers | Parallel Agent tool calls; verification = run checks and paste output before claiming done |
+| superpowers | Parallel Agent tool calls; verification = run checks and paste output before claiming done; brainstorming = interview the user one question at a time before designing |
 
 ## Red flags
 
