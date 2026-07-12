@@ -2,7 +2,7 @@
 
 An execution posture for substantial agent work in Claude Code: **parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity.**
 
-Five skills:
+Six skills:
 
 | Skill | Use for |
 |---|---|
@@ -11,6 +11,7 @@ Five skills:
 | `doctrine-debug` | Anything broken, throwing, failing, or slow. |
 | `doctrine-audit` | Bug hunts and deep code audits: drift, logic issues, over-engineering. |
 | `doctrine-docs` | Documentation sweeps: stale docs, undocumented features, then a PR. |
+| `doctrine-research` | Deep research: dual-engine (Claude + a second independent engine), merged claim table, gap-honest cited report with a grounded recommendation. |
 
 ## The posture
 
@@ -35,7 +36,7 @@ The doctrine composes with other tooling and **degrades gracefully when somethin
 
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) — `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content.
 - [superpowers](https://github.com/obra/superpowers) — brainstorming, dispatching-parallel-agents, verification-before-completion.
-- [OpenAI codex plugin](https://github.com/openai/codex) — the default red team (`codex:codex-rescue`). Fallback: a fresh-context subagent prompted to refute.
+- [OpenAI codex plugin](https://github.com/openai/codex) — the default red team (`codex:codex-rescue`), and `doctrine-research`'s second research engine. Fallback: a fresh-context subagent prompted to refute (research loses cross-model diversity and says so in the report).
 - [ponytail](https://github.com/DietrichGebert/ponytail) — simplification review/audit. Fallback: `/simplify` or a manual YAGNI pass.
 - `matts-code-review` — a two-axis (Standards + Spec) review skill. This is Matt Pocock's `code-review` skill installed under a different name: copy `skills/engineering/code-review/` from his repo into `~/.claude/skills/matts-code-review/` and change the frontmatter `name:` to `matts-code-review` — the rename is required because the original name conflicts with Claude Code's native `/code-review`. Note it's a copy, not a symlink, so re-sync it manually when you update his repo. Fallback: `/code-review` or two parallel review subagents.
 

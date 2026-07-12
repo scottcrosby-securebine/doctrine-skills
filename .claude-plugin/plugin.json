@@ -1,12 +1,22 @@
 {
   "name": "doctrine",
-  "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Five skills: a shared doctrine plus wrappers for coding, debugging, auditing, and documentation sweeps. Composes with (and degrades gracefully without) Matt Pocock's engineering skills, superpowers, codex, and ponytail.",
-  "version": "1.0.0",
+  "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Six skills: a shared doctrine plus wrappers for coding, debugging, auditing, documentation sweeps, and deep research. Composes with (and degrades gracefully without) Matt Pocock's engineering skills, superpowers, codex, and ponytail.",
+  "version": "1.1.0",
   "author": {
     "name": "Scott Crosby"
   },
   "homepage": "https://github.com/scottcrosby-securebine/doctrine-skills",
   "repository": "https://github.com/scottcrosby-securebine/doctrine-skills",
   "license": "MIT",
-  "keywords": ["skills", "workflow", "red-team", "parallel-agents", "code-review", "debugging", "audit", "documentation"]
+  "keywords": [
+    "skills",
+    "workflow",
+    "red-team",
+    "parallel-agents",
+    "code-review",
+    "debugging",
+    "audit",
+    "documentation",
+    "research"
+  ]
 }
