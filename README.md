@@ -2,12 +2,13 @@
 
 An execution posture for substantial agent work in Claude Code: **parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity.**
 
-Seven skills:
+Eight skills:
 
 | Skill | Use for |
 |---|---|
-| `doctrine` | The shared posture; the six wrappers invoke it. |
+| `doctrine` | The shared posture; the seven wrappers invoke it. |
 | `doctrine-code` | General coding (backend, frontend, UI): specs, tickets, features. |
+| `doctrine-gauntlet` | Web design: pages, heroes, design-system cards, built builder-vs-critic against a reference. |
 | `doctrine-debug` | Anything broken, throwing, failing, or slow. |
 | `doctrine-audit` | Bug hunts and deep code audits: drift, logic issues, over-engineering. |
 | `doctrine-docs` | Documentation sweeps: stale docs, undocumented features, then a PR. |
@@ -31,7 +32,7 @@ Seven skills:
 /plugin install doctrine@doctrine-skills
 ```
 
-One install brings all seven skills; the `doctrine-*` skills then appear in your skills list. Ask in task terms ("hunt bugs in the payments module with the doctrine") or name a wrapper ("use doctrine-debug on this flaky test").
+One install brings all eight skills; the `doctrine-*` skills then appear in your skills list. Ask in task terms ("hunt bugs in the payments module with the doctrine") or name a wrapper ("use doctrine-debug on this flaky test").
 
 ## Prerequisites
 
@@ -39,16 +40,19 @@ Everything below is optional (each skill states its fallback), but the doctrine 
 
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) (standalone: copy the `skills/engineering/<name>/` folders): `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content. One special case: install `code-review` as `matts-code-review` (copy it into `~/.claude/skills/matts-code-review/` and set the frontmatter `name:` to match) because the original name collides with Claude Code's native `/code-review`. It's a copy, not a symlink: re-sync it after updating his repo. Fallbacks: the `doctrine` skill's table lists a fallback for each; `matts-code-review` degrades to `/code-review` or two parallel review subagents.
 - [superpowers](https://github.com/obra/superpowers) (plugin): brainstorming, dispatching-parallel-agents, verification-before-completion. Fallback: parallel Agent calls with check output pasted before claiming done; for brainstorming, interview the user one question at a time before designing.
-- [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc) (plugin; also needs the Codex CLI installed and logged in: run `codex:setup` to verify): the default red team (`codex:codex-rescue`) and `doctrine-research`'s second research engine. Fallback: a fresh-context subagent prompted to refute (research loses cross-model diversity and says so in the report).
+- [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc) (plugin; also needs the Codex CLI installed and logged in: run `codex:setup` to verify): the default red team (`codex:codex-rescue`), `doctrine-research`'s second research engine, and — via the Codex CLI directly — `doctrine-gauntlet`'s image generation and image-seeing red team. Fallback: a fresh-context subagent prompted to refute (research loses cross-model diversity and says so in the report; the gauntlet directs native CSS/SVG/canvas art instead of generated assets).
 - [ponytail](https://github.com/DietrichGebert/ponytail) (see its repo for install): simplification review/audit. Fallback: `/simplify` or a manual YAGNI pass.
 - [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) (standalone): Strunk's Elements of Style; the clarity lens in `doctrine-write` and the editing pass in `doctrine-docs`. Fallback: a lens prompted with Strunk's core rules.
 - Claude Code's bundled `deep-research` workflow: `doctrine-research`'s first engine (confirm `deep-research` appears in your skills list). Fallback: a fan-out of web-search agents with per-claim adversarial verification.
+- Claude Design (the `DesignSync` tool, on a claude.ai login): `doctrine-gauntlet` uses it to discover a design system, push work-in-progress rounds you can watch in the Design pane, and deliver the approved set. Fallback: the repo alone is the design system and the source of record.
+- A headless-browser screenshot harness in the target project (any language): `doctrine-gauntlet`'s critics render there. Fallback: the skill bootstraps a throwaway Chromium + axe harness in the scratchpad.
 
 ## Design notes
 
 - The doctrine is a **layer, not a fork**: it wraps other authors' skills at runtime, so their upstream updates flow through untouched (one exception: the renamed `matts-code-review` copy, see Prerequisites).
 - The two-clean-pass gate defines what a "finding" is (anything requiring a diff change), so declined nitpicks don't loop forever, and a four-loop escalation valve prevents grinding.
 - The doctrine trades tokens for confidence: waves, red teams, and loops multiply agent usage. Point it at work that matters, not one-off edits.
+- `doctrine-gauntlet` folds in the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) (Matt Shumer): builder agents paired with harsh critics that judge rendered output blind against a reference. Its two modes keep both halves honest — the **fused gate** bounds the loop the doctrine way (blocking findings loop, polish goes to a docket, four rounds escalate), while **pure gauntlet** hands the stop decision to the critic and runs open-ended. A gauntlet optimizes whatever direction it is given, so the skill binds a design system and verifies the reference render before the first comparison.
 - These skills were built test-first: fresh-context agents ran each wrapper against realistic scenarios, and every ambiguity they hit was patched before release.
 
 ## License
