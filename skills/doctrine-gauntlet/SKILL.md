@@ -108,6 +108,13 @@ Performance is measured only where the project has the tooling. Report frame rat
 
 Use whichever harness can render **the deliverable** — a system repo's harness may only shoot that system's own file format, which makes it useless for the site you're building. Otherwise bootstrap a throwaway in the scratchpad: headless Chromium at the three widths in both color schemes, axe vendored in from the project or a local install, screenshots written out — and say that you bootstrapped it. Probe in order: a harness that renders the deliverable → a browser driver you can drive → axe available. **If the page renders but axe cannot be obtained**, accessibility is unmeasured, not passed: say so and let the user waive it or stop. An unmeasured item **from the floor list above** is never clean on its own; performance sits outside that list and is reported, not gated.
 
+**Render the page the way it ships, and prove the render is honest before anyone grades it.** Two artifacts will otherwise be judged as design:
+
+- A dev server injects overlays — error badges, refresh indicators — that land in the screenshot, and emits hydration warnings the floor counts as failures the built page never has. Serve production output where you can, otherwise suppress the overlay and tell critics which marks are the harness.
+- A full-page screenshot does not trigger lazy loading, so a long page comes back with its lower images blank. Scroll the page to the bottom and wait for images to settle before shooting, or a critic will reject content that is actually there.
+
+Look at the first render yourself before dispatching a single critic. Blank regions and stray badges are usually the harness, not the build.
+
 **If nothing can render the page, stop and tell the user.** This is not a caveat on one gate item: without renders the critic cannot look, and a critic that cannot look is the failure mode this whole skill exists to prevent. Fall back to the project's documented preview or post-deploy verification path if it has one — a post-deploy path means shipping before the gate has passed, so get the user's explicit go-ahead first; otherwise the gauntlet does not run. Never report a gate you did not run.
 
 **The floor outranks the bound law.** Brand palettes that fail contrast are the common case, not the exotic one, and both a floor failure and a law violation are blocking — so a law that requires a floor failure would make a clean pass impossible. It is recorded and escalated to the user, never obeyed silently, and critics do not demand parity on a law's defect.
@@ -160,3 +167,4 @@ Sequence: `list_projects` → `create_project` **only with the user's explicit g
 - A round counter that reset because work happened; only the clean-pass count resets.
 - A builder and critic on their fourth round against one section, with nobody told.
 - A critic calling the work mediocre and the verdict filed as polish. That is a blocking finding.
+- A dev-server overlay or hydration warning graded as a design defect, or a floor failure that only exists in dev.
