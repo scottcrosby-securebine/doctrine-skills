@@ -102,15 +102,21 @@ Docket destinations are not interchangeable. **Polish backlog** → an existing 
 
 ## Technical floor
 
-Universal, both modes, run on the integrated page every round: axe 0 serious/critical in **both** themes, text contrast **measured** not assumed, **non-text contrast** (WCAG 1.4.11) measured explicitly on charts, icons and focus indicators — axe will not catch it — visible focus on every interactive element, reduced motion genuinely static, no layout break at 360/768/1440.
+Universal, both modes, run on the integrated page every round: axe 0 serious/critical in **both** themes, text contrast **measured** not assumed, **non-text contrast** (WCAG 1.4.11) measured explicitly on charts, icons and focus indicators — axe will not catch it — visible focus on every interactive element, reduced motion genuinely static, sane heading structure (exactly one `h1` on a page, no skipped levels), and no layout break at 360/768/1440.
 
 Performance is measured only where the project has the tooling. Report frame rate and LCP as **unmeasured** when you did not measure them; never let an unmeasured item read as a pass.
 
-Use whichever harness can render **the deliverable** — a system repo's harness may only shoot that system's own file format, which makes it useless for the site you're building. Otherwise bootstrap a throwaway in the scratchpad: headless Chromium at the three widths in both color schemes, axe vendored in from the project or a local install, screenshots written out — and say that you bootstrapped it. Probe in order: a harness that renders the deliverable → a browser driver you can drive → axe available. **If the page renders but axe cannot be obtained**, accessibility is unmeasured, not passed: say so and let the user waive it or stop. An unmeasured item **from the floor list above** is never clean on its own; performance sits outside that list and is reported, not gated.
+Use whichever harness can render **the deliverable** — a system repo's harness may only shoot that system's own file format, which makes it useless for the site you're building. Otherwise use the one that **ships beside this skill**, run from the project so it resolves that project's Playwright and axe:
+
+```bash
+node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|both]
+```
+
+It renders the three widths in both themes, scrolls first so lazy images load, hides dev-server overlays, checks heading structure and layout, runs axe when it can resolve it, and prints an `[UNMEASURED]` line for everything it could not check — including non-text contrast and focus visibility, which it never judges for you. Exit codes: `0` clean, `1` failing configurations, `2` could not run, **`3` nothing failed but items went unmeasured** — which is not a pass. Add `--fragment` when the target is a card or partial rather than a whole page, so a missing `h1` is not treated as a defect. It refuses to run when no browser is available, printing the install line rather than a verdict. Nothing in it is machine-specific; `NODE_PATH` points it at an existing install when the project has no `node_modules` of its own. Do not hardcode a path into a copy of it. **If the page renders but axe cannot be obtained**, accessibility is unmeasured, not passed: say so and let the user waive it or stop. An unmeasured item **from the floor list above** is never clean on its own; performance sits outside that list and is reported, not gated.
 
 **Render the page the way it ships, and prove the render is honest before anyone grades it.** Two artifacts will otherwise be judged as design:
 
-- A dev server injects overlays — error badges, refresh indicators — that land in the screenshot, and emits hydration warnings the floor counts as failures the built page never has. Serve production output where you can, otherwise suppress the overlay and tell critics which marks are the harness.
+- A dev server injects overlays — error badges, refresh indicators — that land in the screenshot, and emits hydration warnings that a floor gating JS errors would count as failures the built page never has. The shipped harness hides the overlays and reports those warnings as noise rather than gating them; serve production output where you can, and tell critics which marks are the harness.
 - A full-page screenshot does not trigger lazy loading, so a long page comes back with its lower images blank. Scroll the page to the bottom and wait for images to settle before shooting, or a critic will reject content that is actually there.
 
 Look at the first render yourself before dispatching a single critic. Blank regions and stray badges are usually the harness, not the build.

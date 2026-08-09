@@ -27,6 +27,17 @@ Adding, renaming, or rescoping a skill touches all of:
 - The wrapper list in `skills/doctrine/SKILL.md`'s intro
 - Descriptions in `.claude-plugin/plugin.json` and `marketplace.json`
 
+## The one skill with code in it
+
+`doctrine-gauntlet` ships `harness/floor.mjs` — the technical floor its critics
+depend on. It is the only executable in the repo, and its portability is the
+point: it resolves Playwright and axe from whatever the host project has, and
+reports `[UNMEASURED]` rather than passing something it could not check. Never
+hardcode a path into it, and keep the SKILL.md description of what it does in
+step with what it actually does — the skill claims specific behaviour (three
+widths, both themes, lazy-load scrolling, overlay hiding) that the code must
+still perform.
+
 ## Conventions
 
 - SKILL.md frontmatter `description:` follows the "Use when …" trigger-phrase style; it is what makes the skill fire, so write it for matching, not marketing.

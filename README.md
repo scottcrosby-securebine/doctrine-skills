@@ -45,7 +45,7 @@ Everything below is optional (each skill states its fallback), but the doctrine 
 - [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) (standalone): Strunk's Elements of Style; the clarity lens in `doctrine-write` and the editing pass in `doctrine-docs`. Fallback: a lens prompted with Strunk's core rules.
 - Claude Code's bundled `deep-research` workflow: `doctrine-research`'s first engine (confirm `deep-research` appears in your skills list). Fallback: a fan-out of web-search agents with per-claim adversarial verification.
 - Claude Design (the `DesignSync` tool, on a claude.ai login): `doctrine-gauntlet` uses it to discover a design system, push work-in-progress rounds you can watch in the Design pane, and deliver the approved set. Fallback: the repo alone is the design system and the source of record.
-- A headless-browser screenshot harness in the target project (any language): `doctrine-gauntlet`'s critics render there. Fallback: the skill bootstraps a throwaway Chromium + axe harness in the scratchpad.
+- Playwright, for `doctrine-gauntlet` only: its critics judge rendered output, so the floor needs a browser. The skill **ships its own harness** at `skills/doctrine-gauntlet/harness/floor.mjs`; run it from the project and it resolves that project's Playwright and axe — nothing in it is machine-specific. In a project that has neither: `npm i -D playwright-core axe-core && npx playwright install chromium`. Without a browser the harness refuses to run rather than reporting a pass, because a critic that cannot look has reviewed nothing. Without axe, accessibility reports as unmeasured, never as clean.
 
 ## Design notes
 
