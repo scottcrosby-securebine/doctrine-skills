@@ -14,9 +14,13 @@ Skills were validated by running fresh-context agents through each wrapper again
 
 **Hub and spokes.** `skills/doctrine/SKILL.md` is the hub: the seven-step posture (ask questions first → phases/waves of parallel agents → native checks → red team → two-clean-pass loop → simplify → deliver) and the fallback table for missing prerequisites. The seven `doctrine-*` wrappers each begin with "REQUIRED BACKGROUND: read the `doctrine` skill first" and supply only the task shape: which external skill is the core discipline, how phases map onto it, and which review skill the phase gate uses. Don't restate posture steps inside a wrapper — reference them ("doctrine step 4").
 
+**A hoist that is deliberately not done yet.** About 1,100 words in `doctrine-gauntlet` — "The docket and the arbiter" in full, plus the counter table and the rationale around it in "Modes" — are task-shape-agnostic and conceptually belong to the hub. They stay in the wrapper because **no second wrapper needs them**, and hoisting early makes all seven carry machinery one uses. A second candidate now exists and is deliberately **not** hoisted either: `doctrine-write` and `doctrine-gauntlet` both build a **claim ledger**, and the gauntlet's version cross-references the write one rather than redefining it — the predecessor-is-evidence rule is genuinely gauntlet-only, so two definitions would be wrong but one shared section is premature at two users. **The trigger is a second wrapper needing an escalation budget or PROPOSED/RULED discipline** — at that point move them up. It is a re-layering, not a cut: nothing gets deleted, and expect to generalize on the way, since the counters are written against gauntlet's two modes and the docket destinations assume a bound design system. This was measured during a necessity pass, not guessed — don't re-derive it.
+
 **Every external reference needs a fallback.** Any skill a wrapper invokes must have a graceful-degradation path, either in the doctrine skill's Fallbacks table or stated inline in the wrapper. A reference with no fallback is a bug.
 
 **Gate semantics are load-bearing.** The two-clean-pass exit gate, the definition of a "finding" (anything requiring a diff change; declined nitpicks don't reset the counter), and the four-loop escalation valve are deliberate design (see README Design notes) — don't loosen them casually when editing skills.
+
+**Some rules only look redundant.** `doctrine-gauntlet` carries ten recorded pairs that read as the same rule stated twice and are not — each survives because a run can comply with one and violate the other, and several exist because the two halves reach two different agents' prompts. They are recorded with their distinctions in `skills/doctrine-gauntlet/do-not-merge.md`, which is **not exhaustive**. Read it before proposing a merge there; re-proposing a listed pair isn't a finding unless you can defeat the stated distinction, and an unlisted pair still needs the same argument.
 
 ## Files that must stay in sync
 
@@ -31,11 +35,12 @@ Adding, renaming, or rescoping a skill touches all of:
 
 `doctrine-gauntlet` is the only skill with bundled files: `harness/floor.mjs`
 (the technical floor its critics depend on), `floor.md` (how to drive that
-harness — flags, exit codes, render honesty) and `tools.md` (Codex and Claude
-Design invocation). Both sidecars exist so SKILL.md carries decision content
-and gate law while operating manuals load on demand. The split rule: if it
+harness — flags, exit codes, render honesty), `tools.md` (Codex and Claude
+Design invocation) and `do-not-merge.md` (the pairs a reviewer must not
+collapse). The sidecars exist so SKILL.md carries decision content and gate law
+while operating manuals and review history load on demand. The split rule: if it
 changes what an agent *decides*, it belongs in SKILL.md; if it changes how a
-tool is *invoked*, it belongs in the sidecar. The harness is the only executable in the repo, and its portability
+tool is *invoked* or records a call already made, it belongs in a sidecar. The harness is the only executable in the repo, and its portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
@@ -45,9 +50,18 @@ behaviour (three widths, lazy-load scrolling, overlay hiding, the flag set)
 that the code must still perform. Two flags exist because without them the
 floor can never close on ordinary projects: `--theme-class=NAME` for
 class-based theming (Tailwind's `dark`), and `--single-theme` for a site that
-genuinely ships one. Any new theme-application site must go through the shared
+genuinely ships one. `--crop=SELECTOR` exists because a full-page screenshot is
+read scaled to fit, so nothing else lets a reviewer see a figure at the size it
+ships. Any new theme-application site must go through the shared
 `applyTheme()` helper; a second call site setting `data-theme` directly is how
 the reduced-motion pass silently measured the wrong theme.
+
+**The harness applies the theme, so it must not certify one nobody can reach.**
+The reachability probe (no `prefers-color-scheme`, no `color-scheme`, no toggle,
+no script touching the theme → `[UNMEASURED]`) is load-bearing, not a nicety: an
+instrument that creates the state it measures will otherwise pass a dead palette
+exactly like a working one. Keep the probe honest if you touch theming — it is
+the one check whose absence is invisible in the output.
 
 ## Conventions
 
