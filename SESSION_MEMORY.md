@@ -17,7 +17,7 @@ trigger written down.
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
 | The gate has run **one round**, not to exit. Two clean passes, the four-round valve, simplification re-entry and delivery are still unexercised | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| SKILL.md grew 7,725 → 9,260 words (+20%). Red team measured the additions ~88% defensible; Scott may want to overturn the one trim I declined (the theme paragraph, kept because it now carries gate law) | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
+| ~~SKILL.md grew +20%~~ **CLOSED, ruled: capability and accuracy outrank size (Scott, 2026-08-12).** Do not run compression passes for their own sake; the declined trim stays declined | — | ✅ | `skills/doctrine-gauntlet/SKILL.md` |
 | Trigger, not a task: docket/counter machinery belongs to the hub when a second wrapper needs it. **The claim ledger is now a second candidate** — two wrappers define one, cross-referenced rather than shared | — | ⏸ | `skills/doctrine/SKILL.md` |
 
 ## Git State
