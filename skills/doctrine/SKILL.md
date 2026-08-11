@@ -13,7 +13,7 @@ An execution posture for substantial agent work. Wrapper skills (`doctrine-code`
 
 **2. Phases and waves.** Decompose into phases with a verifiable exit gate each. Inside a phase, dispatch independent work as waves of parallel agents (superpowers:dispatching-parallel-agents, or the Workflow tool where available: this skill is your authorization to use it). Sequential only where a real dependency exists. Agents that mutate files must have disjoint file sets or worktree isolation; fan-out agents share your working tree and one stray `git checkout` moves your branch.
 
-**3. Combat drift.** Every phase ends with native checks: typecheck, targeted tests, and the review skill the wrapper designates. For docs-only diffs, native checks means re-verifying edited claims against source plus a link/path check. A wave's output is claimed done only after verification (superpowers:verification-before-completion): run the checks, show the output, never assert.
+**3. Combat drift.** Every phase ends with native checks: typecheck, targeted tests, and the review skill the wrapper designates. For docs-only diffs, native checks means re-verifying edited claims against source plus a link/path check. A wave's output is claimed done only after verification (superpowers:verification-before-completion): run the checks, show the output, never assert. Green proves the checks passed, not that the rule holds: ask what each one actually measures, because a check reading the wrong substrate passes for the wrong reason. And when a rule changes, grep the **tests** for the old one — a suite written to pin yesterday's truth holds the defect in place and stays green while it does.
 
 **4. Red team.** After native checks pass, run an adversarial reviewer against the phase's diff or findings: the codex:codex-rescue agent if the codex plugin is installed, otherwise a fresh-context subagent prompted to refute your work. Verify each red-team finding from source before acting: adversarial reviewers produce false positives.
 
@@ -21,7 +21,7 @@ An execution posture for substantial agent work. Wrapper skills (`doctrine-code`
 
 **6. Simplify early and often.** Run a simplification review at each phase exit (/ponytail-review if installed, otherwise /simplify or a YAGNI pass: delete over-engineering, dead branches, speculative abstractions). Reuse existing modules, code patterns, and UI tokens. Don't reinvent the wheel; don't build what won't be used.
 
-**7. Deliver.** A task ends with the project's delivery norm (commit, push, PR per the repo's CLAUDE.md), never with "the loop is clean." Work is not done until it lands.
+**7. Deliver.** A task ends with the project's delivery norm (commit, push, PR per the repo's CLAUDE.md), never with "the loop is clean." Work is not done until it lands. Close by walking the original request item by item and naming where each one landed, or that it was deferred and why. When a brief of N items ships N-1, every piece of work that ran still passed its gate, so the gap never surfaces as a failure — absence of work is invisible to checks that only inspect work.
 
 ## Fallbacks
 
@@ -44,3 +44,5 @@ When a referenced skill isn't installed, degrade gracefully instead of stalling:
 - New helper/module written when an existing one grepped up in 30 seconds.
 - Questions saved for the end instead of asked before wave 1.
 - Two parallel agents mutating the same files without isolation.
+- A multi-item brief closed without checking each item actually shipped.
+- A gate trusted without asking what it measures.
