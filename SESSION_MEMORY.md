@@ -13,8 +13,7 @@ kit. Next is the one untested thing: an end-to-end fused-gate run.
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
 | Fused gate has never run end to end — everything around it is tested, the loop is not | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| v1.5.0's reader test and findings discipline have had **no** adversarial round and no live run | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| Two-clean-pass gate never closed; last round found 1 blocking, fixed but unverified | — | ⏳ | `skills/doctrine-gauntlet/harness/floor.mjs` |
+| Unverified: v1.5.0's reader test had no adversarial round, and the two-clean-pass gate never closed (last round found 1 blocking, fixed) | — | ⏳ | `skills/doctrine-gauntlet/` |
 | 19 copy-law violations in website_v3 live copy — voice calls, deliberately not made | — | 🔴 | `website_v3` `npm run lint:copy` |
 | website_v3 home-page footer is the site's weakest surface (blind critic) | — | 🔴 | `website_v3/components/layout` |
 
@@ -28,9 +27,9 @@ kit. Next is the one untested thing: an end-to-end fused-gate run.
 
 - **A critic's coverage is exactly the axes its brief names.** Six waves passed
   every gate and were rejected as "great if you're an LLM, not so great if
-  you're a human being." The one unmeasurable axis that was written down caught
-  4/4; unnamed axes scored 0/7 and reported nothing. Full post-mortem in
-  `securebine-design/docs/LESSONS.md` and `website_v3/docs/RESTYLE-DOCKET.md`.
+  you're a human being": the one unmeasurable axis written down caught 4/4,
+  unnamed axes scored 0/7 and reported nothing. Post-mortem in
+  `securebine-design/docs/LESSONS.md`.
 - `codex exec -i` is **variadic**: a prompt after `-i` is swallowed as a
   filename and the run dies on stdin. Put it first, after `--`, or on stdin.
   Codex also *sees* images, which is what makes it a visual red team.
