@@ -1,54 +1,48 @@
-# State [doctrine-gauntlet v1.5.0; the campaign's lessons absorbed | 2026-08-11]
+# State [doctrine-gauntlet v1.9.0; hardened, measured, still never run | 2026-08-12]
 
 ## Resume
 
-`doctrine-gauntlet` — the eighth skill, fusing Shumer's gauntlet loop with the
-doctrine posture — is built, adversarially reviewed, and pushed at v1.5.0 with
-its own portable floor harness. Its judgment layer was rewritten from the
-website_v3 campaign post-mortem, and the same rulings were absorbed into the
-kit. Next is the one untested thing: an end-to-end fused-gate run.
+Three sessions of hardening `doctrine-gauntlet` are done and pushed. Ten
+red-team rounds fixed seven KILL-level defects; a three-agent necessity pass
+then measured the file and found it **~94% irreducible** — nearly every rule
+maps to a dated failure in the campaign record. It stays one skill: the size
+asymmetry against its 295-632-word siblings is the "layer, not fork"
+architecture working, because gauntlet has no upstream discipline to delegate
+to. Harness detail now lives in `floor.md`, tool invocation in `tools.md`.
 
 ## Active Work
 
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
-| Fused gate has never run end to end — everything around it is tested, the loop is not | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| Unverified: v1.5.0's reader test had no adversarial round, and the two-clean-pass gate never closed (last round found 1 blocking, fixed) | — | ⏳ | `skills/doctrine-gauntlet/` |
-| 19 copy-law violations in website_v3 live copy — voice calls, deliberately not made | — | 🔴 | `website_v3` `npm run lint:copy` |
-| website_v3 home-page footer is the site's weakest surface (blind critic) | — | 🔴 | `website_v3/components/layout` |
+| The fused gate has still never been exercised — every session so far reviewed the artifact, none ran it. Now unblocked | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
+| Two judgment calls owed by Scott: the commit-authorization clause, and provenance for campaign citations in a public plugin | — | 🔴 | `skills/doctrine-write/SKILL.md` |
+| The merger's seven "do not merge" pairs are unrecorded — a future reviewer will re-propose them | — | 🔴 | `CLAUDE.md` |
+| Trigger, not a task: ~1,100 words of docket/counter machinery belong to the hub **when a second wrapper needs them** | — | ⏸ | `skills/doctrine/SKILL.md` |
 
 ## Git State
 
-- Branch: `main` @ `9e13cbf` | clean | PRs: none | CI: none configured
-- Siblings, both clean and pushed: `securebine-design` @ `e11cc03`,
-  `website_v3` @ its own head (another session owns it — see gotcha)
+- Branch `main` @ `aa25970` | clean | pushed | PRs: none | CI: none configured
 
-## Gotchas (learned this session)
+## Gotchas
 
-- **A critic's coverage is exactly the axes its brief names.** Six waves passed
-  every gate and were rejected as "great if you're an LLM, not so great if
-  you're a human being": the one unmeasurable axis written down caught 4/4,
-  unnamed axes scored 0/7 and reported nothing. Post-mortem in
-  `securebine-design/docs/LESSONS.md`.
-- `codex exec -i` is **variadic**: a prompt after `-i` is swallowed as a
-  filename and the run dies on stdin. Put it first, after `--`, or on stdin.
-  Codex also *sees* images, which is what makes it a visual red team.
-- A full-page screenshot does **not** trigger lazy loading, and dev servers
-  inject overlays and hydration noise; an unwarned critic grades it as design.
-  `harness/floor.mjs` handles all three. Never `pkill -f` a pattern matching
-  your own command line.
-- `website_v3` moves under you — another session develops it and pushed
-  mid-work, carrying a commit of mine to origin. Re-check its HEAD before
-  trusting any finding about its contents.
+- **Lane (Scott, 2026-08-12): develop the skills; do not do web development.**
+  `website_v3` is a **read-only evidence corpus** for mining lessons, never a
+  build target. Validating the gate needs *a* page, not *their* page — use a
+  synthetic one in the scratchpad.
+- **Playwright is now installed globally** (`playwright-core`,
+  `@axe-core/playwright`, `axe-core`). Browsers were already cached at
+  `~/.cache/ms-playwright`; `playwright-core` ships without them. Verified with
+  `NODE_PATH` unset from a dir with no `node_modules`: exit 0 clean, and axe
+  genuinely firing on a planted defect — not silently absent.
+- **A broken instrument voids the rounds it already passed.** False passes do
+  not announce themselves; only failures do.
+- **Parallel agents given the same brief converge.** Three copies of one lens
+  read as confidence and measure one opinion. Give diverse mandates.
+- **Codex as red team**: `-c model_reasoning_effort="medium"`, a lean prompt and
+  a long tool timeout. It returns capacity errors under load; re-run.
 
 ## Next Session Kickoff
 
-1. Run a real fused gate on a live page (`doctrine-gauntlet`, fused mode) —
-   the restyled `/partners` wall is the natural target. It is the only
-   untested mechanic and the first exercise of v1.5.0's reader test.
-2. Then one verification round on `harness/floor.mjs` as **code**; the last two
-   rounds found everything there, not in the prose.
-3. Copy-law fixes in `website_v3` need Scott's voice call first.
-
-Invoke: `doctrine`, then `doctrine-gauntlet`. The design system binds via the
-`Design system:` line in `securebine-design/CLAUDE.md`.
+1. Ask which of the four Active Work items Scott wants; do not assume.
+2. If exercising the gate: synthetic page, scratchpad, no client repo.
+3. Invoke `doctrine`, then `doctrine-gauntlet`.
