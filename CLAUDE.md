@@ -30,9 +30,12 @@ Adding, renaming, or rescoping a skill touches all of:
 ## The one skill with code in it
 
 `doctrine-gauntlet` is the only skill with bundled files: `harness/floor.mjs`
-(the technical floor its critics depend on) and `tools.md` (Codex and Claude
-Design invocation, kept out of SKILL.md so the execution core stays decision
-content). The harness is the only executable in the repo, and its portability
+(the technical floor its critics depend on), `floor.md` (how to drive that
+harness — flags, exit codes, render honesty) and `tools.md` (Codex and Claude
+Design invocation). Both sidecars exist so SKILL.md carries decision content
+and gate law while operating manuals load on demand. The split rule: if it
+changes what an agent *decides*, it belongs in SKILL.md; if it changes how a
+tool is *invoked*, it belongs in the sidecar. The harness is the only executable in the repo, and its portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
