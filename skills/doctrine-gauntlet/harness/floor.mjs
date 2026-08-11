@@ -1,7 +1,7 @@
 /* doctrine-gauntlet technical floor.
  *
  *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both]
- *                  [--fragment] [--single-theme] [--theme-class=NAME]
+ *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]
  *
  * Renders 360/768/1440 in the themes asked for, writes full-page screenshots,
  * and reports the floor: horizontal scroll, heading structure, axe
@@ -28,8 +28,12 @@ const SINGLE_THEME = argv.includes('--single-theme')
 /* data-theme and colorScheme are two of the three common mechanisms. The third
    is a class on <html> (Tailwind's `dark`), which nothing else here can set. */
 const THEME_CLASS = (argv.find(a => a.startsWith('--theme-class=')) || '').split('=')[1] || null
+/* A full-page screenshot of a long page is read scaled to fit, so a 175px
+   illustration is reviewed at thumbnail size and its defects are invisible.
+   "Read the images at shipped size" needs an instrument, and this is it. */
+const CROP = (argv.find(a => a.startsWith('--crop=')) || '').split('=').slice(1).join('=') || null
 const [target, outPrefix, themeArg = 'both'] = argv.filter(a => !a.startsWith('--'))
-const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME]'
+const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]'
 if (!target || !outPrefix) { console.error(USAGE); process.exit(2) }
 if (!['dark', 'light', 'both'].includes(themeArg)) {
   console.error(`${USAGE}\n  unknown theme "${themeArg}" — expected dark, light or both`)
@@ -113,6 +117,7 @@ Install the browser, then re-run:
 }
 
 let failures = 0
+const cropNotes = new Set()
 /* Two different things, deliberately kept apart:
    - `unmeasured` is a gap in THIS run that should not have been there — axe
      missing, axe timing out, a theme switch that did nothing. It is not clean,
@@ -128,6 +133,43 @@ const handoff = [
 ]
 const fingerprint = {}   // theme -> width -> computed-style signature
 if (!AXE) unmeasured.push('axe (accessibility) — npm i -D axe-core to measure it')
+
+/* THIS HARNESS APPLIES THE THEME ITSELF, so without this check a page whose dark
+   palette is dead code passes the dark configurations exactly like one that
+   ships a working switch — the instrument creates the state it then measures.
+   Seen live: a page with a hardcoded data-theme="light", no media query and no
+   toggle passed all six configurations while no user could reach three of them.
+   Returns the mechanism found, or null. */
+let reachedBy                   // undefined until probed, then string
+const themeReachable = page => page.evaluate(cls => {
+  let unreadable = false
+  for (const sheet of document.styleSheets) {
+    let rules
+    /* A cross-origin sheet throws here. That is "cannot tell", NOT "absent" —
+       treating it as absent reports a correctly-themed site as broken. */
+    try { rules = sheet.cssRules } catch { unreadable = true; continue }
+    /* cssText of a media rule contains its inner rules, so this catches nesting */
+    for (const r of rules || []) {
+      if (r.cssText && r.cssText.includes('prefers-color-scheme')) return 'a prefers-color-scheme rule'
+    }
+  }
+  if (document.querySelector('[data-theme-toggle], [data-theme-switch]')) return 'a toggle attribute'
+  const mentions = s => !!s && s.includes('data-theme')
+  for (const s of document.scripts) if (mentions(s.textContent)) return 'a script that sets data-theme'
+  for (const el of document.querySelectorAll('button, a, input, select')) {
+    const t = `${el.id} ${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`.toLowerCase()
+    if (t.includes('dark mode') || t.includes('light mode') || /\btheme\b/.test(t)) return 'a control that looks like a theme switch'
+  }
+  /* Deliberately weak signals, reported as such rather than as a pass: a reset
+     carrying `color-scheme: light dark`, or a bundle merely containing the theme
+     class name, proves nothing about whether this page switches. */
+  const weak = []
+  if ((getComputedStyle(document.documentElement).colorScheme || '').includes('dark')) weak.push('a color-scheme declaration')
+  if (document.querySelector('meta[name="color-scheme"]')) weak.push('a color-scheme meta')
+  if (cls) for (const s of document.scripts) if (s.src || (s.textContent || '').includes(cls)) { weak.push(`a script that may reference "${cls}"`); break }
+  if (unreadable) weak.push('a stylesheet this harness could not read (cross-origin)')
+  return weak.length ? `only weak signals: ${weak.join(', ')}` : 'nothing'
+}, THEME_CLASS)
 
 /* dev-server overlays are harness artifacts, not design; hide before shooting */
 const HIDE_OVERLAYS = `
@@ -171,6 +213,9 @@ try {
         await page.addStyleTag({ content: HIDE_OVERLAYS })
         await SETTLE(page)
         await page.waitForTimeout(1200)
+        /* Probe AFTER settling: a toggle injected by a deferred bundle does not
+           exist at `load`, so probing earlier calls every hydrated app themeless. */
+        if (reachedBy === undefined) reachedBy = await themeReachable(page)
 
         const struct = await page.evaluate(() => {
           const hs = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(e => +e.tagName[1])
@@ -199,6 +244,25 @@ try {
 
         await page.screenshot({ path: `${outPrefix}-${theme}-${w}.png`, fullPage: true })
 
+        /* 1:1 shot of a named region — the only way a reviewer sees a figure at
+           the size it ships, rather than scaled into a full-page thumbnail. */
+        if (CROP) {
+          /* Everything here is best-effort. A figure hidden at one breakpoint
+             makes .screenshot() wait for actionability and time out, and a
+             malformed selector throws in .count() — either would escape to the
+             outer catch and report CANNOT RUN on a page that rendered fine.
+             A missing crop is a note, never the end of the floor. */
+          try {
+            if (await page.locator(CROP).count()) {
+              await page.locator(CROP).first().screenshot({
+                path: `${outPrefix}-${theme}-${w}-crop.png`, timeout: 5000,
+              })
+            } else cropNotes.add(`${CROP} matched nothing at ${theme} ${w}px`)
+          } catch (e) {
+            cropNotes.add(`${CROP} at ${theme} ${w}px: ${String(e).split('\n')[0].slice(0, 80)}`)
+          }
+        }
+
         let axeOut = { serious: [], critical: [] }
         if (AXE) {
           try {
@@ -206,8 +270,33 @@ try {
             axeOut = await page.evaluate(async () => {
               const run = window.axe.run(document, { resultTypes: ['violations'] })
               const r = await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('axe timed out')), 45000))])
+              /* Name several targets, not just nodes[0]. "x21 :: .lede" reads as
+                 21 of .lede and sends the fix to one element while the other 20
+                 sit elsewhere — a count and a selector that describe different
+                 things. Distinct selectors, because 18 sibling table cells are
+                 one defect and should not crowd out the others. */
               const pick = imp => r.violations.filter(v => v.impact === imp)
-                .map(v => `${v.id} x${v.nodes.length} :: ${(v.nodes[0]?.target || []).join(' ')}`.slice(0, 200))
+                .map(v => {
+                  /* Group by failure reason, not by node: 18 sibling table cells
+                     failing on one colour pair are one defect, and listing four of
+                     them would hide the two other defects underneath. */
+                  const groups = new Map()
+                  for (const n of v.nodes) {
+                    const target = (n.target || []).join(' ')
+                    /* Only some rules state a reason worth grouping on — contrast
+                       names its colour pair. Where there is none, group by element,
+                       or every node lands in one bucket and the line prints nodes[0]
+                       again with the count twice: worse than what it replaced. */
+                    const why = (n.any?.[0]?.message || '').match(/#[0-9a-f]{3,8}/gi)?.join(' on ') || null
+                    const key = why || target
+                    if (!groups.has(key)) groups.set(key, { target, why, n: 0 })
+                    groups.get(key).n++
+                  }
+                  const shown = [...groups.values()].slice(0, 4)
+                    .map(g => `${g.target}${g.n > 1 ? ` x${g.n}` : ''}${g.why ? ` (${g.why})` : ''}`)
+                  const more = groups.size > shown.length ? ` +${groups.size - shown.length} more` : ''
+                  return `${v.id} x${v.nodes.length} :: ${shown.join(' | ')}${more}`.slice(0, 400)
+                })
               return { serious: pick('serious'), critical: pick('critical') }
             })
           } catch (e) {
@@ -300,6 +389,20 @@ if (themes.length === 2) {
 } else if (!SINGLE_THEME) {
   unmeasured.push(`only the ${themes[0]} theme was rendered — the other theme is unchecked, and the floor requires both. If this project genuinely ships one theme, re-run with --single-theme and it is measured, not missing.`)
 }
+
+/* A JUDGE line, not an UNMEASURED one, and the distinction is load-bearing.
+   UNMEASURED means "this run failed to measure something" — but both themes were
+   measured perfectly; the defect is that one of them ships to nobody. That is a
+   page defect, and UNMEASURED is waivable by the user while a floor failure is
+   not. Detecting it is also heuristic — no probe separates a real toggle from a
+   nav link called "Themes" — and heuristics belong in front of eyes, not in an
+   exit code. A critic answering "no, a user cannot reach it" IS a floor failure
+   and blocks, per the floor list in SKILL.md. */
+if (themes.length === 2 && !SINGLE_THEME) {
+  handoff.push(`theme reachability — this harness APPLIED the theme itself, so both renders exist whether or not the page can switch. Probing the page found ${reachedBy}. Confirm a user can actually reach the second theme; if they cannot, its palette is dead code and that is a floor failure, not a note.`)
+}
+
+for (const n of cropNotes) handoff.push(`--crop could not shoot a region: ${n} — the thing you wanted at shipped size was not seen by anyone.`)
 
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)
 for (const h of handoff) console.log(`\n[JUDGE] ${h}`)

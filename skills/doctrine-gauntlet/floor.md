@@ -10,7 +10,7 @@ project's Playwright and axe.
 
 ```bash
 node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|both]
-                                        [--fragment] [--single-theme] [--theme-class=NAME]
+              [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]
 ```
 
 ## What it does
@@ -26,6 +26,11 @@ resolve it.
 - `--theme-class=NAME` — toggles a class on `<html>` for projects that theme that way
   (Tailwind's `dark`). Without it, `data-theme` alone leaves those projects
   unswitchable and the run reports a false "theme switch had no effect".
+- `--crop=SELECTOR` — also shoots that element at 1:1 per width and theme, as
+  `<outPrefix>-<theme>-<width>-crop.png`. A full-page screenshot of a long page is
+  read scaled to fit, so a figure occupying a tenth of it is reviewed at a tenth of
+  its size; this is how anyone actually sees it at shipped size. A selector matching
+  nothing is `[UNMEASURED]`, not silence.
 - `--single-theme`, with the one theme named — declares that the project genuinely
   ships one theme. **A single-theme site is not a floor failure.** Without this flag
   its missing theme is an `[UNMEASURED]` that can never clear, so the gate could never
@@ -38,11 +43,21 @@ Two markers, and the difference matters:
 - **`[UNMEASURED]`** — a gap that should not be there: axe missing, a theme switch that
   did nothing, only one theme rendered. **It is not clean.**
 - **`[JUDGE]`** — work the harness never does because it needs eyes: non-text contrast,
-  focus visibility, canvas or rAF-driven motion. These always print. **The printed line
-  never gates; the critic's answer to it does** — non-text contrast and visible focus
-  are floor items, so a critic finding either failing is a floor failure and blocks.
-  `[JUDGE]` means the harness handed you the question, never that the question is
-  optional.
+  focus visibility, canvas or rAF-driven motion, **theme reachability**, and any region
+  `--crop` could not shoot. These always print. **The printed line never gates; the
+  critic's answer to it does** — non-text contrast, visible focus and a reachable second
+  theme are all floor items, so a critic finding any of them failing is a floor failure
+  and blocks. `[JUDGE]` means the harness handed you the question, never that the
+  question is optional.
+
+  **Theme reachability** is here rather than in `[UNMEASURED]` on purpose. Both themes
+  really were rendered, so nothing went unmeasured; the possible defect is that one of
+  them ships to nobody, because this harness applies the theme itself. The probe reports
+  what it found — a media query, a toggle, a script, weak signals, or nothing — and no
+  probe can separate a real switch from a nav link named "Themes", so the verdict is the
+  critic's. It also matters that `[UNMEASURED]` is waivable and a floor failure is not:
+  a genuinely dead palette must not be waivable. `--single-theme` remains the honest
+  answer for a page that really ships one.
 
 Exit codes: `0` clean · `1` failing configurations · `2` could not run ·
 **`3` nothing failed but something went unmeasured** — which is not a pass.

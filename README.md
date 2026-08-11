@@ -54,6 +54,7 @@ Everything below is optional (each skill states its fallback), but the doctrine 
 - The doctrine trades tokens for confidence: waves, red teams, and loops multiply agent usage. Point it at work that matters, not one-off edits.
 - `doctrine-gauntlet` folds in the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) (Matt Shumer): builder agents paired with harsh critics that judge rendered output blind against a reference. Its two modes keep both halves honest — the **fused gate** bounds the loop the doctrine way (blocking findings loop, polish goes to a docket, four rounds escalate), while **pure gauntlet** hands the stop decision to the critic and runs open-ended. A gauntlet optimizes whatever direction it is given, so the skill binds a design system and verifies the reference render before the first comparison.
 - These skills were built test-first: fresh-context agents ran each wrapper against realistic scenarios, and every ambiguity they hit was patched before release.
+- **On the case narratives.** `doctrine-gauntlet` cites incidents — a critic that manufactured a finding, a harness that measured the wrong theme, a brief of four items that shipped three. They are drawn from real engagements and deliberately anonymized: no client, product, person or repository is named, and identifying detail is removed rather than obscured. They are mnemonics for the rule beside them, not citations you can follow.
 
 ## License
 
