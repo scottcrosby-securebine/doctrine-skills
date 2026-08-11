@@ -4,10 +4,9 @@
 
 `doctrine-gauntlet` — the eighth skill, fusing Shumer's gauntlet loop with the
 doctrine posture — is built, adversarially reviewed, and pushed at v1.5.0 with
-its own portable floor harness. Its judgment layer was then rewritten from the
+its own portable floor harness. Its judgment layer was rewritten from the
 website_v3 campaign post-mortem, and the same rulings were absorbed into the
-kit. Nothing is stranded; next is the one untested thing, an end-to-end
-fused-gate run.
+kit. Next is the one untested thing: an end-to-end fused-gate run.
 
 ## Active Work
 
@@ -36,19 +35,18 @@ fused-gate run.
   filename and the run dies on stdin. Put it first, after `--`, or on stdin.
   Codex also *sees* images, which is what makes it a visual red team.
 - A full-page screenshot does **not** trigger lazy loading, and dev servers
-  inject overlays and hydration noise; an unwarned critic grades all of it as
-  design. `harness/floor.mjs` handles all three. Never `pkill -f` a pattern
-  matching your own command line.
-- `website_v3` moves under you — another session develops it actively and
-  pushed mid-work, carrying a commit of mine to origin. Re-check its HEAD
-  before trusting any finding about its contents.
+  inject overlays and hydration noise; an unwarned critic grades it as design.
+  `harness/floor.mjs` handles all three. Never `pkill -f` a pattern matching
+  your own command line.
+- `website_v3` moves under you — another session develops it and pushed
+  mid-work, carrying a commit of mine to origin. Re-check its HEAD before
+  trusting any finding about its contents.
 
 ## Next Session Kickoff
 
 1. Run a real fused gate on a live page (`doctrine-gauntlet`, fused mode) —
-   the restyled `/partners` credential wall is the natural target. It is the
-   only untested mechanic, and it exercises v1.5.0's reader test for the
-   first time.
+   the restyled `/partners` wall is the natural target. It is the only
+   untested mechanic and the first exercise of v1.5.0's reader test.
 2. Then one verification round on `harness/floor.mjs` as **code**; the last two
    rounds found everything there, not in the prose.
 3. Copy-law fixes in `website_v3` need Scott's voice call first.
