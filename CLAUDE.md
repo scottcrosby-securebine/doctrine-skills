@@ -29,14 +29,22 @@ Adding, renaming, or rescoping a skill touches all of:
 
 ## The one skill with code in it
 
-`doctrine-gauntlet` ships `harness/floor.mjs` — the technical floor its critics
-depend on. It is the only executable in the repo, and its portability is the
-point: it resolves Playwright and axe from whatever the host project has, and
-reports `[UNMEASURED]` rather than passing something it could not check. Never
-hardcode a path into it, and keep the SKILL.md description of what it does in
-step with what it actually does — the skill claims specific behaviour (three
-widths, both themes, lazy-load scrolling, overlay hiding) that the code must
-still perform.
+`doctrine-gauntlet` is the only skill with bundled files: `harness/floor.mjs`
+(the technical floor its critics depend on) and `tools.md` (Codex and Claude
+Design invocation, kept out of SKILL.md so the execution core stays decision
+content). The harness is the only executable in the repo, and its portability
+is the point: it resolves Playwright and axe from whatever the host project
+has, and reports `[UNMEASURED]` rather than passing something it could not
+check. Never hardcode a path into it.
+
+Keep SKILL.md in step with what the code actually does — it claims specific
+behaviour (three widths, lazy-load scrolling, overlay hiding, the flag set)
+that the code must still perform. Two flags exist because without them the
+floor can never close on ordinary projects: `--theme-class=NAME` for
+class-based theming (Tailwind's `dark`), and `--single-theme` for a site that
+genuinely ships one. Any new theme-application site must go through the shared
+`applyTheme()` helper; a second call site setting `data-theme` directly is how
+the reduced-motion pass silently measured the wrong theme.
 
 ## Conventions
 

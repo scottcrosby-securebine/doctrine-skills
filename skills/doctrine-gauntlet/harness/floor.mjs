@@ -1,6 +1,7 @@
 /* doctrine-gauntlet technical floor.
  *
- *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment]
+ *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both]
+ *                  [--fragment] [--single-theme] [--theme-class=NAME]
  *
  * Renders 360/768/1440 in the themes asked for, writes full-page screenshots,
  * and reports the floor: horizontal scroll, heading structure, axe
@@ -21,13 +22,31 @@ import { resolve, dirname, join, delimiter } from 'node:path'
 
 const argv = process.argv.slice(2)
 const FRAGMENT = argv.includes('--fragment')
-const [target, outPrefix, themeArg = 'both'] = argv.filter(a => a !== '--fragment')
-const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment]'
+/* A project that genuinely ships one theme is not "unmeasured" — without this
+   it can never reach a clean floor, because the missing theme reports forever. */
+const SINGLE_THEME = argv.includes('--single-theme')
+/* data-theme and colorScheme are two of the three common mechanisms. The third
+   is a class on <html> (Tailwind's `dark`), which nothing else here can set. */
+const THEME_CLASS = (argv.find(a => a.startsWith('--theme-class=')) || '').split('=')[1] || null
+const [target, outPrefix, themeArg = 'both'] = argv.filter(a => !a.startsWith('--'))
+const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME]'
 if (!target || !outPrefix) { console.error(USAGE); process.exit(2) }
 if (!['dark', 'light', 'both'].includes(themeArg)) {
   console.error(`${USAGE}\n  unknown theme "${themeArg}" — expected dark, light or both`)
   process.exit(2)   // validate before launching, or it throws with a browser open
 }
+if (SINGLE_THEME && themeArg === 'both') {
+  console.error(`${USAGE}\n  --single-theme needs the one theme named: pass dark or light, not both`)
+  process.exit(2)
+}
+
+/* Exactly one place applies the theme. Two call sites drift: the reduced-motion
+   pass set data-theme without the class, so a class-themed project measured
+   reduced motion in whichever theme the page happened to load in. */
+const applyTheme = (page, theme) => page.evaluate(({ t, cls }) => {
+  document.documentElement.setAttribute('data-theme', t)
+  if (cls) document.documentElement.classList.toggle(cls, t === 'dark')
+}, { t: theme, cls: THEME_CLASS })
 /* fileURLToPath, not .pathname: the latter keeps %20 in spaced paths and
    yields /C:/... on Windows, silently breaking this resolution root. */
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -148,7 +167,7 @@ try {
         page.on('console', m => { if (m.type() === 'error') noise.push(m.text().slice(0, 160)) })
 
         await page.goto(url, { waitUntil: 'load' })
-        await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)
+        await applyTheme(page, theme)
         await page.addStyleTag({ content: HIDE_OVERLAYS })
         await SETTLE(page)
         await page.waitForTimeout(1200)
@@ -226,7 +245,7 @@ try {
     try {
       const page = await ctx.newPage()
       await page.goto(url, { waitUntil: 'load' })
-      await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), themes[0])
+      await applyTheme(page, themes[0])
       await page.addStyleTag({ content: HIDE_OVERLAYS })
       await SETTLE(page)   // or below-the-fold reveals are still at opacity 0
       await page.waitForTimeout(1200)
@@ -276,10 +295,10 @@ Check the target is reachable and the dev server is up, then re-run.`)
 if (themes.length === 2) {
   const same = Object.keys(fingerprint.dark || {}).filter(w => fingerprint.dark[w] === fingerprint.light?.[w])
   if (same.length) {
-    unmeasured.push(`theme switch had no effect at ${same.join(', ')}px — the dark and light renders are the same theme. Set the project's own theme mechanism (a class on <html>, say) before trusting either.`)
+    unmeasured.push(`theme switch had no effect at ${same.join(', ')}px — the dark and light renders are the same theme. If the project themes by a class on <html> (Tailwind's \`dark\`, say), re-run with --theme-class=NAME; otherwise drive the project's own theme mechanism before trusting either render.`)
   }
-} else {
-  unmeasured.push(`only the ${themes[0]} theme was rendered — the other theme is unchecked, and the floor requires both`)
+} else if (!SINGLE_THEME) {
+  unmeasured.push(`only the ${themes[0]} theme was rendered — the other theme is unchecked, and the floor requires both. If this project genuinely ships one theme, re-run with --single-theme and it is measured, not missing.`)
 }
 
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)

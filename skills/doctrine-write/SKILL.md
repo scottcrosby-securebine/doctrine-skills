@@ -7,7 +7,7 @@ description: Use when the user asks for an important document written or rewritt
 
 Prose as the deliverable, under the doctrine. Covers authoring from scratch and rewriting existing text; in rewrite mode the existing text enters as draft 1 with the author's meaning preserved — tighten the words, don't change the claims.
 
-**REQUIRED BACKGROUND:** Read the `doctrine` skill first. Native checks for a prose diff (doctrine step 3) = the review-lens wave plus the traceability audit below. Designated review: the `writing-clearly-and-concisely` skill (Strunk's Elements of Style; in softaworks/agent-toolkit and elsewhere) if installed — have the clarity lens Read its `elements-of-style.md`. Fallback: a clarity lens prompted with Strunk's core rules (omit needless words, active voice, definite concrete language, one idea per paragraph).
+**REQUIRED BACKGROUND:** Read the `doctrine` skill first. Native checks for a prose diff (doctrine step 3) = the review-lens wave below, whose accuracy lens traces every claim back to the ledger. The **designated review is the clarity lens inside that wave, not a second pass over the same draft**: it runs the `writing-clearly-and-concisely` skill (Strunk's Elements of Style; in softaworks/agent-toolkit and elsewhere) if installed — have that lens Read its `elements-of-style.md`. Fallback: a clarity lens prompted with Strunk's core rules (omit needless words, active voice, definite concrete language, one idea per paragraph).
 
 Boundaries: doctrine-docs owns codebase-doc sweeps; doctrine-research owns producing researched content. This wrapper is for when the writing itself is the deliverable; chain it after either.
 
