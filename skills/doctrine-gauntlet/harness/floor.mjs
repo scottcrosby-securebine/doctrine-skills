@@ -381,8 +381,10 @@ Check the target is reachable and the dev server is up, then re-run.`)
    same theme, write -dark- and -light- files, and report two passes for one
    theme — while a critic grades "both themes designed with equal care" from
    two identical images. Compared per width, not once. */
+let switchDead = false
 if (themes.length === 2) {
   const same = Object.keys(fingerprint.dark || {}).filter(w => fingerprint.dark[w] === fingerprint.light?.[w])
+  switchDead = same.length > 0
   if (same.length) {
     unmeasured.push(`theme switch had no effect at ${same.join(', ')}px — the dark and light renders are the same theme. If the project themes by a class on <html> (Tailwind's \`dark\`, say), re-run with --theme-class=NAME; otherwise drive the project's own theme mechanism before trusting either render.`)
   }
@@ -398,8 +400,17 @@ if (themes.length === 2) {
    nav link called "Themes" — and heuristics belong in front of eyes, not in an
    exit code. A critic answering "no, a user cannot reach it" IS a floor failure
    and blocks, per the floor list in SKILL.md. */
-if (themes.length === 2 && !SINGLE_THEME) {
-  handoff.push(`theme reachability — this harness APPLIED the theme itself, so both renders exist whether or not the page can switch. Probing the page found ${reachedBy}. Confirm a user can actually reach the second theme; if they cannot, its palette is dead code and that is a floor failure, not a note.`)
+/* Not for fragments: a card or partial is embedded in a page, and the PAGE owns
+   theme switching. Asking a component preview how a user reaches dark is noise,
+   and noise in a JUDGE line trains people to skip JUDGE lines. */
+if (themes.length === 2 && !SINGLE_THEME && !FRAGMENT) {
+  /* Defer to the fingerprint. It is evidence; the probe is a heuristic, and a
+     confident "found a prefers-color-scheme rule" next to a proven-dead switch
+     reads as two harnesses arguing. Tailwind emits those media queries whether
+     or not the app's own theme (MUI, say) honours them. */
+  handoff.push(switchDead
+    ? `theme reachability — the switch above had NO effect, so whatever this page themes by, it is not what the harness drove. The probe found ${reachedBy}, which on this evidence is not the live mechanism. Either drive the project's own switch and re-run, or if it genuinely ships one theme, say so with --single-theme.`
+    : `theme reachability — this harness APPLIED the theme itself, so both renders exist whether or not the page can switch. Probing the page found ${reachedBy}. Confirm a user can actually reach the second theme; if they cannot, its palette is dead code and that is a floor failure, not a note.`)
 }
 
 for (const n of cropNotes) handoff.push(`--crop could not shoot a region: ${n} — the thing you wanted at shipped size was not seen by anyone.`)
