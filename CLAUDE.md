@@ -46,8 +46,32 @@ has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
 
 Keep SKILL.md in step with what the code actually does — it claims specific
-behaviour (three widths, lazy-load scrolling, overlay hiding, the flag set)
-that the code must still perform. Two flags exist because without them the
+behaviour (four widths, lazy-load scrolling, overlay hiding, the flag set)
+that the code must still perform.
+
+**Two width constants, deliberately distinct.** `WIDEST` (2560) is the top of
+the ladder; `DESKTOP` (1440) is the reference for "enough room available"
+judgements. The inner-clip discriminator must stay anchored to `DESKTOP` — a
+component clipping at 1440 and fitting at 2560 is still a defect, and anchoring
+it to `WIDEST` silently re-rules every such case as a deliberate responsive
+scroller. 2560 earns its two extra configurations per run because a whole
+defect class lives above 1440 and no number of rounds below it can see the
+class at all: seven gauntlet rounds passed a page whose nav was 13px at every
+resolution up to 4K.
+
+**Every new check ships with a tamper test, both halves** — break the thing and
+confirm the check trips, then run it against a known-good artifact and confirm
+it stays quiet. A check that silently measures nothing prints exactly what a
+passing check prints. The second half is not optional: it is what distinguished
+a real layout defect from a design system's deliberate responsive scrollers,
+which look identical to a check that has only seen the broken case.
+
+**Target size is split across the gate and `[JUDGE]` on purpose.** WCAG 2.5.8's
+exceptions are real — an isolated undersized target and an inline-in-a-sentence
+link are both spec-compliant — so only a *crowded* undersized target gates, and
+the exempt ones print for a critic. Do not "simplify" this into a flat 24x24
+gate: that invents a rule the spec does not carry, and the harness's whole
+claim is that it never passes or fails something it did not actually measure. Two flags exist because without them the
 floor can never close on ordinary projects: `--theme-class=NAME` for
 class-based theming (Tailwind's `dark`), and `--single-theme` for a site that
 genuinely ships one. `--crop=SELECTOR` exists because a full-page screenshot is

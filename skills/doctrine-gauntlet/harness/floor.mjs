@@ -3,9 +3,9 @@
  *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both]
  *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]
  *
- * Renders 360/768/1440 in the themes asked for, writes full-page screenshots,
- * and reports the floor: horizontal scroll, heading structure, axe
- * serious/critical, page errors, reduced motion.
+ * Renders 360/768/1440/2560 in the themes asked for, writes full-page
+ * screenshots, and reports the floor: horizontal scroll, heading structure, axe
+ * serious/critical, target size, page errors, reduced motion.
  *
  * Exit codes:  0 clean · 1 failing configurations · 2 could not run ·
  *              3 nothing failed but something went unmeasured (NOT a pass).
@@ -119,9 +119,24 @@ Install the browser, then re-run:
 let failures = 0
 const cropNotes = new Set()
 const innerClip = new Set()
-const WIDTHS = [[360, 780], [768, 1024], [1440, 900]]
+/* 2560 is here because a whole defect class lives above 1440 and nothing below
+   it can see the class at all: type authored at a fixed px size stays
+   byte-identical while the sheet keeps expanding, so the pictures grow and the
+   words do not. Measured live at 13px nav and an 11px primary call to action,
+   identical at 1440, 1920, 2560 and 3840, after seven gauntlet rounds at
+   360/768/1440 had passed the page every time. */
+const WIDTHS = [[360, 780], [768, 1024], [1440, 900], [2560, 1440]]
 const WIDEST = WIDTHS[WIDTHS.length - 1][0]
-let clipAtWidest = false
+/* NOT the widest, deliberately. The inner-clip discriminator asks "does this
+   still hide content when there is plenty of room?", and 1440 is where plenty
+   of room starts — a component that clips at 1440 and not at 2560 is still a
+   desktop layout defect. Anchoring that test to WIDEST instead would silently
+   re-rule every such case as a deliberate responsive scroller the moment 2560
+   joined the ladder. */
+const DESKTOP = 1440
+let clipAtDesktop = false
+const typeScale = {}   // width -> { container, median, min }
+const loneTargets = new Set()
 /* Two different things, deliberately kept apart:
    - `unmeasured` is a gap in THIS run that should not have been there — axe
      missing, axe timing out, a theme switch that did nothing. It is not clean,
@@ -238,7 +253,85 @@ try {
           return out.sort((a, b) => b.hidden - a.hidden).slice(0, 3)
         })
         for (const c of clipped) innerClip.add(`${c.sel} hides ${c.hidden}px at ${theme} ${w}px`)
-        if (clipped.length && w === WIDEST) clipAtWidest = true
+        if (clipped.length && w >= DESKTOP) clipAtDesktop = true
+
+        /* WCAG 2.5.8 target size (AA). axe does not test it and a full-page
+           screenshot cannot show it, which is how a primary call to action with
+           a 145x14px hit area survived seven rounds of critics who were looking.
+           Both of the spec's exceptions are implemented, because a check that
+           fires on every prose link is a check people learn to scroll past. */
+        const targetSize = await page.evaluate(() => {
+          const SEL = 'a[href], button, input:not([type=hidden]), select, textarea, summary,'
+            + '[role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem]'
+          const targets = [...document.querySelectorAll(SEL)]
+            .filter(el => !el.disabled && el.getAttribute('aria-hidden') !== 'true')
+            .map(el => ({ el, r: el.getBoundingClientRect() }))
+            .filter(t => t.r.width > 0 && t.r.height > 0)
+          const label = (el, r) => {
+            const cls = String(el.getAttribute('class') || '').split(' ')[0]
+            const name = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 28)
+            return `${el.tagName.toLowerCase()}${cls ? `.${cls}` : ''} ${Math.round(r.width)}x${Math.round(r.height)}px${name ? ` "${name}"` : ''}`
+          }
+          const fail = [], lone = []
+          for (const { el, r } of targets) {
+            if (r.width >= 24 && r.height >= 24) continue
+            /* INLINE exception — "in a sentence, or constrained by the
+               line-height of non-target text". Two things it is NOT: an
+               inline-BLOCK, which sets its own box and is not line-height
+               constrained; and a link whose only neighbours are other links, so
+               a nav bar of 13px anchors stays in scope. The test is a direct
+               text node of the parent with something in it. */
+            const cs = getComputedStyle(el)
+            const inProse = [...(el.parentElement?.childNodes || [])]
+              .some(n => n.nodeType === 3 && n.textContent.trim())
+            if (cs.display === 'inline' && inProse) continue
+            /* SPACING exception — a 24px DIAMETER circle centred on the target
+               reaching no other target: 12px to another target's box, 24px to
+               another undersized target's centre. */
+            const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+            const crowded = targets.some(({ r: o }) => {
+              if (o === r) return false
+              const dx = Math.max(o.left - cx, 0, cx - o.right)
+              const dy = Math.max(o.top - cy, 0, cy - o.bottom)
+              if (Math.hypot(dx, dy) < 12) return true
+              return Math.hypot(cx - (o.left + o.width / 2), cy - (o.top + o.height / 2)) < 24
+            })
+            /* Spec-exempt but still small. Reported, never gated: 2.5.8 really
+               does allow an isolated 145x14 link, and the harness must not
+               invent a rule — but that link was a live campaign's primary call
+               to action and a human called it a defect on sight. */
+            ;(crowded ? fail : lone).push(label(el, r))
+          }
+          return { fail: [...new Set(fail)].slice(0, 6), lone: [...new Set(lone)].slice(0, 6) }
+        })
+        const smallTargets = targetSize.fail
+        for (const t of targetSize.lone) loneTargets.add(`${t} at ${theme} ${w}px`)
+
+        /* Functional type only — what a person must read or click. Decorative
+           and display type may be any size it likes; that is the point of
+           having a separate register, and gating it would be inventing a rule.
+           Only the two widths the comparison uses: this walks every element
+           twice over, and the narrow renders would pay for it unread. */
+        if (w === DESKTOP || w === WIDEST) typeScale[w] = await page.evaluate(() => {
+          const sizes = [...document.querySelectorAll('p, li, a, button, label, input, td')]
+            .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+            .map(el => parseFloat(getComputedStyle(el).fontSize))
+            .filter(n => n > 0).sort((a, b) => a - b)
+          /* The widest laid-out block is the sheet, whatever this project calls
+             it. Capped at the viewport so an overflowing element cannot pose as
+             a container that grew. */
+          let container = 0
+          for (const el of document.querySelectorAll('body *')) {
+            if (!/^(block|flex|grid)$/.test(getComputedStyle(el).display)) continue
+            const bw = el.getBoundingClientRect().width
+            if (bw > container && bw <= window.innerWidth) container = bw
+          }
+          return {
+            container: Math.round(container),
+            median: sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0,
+            min: sizes.length ? sizes[0] : 0,
+          }
+        })
 
         const struct = await page.evaluate(() => {
           const hs = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(e => +e.tagName[1])
@@ -332,9 +425,11 @@ try {
         const h1Bad = FRAGMENT ? struct.h1 > 1 : struct.h1 !== 1
         const bad = struct.hScroll || h1Bad || struct.headingSkip
           || axeOut.serious.length || axeOut.critical.length || crashes.length
+          || smallTargets.length
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
         if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
+        for (const t of smallTargets) console.log(`  ! FAILS WCAG 2.5.8 (under 24x24, and crowded): ${t}`)
         if (h1Bad) console.log(`  ! h1 count = ${struct.h1} (${FRAGMENT ? 'at most 1 in a fragment' : 'must be exactly 1'})`)
         if (struct.headingSkip) console.log(`  ! heading level skip: ${struct.headingSkip}`)
         for (const v of axeOut.critical) console.log(`  ! axe CRITICAL: ${v}`)
@@ -442,9 +537,40 @@ for (const n of cropNotes) handoff.push(`--crop could not shoot a region: ${n} �
    design) and a heuristic must not fail those. But the reader has to be told,
    because the layout check above cannot see it. */
 if (innerClip.size) {
-  handoff.push(`content hidden inside scrollable components — the page-level layout check cannot see this, so it passed:\n    ${[...innerClip].join('\n    ')}\n  ${clipAtWidest
-    ? `>> IT CLIPS AT ${WIDEST}px, THE WIDEST WIDTH TESTED. A region that still hides content with the most room available is a layout defect, not a responsive decision. Treat as blocking unless the component is a carousel by design.`
-    : `Only at narrow widths, never at ${WIDEST}px — the signature of a deliberate responsive scroller. Confirm it is one.`}`)
+  handoff.push(`content hidden inside scrollable components — the page-level layout check cannot see this, so it passed:\n    ${[...innerClip].join('\n    ')}\n  ${clipAtDesktop
+    ? `>> IT CLIPS AT ${DESKTOP}px OR WIDER. A region that still hides content with a desktop's worth of room is a layout defect, not a responsive decision. Treat as blocking unless the component is a carousel by design.`
+    : `Only below ${DESKTOP}px — the signature of a deliberate responsive scroller. Confirm it is one.`}`)
+}
+
+/* Undersized but spec-exempt, so it is put in front of eyes instead of an exit
+   code. The exemption is real and the defect can be real at the same time: the
+   live case was an 11px "See full details" in a 145x14 box — the primary call
+   to action on every card, isolated enough to pass 2.5.8, and the first thing
+   the client named on sight. */
+if (loneTargets.size) {
+  handoff.push(`targets under 24x24 that WCAG 2.5.8 EXEMPTS because nothing is near them — the spec is satisfied and the control may still be too small to hit or read:\n    ${[...loneTargets].slice(0, 8).join('\n    ')}`)
+}
+
+/* The layout grew and the type did not. Invisible at any single width: only the
+   DELTA between two widths shows it, which is why a ladder ending at 1440 could
+   not have found it however many rounds it ran. Measured live: nav 13px and an
+   11px card CTA byte-identical at 1440, 1920, 2560 and 3840 while the sheet
+   expanded to 1848px and aspect-ratio figures grew to 674px tall.
+   A JUDGE line, not a gate: a design may cap its type deliberately, and the
+   harness cannot tell that from an oversight. The numbers make it answerable. */
+/* Not for fragments, for the same reason reachability is not: a card specimen
+   has no max-width of its own, so its container "grows" to every viewport and
+   the check fires on every card in every kit. Type scale is a PAGE decision and
+   the page it gets embedded in owns it. */
+if (!FRAGMENT) {
+  const ref = typeScale[DESKTOP], top = typeScale[WIDEST]
+  if (ref && top && ref.container && top.container > ref.container * 1.05 && top.median <= ref.median) {
+    const grew = Math.round((top.container / ref.container - 1) * 100)
+    handoff.push(`type frozen above ${DESKTOP}px — the layout grew ${grew}% from ${DESKTOP} to ${WIDEST}px `
+      + `(container ${ref.container} -> ${top.container}px) while the median functional type did not grow at all `
+      + `(${ref.median}px at both, smallest ${top.min}px). If the sheet scales with the viewport the type has to, `
+      + `or the words become a footnote to the pictures. Decorative type is exempt; controls and body copy are not.`)
+  }
 }
 
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)

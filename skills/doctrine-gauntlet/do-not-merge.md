@@ -93,6 +93,26 @@ unsourceable component goes rather than staying as an empty frame. A critic
 cannot enforce the second — by the time it reviews, the empty frame is already
 there with a caption explaining itself.
 
+**11. The counter's "broken instrument voiding a round" vs the moving-instrument
+rule in Technical floor.**
+Detection and bookkeeping, and only the second is written down in the counter
+table. The counter says what happens to the clean-pass and win-streak counts
+*once you know* a round was void; the floor rule is how you find out before
+filing — shoot a canvas settled and at 1:1, or verify from source. A run can
+obey the counter perfectly and never discover that five of its gravest findings
+were a screenshot of a drawing caught mid-animation, which is exactly what
+happened.
+
+**12. Critic brief item 3's type-scale inversions vs "type frozen above the
+widest width".**
+Two different comparisons that both involve type and width. Item 3 is *within*
+one render — a fixed step outsizing a clamped one, visible in a single
+screenshot, an inversion between two elements. The floor rule is *across*
+renders — nothing inverts, everything is uniformly frozen, and it is invisible
+in any single screenshot because only the delta between two viewports shows it.
+A critic can satisfy item 3 completely on a page whose every control is 13px at
+every resolution up to 4K.
+
 ## Settled alongside it
 
 **All ten Red flags pass the silence criterion.** Two carry content found nowhere else

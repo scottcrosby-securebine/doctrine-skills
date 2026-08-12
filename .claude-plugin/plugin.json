@@ -1,7 +1,7 @@
 {
   "name": "doctrine",
   "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Eight skills: a shared doctrine plus wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing. Composes with (and degrades gracefully without) Matt Pocock's engineering skills, superpowers, codex, ponytail, and Claude Design.",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "author": {
     "name": "Scott Crosby"
   },

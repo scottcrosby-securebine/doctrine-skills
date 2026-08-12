@@ -15,9 +15,21 @@ node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|bo
 
 ## What it does
 
-Renders 360/768/1440 in the themes asked for, scrolls first so lazy images load, hides
-dev-server overlays, checks heading structure and layout, and runs axe when it can
-resolve it.
+Renders 360/768/1440/**2560** in the themes asked for, scrolls first so lazy images load,
+hides dev-server overlays, checks heading structure, layout and target size, compares type
+scale across widths, and runs axe when it can resolve it.
+
+**2560 is in the ladder because a whole defect class lives above 1440**: fixed-pixel type
+stays byte-identical while the sheet keeps expanding, so the pictures grow and the words
+do not. That costs two extra configurations per run and is the only thing that finds it —
+seven gauntlet rounds at 360/768/1440 passed a page whose nav was 13px at every resolution
+up to 4K.
+
+**Two width constants, and they are not the same one.** `WIDEST` (2560) is the top of the
+ladder. `DESKTOP` (1440) is the reference for judgements about having enough room — the
+inner-clip discriminator uses it, so a component clipping at 1440 but fitting at 2560 is
+still reported as a defect. Anchoring that judgement to `WIDEST` is the trap: it would
+silently re-rule every 1440 clip as a deliberate responsive scroller.
 
 ## Flags
 
@@ -43,8 +55,9 @@ Two markers, and the difference matters:
 - **`[UNMEASURED]`** — a gap that should not be there: axe missing, a theme switch that
   did nothing, only one theme rendered. **It is not clean.**
 - **`[JUDGE]`** — work the harness never does because it needs eyes: non-text contrast,
-  focus visibility, canvas or rAF-driven motion, **theme reachability**, and any region
-  `--crop` could not shoot. These always print. **The printed line never gates; the
+  focus visibility, canvas or rAF-driven motion, **theme reachability**, content hidden
+  inside scrollable components, **undersized-but-spec-exempt targets**, **type frozen
+  above 1440**, and any region `--crop` could not shoot. These always print. **The printed line never gates; the
   critic's answer to it does** — non-text contrast, visible focus and a reachable second
   theme are all floor items, so a critic finding any of them failing is a floor failure
   and blocks. `[JUDGE]` means the harness handed you the question, never that the
@@ -59,8 +72,43 @@ Two markers, and the difference matters:
   a genuinely dead palette must not be waivable. `--single-theme` remains the honest
   answer for a page that really ships one.
 
+  **Target size** is deliberately split across both halves. WCAG 2.5.8's 24x24 minimum is
+  measured on every control, and the spec's own exceptions are implemented: an undersized
+  target that is *inline in a sentence* is dropped entirely, one that is *isolated* —
+  nothing within a 24px-diameter circle — is spec-compliant and prints as `[JUDGE]`, and
+  only a **crowded** undersized target fails and gates. That split is not hedging: the
+  spec really does clear an isolated 145x14px link, and that link was a live campaign's
+  primary call to action which the client rejected on sight. The harness must not invent a
+  rule, so it hands you the ones the spec forgives. **A bound system that has ruled "every
+  control clears 24x24" has already answered them** — its law binds ahead of this.
+
+  **Type frozen above 1440** compares the widest render against the desktop one and prints
+  only when the container grew more than 5% and the median functional type did not grow at
+  all. It is a comparison, not a measurement at a width, which is why no single render —
+  and therefore no critic handed one — can find it. Decorative type is out of scope by
+  construction: the sample is `p, li, a, button, label, input, td`. Suppressed under
+  `--fragment`, for the same reason reachability is: a card specimen has no max-width of
+  its own, so its container grows to every viewport and the check would fire on every card
+  in every kit. Type scale is a page decision.
+
 Exit codes: `0` clean · `1` failing configurations · `2` could not run ·
 **`3` nothing failed but something went unmeasured** — which is not a pass.
+
+## Changing it
+
+**Every new check ships with a tamper test, both halves.** Break what it measures and
+confirm it trips; then run it against a known-good artifact and confirm it stays quiet. A
+check that silently measures nothing prints exactly what a passing check prints — a
+sibling repo's contrast gate keyed pair discovery on `endswith('-foreground')`, which
+never matches `foreground`, and the most-used text pair on every page went unmeasured
+behind a green report. The second half matters as much: it is what separated a genuine
+desktop layout defect from a design system's deliberate responsive scrollers.
+
+**If you ever add a focus check, do not use `el.focus()`.** A programmatic focus does not
+arm `:focus-visible` once the run has clicked anything, and this harness clicks. A sibling
+battery reported all 32 tiles ringless on light — it had clicked the theme toggle to get
+there — while the identical dark pass passed and nothing was wrong with the page. Drive
+the keyboard and read `document.activeElement`.
 
 ## Resolution and portability
 
