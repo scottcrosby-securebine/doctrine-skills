@@ -49,8 +49,10 @@ Write only what differs; never a wholesale replace.
 
 Where each capability is used in the flow:
 
-- **Discovery** — `list_projects` / `list_files` can supply the DNA when no repo
-  system exists (ladder rung 4).
+- **Discovery** — `list_projects` / `list_files` can show that a project exists and
+  what it renders. A project is never itself the design-system binding: resolve it
+  back to the repo behind it and bind there (ladder rung 4). With no repo behind it,
+  the run has no house system and the DNA comes from comps, not from the project.
 - **Mid-loop** — push each round's finished sections so the user can watch the
   gauntlet progress in the Design pane.
 - **Deliver** — push the approved set.
