@@ -1,28 +1,38 @@
-# State [doctrine-gauntlet v1.11.0; run once, twelve defects found and fixed | 2026-08-12]
+# State [doctrine-gauntlet v1.12.0; fourteen defects found by running it | 2026-08-12]
 
 ## Resume
 
-The gauntlet had been reviewed for three sessions and never executed. Running it
-once, end to end, against a synthetic page in the scratchpad surfaced **twelve
-defects in the skill itself** — and nine were one repair: a rule that lived in
-flow prose and never reached the prompt of the agent who had to obey it. All
-twelve are fixed, red-teamed (five KILLs, all addressed) and committed.
+The gauntlet had been reviewed for three sessions and never executed. Executing
+it found **fourteen defects in the skill itself**, all fixed, red-teamed and
+committed. Two runs produced them:
 
-The four items that were on this board are all closed: the gate has been
-exercised, both judgment calls ruled, the do-not-merge pairs recorded, the hoist
-trigger written down.
+1. **A synthetic page** (twelve findings). Nine were one repair: a rule that
+   lived in flow prose and never reached the prompt of the agent who had to
+   obey it. The skill had a critic brief and no builder brief, named axes for
+   critics and none for the direction adversary, an assertion rule with no
+   ledger to enforce against.
+2. **A mock conversion of a real app panel to a real design system**
+   (`pdd-generator` ECR list → `securebine-design`), which found two more the
+   synthetic run structurally could not: the theme-reachability probe misfiring
+   on fragments and contradicting its own fingerprint (F1-F13 era), and **F14 —
+   the floor's layout check reads the document, so a component clipping 88px at
+   1440 inside `overflow-x` passed all six configurations**.
+
+**Ruled: capability and accuracy outrank size** (Scott, 2026-08-12) — now a
+rule in `CLAUDE.md`. Do not compress for its own sake.
 
 ## Active Work
 
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
 | The gate has run **one round**, not to exit. Two clean passes, the four-round valve, simplification re-entry and delivery are still unexercised | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| ~~SKILL.md grew +20%~~ **CLOSED, ruled: capability and accuracy outrank size (Scott, 2026-08-12).** Do not run compression passes for their own sake; the declined trim stays declined | — | ✅ | `skills/doctrine-gauntlet/SKILL.md` |
+| **PhaseMU migration deficits (7) are recorded but have no durable home** — Scott wants them in a separate session. They were handed over as a file; they are NOT in any repo | — | 🔴 | (handed to Scott) |
+| The law-as-critic-axis is still untested — a bound design system exists now, but no critic has been run against its law | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
 | Trigger, not a task: docket/counter machinery belongs to the hub when a second wrapper needs it. **The claim ledger is now a second candidate** — two wrappers define one, cross-referenced rather than shared | — | ⏸ | `skills/doctrine/SKILL.md` |
 
 ## Git State
 
-- Branch `main` @ `bde93ad` | clean | PRs: none | CI: none configured
+- Branch `main` @ `fb49ce9`+ | clean | PRs: none | CI: none configured
 
 ## Gotchas
 
@@ -37,9 +47,18 @@ trigger written down.
   not be waivable.
 - **A full-page screenshot is read scaled.** A broken illustration passed my own
   inspection that way. Use `--crop=SELECTOR`.
-- The run log with all twelve findings and their evidence lived in the session
-  scratchpad and is **ephemeral**. The findings themselves are now embodied in
-  the skill and in `bde93ad`'s commit message, which is the durable record.
+- **Scratchpad artifacts are ephemeral.** The run log (14 findings with
+  evidence), the synthetic fixture and the ECR conversion mock all lived there.
+  The findings are embodied in the skill and in the commit messages of
+  `bde93ad`, `fde22f7` and `fb49ce9`, which is the durable record; the fixtures
+  are gone with the session and are cheap to rebuild.
+- **`pdd-generator` and `securebine-design` were read-only.** Nothing was
+  written to either. Scott's ruling: develop the skill only; design deficits get
+  reported for a separate session, and `securebine-design` is not to be extended.
+- **PhaseMU renders via its own `/__preview?el=…` harness** (`npx vite`, port of
+  your choice — skip `predev`, it fetches from the network). Six ECR components
+  are renderable; the other 42 surfaces need auth. That constraint is migration
+  deficit D5 and shapes any future conversion work.
 
 ## Next Session Kickoff
 
