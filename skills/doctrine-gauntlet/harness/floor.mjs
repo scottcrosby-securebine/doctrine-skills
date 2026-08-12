@@ -118,6 +118,10 @@ Install the browser, then re-run:
 
 let failures = 0
 const cropNotes = new Set()
+const innerClip = new Set()
+const WIDTHS = [[360, 780], [768, 1024], [1440, 900]]
+const WIDEST = WIDTHS[WIDTHS.length - 1][0]
+let clipAtWidest = false
 /* Two different things, deliberately kept apart:
    - `unmeasured` is a gap in THIS run that should not have been there — axe
      missing, axe timing out, a theme switch that did nothing. It is not clean,
@@ -199,7 +203,7 @@ let fatal = null
 try {
   for (const theme of themes) {
     fingerprint[theme] = {}
-    for (const [w, h] of [[360, 780], [768, 1024], [1440, 900]]) {
+    for (const [w, h] of WIDTHS) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1 })
       try {
         const page = await ctx.newPage()
@@ -216,6 +220,25 @@ try {
         /* Probe AFTER settling: a toggle injected by a deferred bundle does not
            exist at `load`, so probing earlier calls every hydrated app themeless. */
         if (reachedBy === undefined) reachedBy = await themeReachable(page)
+
+        /* The layout check above reads the DOCUMENT. A component that scrolls
+           inside itself — the standard fix for a wide table — hides any amount
+           of content while the page reports no horizontal scroll at all. Seen
+           live: 88px of a table clipped at 1440 with a quarter of the page
+           empty beside it, and 73% of it gone at 360, floor green throughout. */
+        const clipped = await page.evaluate(() => {
+          const out = []
+          for (const el of document.querySelectorAll('*')) {
+            const ox = getComputedStyle(el).overflowX
+            if (/(auto|scroll|hidden)/.test(ox) && el.scrollWidth > el.clientWidth + 1) {
+              const cls = String(el.getAttribute('class') || '').split(' ')[0]
+              out.push({ sel: el.tagName.toLowerCase() + (cls ? `.${cls}` : ''), hidden: el.scrollWidth - el.clientWidth })
+            }
+          }
+          return out.sort((a, b) => b.hidden - a.hidden).slice(0, 3)
+        })
+        for (const c of clipped) innerClip.add(`${c.sel} hides ${c.hidden}px at ${theme} ${w}px`)
+        if (clipped.length && w === WIDEST) clipAtWidest = true
 
         const struct = await page.evaluate(() => {
           const hs = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(e => +e.tagName[1])
@@ -414,6 +437,15 @@ if (themes.length === 2 && !SINGLE_THEME && !FRAGMENT) {
 }
 
 for (const n of cropNotes) handoff.push(`--crop could not shoot a region: ${n} — the thing you wanted at shipped size was not seen by anyone.`)
+
+/* A JUDGE line: some scrollers are deliberate (a carousel, a wide grid by
+   design) and a heuristic must not fail those. But the reader has to be told,
+   because the layout check above cannot see it. */
+if (innerClip.size) {
+  handoff.push(`content hidden inside scrollable components — the page-level layout check cannot see this, so it passed:\n    ${[...innerClip].join('\n    ')}\n  ${clipAtWidest
+    ? `>> IT CLIPS AT ${WIDEST}px, THE WIDEST WIDTH TESTED. A region that still hides content with the most room available is a layout defect, not a responsive decision. Treat as blocking unless the component is a carousel by design.`
+    : `Only at narrow widths, never at ${WIDEST}px — the signature of a deliberate responsive scroller. Confirm it is one.`}`)
+}
 
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)
 for (const h of handoff) console.log(`\n[JUDGE] ${h}`)
