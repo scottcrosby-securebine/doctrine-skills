@@ -32,7 +32,8 @@ rule in `CLAUDE.md`. Do not compress for its own sake.
 
 ## Git State
 
-- Branch `main` @ `fb49ce9`+ | clean | PRs: none | CI: none configured
+- Branch `main` @ `0b35ba4`+ | clean | pushed | PRs: none | CI: none configured
+- Session commits: `76c4b7a` `bde93ad` `58281fe` `fde22f7` `fb49ce9` `0b35ba4`
 
 ## Gotchas
 
@@ -62,7 +63,13 @@ rule in `CLAUDE.md`. Do not compress for its own sake.
 
 ## Next Session Kickoff
 
-1. Ask what Scott wants; do not assume. The board is nearly empty by design.
-2. If running the gate again: synthetic page, scratchpad, no client repo — and
-   run it to *exit* this time, since that is the untested half.
-3. Read the repo's `skills/doctrine-gauntlet/SKILL.md`, not the plugin cache.
+1. Ask which of the four board items Scott wants; do not assume.
+2. **The cheapest remaining skill test is the law-as-critic-axis** — a bound
+   design system exists now (`securebine-design`), and no critic has ever been
+   run against its law. Rebuild the ECR conversion mock (an hour) and put a
+   critic on it with the law named by path, per critic brief item 3.
+3. If running the gate again, run it to *exit* — two clean passes, the
+   four-round valve and simplification re-entry are the untested half.
+4. Read the repo's `skills/doctrine-gauntlet/SKILL.md`, not the plugin cache.
+5. Everything outside `doctrine-skills` is read-only. Design deficits are
+   reported, never fixed.
