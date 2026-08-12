@@ -81,8 +81,15 @@ ships. Any new theme-application site must go through the shared
 the reduced-motion pass silently measured the wrong theme.
 
 **The harness applies the theme, so it must not certify one nobody can reach.**
-The reachability probe (no `prefers-color-scheme`, no `color-scheme`, no toggle,
-no script touching the theme → `[UNMEASURED]`) is load-bearing, not a nicety: an
+The reachability handoff prints **`[JUDGE]`, never `[UNMEASURED]`**, on every
+two-theme run that is not `--single-theme` or `--fragment`; what the probe found
+(a media query, a toggle, a script, weak signals, or nothing) changes only the
+message, not whether it prints. That is deliberate: both themes really were
+rendered, so nothing went unmeasured — the possible defect is that one of them
+ships to nobody, and only a critic can rule on that. The separate dead-switch
+branch, where the two renders come back identical, pushes a real `[UNMEASURED]`
+*and* a `[JUDGE]`. The probe is
+load-bearing, not a nicety: an
 instrument that creates the state it measures will otherwise pass a dead palette
 exactly like a working one. Keep the probe honest if you touch theming — it is
 the one check whose absence is invisible in the output.
