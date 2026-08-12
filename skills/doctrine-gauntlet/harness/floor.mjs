@@ -1,7 +1,7 @@
 /* doctrine-gauntlet technical floor.
  *
  *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both]
- *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]
+ *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
  *
  * Renders 360/768/1440/2560 in the themes asked for, writes full-page
  * screenshots, and reports the floor: horizontal scroll, heading structure, axe
@@ -28,12 +28,15 @@ const SINGLE_THEME = argv.includes('--single-theme')
 /* data-theme and colorScheme are two of the three common mechanisms. The third
    is a class on <html> (Tailwind's `dark`), which nothing else here can set. */
 const THEME_CLASS = (argv.find(a => a.startsWith('--theme-class=')) || '').split('=')[1] || null
+/* Assert the target IS what you meant before measuring it. See the identity
+   block below for the run this exists because of. */
+const EXPECT = (argv.find(a => a.startsWith('--expect=')) || '').split('=').slice(1).join('=') || null
 /* A full-page screenshot of a long page is read scaled to fit, so a 175px
    illustration is reviewed at thumbnail size and its defects are invisible.
    "Read the images at shipped size" needs an instrument, and this is it. */
 const CROP = (argv.find(a => a.startsWith('--crop=')) || '').split('=').slice(1).join('=') || null
 const [target, outPrefix, themeArg = 'both'] = argv.filter(a => !a.startsWith('--'))
-const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]'
+const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]'
 if (!target || !outPrefix) { console.error(USAGE); process.exit(2) }
 if (!['dark', 'light', 'both'].includes(themeArg)) {
   console.error(`${USAGE}\n  unknown theme "${themeArg}" — expected dark, light or both`)
@@ -95,9 +98,17 @@ look has reviewed nothing. Report this to the user rather than skipping it.`)
 let AXE = null
 const axePkg = tryRequire(['axe-core'])
 if (axePkg?.source) AXE = axePkg.source
+/* A repo may VENDOR axe rather than depend on it — a static design system with
+   no package.json has nowhere else to put it. Without these two paths the
+   harness reports accessibility unmeasured on a project that ships the very
+   file it is looking for, and unmeasured blocks. */
 else for (const root of roots()) {
-  const p = join(root, 'axe-core', 'axe.min.js')
-  if (existsSync(p)) { AXE = readFileSync(p, 'utf8'); break }
+  for (const p of [join(root, 'axe-core', 'axe.min.js'),
+                   join(root, 'axe.min.js'),
+                   join(root, 'harness', 'axe.min.js')]) {
+    if (existsSync(p)) { AXE = readFileSync(p, 'utf8'); break }
+  }
+  if (AXE) break
 }
 
 /* pathToFileURL handles spaces, #, % and Windows drive letters; a file: or
@@ -151,6 +162,7 @@ const handoff = [
   'visible focus on every interactive element — tab through and look',
 ]
 const fingerprint = {}   // theme -> width -> computed-style signature
+let identity = null      // what this run actually looked at
 if (!AXE) unmeasured.push('axe (accessibility) — npm i -D axe-core to measure it')
 
 /* THIS HARNESS APPLIES THE THEME ITSELF, so without this check a page whose dark
@@ -236,6 +248,49 @@ try {
            exist at `load`, so probing earlier calls every hydrated app themeless. */
         if (reachedBy === undefined) reachedBy = await themeReachable(page)
 
+        /* WHAT DID THIS RUN ACTUALLY LOOK AT? A URL that answers 200 is not
+           evidence it served the artifact you meant. Seen live, twice in one
+           sitting: a dev server was already holding the port, the target moved
+           to the next one without failing, and two complete runs measured a
+           DIFFERENT SITE and printed a clean floor. The skill has warned about
+           this in prose for months; nothing checked it at the point of
+           measurement. Identity is printed unconditionally — that alone would
+           have caught it — and --expect turns it into a gate.
+           The assertion is POSITIVE on purpose: a first attempt phrased as "is
+           not the other site" passed against an empty response body, certifying
+           no artifact at all as the right one. */
+        if (!identity) {
+          identity = await page.evaluate(() => ({
+            title: document.title || '(no title)',
+            h1: (document.querySelector('h1')?.textContent || '').trim().slice(0, 70) || '(no h1)',
+            chars: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
+          }))
+          if (identity.chars < 30) {
+            console.error(`\nFLOOR: CANNOT RUN — ${url} rendered essentially no text `
+              + `(${identity.chars} chars). An empty response is not a passing page; `
+              + `check the server is serving what you think it is.`)
+            process.exit(2)
+          }
+          if (EXPECT) {
+            const hay = `${identity.title} ${identity.h1} ${await page.evaluate(() => document.body.innerText.slice(0, 4000))}`
+            if (!hay.toLowerCase().includes(EXPECT.toLowerCase())) {
+              console.error(`\nFLOOR: CANNOT RUN — --expect=${EXPECT} not found in ${url}.`
+                + `\n  title: ${identity.title}\n  h1:    ${identity.h1}`
+                + `\nThis is the wrong artifact, or the right one failed to render. `
+                + `Another dev server holding the port is the usual cause.`
+                /* Say which substrate was searched. Matching RENDERED TEXT is
+                   deliberate — matching source would hit the JS bundle and pass
+                   on a string no reader ever sees, which is exactly how the
+                   theme probe gets fooled by a chunk containing "dark". Without
+                   this line an agent whose marker was merely invisible goes
+                   hunting a server problem that does not exist. */
+                + `\nNote: --expect matches the page's RENDERED TEXT, not its source. `
+                + `Pick something a reader can see (the title above is a safe choice).`)
+              process.exit(2)
+            }
+          }
+        }
+
         /* The layout check above reads the DOCUMENT. A component that scrolls
            inside itself — the standard fix for a wide table — hides any amount
            of content while the page reports no horizontal scroll at all. Seen
@@ -244,11 +299,20 @@ try {
         const clipped = await page.evaluate(() => {
           const out = []
           for (const el of document.querySelectorAll('*')) {
-            const ox = getComputedStyle(el).overflowX
-            if (/(auto|scroll|hidden)/.test(ox) && el.scrollWidth > el.clientWidth + 1) {
-              const cls = String(el.getAttribute('class') || '').split(' ')[0]
-              out.push({ sel: el.tagName.toLowerCase() + (cls ? `.${cls}` : ''), hidden: el.scrollWidth - el.clientWidth })
-            }
+            const cs = getComputedStyle(el)
+            if (!/(auto|scroll|hidden)/.test(cs.overflowX)) continue
+            if (el.scrollWidth <= el.clientWidth + 1) continue
+            /* VISUALLY-HIDDEN TEXT IS NOT A CLIPPED COMPONENT. `.sr-only` and
+               friends are a ~1px box that hides its whole string on purpose, so
+               without this the check reports "hides 555px … treat as blocking"
+               against standard screen-reader markup — which is on most modern
+               pages. A real scrollable component is never 1px in either axis.
+               Found on a stock Next/Tailwind page, not on the kit this check
+               was originally tamper-tested against. */
+            if (el.clientWidth <= 4 || el.clientHeight <= 4) continue
+            if (/inset\(\s*50%/.test(cs.clipPath || '')) continue
+            const cls = String(el.getAttribute('class') || '').split(' ')[0]
+            out.push({ sel: el.tagName.toLowerCase() + (cls ? `.${cls}` : ''), hidden: el.scrollWidth - el.clientWidth })
           }
           return out.sort((a, b) => b.hidden - a.hidden).slice(0, 3)
         })
@@ -317,12 +381,17 @@ try {
             .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
             .map(el => parseFloat(getComputedStyle(el).fontSize))
             .filter(n => n > 0).sort((a, b) => a - b)
-          /* The widest laid-out block is the sheet, whatever this project calls
-             it. Capped at the viewport so an overflowing element cannot pose as
-             a container that grew. */
+          /* THE READING COLUMN, NOT THE PAGE WRAPPER. Taking the widest laid-out
+             block reports growth on every full-bleed layout: a stock shadcn page
+             reported "the layout grew 78%" while <main> was capped at max-w-3xl
+             and the reader's column never moved an inch. A block-level text
+             element fills its column, so measuring those measures the box whose
+             growth would actually force the type to follow. Capped at the
+             viewport so an overflowing element cannot pose as a column.
+             If a page has no running text at all, container stays 0 and the
+             comparison below is skipped rather than guessed. */
           let container = 0
-          for (const el of document.querySelectorAll('body *')) {
-            if (!/^(block|flex|grid)$/.test(getComputedStyle(el).display)) continue
+          for (const el of document.querySelectorAll('p, li, td, h1, h2, h3')) {
             const bw = el.getBoundingClientRect().width
             if (bw > container && bw <= window.innerWidth) container = bw
           }
@@ -576,6 +645,14 @@ if (!FRAGMENT) {
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)
 for (const h of handoff) console.log(`\n[JUDGE] ${h}`)
 const verdict = failures ? `${failures} failing configuration(s)` : (unmeasured.length ? 'PASS on what was measured' : 'PASS')
+/* Printed unconditionally, and last, where a reader actually looks. Two full
+   runs once measured a different site than the one intended and reported a
+   clean floor; this line alone would have shown it. */
+if (identity) {
+  console.log(`\n[MEASURED] ${url}`)
+  console.log(`  title: ${identity.title}`)
+  console.log(`  h1:    ${identity.h1}   (${identity.chars} chars of text)`)
+}
 console.log(`\n=== TECHNICAL FLOOR: ${verdict} ===`)
 if (unmeasured.length) console.log('Unmeasured is not clean. Report it; the user waives it or the run stops.')
 /* exit 3, not 0: a caller keying on status must not read "nothing failed" as

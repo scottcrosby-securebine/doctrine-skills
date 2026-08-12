@@ -10,7 +10,7 @@ project's Playwright and axe.
 
 ```bash
 node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|both]
-              [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR]
+              [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
 ```
 
 ## What it does
@@ -33,8 +33,21 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
 
 ## Flags
 
-- `--fragment` — the target is a card or partial, not a whole page, so a missing `h1`
-  is not a defect.
+- `--expect=TEXT` — refuse to measure unless `TEXT` appears in the page's **rendered
+  text**. Use it on any `http://` target. A URL answering 200 is not evidence it served
+  what you meant: a dev server already holding the port sends the next one elsewhere
+  without failing, and two complete runs once measured **a different site** and printed
+  a clean floor. Matching rendered text and not source is deliberate — source would hit
+  the JS bundle and pass on a string no reader ever sees. The run also refuses a page
+  with under 30 characters of text, because a negative check ("is not the other site")
+  is satisfied by an empty response. Identity — title, first `h1`, text length — prints
+  on every run whether or not you pass this.
+- `--fragment` — the target is **owned by a host page** that supplies theme switching and
+  the type scale: a design-system card specimen, a partial, anything rendered inside
+  something else. A missing `h1` is not a defect (exactly one is still fine), and the
+  theme-reachability and frozen-type judgements are suppressed because neither is this
+  file's to answer. Read the flag by ownership, not by the `h1` clause alone — a card
+  that requires exactly one `h1` still wants this flag.
 - `--theme-class=NAME` — toggles a class on `<html>` for projects that theme that way
   (Tailwind's `dark`). Without it, `data-theme` alone leaves those projects
   unswitchable and the run reports a false "theme switch had no effect".
@@ -90,6 +103,20 @@ Two markers, and the difference matters:
   `--fragment`, for the same reason reachability is: a card specimen has no max-width of
   its own, so its container grows to every viewport and the check would fire on every card
   in every kit. Type scale is a page decision.
+
+  **"Container" means the reading column, not the page wrapper**, and the distinction is
+  the whole check. Measuring the widest laid-out block reports growth on every full-bleed
+  layout: a stock shadcn page reported "the layout grew 78%" while its `<main>` was capped
+  at `max-w-3xl` and the reader's column never moved. The sample is block-level text
+  elements, which fill their column, so what is measured is the box whose growth would
+  actually force the type to follow. A page with no running text leaves it unmeasured
+  rather than guessed.
+
+  **Content hidden inside scrollable components** exempts the visually-hidden pattern —
+  an absolutely positioned ~1px box, or `clip-path: inset(50%)`. `.sr-only` hides its
+  whole string by design and sits on most modern pages; without the exemption the check
+  reports "hides 555px … treat as blocking" against standard screen-reader markup. A real
+  scrollable component is never 1px in either axis.
 
 Exit codes: `0` clean · `1` failing configurations · `2` could not run ·
 **`3` nothing failed but something went unmeasured** — which is not a pass.
