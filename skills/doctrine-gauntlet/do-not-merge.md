@@ -18,6 +18,14 @@ unlisted pair needs the same argument as a listed one, not less.
 Pairs are anchored by quoted phrase, not line number — the file has been compressed
 since the pass and line numbers drift.
 
+**One entry below is not the three-prompts pattern, and says so.** The floor-versus-house
+reversal ("the floor is a minimum, never a ceiling") now appears at Precedence, under
+Binding the design system, in Technical floor, and in critic brief item 7. Only item 7 is
+a different prompt; the other three are **one reader** — the orchestrator — reading three
+places in one document. That entry therefore rests on a different argument, stated with
+it, and a reviewer who applies the three-prompts test to it will correctly find it does
+not pass. Read the argument, not the pattern.
+
 ## The seven
 
 **1. "which states were compared" vs "which sections were compared."**
@@ -204,7 +212,7 @@ editing the primary token therefore renders correctly, passes every gate, and re
 future page. Collapsing any two of the three restores exactly that: the orchestrator alone
 holding a rule only the builder can obey and only a critic can catch.
 
-**Critic brief item 5's crop mechanism vs the same mechanism under Technical floor.** Item 5
+**Critic brief item 5's crop mechanism vs the same mechanism under Technical floor.** **Until 2026-08-13** item 5
 carried the standard ("read the images at shipped size") and none of the means; `--crop`, the
 other-harness region shot and the source-geometry last resort lived only in Technical floor,
 which — exactly like the inline floor list in item 7 — carries no orchestrator-only
@@ -213,4 +221,167 @@ eight items and nothing else. A critic handed full-page screenshots then reports
 satisfied having reviewed each figure at a tenth of its size, which is the incident that
 section itself records. The Technical floor copy still earns its place: the orchestrator is
 who decides to pass `--crop` when it renders for a critic. Same rule as item 7 — naming a
-test is not handing it over.
+test is not handing it over. **Item 5 now carries all three means**, and that live duplication
+is what this entry defends — it is not a record of a fix already filed away.
+
+**Critic brief item 1's section-scope carve-out vs the Modes blocking enumeration.** Added
+2026-08-13. Modes rules that an axis a critic could not assess for want of an artifact —
+no floor report (item 1), no diff (item 3), no way to crop (item 5) — blocks; item 1
+carries a carve-out saying that a critic **whose prompt states it is a step-6 section
+review** is owed no floor report, and that the absence must not block or reject there. That reads as the same fact stated twice and is the
+three-prompts pattern again: Modes is orchestrator-read and a critic prompt is the eight
+items and nothing else, so a section critic hears the blocking rule only through its own
+brief and can be exempted only there. It is also **not** the same rule — Modes grades a
+report that exists, item 1 stops one from being written — and the round-8 wording is
+predicated on "an axis the critic reported it could not assess", so the exemption has to
+land at the reporting critic or it lands nowhere. Deleting the carve-out restores the
+defect it was written for: a section critic correctly reports the floor report missing (it
+is missing by construction — the round's gate runs once and a step-6 pair critic is not
+it), blocks
+on it, the builder has nothing to hand over, and the section-rejection counter reaches
+three on a disagreement no one can settle. The round counters never see section loops, so
+neither the four-loop valve nor the unmeasured-waiver reaches it.
+
+**Item 1's closing clause naming items 3 and 5 as still blocking at section scope** looks
+like a straight restatement of the Modes enumeration and is not: it exists to stop the
+critic generalising the carve-out it has just been given. A section builder's diff exists
+and a section critic can crop, so those two abstentions are real gaps at section scope,
+and a critic that quietly extends "the floor report does not block here" to them stops
+blocking on two axes with nothing in its output to show it happened. Cutting the clause
+is invisible in exactly the way this file's silence criterion warns about.
+
+**The trigger was re-keyed in round 10, and the re-keying is now part of what the entry
+above defends.** Round 9 fired the carve-out on the *shape* of the artifact — "a single
+section rather than the whole integrated page" — which is not the same set as "dispatched
+in step 6". They diverge in three shapes this skill supports: a phase that is one
+design-system card, a one-section job that runs no wave, and a deliverable that is a
+section of a host page. In each, the round's own gate critic is looking at a single section
+and a floor report exists — `--fragment` in `floor.md` is there precisely so the floor can
+run on a card specimen or a partial — and the shape-keyed wording told that critic to rule
+on no floor item and not to block, closing the round with the whole floor unruled, against
+"`[UNMEASURED]` is not clean" and "Never report a gate you did not run". Re-keying it to
+anything the critic can observe re-creates that, because the only evidence the gate ran is
+the report the critic did not receive.
+
+**Step 6's "tell each section critic it is a step-6 section review" vs critic brief item
+1's condition on that statement.** Added round 10. Two halves of one rule reaching two
+agents, which is the three-prompts pattern: the orchestrator reads the flow and never a
+critic's assembled prompt; a critic reads the eight items and never the flow. Collapse it
+either way and the rule dies. With only the step-6 line, no critic knows what the sentence
+licenses and the exemption is inert. With only item 1, nothing tells an orchestrator to
+state the fact, every section critic blocks on a floor report nobody can produce, and the
+section-rejection counter reaches three — the round-9 defect above, restored in full.
+**The polarity is ruled, not incidental**: the exemption is granted by an affirmative
+statement and never by default, so a forgotten sentence stalls one section visibly and
+clears on one sentence. The inverted form — exempt any critic not told it is the round's
+gate — was considered in round 10 and rejected: there a forgotten sentence passes an
+entire unruled floor in silence, and a silent pass ships where a visible deadlock
+escalates to a human.
+
+**The critic brief's theme-count dispatch line vs item 1's single-theme clause vs item
+7's "only where the work claims two themes".** Added round 11, and the same three-prompts
+pattern as the entry above with the same polarity ruling. Items 1 and 7 are *conditioned*
+on a fact — this project genuinely ships one theme — that a critic cannot observe: the
+renders look the same either way and the floor report is silent precisely because
+`--single-theme` suppressed the check. The preamble line is the orchestrator's half; a
+critic prompt is the eight items and nothing else, so the preamble never reaches a critic
+and the two item-level clauses never reach the orchestrator. Collapse it either way and
+the rule dies exactly as the step-6 one does: with only items 1 and 7, nothing instructs
+an orchestrator to state a fact only it holds, and a genuine single-theme run has its
+critic file the absent second theme as a floor failure item 7 makes blocking and
+unwaivable while the floor report reads green — a disagreement with no tie-breaker and no
+diff a builder can make. **The polarity is ruled, not incidental**: two themes is the
+default, granted by silence; one theme is granted only by an affirmative sentence. The
+inverse — assume one theme unless told otherwise — makes a forgotten sentence pass a dead
+palette in silence, which is the outcome `floor.md` refuses to make waivable.
+
+**Three sites, not two, and the third is deliberate**: the preamble line does not name a
+theme, it names an *obligation to state* one. Shortening it to "see item 1" restores the
+defect, because item 1 is not in the prompt the orchestrator assembles from.
+
+**The floor-versus-house reversal at Precedence vs Binding the design system vs Technical
+floor.** Added round 11, and **not** a three-prompts case: all three are orchestrator-read
+and none of them is ever copied into a subagent prompt. The distinction is different in
+kind. Each of the three already carried the *absolute* form — "the technical floor is the
+single exception, and it outranks the law", "**The floor outranks the bound law.**" — in
+bold, in a document whose agents extract bolded clauses as rules. Round 11 found the
+reversal added at Precedence alone, which left two bolded absolutes standing and produced
+opposite verdicts on one fact pattern: an isolated 20x20 control under a house that ruled
+"every control clears 24x24, measured" ships clean by the two flat claims and blocks by
+Precedence and item 7. A correction is bound to the *statement*, not to the reader, so a
+rule stated in three places must be corrected in three. **Merging is not forbidden here;
+leaving a bolded absolute behind is.** Consolidating to one site is legitimate only if all
+three statements go at once and no shortened "see Precedence" pointer remains where a
+scanner reads the bold — a pointer preserves the defect exactly, because the sentence that
+misleads is the one that stays. Item 7's copy is separate and defended by its own entry
+above; it is the only one a critic ever sees.
+
+**Same argument covers the exit-condition carve-out at Precedence vs Binding the design
+system** ("its exit condition and its loop are fixed by the table in Modes"). Round 11
+ruled the process-doctrine "run the stricter" clause down to the blocking definition
+alone, because the Modes table's sole authority is what makes the loop terminate and there
+is no notation in it for a house-raised counter. Both statements of the narrowed rule are
+orchestrator-read; both are kept for the same reason as the reversal, since Precedence
+previously said exit conditions "collide by strictness" and a scanner reading only that
+one honours a house's three-clean-reviews exit while the table says two. Re-proposing
+either a merge or the wider "run the stricter" needs an argument that an orchestrator can
+raise a counter without a notation for it, not merely that the two sites overlap.
+
+## Added round 12 — four orchestrator-only rules copied to the agent that must obey them
+
+These four pairs are one pattern, filed as one entry: a rule sat in a section only the
+orchestrator reads, while the agent named in the rule — a critic, or the builder — is
+assembled from a prompt that never draws on it. All four predate every review round on
+this file; they were found by pointing a pass at territory no earlier pass had audited
+(`UNAUDITED.md` 1, 3, 4, 5). The defence is the one the document makes about itself: **a
+critic prompt is the eight numbered items and nothing else, a builder prompt is
+`## The brief`, and naming a test is not handing it over.**
+
+- **`## The reader test` vs critic brief item 2, and its six axes vs item 3's label list.**
+  Item 2 made the reader test's answer *blocking* and Modes lists "failing the reader test"
+  among the blocking conditions, while the question and every axis grading it lived in a
+  section no critic prompt draws from. The gate's own blocking condition was defined where
+  the agent rendering the verdict cannot read it. Item 3 aggravated it, listing the six axes
+  as bare noun phrases in the same item where the ruled-versus-default test is reproduced
+  *in full* on the explicit ground that a name is not the test. The section stays: the
+  orchestrator reads it to name the target reader per surface and to decide to hand the
+  critic the predecessor, neither of which a critic can do for itself.
+- **`## What a critic may conclude` vs critic brief item 6.** What was copied is
+  obligations discharged **before filing** — grep the premise of a sensitivity finding, crop
+  before disputing a number, validate an instrument against a known-good control, distrust
+  findings outside the named axes, verify the cause and not only the symptom. Only the filer
+  can discharge them and only item 6 reaches the filer. **One rule was deliberately not
+  propagated**: sorting an outside review into right / wrong / **stale** is the
+  orchestrator's disposal of a returned review, not an act a critic performs on its own
+  findings. Re-proposing it needs that argument defeated.
+- **The docket's "a builder may not cite a PROPOSED item as a constraint" vs the builder's
+  assert list.** Every verb in that rule is a builder's and the recorded incident is a
+  builder hardening an unconfirmed item into a ban and deleting the client's certification
+  logos — aimed, until now, at an agent that never heard it. The docket copy still governs
+  the orchestrator's own marking, its no-renumbering rule and its escalation cap.
+- **`## Technical floor` vs `## The brief`.** The builder authors the palette, the focus
+  ring, the motion, the type scale and the target sizes; it was told the house outranks its
+  brief and held four words of floor. **Build-then-measure was weighed and rejected as a
+  defence**: a gate can catch a floor defect, but no gate can correct a builder that was
+  told the *wrong precedence* — with brand palettes failing contrast "the common case, not
+  the exotic one", a builder that reads the house as outranking the floor authors the
+  failure as policy. The measurement half follows the floor section's own evidence: a
+  145x14px call to action and 13px nav frozen to 3840 each survived seven rounds of critics
+  looking straight at them.
+
+**The accepted cost, stated so the next reviewer does not re-discover it as a defect.** The
+floor's substance is now a second place to update when the floor list changes, and the
+reader test's axes a second place when an axis is added — exactly the cost taken
+deliberately for item 7's inline floor list and item 5's crop means. A pointer instead is
+the fix that failed three rounds running. **Pair 7 does not license collapsing any of
+these**: pair 7 is a compressed item against its *reasoning*, and what was copied here is a
+definition, a question, and a set of obligations an item cannot be run without.
+
+**A fifth finding of the same class was ruled the other way, and nothing was duplicated.**
+`## The brief`'s fidelity procedure said "tell the critic that a tie in the blind comparison
+counts as a pass". There is no critic prompt it can legitimately land in: item 8 denies the
+briefed critic the comparison verdict, and the blind pass is briefed from the subject, the
+reader and the job alone. It was re-aimed at the orchestrator, where `## The comparison`
+already states it. Re-proposing it as a critic instruction needs an argument that survives
+item 8 — the failure it invites is a briefed critic returning a verdict its own brief denies
+it, which is not a placement defect but a scope one.
