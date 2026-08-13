@@ -1,9 +1,13 @@
 # Do not merge — pairs that look redundant and aren't
 
 A necessity pass (2026-08-12) put three agents with different mandates against this
-skill. The merger's most useful output was not its merges but this list: seven pairs
-that read as the same rule twice and are not. Each was checked against the campaign
-record, and each survives because **a run can comply with one and violate the other**.
+skill. The merger's most useful output was not its merges but this list: **pairs that
+read as the same rule twice and are not**. The pass opened it with seven; the founding
+list below now carries twelve, and every "Added round N" section after it adds more — so
+read the whole file, never its first heading. Each entry was checked against the campaign
+record or the code, and each survives because **a run can comply with one and violate the
+other**. No count is written into this paragraph on purpose: the note on the Red flags
+list further down says why one drifts.
 
 Read this before proposing to merge anything here. Re-proposing a pair below is not a
 finding unless you can defeat the distinction stated with it.
@@ -26,7 +30,7 @@ places in one document. That entry therefore rests on a different argument, stat
 it, and a reviewer who applies the three-prompts test to it will correctly find it does
 not pass. Read the argument, not the pattern.
 
-## The seven
+## The founding list
 
 **1. "which states were compared" vs "which sections were compared."**
 Near-identical wording, different axes. The first is width-and-theme coverage of a
@@ -511,3 +515,30 @@ docket section is the moment of use. The docket section's copies still earn thei
 is where the destinations are ranked and where the read-only fallback lives. Collapsing into
 the docket section alone restores the error the inventory's header names in its own first
 sentence, which the skill was committing two sections later.
+
+## Added round 16 — the target reader's delivery, and the ledger's run-state block
+
+**Step 4's DNA enumeration vs the critic brief's handover manifest vs the direction brief's
+delivery line — against critic item 2, direction item 1 and `## The reader test`.** The
+reader is a **run parameter, not a design value**: it is answered in step 2 and appears in no
+artifact anyone hands over unless somebody puts it in one. Until round 16 the only route was
+`## The reader test`'s "name the target reader per surface", which is orchestrator-only, plus
+the hope that step 2's answers landed in an artifact defined as "the complete set of facts
+the page may assert" — where a run parameter is not obviously at home. Three prompts graded
+register against a fact whose delivery was a side effect. Each new site does a different job:
+**step 4's** makes it durable, so a resumed orchestrator reads it off the direction document
+instead of reconstructing it; **the manifest's** makes it *stated in those words*, because a
+critic handed a design document cannot tell which of its lines is "the target reader you were
+given"; **the direction brief's** is the only one the adversary's prompt can reach at all.
+Collapsing to step 4 alone leaves item 2 guessing which line it means; collapsing to the
+manifest alone loses the fact on resume and never reaches the adversary.
+
+**The ledger file's run-state block vs step 7's round report.** Not one artifact stated twice:
+the round report is written into the conversation and the run-state block is written to disk,
+and compaction takes exactly one of the two — which is the defect round 13 left open and named
+as the weakest of its own fixes. The **carve-out** that travels with it — the block is not
+handed to any agent — is stated once, in `## The ledger`, beside the distribution list it
+modifies, because that is where the handover decision is made. Anyone promoting the counters
+into the ledger's fact list proper creates a worse defect than the one this fixed: a critic
+holding *rounds since check-in: 5* has been told how badly this round needs to be clean, which
+is the one thing a reviewer must not know.

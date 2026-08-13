@@ -63,22 +63,27 @@ longest item in the file. Only item 7 needed the carve-out.
   ruling is defensible and stricter; the exemption is bound to one named clause rather than
   to "blocking questions" generally, precisely because the abuse surface is real.
 
-## Still open
+## Closed since
 
-- **The round report's durability (from #7).** The counters now appear in the round report,
-  but if that report only ever exists in the conversation, a compacted orchestrator loses it
-  too. The stronger fix writes them beside the ledger. Recorded by round 13's own author as
-  the weakest of its eight fixes.
-- **`floor.md`'s `--fragment` entry** never says that `--fragment` does *not* suppress the
-  one-theme `[UNMEASURED]`, so an orchestrator shooting a single-theme card with
-  `--fragment` alone gets a blocking unmeasured line and no hint why. One clause.
-- **`## Technical floor` says non-text contrast is "yours or the critic's"** — "yours" has no
-  assignee now that the red team has a brief and the critic has item 3. The same orphan
-  shape as #2, one degree weaker.
+All three items this file listed as open were fixed in round 16, and the sections it named
+as unexamined were audited in round 15 — which found eleven more defects in them, listed in
+`do-not-merge.md`'s round-15 entry rather than here.
+
+- **The round report's durability** — the counters now also go to disk, in a
+  `## Run state — orchestrator only` block in the ledger file, with an explicit carve-out
+  that the block is handed to no agent. A critic holding *rounds since check-in: 5* has been
+  told how badly this round needs to be clean.
+- **`floor.md`'s `--fragment` entry** now states that it suppresses no `[UNMEASURED]` line,
+  the one-theme line included — verified against the code, where that push is gated on
+  `--single-theme` alone.
+- **Non-text contrast's "yours"** now names the critic under item 3, with the red team free
+  to re-run it under its own item 1.
 
 ## What this list is not
 
-**Exhaustive.** It is one pass, by three lenses, over territory that had never been audited.
-The sections still unexamined are namable: `## The comparison`, the docket's destinations,
-and the direction brief beyond the item added here. A pass pointed at those should be
-assumed to find more, on the evidence of this one.
+**Exhaustive, and it never was.** Its own prediction held: a pass pointed at `## The
+comparison`, the docket's destinations and the direction brief found eleven further defects,
+including a section whose central protection was delivered by an instruction two other lines
+forbade executing, and a control-flow bound keyed to a verdict word the classifier was never
+given. The lesson is not that the list was short — it is that **scope is a filter on where
+people look, not on what is wrong**, and every widening so far has paid.
