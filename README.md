@@ -19,9 +19,9 @@ Eight skills:
 
 1. **Ask questions first**, in plain prose, one topic at a time. Never ask what the request already answered or what a source can confirm.
 2. **Phases and waves**: work splits into phases, each with a verifiable exit gate; inside a phase, independent tasks run as waves of parallel agents. Mutating agents get disjoint files or worktrees.
-3. **Combat drift**: every phase ends with native checks (typecheck and targeted tests for code, claim re-verification for prose) and a designated review skill; done means showing check output, not asserting it.
+3. **Combat drift**: every phase ends with native checks — **every check the project documents as a gate**, not only typecheck and tests, since a linter, schema check or content law is read out of the run by a compiler-noun definition — plus a designated review skill; done means showing check output, not asserting it, and an unrun check is recorded as unrun rather than reported clean.
 4. **Red team**: an adversarial reviewer attacks each phase's diff or findings. Verify every red-team finding from source before acting on it; adversarial reviewers produce false positives.
-5. **Loop until confident**: a phase exits on two consecutive clean passes of the full gate. Any diff change resets the counter. Four loops without exit escalate to the user.
+5. **Loop until confident**: a phase exits on two consecutive clean passes of the full gate. Any diff change resets the counter to zero, simplification included. A separate valve counts unresolved rounds and never resets, escalating at every multiple of four and re-arming rather than being spent; both counters go to disk, because a compaction zeroes an in-context counter and tells nobody.
 6. **Simplify early and often**: a YAGNI/dead-code pass at every phase exit; reuse before reinventing.
 7. **Deliver**: work ends with commit/push/PR per the repo's norms, never with "the loop is clean."
 
@@ -50,7 +50,7 @@ Everything below is optional (each skill states its fallback), but the doctrine 
 ## Design notes
 
 - The doctrine is a **layer, not a fork**: it wraps other authors' skills at runtime, so their upstream updates flow through untouched (one exception: the renamed `matts-code-review` copy, see Prerequisites).
-- The two-clean-pass gate defines what a "finding" is (anything requiring a diff change), so declined nitpicks don't loop forever, and a four-loop escalation valve prevents grinding.
+- The two-clean-pass gate splits findings into **blocking** (the deliverable is wrong or unfinished without a change) and **non-blocking**, so only the first resets the counter and declined nitpicks don't loop forever. A pass is clean when it leaves nothing outstanding — including a finding carried over from an earlier pass, which "no *new* findings" would have waved through. A four-loop escalation valve prevents grinding.
 - The doctrine trades tokens for confidence: waves, red teams, and loops multiply agent usage. Point it at work that matters, not one-off edits.
 - `doctrine-gauntlet` folds in the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) (Matt Shumer): builder agents paired with harsh critics that judge rendered output blind against a reference. Its two modes keep both halves honest — the **fused gate** bounds the loop the doctrine way (blocking findings loop, polish goes to a docket, four rounds escalate), while **pure gauntlet** hands the stop decision to the critic and runs open-ended. A gauntlet optimizes whatever direction it is given, so the skill binds a design system and verifies the reference render before the first comparison.
 - These skills were built test-first: fresh-context agents ran each wrapper against realistic scenarios, and every ambiguity they hit was patched before release.
