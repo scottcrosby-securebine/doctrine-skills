@@ -45,7 +45,9 @@ Order matters; `write_files` is rejected without a `planId`.
 `list_files` / `get_file` → diff → `finalize_plan` (returns the `planId`) →
 `write_files` / `delete_files` with that `planId` → re-list to verify.
 
-Write only what differs; never a wholesale replace.
+Write only what differs; never a wholesale replace — **except an empty project, where the
+whole set is the diff** and a full rehydrate is the correct first sync, not the wholesale
+replace this rule warns against.
 
 Where each capability is used in the flow:
 

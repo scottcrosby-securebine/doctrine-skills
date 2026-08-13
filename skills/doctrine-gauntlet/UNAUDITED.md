@@ -1,146 +1,84 @@
-# Pre-existing findings — surfaced 2026-08-13, not yet fixed
+# The unaudited pass — findings, and what became of them
 
-Eleven gate passes ran against **this session's diff only**. Pass 11 was deliberately
-pointed at territory no pass had audited, and found defects in text nobody touched — twelve
-as of this writing, and the count is not the point, since the list is open.
-They are recorded here rather than fixed, because fixing them is a different commitment
-from closing a gate scoped to a diff, and silently widening that scope would have made
-the gate's own result meaningless.
+Eleven gate rounds ran against **one session's diff**. A twelfth pass was pointed instead
+at territory no earlier pass had examined — the red team's prompt, the builder's floor
+knowledge, the ledger's storage, the orchestrator's own recoverability, the harness manual
+against the harness — and found twelve defects in text nobody had touched. Rounds 12 and 13
+fixed them.
 
-Every one is verified against the file or the code. Provenance was checked: all of them
-predate this session except #12, which round 11 surfaced while fixing something else.
+**This file is a status record, not a queue.** It is kept because the *reasoning* is worth
+more than the diffs: two fixes were ruled the other way, one finding turned out to be half
+wrong, and the accepted costs are written down so a later reviewer does not rediscover them
+as defects. Every claim below was verified against the file or the code, and provenance was
+checked — all twelve predate the session that found them except #12.
 
-## The dominant class, again
+## Why they survived eleven passes
 
-Almost all of them are the same defect this session spent eleven rounds on — a correct rule
-sitting where the agent who must obey it never reads. That is not a coincidence: the
-architecture assembles fresh-context prompts from named sections, so every rule written
-in a section no prompt draws from is invisible to the agent it governs. The gate found
-these in *new* text because that is what it was scoped to. Nobody had asked the same
-question of the old text.
+Not severity — **attention**. Every pass asked "is the new text sound?", and these were old
+text. Finding #1 is HIGH, trivially verifiable, and sat untouched through all eleven,
+because scope is a filter on where people look, not on what is wrong. Widening the lens by
+one step found twelve defects in about ninety minutes.
 
-## Placement — the reviewer's brief never carries the rule
+Nine of the twelve are one class: **a correct rule sitting where the agent who must obey it
+never reads.** That is structural. The architecture assembles fresh-context prompts from
+named sections, so any rule written in a section no prompt draws from is invisible to the
+agent it governs — and nothing mechanical catches it.
 
-**1. `## The reader test` never reaches a critic. HIGH.**
-Critic brief item 2 says "**Answer the reader test before anything else**, and let that
-answer block." The test itself — *"would a human want to look at this, and does it serve
-the reader it is for?"* — lives in `## The reader test`, and the critic brief's own intro
-tells the orchestrator not to copy the rest ("the rest of this skill is only the reasoning
-behind these lines"). Modes lists "failing the reader test" as blocking. So the gate's
-blocking condition is defined by a question the agent rendering the verdict never sees.
-Aggravation: item 3 names six reader-test axes as bare noun phrases — "the wall", "what
-the original *does*", "deletion as a change" — with no definitions, in the same item where
-this session reproduced the ruled-versus-default test *in full* on the explicit ground
-that naming a test is not handing it over.
+## Fixed
 
-**2. The red team has no brief at all. HIGH.**
-It is invoked four times and briefed zero. `## Technical floor` says "**The red team checks
-print in the round it runs, and reports it as a floor item**: nothing above checks print,
-so an instruction with no assignee is an instruction nobody executes." That sentence
-assigns print to an agent that cannot read the assignment — it commits the exact error it
-names, in its own text. The ledger's distribution list ("every builder, every critic and
-the direction adversary") also omits the red team, while the ledger exists so "a reviewer
-holding no fact base cannot tell an invented number from a given one".
+| # | Finding | Fix landed |
+|---|---|---|
+| 1 | `## The reader test` never reached a critic, while Modes made failing it blocking. Item 3 listed its six axes as bare noun phrases | round 12 — the question and all six axes are now inside critic brief item 2, runnable as written; item 3 points at item 2, inside the same prompt |
+| 2 | The red team had **no brief at all** — invoked four times, briefed zero — while Technical floor assigned it print duty in a section it never receives, in the same sentence that says "an instruction with no assignee is an instruction nobody executes" | round 13 — a fourth brief section, `## The red team brief`, six items; step 7 now assembles from it; the ledger's distribution list gained the red team |
+| 3 | `## What a critic may conclude` reached no critic, though its rules are discharged *before filing* | round 12 — copied into critic brief item 6. The right/wrong/**stale** triage was deliberately **not** copied: that is the orchestrator's disposal of a returned review |
+| 4 | "A builder may not cite a PROPOSED item as a constraint" never reached a builder — the recorded incident is a builder deleting a client's certification logos on an unruled item | round 12 — a bullet in the builder's assert list |
+| 5 | The builder was told the house outranks its brief, pointed at precedence it cannot read, and given four words of floor | round 12 — the precedence fact and the floor's authorable substance now sit in `## The brief`. Build-then-measure was weighed as a defence and rejected: no gate can correct a builder told the wrong precedence |
+| 6 | The ledger was the only durable artifact with no path, while being handed to more fresh contexts than the DNA or the docket | round 13 — `docs/design-ledger.md`, or the bound system's docs location, or the scratchpad |
+| 7 | The orchestrator's counters existed only in its own context, unrecoverable after compaction and undetectable when lost | round 13 — the round report now carries every counter value, escalations spent, and docket-item age |
+| 8 | The fidelity tie instruction targeted a critic that item 8 denies the comparison verdict | round 12 — **ruled the other way and re-aimed**, not duplicated. Only the orchestrator can act on it |
+| 9 | The direction adversary was never asked whether the direction is buildable under the floor | round 13 — direction brief item 8, appended so nothing renumbers |
+| 10 | `floor.md` said a `--crop` miss is `[UNMEASURED]`; the code routes it to `[JUDGE]`, and `floor.md`'s own output section agreed with the code | round 13 — corrected against `floor.mjs`, and the correction names where the real block comes from |
+| 11 | `tools.md` stated "never a wholesale replace" absolutely while `SKILL.md` carves out the empty-project case — and `tools.md` is the designated fast path | round 13 — the exception now travels with the rule |
+| 12 | `--fragment` suppresses theme-reachability and frozen-type, and no rule told the orchestrator to state that condition | round 13 — the critic-brief preamble states it; item 7's first rule carries the carve-out |
 
-**3. `## What a critic may conclude` reaches no critic. MEDIUM.**
-Pre-filing obligations only the filer can discharge: "Grep the repo for the premise
-**before filing**" a sensitivity finding; "settle a disputed measurement by cropping the
-render and looking at it"; "distrust confident findings that fall outside the named axes";
-"A real finding can still carry a wrong diagnosis." Two of the section's rules made it
-into the brief; the rest reach the orchestrator alone. The recorded costs — four repeat
-false alignment failures, one false customer-identification accusation into a permanent
-record — are costs of *filing*.
+## A correction to this register's own findings
 
-**4. "A builder may not cite a PROPOSED item as a constraint" never reaches a builder.
-MEDIUM.**
-The docket section is orchestrator-read. The recorded incident is a builder hardening an
-unconfirmed item into a ban and **deleting the client's certification logos** — the exact
-failure the rule exists to stop, aimed at an agent that never hears it.
+**#12 was half wrong as filed.** It named critic brief items 1 *and* 7. Round 13 verified
+against `floor.mjs` that `--fragment` suppresses no `[UNMEASURED]` line — a one-theme
+fragment run still reports "only the X theme was rendered" unless `--single-theme` is also
+passed — so **both themes really are rendered** and item 1's render set was correct as
+written. Editing it would have been a false parallel to the single-theme case, in the
+longest item in the file. Only item 7 needed the carve-out.
 
-**5. The builder is told the house outranks its brief, and never given the floor. MEDIUM.**
-`## The brief` says "this brief applies only where the house is silent (precedence above)"
-— and "precedence above" is in the orchestrator-only background block. The only floor
-content in a builder's prompt is four words: "reduced-motion honored". Meanwhile the floor
-section records that "brand palettes that fail contrast are the common case, not the
-exotic one", and that a 145x14 call to action "survived seven rounds of critics". The
-builder authors the palette and holds no rule saying the floor beats the house.
-*Counter-argument, recorded fairly:* build-then-measure is a coherent division of labour.
-The cost is that every floor defect authored costs a round.
+## Accepted costs, written down so they are not rediscovered as defects
 
-**6. The ledger is the only durable artifact with no home. MEDIUM.**
-The DNA gets a path (`docs/design-dna.md`). The docket gets a path
-(`docs/design-docket.md`). The ledger gets none — it is handed to more fresh contexts than
-either, accumulates ruled-versus-default verdicts across rounds, and in pure-gauntlet mode
-must survive orchestrator compaction. Step 4's own justification convicts it: "an
-undocumented direction cannot be handed to a fresh context."
+- The floor's substance is now a second place to update when the floor list changes; the
+  reader test's axes a second place when an axis is added. That is the same cost taken
+  deliberately for item 7's inline floor list and item 5's crop means. **A pointer instead
+  is the fix that failed three rounds running.**
+- The red team's brief duplicates the ledger check and the observed/derived/assumed rule.
+  Its axes deliberately do **not** duplicate the critic's — an adversary handed the critic's
+  axes returns the critic's findings.
+- Round 13 exempted a builder's forced escalation from the three-per-phase cap. The opposite
+  ruling is defensible and stricter; the exemption is bound to one named clause rather than
+  to "blocking questions" generally, precisely because the abuse surface is real.
 
-**7. The orchestrator's counters are unrecoverable by a resumed context. MEDIUM.**
-Consecutive-clean-passes, unresolved-rounds, win-streak, unchanged-rounds, escalations-
-spent and docket-item age exist only in the orchestrator's context. Step 7's round report
-asks for "the round number, what got bolder, what the critics still rejected" — no counter
-values. A compacted orchestrator cannot recover them from any artifact and cannot detect
-that it lost them. Cheapest fix: add the counter values to the round report, which also
-makes the state auditable by the user.
+## Still open
 
-**8. The fidelity tie instruction targets an agent that cannot use it. LOW-MEDIUM.**
-"tell the critic that a tie in the blind comparison counts as a pass" — but item 8 says the
-comparison winner "comes from the blind pass, not from this critic", and the blind critic
-gets "the subject, the reader and the job only". The rule is already the orchestrator's,
-stated under The comparison. Read literally it invites putting comparison-scoring guidance
-into a briefed critic's prompt, which is how a briefed critic starts returning a verdict it
-is explicitly denied.
-
-**9. The direction adversary is never asked whether the direction is buildable under the
-floor. LOW-MEDIUM, contested.**
-The DNA is "palette, type, motion" — the floor-relevant axes — and floor-failing brand
-palettes are "the common case". A direction whose defining move cannot clear contrast is
-killable only at step 5; after that every round blocks on a defect the builder cannot fix
-without reopening the direction. The direction brief already carries the exact analogue for
-facts ("Does it require facts that do not exist?"). One more item — "Does it require a
-value the floor forbids?" — costs one line at the one moment the user is already in the loop.
-
-## Doc-versus-code
-
-**10. `floor.md` contradicts itself and the harness on a crop miss. HIGH.**
-`floor.md` flag section: "A selector matching nothing is `[UNMEASURED]`, not silence."
-`floor.md` output section: `[JUDGE]` includes "any region `--crop` could not shoot."
-`harness/floor.mjs`: crop misses go to `cropNotes` (445, 447) → `handoff` (603) → printed
-as `[JUDGE]` (646). Never `[UNMEASURED]`.
-This is not cosmetic — the two markers are different gate law. `[UNMEASURED]` blocks and
-advances the counter until waived; `[JUDGE]` never gates by itself. A reader trusting the
-flag section believes a crop miss auto-blocks. Fix: `[UNMEASURED]` → `[JUDGE]` in the flag
-section.
-
-**11. `tools.md` drops an exception `SKILL.md` carries. MEDIUM.**
-`tools.md`: "Write only what differs; never a wholesale replace." Stated absolutely.
-`SKILL.md`: "Write only what differs — **except an empty project, where the whole set is
-the diff** and a full rehydrate is the correct first sync." `tools.md` is the designated
-fast path for this exact procedure, so a reader who consults only it gets a flatly wrong
-instruction on first sync to an empty project.
+- **The round report's durability (from #7).** The counters now appear in the round report,
+  but if that report only ever exists in the conversation, a compacted orchestrator loses it
+  too. The stronger fix writes them beside the ledger. Recorded by round 13's own author as
+  the weakest of its eight fixes.
+- **`floor.md`'s `--fragment` entry** never says that `--fragment` does *not* suppress the
+  one-theme `[UNMEASURED]`, so an orchestrator shooting a single-theme card with
+  `--fragment` alone gets a blocking unmeasured line and no hint why. One clause.
+- **`## Technical floor` says non-text contrast is "yours or the critic's"** — "yours" has no
+  assignee now that the red team has a brief and the critic has item 3. The same orphan
+  shape as #2, one degree weaker.
 
 ## What this list is not
 
-It is not exhaustive. It is one pass, by three lenses, over territory that had never been
-audited — the red team's prompt, the arbiter, the builder's floor knowledge, the ledger's
-storage, the orchestrator's own recoverability, and the harness manual against the harness.
-A second pass over the same territory would very likely find more, and the sections nobody
-has pointed a lens at yet (the direction brief, the comparison, the docket's destinations)
-are the obvious next place to look.
-
----
-
-## Added after the register was written
-
-**12. `--fragment` suppresses a floor item that critic brief items 1 and 7 still demand a
-ruling on. HIGH.** Found by round 11's author, outside its brief.
-`floor.md` records that `--fragment` suppresses the theme-reachability judgement, and
-`CLAUDE.md` states the reachability handoff prints on "every two-theme run that is not
-`--single-theme` or `--fragment`". Items 1 and 7 now carry the `--single-theme` condition
-(round 11) and say nothing about `--fragment`. So a card-specimen or partial gate critic
-is told to rule on "a second theme no user can reach" — a floor item its report
-deliberately never raises — and item 7's first rule makes an absent second theme blocking
-with no carve-out for a fragment whose *host page* owns theming.
-Structurally identical to the single-theme defect round 11 fixed: a prompt-conditioned
-suppression with nobody told to state the condition. `--fragment` is orchestrator-chosen
-too, so the fix belongs in the same critic-brief preamble sentence. It lands on exactly
-the card-phase shape rounds 9 and 10 spent two rounds on.
+**Exhaustive.** It is one pass, by three lenses, over territory that had never been audited.
+The sections still unexamined are namable: `## The comparison`, the docket's destinations,
+and the direction brief beyond the item added here. A pass pointed at those should be
+assumed to find more, on the evidence of this one.

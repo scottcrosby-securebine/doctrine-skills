@@ -55,7 +55,11 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
   `<outPrefix>-<theme>-<width>-crop.png`. A full-page screenshot of a long page is
   read scaled to fit, so a figure occupying a tenth of it is reviewed at a tenth of
   its size; this is how anyone actually sees it at shipped size. A selector matching
-  nothing is `[UNMEASURED]`, not silence.
+  nothing is `[JUDGE]`, not silence — it is never `[UNMEASURED]`, and the two are
+  different gate law. The harness saw the page; what it could not do is put a region in
+  front of eyes, so it hands the question over rather than blocking. The block, when there
+  is one, comes from the critic: critic brief item 5 makes it say it had no way to crop,
+  and Modes makes that abstention blocking.
 - `--single-theme`, with the one theme named — declares that the project genuinely
   ships one theme. **A single-theme site is not a floor failure.** Without this flag
   its missing theme is an `[UNMEASURED]` that can never clear, so the gate could never

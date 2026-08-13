@@ -385,3 +385,38 @@ reader and the job alone. It was re-aimed at the orchestrator, where `## The com
 already states it. Re-proposing it as a critic instruction needs an argument that survives
 item 8 — the failure it invites is a briefed critic returning a verdict its own brief denies
 it, which is not a placement defect but a scope one.
+
+## Added round 13 — a fourth prompt, and one more conditioned suppression
+
+**`## The red team brief` vs Technical floor's print rule vs the ledger section vs critic
+brief item 6.** One entry, one pattern: the red team is a **fourth** assembled prompt,
+alongside the builder's `## The brief`, the direction adversary's list and the critic's
+eight items — and until round 13 it was dispatched with none. Three rules it is named in
+lived only where it cannot read them. Print is the sharpest: Technical floor assigns print
+to the red team in the same sentence that says "an instruction with no assignee is an
+instruction nobody executes", which is orchestrator-read, so the skill committed the error
+it names in its own text. The ledger check duplicates the ledger section and critic item 4,
+and the observed / derived / assumed rule duplicates critic item 6 — same three-prompts
+argument as the entries above. The orchestrator's copies still earn their place: Technical
+floor is where the orchestrator learns print counts as a floor item in the round's
+accounting, and the ledger section is where it learns to build and distribute one.
+**What is deliberately NOT duplicated: the critic brief's axes.** Red team items 1 and 2
+say the opposite — attack what the round passed, judge the set rather than the sections —
+because an adversary handed the critic's axes returns the critic's findings and stops being
+an adversary. Anyone merging the two briefs destroys that on contact.
+
+**The critic brief's fragment dispatch line vs item 7's fragment carve-out.** Added round
+13, and covered by the round-11 single-theme entry's argument in full: a prompt-conditioned
+harness suppression, with the orchestrator holding the only fact and the critic holding the
+only rule it conditions. `--fragment` suppresses the theme-reachability and frozen-type
+handoffs (verified in `floor.mjs` — it suppresses no `[UNMEASURED]` line, so both themes
+are still rendered and item 1's render set is untouched; the finding that prompted this
+named item 1 as well and was wrong on that half). Same ruled polarity: page-owned theming
+is the default granted by silence, fragment is granted only by an affirmative sentence.
+
+**Direction brief item 8 vs `## The brief`'s floor paragraph vs `## Technical floor`.**
+Three prompts, and the moments are what differ: item 8 asks whether the *direction* can be
+built under the floor, before anything exists, at the one step where killing it is cheap;
+The brief tells the *builder* what to author; Technical floor is the orchestrator's gate
+list. Only item 8 can reach a verdict that costs nothing — after step 5 the same defect
+blocks every round and its fix is reopening the direction, which is the user's question.
