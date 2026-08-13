@@ -467,3 +467,47 @@ holding the rest of the list cannot infer it from anything it sees.
 large enterprise's grammar). Restoring it is compliance with the round-12 entry, not a new
 duplication: a copy carrying only the overstatement examples fails the standard the round-13
 note sets — "in full" is the requirement, byte-identity is not.
+
+## Added round 15 — the first audit of `## The comparison`, the direction brief and the docket
+
+**The blind pass's prompt manifest at three sites: The comparison's "run the pairs first",
+the execution-scope paragraph below it, and the critic brief's preamble.** All three are
+orchestrator-read, so this is the *floor-versus-house reversal* argument and **not** the
+three-prompts one: what makes it undeletable is that each site states the prompt's contents
+in bold, and a reviewer collapsing two leaves a bolded absolute behind that produces the
+opposite dispatch. Until round 15 two of the three said "the subject, the reader and the job
+and nothing else" while the third told the orchestrator to hand that same critic an
+execution-scope instruction, and nothing ordered them — an orchestrator obeying the literal
+form ships the recorded defect where a restyle loses every comparison because the reference
+lists more cards. Merging is legitimate only if all three move at once and no shortened
+pointer stays where a scanner reads the bold.
+
+**Step 7's blind-comparison step vs `## The comparison`'s "run the pairs first, then the
+briefed critique".** Not a restatement: The comparison defines the *procedure*, step 7 is the
+only place a round is *scheduled*, and an orchestrator working the flow has no reason to
+reopen The comparison mid-loop. Until round 15 the ordering existed only in the procedure
+section, so fused gate's "losing the comparison" was a blocking condition nothing dispatched
+and pure gauntlet's win streak was a primary exit counter nothing fed.
+
+**Direction brief item 8's inline floor list vs `## The brief`'s floor paragraph vs
+`## Technical floor`.** Extends the round-13 entry on the round-14 precedent that added axe:
+same accepted cost, one more place to update, and **a pointer is the fix that failed three
+rounds running**. What forced it: item 8 demanded the adversary name "which floor item the
+move collides with" against a list its prompt never carried, so a single-theme conceit, a
+headline-less poster page, a fixed-px 2560 hero, a crowded hairline cluster and a
+keyboard-invisible interaction were each invisible to the one reviewer that can kill a
+direction while killing is still cheap.
+
+**Item 8's verdict vocabulary vs step 5's "whatever the adversary kills" vs the direction
+brief's trailing paragraph.** Three-prompts pattern with an asymmetry worth stating: step 5
+and the trailing paragraph are orchestrator-read and both *count* kills, while the adversary
+— whose prompt is items 1-8 — was never told the word. A bound that keys on a classification
+the classifier was never asked to produce is inert. It sits at the tail of item 8 rather than
+after the list because trailing prose is not dispatched.
+
+**The capability inventory's polish-docket and ruling-queue rows vs the docket section's
+destinations.** One reader, two moments: the row is the question asked once at binding, the
+docket section is the moment of use. The docket section's copies still earn their place — it
+is where the destinations are ranked and where the read-only fallback lives. Collapsing into
+the docket section alone restores the error the inventory's header names in its own first
+sentence, which the skill was committing two sections later.
