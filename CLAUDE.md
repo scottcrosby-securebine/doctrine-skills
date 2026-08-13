@@ -47,8 +47,9 @@ belongs in SKILL.md; if it changes how a tool is *invoked* or records a call alr
 made, it belongs in a sidecar. `do-not-merge.md` and `UNAUDITED.md` are both the
 second kind — a record of rulings already made, not a rule any agent reads at
 runtime — which is why neither is ever assembled into a prompt. `harness/floor.mjs`
-is the only executable the plugin ships; `fixtures/shadcn.sh` is the other tracked
-executable in the repo. The harness's portability
+is the only code the plugin ships, and it is run as `node floor.mjs` rather than
+executed — `git ls-files -s` shows exactly one mode-100755 file in the repo, and it is
+`fixtures/shadcn.sh`. The harness's portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
