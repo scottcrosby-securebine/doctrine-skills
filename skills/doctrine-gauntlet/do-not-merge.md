@@ -894,3 +894,38 @@ receives the record anyway inside the ledger. Re-adding it needs an argument tha
 can make a parity finding — and note that handing that agent reference material is in tension
 with item 1's design, which is that an adversary given the critic's inputs returns the critic's
 findings.
+
+## Added round 19 — a blind check, and a signal with no owner
+
+**The harness's printed `[JUDGE]` sentence ("Look at the 1440 renders and say which") vs critic
+item 3's "including the one that hands you a subtraction instead of a defect, whose consequence
+the harness cannot print".** A producer and its consumer across a machine and a prompt, and the
+split is not arbitrary: `floor.mjs` can print the *question* — here are the elements the ordinary
+render also hid, look at them — and cannot print the *consequence*, because "a dead reveal is a
+blocking finding" is gate law, and gate law lives in SKILL.md where the counters are defined.
+**This entry is not the three-prompts pattern**: the harness's line does reach the critic, inside
+the floor report item 1 hands over, so nothing here is about a prompt losing the rule. It is
+about which of the two documents may say what blocks. Delete item 3's clause and the critic
+answers "closed drawer or dead reveal?" with no rule telling it that one of the two answers ends
+the round — and this is the one `[JUDGE]` where the underlying pass prints its clean sentence
+either way, so no other item in either brief looks at the list. Delete the harness's sentence and
+the critic holds an axis with no elements attached: only the harness knows what the baseline
+subtracted, and the reduced-motion result it can see has already had them removed. **The red team
+is deliberately not a second site.** Its manifest hands it renders, the diff and the critic's
+report and no floor report, so it never sees the line; reaching it means widening that manifest,
+which is a different change with its own entry to write.
+
+**The tamper test's third clause, stated in `floor.md`'s "Changing it", in SKILL.md's Technical
+floor and in the repo's `CLAUDE.md`.** The two-clause rule already lived in all three and this
+round extends each; the argument is that the three files have three **entry points**, not one
+reader with three sites. Whoever edits `harness/floor.mjs` opens `floor.md` and may never open
+`CLAUDE.md`; a Claude Code session editing this repo opens `CLAUDE.md` and has no reason to open
+either of the others; an orchestrator running a gauntlet on a client project holds SKILL.md and
+authors project-specific native checks — a house copy linter, a ruling probe — with `floor.md`
+nowhere in reach unless it drives this harness. Each collapse costs a different reader the rule
+at the moment they are about to add a check: cut `floor.md`'s and the one case with the recorded
+incident loses it; cut SKILL.md's and a gauntlet's own new instrument ships with two clauses; cut
+`CLAUDE.md`'s and the next edit to this repo does. **The three are deliberately worded to three
+readers** — fixture-and-render for the repo editor, instrument-authoring for the orchestrator —
+so a merger finding "the same paragraph three times" has found three paragraphs that are not the
+same one, and reconciling their wording is how the reader-specific half gets planed off.
