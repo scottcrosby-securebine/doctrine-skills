@@ -20,8 +20,28 @@ hides dev-server overlays, checks heading structure, layout and target size, com
 scale across widths, and runs axe when it can resolve it. Two more checks **gate** and were
 missing from this list: **uncaught page errors** — a `pageerror` fails that configuration,
 while console errors are printed as noise and never gate — and a **reduced-motion pass**,
-which fails on text still hidden under `prefers-reduced-motion` and on any CSS or WAAPI
-animation still running.
+which fails on text reduced motion took away and on any CSS or WAAPI animation still
+running.
+
+**Every DOM walk crosses shadow boundaries, and none of them crosses a frame.**
+`document.querySelectorAll` stops at a shadow root, so heading structure, target size,
+inner clip and type scale all reported *nothing* about a Lit/Stencil/Lightning
+application while grading its page chrome — byte-identical markup measured 28 findings in
+light DOM and 4 inside a shadow root, with nothing in the output saying a subtree had gone
+unlooked-at. Every walk now goes through one deep helper, which also reaches **closed**
+roots by recording `attachShadow` before any page script runs. Frames are the case it does
+*not* solve: nothing here enters one, so a page whose app is in an iframe gets an
+`[UNMEASURED]` and its `h1` gate suppressed rather than run on a count that is wrong.
+
+**It also checks that what it rendered is the artifact at all**, which is a separate
+question from whether the artifact is good. The navigation's **HTTP status** is read (an
+HTTP 500 used to come back `PASS`, with `h1: Internal Server Error` printed one line
+above the verdict); **stylesheets, fonts and images that never arrived** are counted from
+the network rather than the DOM (an entire design in one 404ing stylesheet used to exit 0,
+and a 404ing `background-image` leaves no element for the blank-image check to find); the
+page **height is re-read** after measuring, and once per run watched five seconds longer,
+because four real defects arriving at four seconds were measured as absent under a clean
+verdict; and the settle scroll **reports the tail its step cap never reached**.
 
 **It writes screenshots, and their paths are what everything downstream grades.** Every
 configuration writes a full-page PNG to `<outPrefix>-<theme>-<width>.png` — so
@@ -29,7 +49,22 @@ configuration writes a full-page PNG to `<outPrefix>-<theme>-<width>.png` — so
 plus `<outPrefix>-reducedmotion-<theme>.png` per theme, and
 `<outPrefix>-<theme>-<width>-crop.png` for every configuration where `--crop` matched
 something. The critic brief requires the orchestrator to hand over this round's renders
-at 360/768/1440/2560 in every theme: those eight files are it.
+at 360/768/1440/2560 in every theme the run claims: the four files per theme above
+are it — eight on a two-theme run, four under `--single-theme`.
+
+**The reduced-motion pass reports what reduced motion took away, not what is hidden.**
+It compares against a **baseline** — the same page, same theme, same 1440 width, rendered
+without `prefers-reduced-motion` in the main loop, so the baseline costs no extra page
+load. Both halves of that are load-bearing. Reading each element's own computed opacity
+missed the commonest reveal pattern there is: `opacity: 0` on a *wrapper*, every child
+computing `1`, none of them painting — a blank render under the printed sentence "ok — all
+content visible", which is worse than silence. `Element.checkVisibility` sees the wrapper.
+It also sees a closed mobile drawer, which is on most responsive sites and is not a motion
+defect, hence the subtraction. The subtraction is by **count**, not set difference, so two
+elements with the same text — one always closed, one revealed — cannot cancel each other.
+And what the baseline removes is not discarded: it prints as `[JUDGE]`, because a closed
+menu and a reveal whose trigger never fired look identical from here and one of them is a
+blank section.
 
 **The reduced-motion pass runs in every theme, at 1440 only**, writing
 `<outPrefix>-reducedmotion-<theme>.png` per theme. Per-theme because a reveal scoped to one
@@ -67,10 +102,12 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
 
   **It is a single-shot check, and knowing where it looks is how you pick a marker that
   works.** Both this and the 30-character refusal run **once**, in the first theme at the
-  first width — `dark` at `360px` — against the page's title, its first `h1`, and its
-  whole `document.body.innerText`. Three consequences. A marker inside an element hidden
+  first width — the first theme is whichever you asked for first (`dark` on a `both` run,
+  the named one under `--single-theme` or a bare `light`), and the first width is always
+  `360px` — against the page's title, its first `h1`, and its whole
+  `document.body.innerText`. Three consequences. A marker inside an element hidden
   at 360 fails, because `innerText` skips `display: none`. A marker that renders only in
-  `light`, or only at desktop, fails. And failure is **exit 2 / CANNOT RUN**, which stops
+  the theme you did not ask for first, or only at desktop, fails. And failure is **exit 2 / CANNOT RUN**, which stops
   the whole gate — so pick something the page shows in every theme at every width. The
   title is the safe choice, and the run prints it for you.
 
@@ -96,9 +133,14 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
   and never consults `--fragment`, so a single-theme card shot with `--fragment` by itself
   reports its other theme missing, exits 3, and blocks the gate with no hint why. Pass
   both flags.
-- `--theme-class=NAME` — toggles a class on `<html>` for projects that theme that way
-  (Tailwind's `dark`). Without it, `data-theme` alone leaves those projects
-  unswitchable and the run reports a false "theme switch had no effect".
+- `--theme-class=NAME` — toggles a class on **both `<html>` and `<body>`** for projects
+  that theme that way (Tailwind's `dark` on the root, Bootstrap 5.3's and Primer's on the
+  body). Without it, `data-theme` alone leaves those projects unswitchable and the run
+  reports a false "theme switch had no effect". `<html>` alone was not enough: a
+  body-themed project passed the flag, still rendered one palette twice, and got a remedy
+  telling it to pass the flag it had just passed — the exact confident wrong answer the
+  unknown-flag guard exists to prevent. When the flag *is* passed and the renders are
+  still identical, the message now says so and sends you to the project's own toggle.
 - `--crop=SELECTOR` — also shoots that element at 1:1 per width and theme, as
   `<outPrefix>-<theme>-<width>-crop.png`. A full-page screenshot of a long page is
   read scaled to fit, so a figure occupying a tenth of it is reviewed at a tenth of
@@ -112,6 +154,13 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
   ships one theme. **A single-theme site is not a floor failure.** Without this flag
   its missing theme is an `[UNMEASURED]` that can never clear, so the gate could never
   close.
+
+**Argument validation refuses one dash as well as two, and refuses a fourth positional.**
+`-fragment` matched neither the filter that validates flags nor the one that collects
+positional arguments, so it fell through as a third argument and the run completed under a
+configuration nobody asked for — one dash from the exact failure the validator exists to
+prevent. Anything leading with `-` that is not a known flag, and anything after the third
+positional, is now `exit 2` with the reason.
 
 ## Output
 
@@ -144,11 +193,31 @@ The two markers that carry gate law:
 - **`[UNMEASURED]`** — a gap in this run that should not be there. **It is not clean.**
   The complete list of what pushes one: axe could not be resolved at all; axe threw or
   **timed out** — it is raced against 45 seconds in every configuration; **contrast that
-  axe ran but could not determine**; a theme switch that had no effect; only one theme
-  rendered without `--single-theme`; images that finished loading carrying no pixels; a
-  runtime with no `document.getAnimations`.
-- **`[JUDGE]`** — work the harness never does because it needs eyes. **Three of the nine
-  print on every run; the other six print only under their own condition**, and the
+  axe ran but could not determine**, and axe's **`frame-tested`**, which means it never
+  got into a frame and therefore measured nothing in that whole subtree; a theme switch
+  that had no effect; only one theme rendered without `--single-theme`; images that
+  finished loading carrying no pixels; a runtime with no `document.getAnimations` **or no
+  `Element.checkVisibility`**; the navigation answering **HTTP 400 or worse**; a
+  **stylesheet, font or image that never arrived**; the page **still changing** after it
+  was measured; the settle scroll's **step cap** biting before the bottom of the page;
+  **text painted into a canvas**, which has no node for anything here or in axe to read;
+  and **content rendered inside a frame**, which nothing here enters.
+
+  **Seven of those say the same thing in different words: the renders a critic is about to
+  grade are not the artifact.** That is a gap in *this run* rather than a design question,
+  which is why they block and are waivable, and why none of them gates. A designed 404 page
+  is a real deliverable somebody has to shoot, so `HTTP 404` is a waiver and not an
+  `exit 2` refusal.
+
+  **Scripts are deliberately not in the failed-resource set.** They were, briefly: a stock
+  Next dev server 403s two of its own dev-only chunks on every page load, which turned a
+  clean stock app into an `[UNMEASURED]` nobody could ever clear. A floor that cannot close
+  on the commonest stack there is teaches people to waive `[UNMEASURED]` by reflex, at
+  which point the one that matters gets waived with it. Stylesheets, fonts and images are
+  in because they decide what is painted; a script that fails and matters surfaces as a
+  `pageerror`, which gates already, or as content visibly absent.
+- **`[JUDGE]`** — work the harness never does because it needs eyes. **Three of the eleven
+  print on every run; the other eight print only under their own condition**, and the
   difference is gate law: a critic told to expect a line it never receives has grounds to
   declare an abstention, and an abstention blocks exactly like an unmeasured floor item.
   Unconditional, every run: **non-text contrast** (WCAG 1.4.11), **visible focus**, and
@@ -159,7 +228,9 @@ The two markers that carry gate law:
   not `--fragment`, *and* the container grew over 5% from 1440 to 2560, *and* the median
   functional type did not grow at all; **a region `--crop` could not shoot** — `--crop`
   was passed and missed; **axe's other undecided rules** — its `incomplete` bucket held
-  something that was not contrast. **The printed line never gates; the
+  something that was not contrast; **text hidden in the ordinary render too** — the
+  reduced-motion baseline was not empty, so something was subtracted; **targets whose hit
+  area could not be probed** — there were some. **The printed line never gates; the
   critic's answer to it does** — non-text contrast, visible focus and a reachable second
   theme are all floor items, so a critic finding any of them failing is a floor failure
   and blocks. `[JUDGE]` means the harness handed you the question, never that the
@@ -174,8 +245,30 @@ The two markers that carry gate law:
   a genuinely dead palette must not be waivable. `--single-theme` remains the honest
   answer for a page that really ships one.
 
-  **Target size** is deliberately split across both halves. WCAG 2.5.8's 24x24 minimum is
-  measured on every control, and the spec's own exceptions are implemented: an undersized
+  **Target size measures the hit area, not the painted box, and only on controls a person
+  can see.** Three things had to be true before the number was defensible.
+  *Visibility*: the only filter was a non-zero box, so a closed drawer, an `opacity: 0`
+  group and the links inside a shut `<details>` all failed 2.5.8 — controls that accept no
+  pointer at all, `elementFromPoint` at their centre returning `<body>`. Most responsive
+  sites ship a closed menu, so the gate fired on most responsive sites.
+  *Hit area*: `getBoundingClientRect` cannot see a pseudo-element's box, and
+  `::before { position: absolute; inset: -14px }` is the standard way to give a 16px glyph
+  a 44px target — so the harness gated a compliant control at `16x16px`, which is a
+  **wrong** number rather than a conservative one. It now asks the gate's own question
+  directly: is a 24x24 square centred on the control activated by that control at every
+  point? Yes exempts it however it was built; no gates whatever the box says; **and a probe
+  that cannot reach the target — off-viewport after scrolling, or covered by something it
+  could not resolve — is `[JUDGE]`, never the gate**, because the file does not fail what
+  it did not measure. The probe descends through shadow hosts, or every control in a web
+  component would read as covered.
+  *Labels*: a control's label is part of its target — clicking the words toggles the box.
+  So a hit on the label counts, and the **visually-hidden native input** that every design
+  system ships (`opacity: 0`, absolutely positioned, a `span` painting the box) is measured
+  by its `<label>` instead of being dropped as unseen. Found on the bound fixture, not
+  reasoned: it had been reporting `input 20x20px` for a control whose real target is a
+  116x45 label that toggles it on click.
+
+  The rest of the split stands. The spec's own exceptions are implemented: an undersized
   target that is *inline in a sentence* is dropped entirely, one that is *isolated* —
   nothing within a 24px-diameter circle — is spec-compliant and prints as `[JUDGE]`, and
   only a **crowded** undersized target fails and gates. That split is not hedging: the
@@ -235,10 +328,10 @@ The two markers that carry gate law:
   **Render honesty** below is the other half of this — a blank image only counts after the
   page has been scrolled and given time to settle, which the run does before it looks.
 
-  **Every finding list is capped, and every cap declares itself.** Per configuration: 6
+  **The lists enumerated here are capped, and each of those caps declares itself when it bites — but not every list is capped, and one cut declares nothing.** Three lists print in full: undeterminable-contrast ids, axe's other undecided ids, and images that loaded no pixels — each joined whole, so a long one is long rather than quietly shortened. And axe's 400-character line truncation is the one cut that states no number: it appends `…(line truncated)` with neither a withheld count nor a total, so a truncated axe line is evidence you have not finished reading and nothing in the output will tell you how much is missing. Per configuration: 6
   crowded undersized targets, 3 clipped elements, 3 distinct page errors, 2 distinct
-  console errors, 6 elements still hidden under reduced motion. Across the whole run: 8
-  spec-exempt lone targets. axe caps at 4 failure-reason groups per rule and 400 characters
+  console errors, 6 elements reduced motion removed. Across the whole run: 8
+  spec-exempt lone targets, and 5 of the always-hidden baseline per theme. axe caps at 4 failure-reason groups per rule and 400 characters
   per line. Whenever a cap bites, the next line says how many were withheld and what the
   total was — `… 24 more not shown (32 total across the run)`. A silent cap is how a
   builder fixes "the 6 undersized targets", ships the seventh, and reads the next round's
@@ -257,6 +350,26 @@ sibling repo's contrast gate keyed pair discovery on `endswith('-foreground')`, 
 never matches `foreground`, and the most-used text pair on every page went unmeasured
 behind a green report. The second half matters as much: it is what separated a genuine
 desktop layout defect from a design system's deliberate responsive scrollers.
+
+**And a third clause: prove the broken half is really broken, independently of the
+harness.** Both of the first two clauses passed on the reduced-motion check while it was
+blind to the commonest shape of the defect — the fixture it was built against happened to
+put `opacity: 0` where the check could see it, so breaking it tripped the check and a good
+page stayed quiet, and neither told anyone the check could not see a wrapper. Read the
+render. The proof that the check was lying was a screenshot with an `h1` and nothing else
+under the words "ok — all content visible".
+
+**A fix that makes the harness quieter needs the same proof as one that makes it louder.**
+Adding the visibility filter silently stopped reporting a bound system's checkboxes; that
+turned out to be correct — the label really is the target and clicking it really does
+toggle the input, both checked outside the harness — but "a finding disappeared" and "a
+blind spot appeared" print exactly the same thing, which is nothing.
+
+**One measurement is paid for once per run rather than per configuration.** Nothing
+observable inside a settled page separates "finished" from "about to change", so the only
+honest instrument for late-arriving content is a longer look: one configuration watches
+five seconds past settle. That is ~5s on a ~20s run, and eight of them would cost more
+than the rest of the run to say the same thing.
 
 **If you ever add a focus check, do not use `el.focus()`.** A programmatic focus does not
 arm `:focus-visible` once the run has clicked anything, and this harness clicks. A sibling
