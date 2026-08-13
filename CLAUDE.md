@@ -68,12 +68,28 @@ defect class lives above 1440 and no number of rounds below it can see the
 class at all: seven gauntlet rounds passed a page whose nav was 13px at every
 resolution up to 4K.
 
-**Every new check ships with a tamper test, both halves** — break the thing and
-confirm the check trips, then run it against a known-good artifact and confirm
-it stays quiet. A check that silently measures nothing prints exactly what a
-passing check prints. The second half is not optional: it is what distinguished
-a real layout defect from a design system's deliberate responsive scrollers,
-which look identical to a check that has only seen the broken case.
+**Every new check ships with a tamper test, and it has three clauses** — break
+the thing and confirm the check trips; run it against a known-good artifact and
+confirm it stays quiet; and prove the broken fixture really carries the defect,
+independently of the check. A check that silently measures nothing prints
+exactly what a passing check prints. The second clause is not optional: it is
+what distinguished a real layout defect from a design system's deliberate
+responsive scrollers, which look identical to a check that has only seen the
+broken case. **The third is the one to reach for when you are editing this
+repo, because it is what the first two cannot do.** The reduced-motion check
+passed both of them and was blind anyway: it read each element's own computed
+`opacity`, which does not inherit but composites, so `opacity: 0` on a reveal
+wrapper left every child computing `1` and nothing painted — and the fixture it
+was built against happened to put the zero where the check could see it, so
+both halves behaved. Reading the render is what settled it: an `h1` and nothing
+else under `TECHNICAL FLOOR: PASS`. The same read condemned the fixture — its
+content was `opacity: 0` in *both* renders, 7,596 non-white pixels in each, so
+the "correct failure" clause one certified was the check flagging permanently
+hidden content, not a motion defect. **A change that makes the harness quieter
+needs the same proof as one that makes it louder**: the visibility filter
+silently stopped reporting a bound system's checkboxes — correct, as it turned
+out, since the label is the real target — but "a finding disappeared" and "a
+blind spot appeared" print exactly the same thing, which is nothing.
 
 **Target size is split across the gate and `[JUDGE]` on purpose.** WCAG 2.5.8's
 exceptions are real — an isolated undersized target and an inline-in-a-sentence
