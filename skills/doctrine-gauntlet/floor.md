@@ -17,7 +17,21 @@ node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|bo
 
 Renders 360/768/1440/**2560** in the themes asked for, scrolls first so lazy images load,
 hides dev-server overlays, checks heading structure, layout and target size, compares type
-scale across widths, and runs axe when it can resolve it.
+scale across widths, and runs axe when it can resolve it. Two more checks **gate** and were
+missing from this list: **uncaught page errors** — a `pageerror` fails that configuration,
+while console errors are printed as noise and never gate — and a **reduced-motion pass**,
+which fails on text still hidden under `prefers-reduced-motion` and on any CSS or WAAPI
+animation still running.
+
+**The reduced-motion pass runs in every theme, at 1440 only**, writing
+`<outPrefix>-reducedmotion-<theme>.png` per theme. Per-theme because a reveal scoped to one
+palette is invisible in the other — a single pass in the first theme gated one and certified
+two — and `SKILL.md` tells the builder "both themes get all of this". 1440 only because a
+reduced-motion defect is almost always CSS-scoped rather than width-scoped, so a defect
+firing at 360 alone is still unmeasured here and nothing in the output says so. That residue
+is the hard case for the rule under **Changing it**: a check that measures *nothing* prints
+what a passing check prints, and a check that measures *most* prints it with a real result
+behind it.
 
 **2560 is in the ladder because a whole defect class lives above 1440**: fixed-pixel type
 stays byte-identical while the sheet keeps expanding, so the pictures grow and the words
@@ -47,7 +61,11 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
   something else. A missing `h1` is not a defect (exactly one is still fine), and the
   theme-reachability and frozen-type judgements are suppressed because neither is this
   file's to answer. Read the flag by ownership, not by the `h1` clause alone — a card
-  that requires exactly one `h1` still wants this flag.
+  that requires exactly one `h1` still wants this flag. **It suppresses no `[UNMEASURED]`
+  line, and the one-theme line included**: that push is gated on `--single-theme` alone
+  and never consults `--fragment`, so a single-theme card shot with `--fragment` by itself
+  reports its other theme missing, exits 3, and blocks the gate with no hint why. Pass
+  both flags.
 - `--theme-class=NAME` — toggles a class on `<html>` for projects that theme that way
   (Tailwind's `dark`). Without it, `data-theme` alone leaves those projects
   unswitchable and the run reports a false "theme switch had no effect".

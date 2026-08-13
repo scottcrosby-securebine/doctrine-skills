@@ -515,13 +515,17 @@ try {
     }
   }
 
-  /* reduced motion: content must be visible, and nothing should still be animating */
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', colorScheme: themes[0] })
+  /* reduced motion: content must be visible, and nothing should still be animating.
+     PER THEME, because a reveal scoped to one palette is invisible in the other: a
+     single pass in themes[0] gated one theme and certified two, which is the shape
+     this file exists to refuse. Still 1440 only - a reduced-motion defect is almost
+     always CSS-scoped rather than width-scoped, and four widths is not earned. */
+  for (const theme of themes) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', colorScheme: theme })
     try {
       const page = await ctx.newPage()
       await page.goto(url, { waitUntil: 'load' })
-      await applyTheme(page, themes[0])
+      await applyTheme(page, theme)
       await page.addStyleTag({ content: HIDE_OVERLAYS })
       await SETTLE(page)   // or below-the-fold reveals are still at opacity 0
       await page.waitForTimeout(1200)
@@ -533,20 +537,21 @@ try {
           .map(e => e.tagName + ':' + e.textContent.trim().slice(0, 40)).slice(0, 6),
         running: document.getAnimations ? document.getAnimations().filter(a => a.playState === 'running').length : -1,
       }))
-      await page.screenshot({ path: `${outPrefix}-reducedmotion.png`, fullPage: true })
+      await page.screenshot({ path: `${outPrefix}-reducedmotion-${theme}.png`, fullPage: true })
       if (rm.hidden.length) {
         failures++
-        console.log(`\n[reduced-motion] FAIL — content still hidden:`)
+        console.log(`\n[reduced-motion ${theme}] FAIL — content still hidden:`)
         rm.hidden.forEach(x => console.log('  ! ' + x))
-      } else console.log(`\n[reduced-motion] ok — all content visible`)
-      if (rm.running > 0) { failures++; console.log(`  ! ${rm.running} animation(s) still running under prefers-reduced-motion`) }
-      /* getAnimations covers CSS and WAAPI only; motion driven by
-         requestAnimationFrame or canvas is invisible to it. */
-      handoff.push('rAF/canvas-driven motion under prefers-reduced-motion — watch the page and judge')
+      } else console.log(`\n[reduced-motion ${theme}] ok — all content visible`)
+      if (rm.running > 0) { failures++; console.log(`  ! ${rm.running} animation(s) still running under prefers-reduced-motion in ${theme}`) }
     } finally {
       await ctx.close()
     }
   }
+  /* getAnimations covers CSS and WAAPI only; motion driven by requestAnimationFrame
+     or canvas is invisible to it. Pushed once, outside the loop - inside it, a
+     two-theme run printed the same JUDGE line twice. */
+  handoff.push('rAF/canvas-driven motion under prefers-reduced-motion — watch the page and judge')
 } catch (e) {
   fatal = e            // a bad URL, a dead server, a navigation timeout
 } finally {
