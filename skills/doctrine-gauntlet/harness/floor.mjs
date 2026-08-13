@@ -27,7 +27,7 @@ const FRAGMENT = argv.includes('--fragment')
 const SINGLE_THEME = argv.includes('--single-theme')
 /* data-theme and colorScheme are two of the three common mechanisms. The third
    is a class on <html> (Tailwind's `dark`), which nothing else here can set. */
-const THEME_CLASS = (argv.find(a => a.startsWith('--theme-class=')) || '').split('=')[1] || null
+const THEME_CLASS = (argv.find(a => a.startsWith('--theme-class=')) || '').split('=').slice(1).join('=') || null
 /* Assert the target IS what you meant before measuring it. See the identity
    block below for the run this exists because of. */
 const EXPECT = (argv.find(a => a.startsWith('--expect=')) || '').split('=').slice(1).join('=') || null
@@ -37,6 +37,24 @@ const EXPECT = (argv.find(a => a.startsWith('--expect=')) || '').split('=').slic
 const CROP = (argv.find(a => a.startsWith('--crop=')) || '').split('=').slice(1).join('=') || null
 const [target, outPrefix, themeArg = 'both'] = argv.filter(a => !a.startsWith('--'))
 const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]'
+/* An unknown flag must not run to completion. `--theme_class=dark` matched
+   nothing here, rendered both passes in one palette, and reported a false
+   "theme switch had no effect" whose remedy text told you to pass the flag you
+   thought you had just passed — a confident wrong answer, which costs more than
+   a refusal. An empty value is the same bug with a subtler spelling:
+   `--crop=` parses to null and silently shoots no region at all. */
+const KNOWN_FLAGS = ['--fragment', '--single-theme', '--theme-class=', '--crop=', '--expect=']
+for (const a of argv.filter(a => a.startsWith('--'))) {
+  const k = KNOWN_FLAGS.find(k => k.endsWith('=') ? a.startsWith(k) : a === k)
+  if (!k) {
+    console.error(`${USAGE}\n  unknown flag "${a}" — nothing here reads it, so it would have changed nothing while looking like it had`)
+    process.exit(2)
+  }
+  if (k.endsWith('=') && !a.slice(k.length)) {
+    console.error(`${USAGE}\n  "${a}" has no value, so it sets nothing — pass ${k}SOMETHING or drop the flag`)
+    process.exit(2)
+  }
+}
 if (!target || !outPrefix) { console.error(USAGE); process.exit(2) }
 if (!['dark', 'light', 'both'].includes(themeArg)) {
   console.error(`${USAGE}\n  unknown theme "${themeArg}" — expected dark, light or both`)
@@ -148,10 +166,23 @@ const DESKTOP = 1440
 let clipAtDesktop = false
 const typeScale = {}   // width -> { container, median, min }
 const loneTargets = new Set()
+const blankImages = new Set()
+/* axe's third bucket, split by whether the floor list names the thing it could
+   not decide. See where these are emptied, below the loops. */
+const contrastUndetermined = new Set()
+const axeIncomplete = new Set()
+/* Print at most n of a list, and SAY SO when there were more. A silent cap is
+   how a builder fixes "the 6 undersized targets", ships the seventh, and reads
+   next round's identically-capped report as a fresh finding. */
+const show = (list, n, line) => {
+  for (const x of list.slice(0, n)) console.log(line(x))
+  if (list.length > n) console.log(`  … ${list.length - n} more not shown (${list.length} total)`)
+}
 /* Two different things, deliberately kept apart:
    - `unmeasured` is a gap in THIS run that should not have been there — axe
-     missing, axe timing out, a theme switch that did nothing. It is not clean,
-     and it drives exit 3.
+     missing, axe timing out, a theme switch that did nothing, only one theme
+     rendered, contrast axe could not determine, images that loaded no pixels,
+     a runtime with no getAnimations. It is not clean, and it drives exit 3.
    - `handoff` is work this harness never does by design, because it needs eyes.
      It is printed for the critic, and it does NOT touch the exit code. Folding
      these into `unmeasured` made exit 0 unreachable, which made the fused
@@ -272,7 +303,10 @@ try {
             process.exit(2)
           }
           if (EXPECT) {
-            const hay = `${identity.title} ${identity.h1} ${await page.evaluate(() => document.body.innerText.slice(0, 4000))}`
+            /* The WHOLE rendered text, not a prefix of it. A 4000-character
+               window silently failed any marker further down a long page, and
+               the failure mode is exit 2 on an artifact that was in fact correct. */
+            const hay = `${identity.title} ${identity.h1} ${await page.evaluate(() => document.body.innerText)}`
             if (!hay.toLowerCase().includes(EXPECT.toLowerCase())) {
               console.error(`\nFLOOR: CANNOT RUN — --expect=${EXPECT} not found in ${url}.`
                 + `\n  title: ${identity.title}\n  h1:    ${identity.h1}`
@@ -314,10 +348,16 @@ try {
             const cls = String(el.getAttribute('class') || '').split(' ')[0]
             out.push({ sel: el.tagName.toLowerCase() + (cls ? `.${cls}` : ''), hidden: el.scrollWidth - el.clientWidth })
           }
-          return out.sort((a, b) => b.hidden - a.hidden).slice(0, 3)
+          /* Capped, and the total travels with it: three of nine reported as
+             three reads as a page with three clipped regions. */
+          out.sort((a, b) => b.hidden - a.hidden)
+          return { list: out.slice(0, 3), total: out.length }
         })
-        for (const c of clipped) innerClip.add(`${c.sel} hides ${c.hidden}px at ${theme} ${w}px`)
-        if (clipped.length && w >= DESKTOP) clipAtDesktop = true
+        for (const c of clipped.list) innerClip.add(`${c.sel} hides ${c.hidden}px at ${theme} ${w}px`)
+        if (clipped.total > clipped.list.length) {
+          innerClip.add(`… ${clipped.total - clipped.list.length} more clipped element(s) at ${theme} ${w}px, not shown (${clipped.total} total there)`)
+        }
+        if (clipped.total && w >= DESKTOP) clipAtDesktop = true
 
         /* WCAG 2.5.8 target size (AA). axe does not test it and a full-page
            screenshot cannot show it, which is how a primary call to action with
@@ -366,7 +406,10 @@ try {
                to action and a human called it a defect on sight. */
             ;(crowded ? fail : lone).push(label(el, r))
           }
-          return { fail: [...new Set(fail)].slice(0, 6), lone: [...new Set(lone)].slice(0, 6) }
+          /* Deduped but NOT capped here. The caps are applied where the lines
+             are printed, which is the only place that can also state the total
+             — capping in here throws the total away before anyone can print it. */
+          return { fail: [...new Set(fail)], lone: [...new Set(lone)] }
         })
         const smallTargets = targetSize.fail
         for (const t of targetSize.lone) loneTargets.add(`${t} at ${theme} ${w}px`)
@@ -418,7 +461,12 @@ try {
             scrollW: document.documentElement.scrollWidth,
             h1: document.querySelectorAll('h1').length,
             headingSkip: skip,
-            blankImages: [...document.images].filter(i => i.complete && i.naturalWidth === 0).length,
+            /* Finished loading and carrying no pixels = the resource failed.
+               Two things deliberately excluded, both verified in Chromium: an
+               <img> with no src or src="" is deliberate blank markup rather
+               than a 404, and a sizeless SVG reports the 150x150 default, not 0. */
+            blankImages: [...document.images]
+              .filter(i => i.complete && !i.naturalWidth && (i.currentSrc || i.getAttribute('src'))).length,
             height: document.body.scrollHeight,
             /* several theme-sensitive values, not one: a page can change an
                incidental body background while the real theme never switched */
@@ -448,12 +496,18 @@ try {
           }
         }
 
-        let axeOut = { serious: [], critical: [] }
+        let axeOut = { serious: [], critical: [], incomplete: [] }
         if (AXE) {
           try {
             await page.evaluate(AXE)
             axeOut = await page.evaluate(async () => {
-              const run = window.axe.run(document, { resultTypes: ['violations'] })
+              /* 'incomplete' is named here for its NODE COUNTS, not to fetch the
+                 bucket — axe returns that bucket either way, but truncates every
+                 entry in it to a single node unless the type is listed. Measured
+                 live: `color-contrast x1` where the true count was 124. A count
+                 that is an artifact of the options object is exactly the kind of
+                 number this file must never print. */
+              const run = window.axe.run(document, { resultTypes: ['violations', 'incomplete'] })
               const r = await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('axe timed out')), 45000))])
               /* Name several targets, not just nodes[0]. "x21 :: .lede" reads as
                  21 of .lede and sends the fix to one element while the other 20
@@ -480,13 +534,39 @@ try {
                   const shown = [...groups.values()].slice(0, 4)
                     .map(g => `${g.target}${g.n > 1 ? ` x${g.n}` : ''}${g.why ? ` (${g.why})` : ''}`)
                   const more = groups.size > shown.length ? ` +${groups.size - shown.length} more` : ''
-                  return `${v.id} x${v.nodes.length} :: ${shown.join(' | ')}${more}`.slice(0, 400)
+                  const line = `${v.id} x${v.nodes.length} :: ${shown.join(' | ')}${more}`
+                  /* Say when the line was cut. A silently chopped line ends
+                     mid-selector and reads as a complete finding. */
+                  return line.length > 400 ? `${line.slice(0, 380)} …(line truncated)` : line
                 })
-              return { serious: pick('serious'), critical: pick('critical') }
+              /* The THIRD bucket: rules axe ran and could not decide. Reported
+                 whatever the impact, because what is done with it below is
+                 decided by rule id rather than by severity. */
+              const incomplete = r.incomplete.map(v =>
+                `${v.id} x${v.nodes.length}${v.impact ? ` [${v.impact}]` : ''} :: `
+                + v.nodes.slice(0, 2).map(n => (n.target || []).join(' ')).join(' | ')
+                + (v.nodes.length > 2 ? ` | +${v.nodes.length - 2} more nodes` : ''))
+              return { serious: pick('serious'), critical: pick('critical'), incomplete }
             })
           } catch (e) {
             unmeasured.push(`axe at ${theme} ${w}px: ${String(e).slice(0, 90)}`)
           }
+        }
+        /* "Could not determine" IS the definition of unmeasured, and this
+           harness threw the whole bucket away: a live production page returned
+           124 undeterminable text pairs under a clean PASS with no contrast
+           line printed at all, while the skill told the orchestrator contrast
+           had been measured and not assumed. Split by rule id, not by impact.
+           CONTRAST BLOCKS: the floor list names text contrast as measured, so a
+           contrast axe could not compute is a floor item this run does not have.
+           EVERYTHING ELSE GOES TO EYES: the rest of the bucket names no floor
+           item and carries genuine low-value noise, and a blanket block on it
+           leaves the gate unclosable on ordinary pages — which would teach
+           people to waive UNMEASURED by reflex, at which point the one that
+           matters gets waived with it. */
+        for (const inc of axeOut.incomplete) {
+          if (inc.startsWith('color-contrast')) contrastUndetermined.add(`${theme} ${w}px: ${inc}`)
+          else axeIncomplete.add(`${theme} ${w}px: ${inc}`)
         }
 
         /* A fragment or design-system card legitimately has no h1; gating on it
@@ -498,7 +578,7 @@ try {
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
         if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
-        for (const t of smallTargets) console.log(`  ! FAILS WCAG 2.5.8 (under 24x24, and crowded): ${t}`)
+        show(smallTargets, 6, t => `  ! FAILS WCAG 2.5.8 (under 24x24, and crowded): ${t}`)
         if (h1Bad) console.log(`  ! h1 count = ${struct.h1} (${FRAGMENT ? 'at most 1 in a fragment' : 'must be exactly 1'})`)
         if (struct.headingSkip) console.log(`  ! heading level skip: ${struct.headingSkip}`)
         for (const v of axeOut.critical) console.log(`  ! axe CRITICAL: ${v}`)
@@ -506,9 +586,12 @@ try {
         /* An uncaught exception means the page broke; that is gated. Console
            errors are usually dev-server hydration chatter a built page never
            has, so they are reported and left for a human to judge. */
-        for (const e of [...new Set(crashes)].slice(0, 3)) console.log(`  ! page threw: ${e}`)
-        for (const e of [...new Set(noise)].slice(0, 2)) console.log(`  ~ console (not gated): ${e}`)
-        if (struct.blankImages) console.log(`  ? ${struct.blankImages} image(s) failed to load — check before judging them missing`)
+        show([...new Set(crashes)], 3, e => `  ! page threw: ${e}`)
+        show([...new Set(noise)], 2, e => `  ~ console (not gated): ${e}`)
+        if (struct.blankImages) {
+          console.log(`  ? ${struct.blankImages} image(s) finished loading with no pixels — the resource failed`)
+          blankImages.add(`${struct.blankImages} at ${theme} ${w}px`)
+        }
       } finally {
         await ctx.close()
       }
@@ -534,16 +617,22 @@ try {
           .filter(e => e.textContent.trim() && (getComputedStyle(e).opacity === '0'
             || getComputedStyle(e).visibility === 'hidden'
             || /inset\((?!0px 0px 0px 0px)/.test(getComputedStyle(e).clipPath)))
-          .map(e => e.tagName + ':' + e.textContent.trim().slice(0, 40)).slice(0, 6),
+          .map(e => e.tagName + ':' + e.textContent.trim().slice(0, 40)),
         running: document.getAnimations ? document.getAnimations().filter(a => a.playState === 'running').length : -1,
       }))
       await page.screenshot({ path: `${outPrefix}-reducedmotion-${theme}.png`, fullPage: true })
       if (rm.hidden.length) {
         failures++
         console.log(`\n[reduced-motion ${theme}] FAIL — content still hidden:`)
-        rm.hidden.forEach(x => console.log('  ! ' + x))
+        show(rm.hidden, 6, x => '  ! ' + x)
       } else console.log(`\n[reduced-motion ${theme}] ok — all content visible`)
       if (rm.running > 0) { failures++; console.log(`  ! ${rm.running} animation(s) still running under prefers-reduced-motion in ${theme}`) }
+      /* -1 is the sentinel for "this runtime has no getAnimations". Chromium
+         always has it, so this cannot fire today — but a sentinel meaning
+         "could not measure" that reaches neither the gate nor the unmeasured
+         list is precisely the bug this file exists to refuse, and nothing
+         guarantees the next runtime it is pointed at is Chromium. */
+      else if (rm.running < 0) unmeasured.push(`animations under prefers-reduced-motion in ${theme} — this runtime has no document.getAnimations, so nothing counted them`)
     } finally {
       await ctx.close()
     }
@@ -607,6 +696,26 @@ if (themes.length === 2 && !SINGLE_THEME && !FRAGMENT) {
 
 for (const n of cropNotes) handoff.push(`--crop could not shoot a region: ${n} — the thing you wanted at shipped size was not seen by anyone.`)
 
+/* Contrast axe could not compute is contrast nobody measured, and the floor
+   list requires it measured rather than assumed. One line for the run, so that
+   eight near-identical configurations do not bury the rest of the report. */
+if (contrastUndetermined.size) {
+  unmeasured.push(`TEXT CONTRAST — axe ran the rule and could not determine the result, so contrast on these nodes is NOT measured (a background image, a gradient, or transparency behind the text is the usual cause):\n    ${[...contrastUndetermined].join('\n    ')}\n  Check those pairs by hand against the actual painted background, or give the text an opaque backdrop and re-run. Waiving this ships contrast nobody ever checked.`)
+}
+/* The rest of the bucket: real "needs review" work that names no floor item. */
+if (axeIncomplete.size) {
+  handoff.push(`axe could not decide these — its "needs review" bucket, which is neither a pass nor a failure and which nothing above gates on:\n    ${[...axeIncomplete].join('\n    ')}`)
+}
+
+/* Neither a gate nor a note. This harness cannot tell a page that ships broken
+   images from a dev server that failed to serve good ones — but under either
+   reading the renders every critic is about to grade are not the artifact, and
+   that is a gap in THIS run. Graded as design instead, it becomes the campaign
+   whose client's complaint was that the pages had no identifiable photographs. */
+if (blankImages.size) {
+  unmeasured.push(`images finished loading with no pixels, so the renders are not the page as it ships: ${[...blankImages].join(', ')}. A dev-server 404 and a genuinely broken source look identical from here — serve the built artifact or fix the sources and re-run. Do not let a critic grade these screenshots as a design decision.`)
+}
+
 /* A JUDGE line: some scrollers are deliberate (a carousel, a wide grid by
    design) and a heuristic must not fail those. But the reader has to be told,
    because the layout check above cannot see it. */
@@ -622,7 +731,9 @@ if (innerClip.size) {
    to action on every card, isolated enough to pass 2.5.8, and the first thing
    the client named on sight. */
 if (loneTargets.size) {
-  handoff.push(`targets under 24x24 that WCAG 2.5.8 EXEMPTS because nothing is near them — the spec is satisfied and the control may still be too small to hit or read:\n    ${[...loneTargets].slice(0, 8).join('\n    ')}`)
+  const shownLone = [...loneTargets].slice(0, 8)
+  handoff.push(`targets under 24x24 that WCAG 2.5.8 EXEMPTS because nothing is near them — the spec is satisfied and the control may still be too small to hit or read:\n    ${shownLone.join('\n    ')}`
+    + (loneTargets.size > shownLone.length ? `\n    … ${loneTargets.size - shownLone.length} more not shown (${loneTargets.size} total across the run)` : ''))
 }
 
 /* The layout grew and the type did not. Invisible at any single width: only the
@@ -649,7 +760,12 @@ if (!FRAGMENT) {
 
 for (const u of unmeasured) console.log(`\n[UNMEASURED] ${u}`)
 for (const h of handoff) console.log(`\n[JUDGE] ${h}`)
-const verdict = failures ? `${failures} failing configuration(s)` : (unmeasured.length ? 'PASS on what was measured' : 'PASS')
+/* The word PASS must not appear in this line when something went unmeasured.
+   What a critic is handed is the TEXT report, not the exit code, and
+   "PASS on what was measured" is read as PASS by everyone reading it at speed —
+   which made the harness's most consequential single string its least honest. */
+const verdict = failures ? `${failures} failing configuration(s)`
+  : (unmeasured.length ? `NOT CLEAN — nothing failed, but ${unmeasured.length} item(s) went unmeasured` : 'PASS')
 /* Printed unconditionally, and last, where a reader actually looks. Two full
    runs once measured a different site than the one intended and reported a
    clean floor; this line alone would have shown it. */
