@@ -1,67 +1,64 @@
-# State [doctrine-gauntlet v1.15.0; generality-tested against three topologies | 2026-08-13]
+# State [doctrine-gauntlet; gate widened to the whole document | 2026-08-14]
 
 ## Resume
 
-Auditing `doctrine-gauntlet` against the upgraded `securebine-design` produced a bigger
-result than the audit: **Scott ruled the skill must also work with no design language, or
-a different one.** The standing test is now "prove nothing here is kit-shaped", not "fit
-this kit". Three fixtures encode it — `fixtures/README.md` says what each proves — and
-they paid out within minutes: the harness had been measuring the **wrong website** through
-two clean runs (port conflict), `.sr-only` read as a blocking layout defect, frozen-type
-measured the page wrapper instead of the reading column, and a scaffold's zero-chroma
-defaults outranked the brief. Fixes and reasoning: `e5fdf91` (harness), `01e14f8`
-(binding, v1.15.0), `6d41669` (fixtures); local memory `[[generality-fixtures]]`.
+The gate ran 16 rounds and then changed shape. Eleven passes against this session's **diff**
+converged to a clean pass — and a twelfth pass, deliberately pointed at territory no earlier
+pass had audited, found **twelve defects in text nobody had touched**. Scott ruled: fix
+everything, so the exit condition is now the whole artifact rather than the diff. A widened
+pass then returned **30 findings**, all fixed across rounds 14–16. See
+`skills/doctrine-gauntlet/UNAUDITED.md` for the register and `do-not-merge.md`'s five
+"Added round N" sections for every duplication and the argument defending it.
 
-Nothing is stranded — all work committed and pushed. **Two findings registers went to the
-sibling repos and Scott confirms both are acting on them**; do not re-report them as new.
+**🔴 Seven commits are unpushed** (`17c9d2c`…`d81a7aa`). Nothing else is stranded; tree clean.
+The widened scope has had one round of fixes and **zero clean passes**.
 
 ## Active Work
 
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
-| The gate never formally closed — 4 loops, ~50 findings, converging (26 → 15 → 3 → 9+9) but not provably terminated. The last round of mechanical fixes is **unverified**. A real gauntlet run beats a fifth synthetic one | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
-| **law-as-critic-axis** untested — no critic has run against a bound system's law with the law named by path | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| The fused gate has never run to exit locally. Pure gauntlet has, in production (wave 10) | — | ⏳ | `website_v3/docs/RESTYLE-DOCKET.md` #84 (cross-repo; not a `gh` issue here) |
-| Trigger, not a task: hoist docket/counter machinery to the hub when a second wrapper needs it. Claim ledger is a second candidate | — | ⏸ | `skills/doctrine/SKILL.md` |
+| 🔴 Seven commits unpushed — push was never authorised this session | — | 🔴 | — |
+| Widened gate needs **two consecutive clean passes** and has had none. Every widening so far has paid; expect findings | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
+| Phase 3 field test, staged all session and never run: clone @ `21bc6d4`, deps installed, Playwright resolving, port 3177 free | — | ⏳ | `skills/doctrine-gauntlet/harness/floor.mjs` |
+| `--expect` asserts identity, never freshness — a server on a **deleted** build passes it. Rule needed: own the server you measure | — | ⏳ | `harness/floor.mjs`, `floor.md` |
+| Section render breadth unscoped: 8 renders per section per retry. Cost, not correctness — must not drop 2560 | — | ⏸ | `SKILL.md` critic item 1 |
 
 ## Git State
 
-- Branch `main` | PRs: none | open issues: none | CI: none configured
-- Substantive commits this session: `e5fdf91` · `01e14f8` · `6d41669` — all pushed
-- **HEAD is the backup commit that wrote this file**, so it always sits one ahead of the
-  last substantive commit. Compare against the list above, not against HEAD — a one-commit
-  gap whose message is `docs(session):` is the design, not drift.
+- Branch `main` | tree clean | **ahead 7, unpushed** | PRs: none | open issues: none | CI: none configured
+- Session commits: `17c9d2c` `4fee93a` `fe30362` `b3ecbab` `8b92311` `d81a7aa` (+ this backup)
+- HEAD is always the backup commit; compare against the list, not HEAD.
 
 ## Gotchas
 
-- **Run every change against all three fixtures.** The shadcn app is built on demand and
-  pinned; a rebuild that differs under those pins is information, not noise.
-- **The theme probe is wrong in both directions, and that is the point.** It reports
-  "nothing reachable" on a kit card (false — the pane owns theming) and on a stock shadcn
-  app (true — `.dark` ships with no toggle). Identical output, opposite correct answers.
-  Driving the control is the only fix; pattern-matching labels is not.
-- **The dominant defect class is placement, not content.** Six of the last nine, and most
-  of the ~50, were a correct rule sitting where the agent who must obey it never reads.
-  Ask "is this rule reachable from the prompt that needs it?" before asking if it is right.
-- **Scenario testing cannot find seams.** Three rounds of three-fixture waves kept missing
-  contradictions between new text and distant paragraphs; one adversary reading the diff
-  against the *whole file* found 15, two critical.
-- **Three claims I stated this session were false**, each adopted from an agent without
-  re-deriving. Verify before writing a claim into a rule — a wrong sentence in a report is
-  corrected next turn; in a skill it ships.
-- `pkill -f "codex exec"` **kills your own wrapper shell** (its command line contains the
-  string); `codex exec` in a non-TTY context blocks on stdin unless you redirect
-  `< /dev/null`; `/codex:status` is user-invocation only — the fresh-context fallback is
-  the agent's path and it performed well.
+- **Scope is a filter on where people look, not on what is wrong.** Eleven passes, three
+  lenses each, all honest — and structurally blind to the gate's own blocking condition
+  (the reader test) being defined where no critic could read it. A green result means
+  exactly what its scope means.
+- **The document is stratified by age.** The newest brief had the best handover discipline;
+  the oldest had none. Auditing recent changes inspects the stratum least likely to be wrong.
+- **Passive voice hides a missing instruction.** "The floor report, which is handed to you"
+  read as documentation of an arrangement that did not exist. In a prompt-assembling spec,
+  "X is handed to you" is always *two* obligations. Grep for it.
+- **A partial check is worse than a missing one.** The reduced-motion pass gated one theme
+  and certified two; `[reduced-motion] ok` looked identical to full coverage. Tamper-test
+  all three clauses — including *confirm the broken half is actually broken*.
+- **Fresh authors beat fresh reviewers.** Rounds 1–4 (one author) each produced the next
+  defect; rounds 5–16 (fresh author per round) repeatedly rejected their own briefs and were
+  right. A reviewer can say a rule is wrong; only a new author can say the framing is.
+- `pkill -f "codex exec"` kills your own wrapper shell; `codex exec` needs `< /dev/null` in
+  non-TTY; `/codex:status` is user-invocation only.
 
 ## Next Session Kickoff
 
-1. Ask which board item Scott wants; do not assume.
-2. **Do not re-litigate the sibling-repo findings.** Both repos have them and are acting.
-3. If touching `SKILL.md`: three fixtures, then the diff-versus-whole-file adversary.
-   Skipping the second is how the last 15 got in.
-4. Read the repo's `skills/doctrine-gauntlet/SKILL.md`, not the plugin cache.
-5. Standing rule: everything outside `doctrine-skills` is read-only. Design deficits are
-   reported, never fixed.
-6. Skills to invoke: `doctrine` (hub) before any `doctrine-*` wrapper; `doctrine-audit`
-   for a fresh sweep; `doctrine-gauntlet` for the real run item 1 wants.
+1. **Ask whether to push the seven commits.** Repo norm is push only when told; it was never
+   said this session.
+2. Then: the widened gate's second pass — three lenses, whole document, and point them at
+   sections still unexamined rather than re-walking cleared ground. That is what found 12
+   and then 30.
+3. Phase 3 is the oldest debt and needs no gate: it is read-only against `website_v3` @ `21bc6d4`.
+4. Read the repo's `skills/doctrine-gauntlet/`, never the plugin cache. Read `UNAUDITED.md`
+   and `do-not-merge.md` **before** proposing any merge or simplification.
+5. Standing rule: everything outside `doctrine-skills` is read-only; design deficits are
+   reported, never fixed. Do not re-litigate the sibling-repo registers.
+6. Skills: `doctrine` (hub) before any `doctrine-*` wrapper.
