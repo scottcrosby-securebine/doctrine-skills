@@ -11,7 +11,7 @@ Eight skills:
 | `doctrine-gauntlet` | Web design: pages, heroes, design-system cards, built builder-vs-critic against a reference. |
 | `doctrine-debug` | Anything broken, throwing, failing, or slow. |
 | `doctrine-audit` | Bug hunts and deep code audits: drift, logic issues, over-engineering. |
-| `doctrine-docs` | Documentation sweeps: stale docs, undocumented features, then a PR. |
+| `doctrine-docs` | Documentation sweeps: stale docs, undocumented features, landed by the repo's norm. |
 | `doctrine-research` | Deep multi-source research questions that need a fact-checked recommendation. |
 | `doctrine-write` | Important documents, written or rewritten: proposals, briefs, PRDs, reports. |
 

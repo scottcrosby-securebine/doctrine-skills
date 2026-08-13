@@ -1,24 +1,35 @@
 ---
 name: doctrine-docs
-description: Use when the user asks for a documentation sweep: reviewing the codebase so all docs reflect the current implementation, updating stale docs, covering undocumented features, then opening a PR. NOT for bug hunts or code changes.
+description: Use when the user asks for a documentation sweep: reviewing the codebase so all docs reflect the current implementation, updating stale docs, covering undocumented features, then landing the sweep by the repo's delivery norm (a PR where that is the norm). NOT for bug hunts or code changes.
 ---
 
 # Doctrine Docs
 
-Documentation sweep under the doctrine. Docs-only: no code changes, no bug fixing. If a doc-vs-code mismatch turns out to be a code bug, file it on the project's tracker and update the doc to describe actual behavior with an annotation ("currently does Y, see issue #N; intended X"), so the doc is neither wrong today nor silently enshrining the bug.
+Documentation sweep under the doctrine. Docs-only: no code changes, no bug fixing. If a doc-vs-code mismatch turns out to be a code bug, file it on the project's tracker and update the doc to describe actual behavior with an annotation ("currently does Y, see issue #N; intended X"), so the doc is neither wrong today nor silently enshrining the bug. **Where the issue cannot be filed** — the project's CLAUDE.md names no tracker, `gh` isn't authenticated, or the user hasn't said where issues go — **annotate without a number** ("currently does Y; intended X — unfiled, listed in the sweep summary") and carry it in the delivery summary instead. Never invent an issue number, never drop the annotation, and never stall a docs-only run on a tracker.
 
-**REQUIRED BACKGROUND:** Read the `doctrine` skill first. Native checks for a docs diff (doctrine step 3): re-verify every edited claim against source, plus a link/path/command check. Designated review: the red-team pass in step 5 (it serves as both review and red team here; it runs once per pass, not twice).
+**REQUIRED BACKGROUND:** Read the `doctrine` skill first. Native checks for a docs diff (doctrine step 3): **every check the project documents as a gate — whatever its `CLAUDE.md`, README, review doc or task runner lists — plus** re-verifying every edited claim against source, plus a link/path check, plus a command check. The project's own gates come first and this wrapper's three are an addition to them, never a definition that replaces them: a docs sweep in a repo carrying `vale`, `markdownlint`, `mkdocs build --strict` or a link-checker in its task runner runs all of them, and **a project with no build step still has gates**, so read `package.json` scripts or their equivalent yourself rather than assuming a docs diff has nothing to run. **"Command check" means the command still resolves, not that it was executed**: the binary exists, the script name is in the task runner, the flags match `--help`. **Do not run a documented command for its effects** — `npm run migrate`, `terraform apply` — which would break this wrapper's docs-only boundary; where only running it could verify a claim, mark the claim unverified and say so in the summary. Designated review: the red-team pass in step 5 (it serves as both review and red team here; it runs once per pass, not twice).
 
 Two axes, run as parallel sub-agents so they don't pollute each other's context:
 
 - **Accuracy**: for each doc, verify every checkable claim (paths, commands, env vars, endpoints, flags, behavior) against the current source. Report stale claims with `doc-file:line` → evidence in code.
-- **Coverage**: walk merges since the last docs sweep (ask the user for the horizon if unknowable) and the module list; find shipped features and behavior changes no doc mentions. Report gaps with the code evidence a writer needs.
+- **Coverage**: walk merges since the horizon settled in step 1 — **state it in each Coverage agent's prompt as a concrete ref** (a SHA, a tag, a date). A dispatched sub-agent has no user to ask, and three agents left to infer it walk three different histories and return findings that merge into something that looks complete. Settle it with the user in step 1 and dispatch nobody before it exists — then walk that range and the module list; find shipped features and behavior changes no doc mentions. Report gaps with the code evidence a writer needs.
 
 ## Flow
 
-1. Ask the user the scope questions their request didn't answer: which doc trees count (README, docs/, CLAUDE.md, playbooks), the Coverage horizon, and one PR or split by area for a big sweep (default: one PR).
+1. Ask the user the scope questions their request didn't answer: which doc trees count (README, docs/, CLAUDE.md, playbooks), the Coverage horizon, and how the sweep lands: whether a PR is wanted at all, and if so one or split by area for a big sweep (default: one PR where the repo's norm is PRs).
 2. Inventory the doc surface, split into areas, and run both axes per area as parallel waves. Merge and dedupe the two axes' findings per area before editing; when they disagree, the code is the arbiter.
 3. Verify every finding against source before editing: a "stale" doc that's actually correct is the false positive to fear here.
 4. Edit: fix Accuracy findings, write Coverage gaps. Match each doc's existing voice and structure; use writing-clearly-and-concisely if installed, else apply Strunk's core rules (omit needless words, active voice, definite concrete language). Simplicity applies to prose too: delete redundant docs rather than maintaining duplicates. Treat agent-instruction files (CLAUDE.md, AGENTS.md) with extra care: edits there change agent behavior, so flag them separately in the PR.
-5. Red team (doctrine step 4): give it the doc diff and ask it to find claims that are still wrong or newly introduced errors. Verify, fix, loop to two consecutive clean passes (doctrine gate, including its 4-loop escalation valve).
-6. Open a PR with the sweep summary: docs touched, stale claims fixed, gaps filled, bugs filed.
+5. Red team (doctrine step 4): **brief it in full per that step. It is the only adversary in this gate and doubles as the designated review, so an unbriefed "refute this" leaves the phase with no review at all — and it returns taste.** Hand it: the doc diff itself, never filenames; what the sweep was supposed to do; the Accuracy and Coverage findings this pass already cleared, so it attacks what was passed rather than restating what was caught; **the axes it must answer on** — claims still wrong, errors the edit newly introduced, coverage the sweep missed, each doc's own voice and structure — since its coverage is exactly the axes you name and an unnamed one comes back silently perfect; and **the scope decisions step 1 settled** (which doc trees count, the Coverage horizon, PR shape), which a fresh context otherwise re-opens with full confidence. Require the return sorted: blocking, then non-blocking, then what it attacked and could not break. Verify, fix, loop to two consecutive clean passes (doctrine gate, including its 4-loop escalation valve).
+6. Deliver per the repository's delivery norm (doctrine step 7) — its CLAUDE.md, or the pattern in its history — with the sweep summary: docs touched, stale claims fixed, gaps filled, bugs filed (and bugs *not* filed, per the annotation rule above). Where the norm is a PR, open it, flagging agent-instruction files separately as step 4 requires. Where it is patch handoff, hand over the diff and say so. Where there is no remote, no `gh`, or the user said local-only, commit locally and ask before pushing.
+
+## Red flags
+
+- "Native checks" read as re-verifying claims, while the repo's own `vale`, `markdownlint` or docs build never ran — two clean passes, then red CI.
+- A documented command executed to check it, mutating state a docs-only sweep promised not to touch.
+- An invented issue number in an annotation, or the annotation dropped because no number existed.
+- Coverage agents dispatched before the horizon was a concrete ref; three histories walked, one merged list that looks complete.
+- A red team handed the diff alone, returning taste and re-opening scope the user settled in step 1 — and counted as the designated review anyway.
+- A PR opened in a repo whose norm is a local commit or a patch.
+- A "stale" claim rewritten that was correct, and the code left as the loser of an argument nobody checked.
+- CLAUDE.md or AGENTS.md edited inside the body of a sweep, with nothing flagging that agent behavior changed.
