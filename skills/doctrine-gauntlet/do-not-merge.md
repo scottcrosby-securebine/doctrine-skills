@@ -2,12 +2,18 @@
 
 A necessity pass (2026-08-12) put three agents with different mandates against this
 skill. The merger's most useful output was not its merges but this list: **pairs that
-read as the same rule twice and are not**. The pass opened it with seven; the founding
-list below now carries twelve, and every "Added round N" section after it adds more — so
-read the whole file, never its first heading. Each entry was checked against the campaign
-record or the code, and each survives because **a run can comply with one and violate the
-other**. No count is written into this paragraph on purpose: the note on the Red flags
-list further down says why one drifts.
+read as the same rule twice and are not**. What that pass opened is `## The founding list`;
+the numbered run continues past that heading into `## Added 2026-08-12` and stops there —
+everything later is anchored by quoted phrase rather than numbered. **Read the whole file,
+never a heading.** The sections come in three kinds, and only one kind says "round" in its
+name: the founding list, two undated sections — `## Settled alongside it` and `## Added since
+the pass` — and the `## Added round N` sections. Do not read "Added round N" as the whole
+tail: `## Added since the pass` holds more entries than any other section here, and a reviewer
+following an earlier version of this map walked straight past it. Each entry was checked
+against the campaign record or the code, and each survives because **a run can comply with one
+and violate the other**. **No count of entries is written anywhere in this file, on purpose** —
+the note on the Red flags list further down says what happens to one that is, and this
+paragraph carried two until an audit found the first of them already drifted.
 
 Read this before proposing to merge anything here. Re-proposing a pair below is not a
 finding unless you can defeat the distinction stated with it.
@@ -19,16 +25,34 @@ composition claims things the copy never says", direction brief item 4 against "
 grammar against its subject", and builder brief item 6 — "Label your own caveats", the near-duplicate — against critic brief item 6. An
 unlisted pair needs the same argument as a listed one, not less.
 
-Pairs are anchored by quoted phrase, not line number — the file has been compressed
-since the pass and line numbers drift.
+Pairs are anchored by quoted phrase, not line number — the file has been compressed since the
+pass and line numbers drift. **Some quotes here are deliberately historical.** An entry that
+records a defect quotes the wording that *caused* it, which by definition is no longer in the
+file; an entry defending a live duplication quotes text that should still be there. Read the
+entry's tense before concluding it is stale — a quote introduced as what a site "already
+carried" is evidence, a quote naming a live pair is an anchor. Where a live anchor no longer
+greps, **re-quote it**: do not delete the entry, and never read a failed grep as the
+distinction defeated.
 
-**One entry below is not the three-prompts pattern, and says so.** The floor-versus-house
-reversal ("the floor is a minimum, never a ceiling") now appears at Precedence, under
-Binding the design system, in Technical floor, and in critic brief item 7. Only item 7 is
-a different prompt; the other three are **one reader** — the orchestrator — reading three
-places in one document. That entry therefore rests on a different argument, stated with
-it, and a reviewer who applies the three-prompts test to it will correctly find it does
-not pass. Read the argument, not the pattern.
+**Not every entry below is the three-prompts pattern, and each exception says so in its own
+words.** Two other arguments recur, and applying the three-prompts test to an entry resting on
+one of them will correctly find it does not pass — which proves nothing.
+
+The first is **one reader, many sites**: a rule stated in several places that are *all*
+orchestrator-read, where what makes a merge unsafe is not that a prompt loses the rule but that
+each site states it **in bold**, in a document whose agents extract bolded clauses as rules —
+so collapsing two and leaving the third's absolute standing produces opposite verdicts on one
+fact pattern. The floor-versus-house reversal ("the floor is a minimum, never a ceiling") at
+Precedence, under Binding the design system and in Technical floor rests on this, as do the
+exit-condition carve-out that travels with it and the blind pass's prompt manifest. Merging is
+not forbidden under this argument; leaving a bolded absolute or a shortened pointer behind is.
+Critic brief item 7's copy of the reversal is a **separate** entry and *is* the three-prompts
+pattern, because item 7 is the only copy a critic ever sees.
+
+The second is **one reader, two moments** — the capability inventory's rows against the
+docket's destinations — where the same orchestrator meets one rule at binding and again at use.
+
+Read the argument stated with the entry, not the pattern you expect.
 
 ## The founding list
 
@@ -49,11 +73,20 @@ the builder's frame, and the reference-comparison scoring problem.
 under "What it does" and "Render honesty").
 The capability list describes what *this* harness already does. The render-honesty rules
 bind **any** harness, and the skill explicitly permits another one. The rules also carry
-three obligations the capability list does not: serve production output, treat hydration
-warnings as noise rather than failures, and tell critics which marks are the harness.
-**Note:** extracting the harness manual to `floor.md` moved these two into the same file,
-about forty lines apart. They are now more temptingly adjacent than when the merger
-ruled on them, not less.
+two obligations the capability list does not: serve production output, and tell critics which
+marks are the harness.
+**A third obligation has since migrated into the other half and is no longer a distinction**:
+"treat hydration warnings as noise rather than failures" now sits in both, because "What it
+does" gained "console errors are printed as noise and never gate" and a hydration warning is a
+console error. That is one clause converging, not this entry defeated — the two obligations
+above still hold, and the any-harness argument, which is the load-bearing half, is untouched.
+Re-read both sections before citing the list: a distinction that has migrated is not evidence
+the pair is one rule.
+**Note:** extracting the harness manual to `floor.md` moved these two into the same file, under
+adjacent headings. They are more temptingly collapsible than when the merger ruled on them, not
+less. **No distance between them is stated here on purpose** — `floor.md` grows between the two
+headings on most edits, so a line count is wrong within a round and argues the entry's vigilance
+from a number nobody maintains.
 
 **4. "thirty findings … eight of them kills" vs "a red team killed eight parts of one
 plan."**
@@ -115,8 +148,8 @@ obey the counter perfectly and never discover that five of its gravest findings
 were a screenshot of a drawing caught mid-animation, which is exactly what
 happened.
 
-**12. Critic brief item 3's type-scale inversions vs "type frozen above the
-widest width".**
+**12. Critic brief item 3's type-scale inversions vs "type … frozen while the sheet grows
+past 1440".**
 Two different comparisons that both involve type and width. Item 3 is *within*
 one render — a fixed step outsizing a clamped one, visible in a single
 screenshot, an inversion between two elements. The floor rule is *across*
@@ -124,6 +157,12 @@ renders — nothing inverts, everything is uniformly frozen, and it is invisible
 in any single screenshot because only the delta between two viewports shows it.
 A critic can satisfy item 3 completely on a page whose every control is 13px at
 every resolution up to 4K.
+**The anchor on this pair was re-quoted, and the old wording must not come back.** It was filed
+against "type frozen above the widest width", which is not what the floor rule says and is the
+exact phrasing `SKILL.md` names as a live trap: anchoring the judgement to whatever the widest
+render happens to be silently re-rules every defect between 1440 and the top of the ladder as
+deliberate, and adding a wider render would re-rule more of them. The rule is anchored to 1440.
+Do not restore the old phrasing here, and do not "correct" the harness toward it.
 
 ## Settled alongside it
 
@@ -306,9 +345,11 @@ defect, because item 1 is not in the prompt the orchestrator assembles from.
 **The floor-versus-house reversal at Precedence vs Binding the design system vs Technical
 floor.** Added round 11, and **not** a three-prompts case: all three are orchestrator-read
 and none of them is ever copied into a subagent prompt. The distinction is different in
-kind. Each of the three already carried the *absolute* form — "the technical floor is the
-single exception, and it outranks the law", "**The floor outranks the bound law.**" — in
-bold, in a document whose agents extract bolded clauses as rules. Round 11 found the
+kind. Each of the three already carried the *absolute* form — **quoted here as the defect, in the
+wording that stood before round 11, not as current text**: "the technical floor is the single
+exception, and it outranks the law", and "**The floor outranks the bound law.**" — in bold, in
+a document whose agents extract bolded clauses as rules. Neither sentence greps today; both
+were narrowed to name the *looser* case explicitly, which is the fix this entry defends. Round 11 found the
 reversal added at Precedence alone, which left two bolded absolutes standing and produced
 opposite verdicts on one fact pattern: an isolated 20x20 control under a house that ruled
 "every control clears 24x24, measured" ships clean by the two flat claims and blocks by
@@ -321,7 +362,8 @@ misleads is the one that stays. Item 7's copy is separate and defended by its ow
 above; it is the only one a critic ever sees.
 
 **Same argument covers the exit-condition carve-out at Precedence vs Binding the design
-system** ("its exit condition and its loop are fixed by the table in Modes"). Round 11
+system** — both sites now open "**Its exit condition and its loop**" and both hand the numbers
+to "the table in Modes". Round 11
 ruled the process-doctrine "run the stricter" clause down to the blocking definition
 alone, because the Modes table's sole authority is what makes the loop terminate and there
 is no notation in it for a house-raised counter. Both statements of the narrowed rule are
@@ -441,8 +483,11 @@ assembles from and working the set out is exactly the labour that never happened
 
 **The Modes abstention enumeration gained a fourth entry** — "no predecessor in a restyle
 (item 2)" — plus an open clause, so a future item that instructs an abstention is covered
-without another edit. The round-13 entry above quotes the three-item form; that quotation
-has drifted and its argument has not.
+without another edit. Two entries still quote the three-item form — the handover-manifest entry directly above, and
+"Critic brief item 1's section-scope carve-out vs the Modes blocking enumeration" under
+`## Added since the pass`. Those quotations have drifted and their arguments have not. (An
+earlier version of this sentence credited the quotation to the round-13 section, which carries
+none: anchor by quoted phrase, per the preamble, never by round number.)
 
 **The red team brief's settled list and RULED-recurrence rule (preamble, item 1) vs the
 docket section and critic item 4; its return sort (item 5) vs critic item 8; its ledger
@@ -486,8 +531,8 @@ form ships the recorded defect where a restyle loses every comparison because th
 lists more cards. Merging is legitimate only if all three move at once and no shortened
 pointer stays where a scanner reads the bold.
 
-**Step 7's blind-comparison step vs `## The comparison`'s "run the pairs first, then the
-briefed critique".** Not a restatement: The comparison defines the *procedure*, step 7 is the
+**Step 7's blind-comparison step vs `## The comparison`'s "Run the pairs first …" and "Then run
+the briefed critique".** Not a restatement: The comparison defines the *procedure*, step 7 is the
 only place a round is *scheduled*, and an orchestrator working the flow has no reason to
 reopen The comparison mid-loop. Until round 15 the ordering existed only in the procedure
 section, so fused gate's "losing the comparison" was a blocking condition nothing dispatched
@@ -502,12 +547,28 @@ headline-less poster page, a fixed-px 2560 hero, a crowded hairline cluster and 
 keyboard-invisible interaction were each invisible to the one reviewer that can kill a
 direction while killing is still cheap.
 
-**Item 8's verdict vocabulary vs step 5's "whatever the adversary kills" vs the direction
-brief's trailing paragraph.** Three-prompts pattern with an asymmetry worth stating: step 5
-and the trailing paragraph are orchestrator-read and both *count* kills, while the adversary
-— whose prompt is items 1-8 — was never told the word. A bound that keys on a classification
-the classifier was never asked to produce is inert. It sits at the tail of item 8 rather than
-after the list because trailing prose is not dispatched.
+**The verdict vocabulary (KILL / WEAKEN / CLEAR) vs step 5's "whatever the adversary kills"
+vs the direction brief's trailing paragraph.** Three-prompts pattern with an asymmetry worth
+stating: step 5 and the trailing paragraph are orchestrator-read and both *count* kills,
+while the adversary — whose prompt is the direction brief's numbered items and nothing after
+them — is the only agent that can produce one. A bound that keys on a classification the
+classifier was never asked to produce is inert: step 5 spends exactly one revise-and-reapprove
+cycle "on whatever the adversary kills", so an adversary never given the word returns concerns
+and the cycle fires on nothing.
+**The rule, stated so it survives any placement.** The vocabulary must sit inside whatever the
+adversary's prompt is assembled from; the escalation paragraph must stay outside it. Those are
+not in tension — one is dispatched and one is not — and a merge breaks a different thing each
+way. Move the vocabulary out of the dispatched set and the loop bound goes inert. Move the
+escalation reasoning in and the one reviewer whose entire value is willingness to kill has been
+handed a reason not to kill twice.
+**This entry was itself found stale by an audit (2026-08-14), which is the most useful thing a
+reader can know about it.** As filed in round 15 it certified a placement the document did not
+have — it said the vocabulary "sits at the tail of item 8 rather than after the list" when it
+sat *after* the list, as an unindented top-level paragraph, unreachable by the adversary. The
+defect the entry described as fixed was still live, and the entry is what stopped anyone
+looking. Do not re-file this as a position claim. **Verify against the dispatch line before
+citing it**, and if the vocabulary is again outside the assembled set, that is a finding, not a
+duplication.
 
 **The capability inventory's polish-docket and ruling-queue rows vs the docket section's
 destinations.** One reader, two moments: the row is the question asked once at binding, the
@@ -542,3 +603,238 @@ modifies, because that is where the handover decision is made. Anyone promoting 
 into the ledger's fact list proper creates a worse defect than the one this fixed: a critic
 holding *rounds since check-in: 5* has been told how badly this round needs to be clean, which
 is the one thing a reviewer must not know.
+
+## Added round 17 — the second widened pass: facts three prompts consumed and no step produced
+
+Round 17 pointed three lenses at territory no earlier pass had read: reachability (does a
+fact a prompt is conditioned on have a step that *produces* it?), doc-versus-code over the
+harness, and repo coherence over this file and the sync list. Most of what it created is one
+shape, and it is the **inverse** of the round-12 pattern. Round 12 found correct rules sitting
+where the agent bound by them cannot read; round 17 found correct rules **conditioned on facts
+nothing establishes** — a carve-out granted by a sentence no step writes, an artifact four
+prompts are handed and no section defines. Each fix therefore adds a site that *establishes*
+something, and each entry below defends that site against the reviewer who reads it as a
+restatement of the sites that consume it. **A producer and its consumers are never one rule**:
+delete the producer and the consumers point at nothing, which the round-15 record already
+names as strictly worse than an unreachable rule, because a pointer also forbids re-deriving
+what it points at. `UNAUDITED.md` carries the pass itself; only the undeletable duplications
+are here.
+
+**Step 2's "how many themes this project genuinely ships" and "whether the deliverable is a
+whole page or a fragment whose host page owns theme switching" vs the critic brief's
+single-theme dispatch line, its fragment dispatch line, and item 7's two carve-outs.** The
+consumption sites are already defended by the round-11 and round-13 entries; this extends
+those entries at the other end, which is where the defect actually was. Three prompts is only
+half the argument here: step 2 *asks a human*, the dispatch lines *state the answer to an
+agent*, and item 7 *conditions a verdict on it* — three different acts, and until round 17 the
+first of them did not exist anywhere in the flow. Collapse in either direction and a named
+failure follows. Delete step 2's questions as covered by the preamble, and the preamble's
+"**Where the run has established that this project genuinely ships one theme**" is conditioned
+on an establishment nothing performs: the orchestrator's honest fallback is to infer from
+discovery, and a source tree carrying one palette is equally a site that ships one theme and a
+site whose second theme somebody deleted — assume the first and the harness's reachability
+probe is suppressed, item 7's carve-out makes the absent second theme not a finding, and **a
+dead palette exits the phase clean**. Delete the dispatch lines as covered by step 2, and the
+answer stays in the orchestrator's context and reaches no critic, which is the round-11 entry's
+own failure restored. **The tempting cut inside step 2 is its consequence clause** — it names
+item 7's carve-out and the dead palette, which item 7 and the preamble also say — and cutting
+it is what turns the question back into a harness-flag detail answerable from the tokens. **The
+third site is the ledger** ("**Record both answers in the ledger**"): the two are run
+parameters held by one context, and a compaction takes them with everything else.
+
+**The ledger's "The same file carries the settled list, under a `## Settled — ruled and closed`
+heading" vs the critic brief's manifest entry, critic item 4, the red team's preamble and its
+item 1.** Round 14's entry defends those consumers against each other and against the docket;
+this defends the **producer**, which did not exist until round 17 — four prompts were handed a
+"settled list" that no section defined, gave a path, told anyone to build, or said what an
+empty one looks like. Collapse toward the consumers and the manifest asks for an artifact
+nobody writes; collapse toward the producer and the list is built and reaches no reviewer,
+where the failure is not mere repetition — critic item 4 tells a fresh critic to file a
+recurrence as a finding, an accepted finding restarts the clean-pass count, and a phase whose
+closed questions keep reappearing can be **structurally unable to reach two consecutive clean
+passes**. **"An empty settled list is a real state and is handed over as one" restates
+nothing** and is the clause most likely to be cut as verbiage: from inside a prompt an early
+phase and a section you forgot look identical. (The list reaches the red team through its
+**preamble and item 1** — item 3 is print. Anchor by quoted phrase, never by item number
+remembered from a brief.)
+
+**`## The reference`'s "record which floor items it fails in the ledger" vs the critic brief
+manifest's "the reference's recorded floor failures".** **One reader, two moments**, not three
+prompts — both sites are orchestrator-read, and what is dispatched is the *record*. The
+reference branch is met once, at step 3, when the failures are observed; the manifest is met
+at every dispatch in steps 6 and 7. Delete the manifest entry and the record sits in the
+ledger with nobody told to state it: the briefed critic is handed the predecessor because item
+2's "what the original *does*" axis needs it, and a critic holding the predecessor and no such
+record demands parity on a hairline control or a failing contrast pair — a blocking finding
+whose only fix breaks the floor, against a builder with no compliant diff. Delete the
+reference's clause and the manifest asks for a record nothing produces. Same shape as the
+settled list, one moment earlier in the run.
+
+**The critic brief's "Say the same thing about inherited failures, in the briefed critic's
+prompt and the red team's alike" vs critic item 7's "unless your prompt names that specific
+failure as inherited" vs red team item 5's "One exception, and only where your prompt names
+it: a failure it identifies as inherited" — against step 7's "pre-existing failures you did
+not cause are recorded as inherited rather than blocking" and Binding's "A house gate that
+fails for reasons you did not cause is inherited, not blocking".** Three prompts, five sites,
+and until round 17 the only two were the orchestrator-read pair: both reviewers defined
+blocking with no inherited branch and neither can derive one. A fresh critic sees a real floor
+violation on a host page it was told to gate and files it as blocking — correctly by its own
+brief — every round, against a builder who has no diff to make. **The two reviewer copies are
+not one sentence stated twice for emphasis.** Each sits inside its own gate's machinery: item
+7's inside the floor's first rule, where the verdict it modifies is "the floor governs and
+outranks the bound law"; item 5's inside the blocking-versus-polish sort the round counters key
+on. A merged sentence has to live in one prompt, which leaves the other reviewer with an
+unqualified blocking definition. **What must survive above all is item 7's file-anyway
+clause** — "**say exactly that in your return and file it as blocking anyway**". Fold inherited
+into the single-theme dispatch line as one more run-level fact and that clause has nowhere to
+sit: theme count is a run fact stated once, inherited is granted **per failure**, and a
+reviewer left to judge age for itself excuses the defect this phase introduced.
+
+**Critic item 6's "And re-check the current HEAD of any file you are about to name before you
+file against it" vs red team item 6's "Re-check the current HEAD of any file you name before
+filing against it" vs Binding's "The deliverable can move under you".** Three prompts. The
+orchestrator's copy still earns its place and is not a superset: it carries "rebase before you
+commit rather than after a push fails", a commit-time obligation neither reviewer holds and
+neither could perform. The two reviewer copies differ in the one way that matters to whoever
+must obey them — item 6 asks a critic to "say which revision you read it at", while the red
+team's states why its exposure is worst ("you run last in the round, so the deliverable has
+had the longest to move under you"). Merging them means choosing one prompt to put the rule
+in, which is the round-12 defect with a new sentence.
+
+**`## The brief`'s "Inventory before you design: a page never invents a component the kit
+already has" vs Binding's "Inventory before you design and show the grep in the report".**
+Three prompts, and the plainest instance of the round-12 pattern this round found: every verb
+in that rule is a builder's — grep the kit, fill the gap in the system, promote only what is
+reusable, escalate rather than building around a missing piece — and it sat in a section the
+flow declares orchestrator-only. **The report obligation is deliberately split, not
+duplicated**: the builder runs the search and returns it ("**return the grep you ran alongside
+your work**"), the orchestrator writes it up ("**the builder runs that grep and returns it with
+its work** … you put the result in the report"). Only the builder knows what it searched for,
+and only the orchestrator writes a report. Collapse to Binding and the pre-round-17 state
+returns; collapse to The brief and a grep comes back to nobody whose job is to publish it.
+Accepted cost, on the round-12 precedent: the promote-what-is-reusable rule is now a second
+place to update.
+
+**`## The brief`'s "Your escalation must name the house rule, name the floor item it collides
+with, and say what you tried that would have satisfied both" vs Modes' "An escalation claiming
+this exemption must **name the house rule, name the floor item it collides with, and say what
+was tried that would have satisfied both**".** Three prompts, and the halves are a producer and
+its verifier: Modes already told the orchestrator to **bounce** an escalation missing any of
+the three, and nothing told the builder the three exist. With Modes alone the collision arrives
+as prose, is bounced, costs the section a round, and comes back asking for fields nobody had
+told the builder to produce. With The brief alone the fields are produced and nothing checks
+them, which is where the "verify it before granting it" ruling dies and the exemption from the
+three-per-phase cap becomes self-service. **The third field is not paperwork in the builder's
+copy**: it ends by telling the builder to run it honestly — where something tried *would*
+satisfy both, "there is no collision, and doing that is the answer rather than escalating".
+That is an instruction **not** to escalate, and it can only fire inside the prompt of the
+agent about to.
+
+**`## The brief`'s "If you generate or regenerate an asset, read `tools.md` beside this skill
+first, and read every file you generate" vs Two optional capabilities' "**Read every generated
+file yourself before using it** — never report an asset landed without looking".** Three
+prompts. Both agents generate images — the orchestrator fans out concept comps in step 4, the
+builder regenerates an asset mid-loop against a critic's note — and the rule lived only where
+the first can read it. The copies are not interchangeable: the builder's carries the mid-loop
+case explicitly, because that is the one where a regenerated file quietly changes the subject,
+the palette or the count of things in the frame while the note's own axis is what nobody
+re-checks, and it carries a three-way return format (image tool / native art / ask the user)
+that is a builder's output and belongs in no orchestrator section.
+
+**Step 4's "each one handed the ledger and The brief's assert-nothing-outside-it rule, exactly
+as a builder is" vs the ledger's "every concept-comp agent in step 4".** **One reader, two
+moments** — both orchestrator-read. The ledger section is met at step 1, where the thing is
+built and its distribution list is set; step 4 is the moment agents are actually fanned out.
+Collapse to step 4 and the canonical list of who receives a ledger omits the agents it itself
+names as "**the easiest to leave off it**" — they run before the DNA exists and read as
+exploration rather than building. Collapse to the ledger and an orchestrator working the flow
+has no cue at the dispatch to reopen it, which is the argument the round-15 entry makes for
+step 7 scheduling the blind pass. The cost of the omission is not symmetrical with a builder's:
+three comps full of invented figures become the DNA the user picks, and every later section
+inherits the invention along with the look.
+
+**The direction brief's two boundary statements: the preamble's "Assemble its prompt from this
+list — items 1-8 *and the verdict-vocabulary paragraph that immediately follows item 8*, and
+nothing after that" vs the Orchestrator-only paragraph's "the adversary's prompt is items 1-8
+plus the verdict-vocabulary paragraph above, and ends there".** **One reader, many sites**: two
+bold absolutes describing one boundary, in a document whose agents extract bolded clauses as
+rules. **This pair carries the worst precedent in this file.** The round-15 entry above
+certified a placement the document did not have, and that certification is what stopped anyone
+looking — for two further rounds, until round 17 found the vocabulary still sitting outside the
+dispatched set and step 5's kill-keyed loop bound still inert. The distinction a merger must
+defeat is therefore about **drift, not absence**: neither statement may be updated alone,
+because two boundary claims that disagree are indistinguishable from one that is right. Delete
+the preamble's clause and the assembler reads "assemble its prompt from this list", stops at
+item 8, and restores the round-17 defect exactly. Delete the tail's and nothing marks the
+escalation paragraph as undispatched **where that paragraph sits** — and it is the one
+paragraph that hands the reviewer whose entire value is willingness to kill a reason not to
+kill twice.
+
+**Modes' "The same test classifies every other forced question, and the floor collision is not
+the only one" vs the six sections that each raise one of those questions.** **One reader, many
+moments**, and it is a **classification, not a restatement**: step 5's twice-killed direction,
+step 5's missing-fact-that-changes-the-assertion, step 6's twice-deadlocked section, an
+unsourceable claim the predecessor carried, a gap in a system repo you cannot write to, and a
+clause of the law ruled stale each state the question — and **not one of them says whether
+asking it spends one of the three escalations per phase**. Delete the paragraph as redundant
+and an orchestrator meeting a second kill at escalation four defers it into a batch or takes a
+stated default, both of which are wrong for a question that blocks the phase either way, and
+the user is never told the phase stalled. The six source sites still earn theirs: each is where
+the question *arises*, and the table is read at the moment of escalating.
+
+**`floor.md`'s "The critic brief requires the orchestrator to hand over this round's renders at
+360/768/1440/2560 in every theme: those eight files are it" vs the critic brief manifest's
+"**this round's renders** at 360/768/1440/2560 in every theme the run claims (item 1)".** One
+reader, two moments, across two files: the manifest states an obligation at dispatch,
+`floor.md` states which files discharge it at the moment the harness is driven. **No recorded
+incident stands behind this entry** — it is filed on the round-14 manifest precedent, that
+working the set out is exactly the labour that never happens, and it is the weakest entry in
+this section for that reason. Deleting the `floor.md` sentence leaves an orchestrator to map a
+requirement onto a set of filenames mid-dispatch. A reviewer who can show that mapping is
+trivial has defeated this one; that argument has not been made, and "it looks redundant" is
+not it.
+
+**The capability inventory's staleness row ("run **every** check it names … a stale clause is
+escalated, not obeyed") vs the critic brief's "Where the run has ruled a clause of the bound
+law stale, state that ruling too, clause by clause where the law names clauses" vs critic item
+7's second rule ("unless your prompt marks that clause stale").** The third fact of the shape
+the round-11 single-theme entry and the round-13 fragment entry already defend: a rule
+suppressed by a run-level ruling the critic cannot observe. **The argument is a hybrid, and the
+entry says so rather than picking one of the file's three labels.** The preamble against item 7
+is **three prompts** — the preamble is orchestrator-read, a critic prompt is the eight items,
+so only item 7's copy is ever dispatched. The inventory row against the preamble is **one
+reader, two moments** — both orchestrator-read, the row met once at binding when the verdict is
+produced, the preamble met at every dispatch. Classifying the whole entry as either one will
+correctly find half of it failing, which proves nothing.
+
+Each of the three collapses into a different failure. **Delete item 7's branch** and a critic
+holding the ruling still cannot act on it: the second rule makes a stricter house minimum block
+**ahead of the floor**, so the critic blocks the round on a clause this run has already declared
+not-to-be-obeyed, and the only diff available to the builder is to obey it — **a deadlock with
+no diff in it**. That is a different shape from the inherited carve-out in the same paragraph,
+where the defect is real and merely somebody else's; here the *rule* is what the run retired,
+and complying with it is the defect. **Delete the preamble's clause** and the verdict is
+produced once, at binding, and reaches nobody — the run's own ruling invisible to the one agent
+enforcing the law it retired. **Delete the inventory row** and nothing produces a staleness
+verdict at all, leaving the preamble instructing the orchestrator to state a ruling no step
+makes: the round-15 defect exactly, a pointer at something nothing in the document produces.
+
+**"say "no staleness marker; treat the bound law as current"" is not a restatement and is the
+clause most likely to be cut as verbiage.** From inside a prompt, silence and a clean verdict
+are the same sentence, so an unstated marker reads as a law with nothing stale in it — which is
+the right answer often enough to survive review and wrong exactly when a house does publish one
+and nobody ran it. **The granularity is ruled too**: staleness is stated **clause by clause**,
+like an inherited failure and unlike the theme count, because a run-level "this law is stale"
+retires a whole ratified law on one clause's evidence.
+
+**On the co-location: it is deliberate *and* it is a hazard, and both belong in the entry.**
+Deliberate, because inherited failures and stale clauses are both run-level facts only the
+orchestrator holds, both are granted by naming rather than by silence, and an orchestrator
+assembling a prompt meets them in one breath at the same moment. The hazard is that their
+consumers are **not** co-located: the inherited carve-out is consumed by item 7's *first* rule
+and red team item 5, the staleness carve-out by item 7's *second* rule. A merger tightening
+what reads as one over-long dispatch paragraph therefore removes two unrelated rules in one
+edit, and the diff looks like it removed one. Anyone editing that paragraph must check both
+consumers, and anyone splitting it must keep both halves inside the preamble — a staleness
+sentence moved into item 7 as "tidier" lands in the only prompt that already has the rule and
+leaves the orchestrator with no instruction to state the fact.
