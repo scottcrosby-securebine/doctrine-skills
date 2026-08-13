@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build, lint, or test tooling. The only machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing). Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no automated test suite. The only machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing). Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun.
+
+**One standing regression suite exists, and it is manual: `fixtures/`.** Three generality cases — `bare.html` (no design system, no repo, no package.json), `fixtures/shadcn.sh` (a recipe that builds a stock Next + shadcn install on demand; the app is deliberately not vendored, and versions are pinned so a rebuild reports signal rather than weather), and a real bound system — exist because `doctrine-gauntlet` grew up against one design system, which is how a skill acquires rules that only make sense for that system without anyone noticing. Run a gauntlet or harness change against all three; each proves something the other two cannot, and `fixtures/README.md` says what. The sharpest case is the theme probe, which prints identical output on a kit card (a **false** alarm — the Design pane owns theming) and on a stock shadcn app (a **true** one — `.dark` styles ship with no toggle): only having both in front of you separates them.
 
 ## Architecture
 
@@ -20,7 +22,7 @@ Skills were validated by running fresh-context agents through each wrapper again
 
 **Gate semantics are load-bearing.** The two-clean-pass exit gate, the definition of a "finding" (anything requiring a diff change; declined nitpicks don't reset the counter), and the four-loop escalation valve are deliberate design (see README Design notes) — don't loosen them casually when editing skills.
 
-**Some rules only look redundant.** `doctrine-gauntlet` carries ten recorded pairs that read as the same rule stated twice and are not — each survives because a run can comply with one and violate the other, and several exist because the two halves reach two different agents' prompts. They are recorded with their distinctions in `skills/doctrine-gauntlet/do-not-merge.md`, which is **not exhaustive**. Read it before proposing a merge there; re-proposing a listed pair isn't a finding unless you can defeat the stated distinction, and an unlisted pair still needs the same argument.
+**Some rules only look redundant.** `doctrine-gauntlet` records a running list of pairs that read as the same rule stated twice and are not — each survives because a run can comply with one and violate the other, and several exist because the two halves reach two different agents' prompts. They are recorded with their distinctions in `skills/doctrine-gauntlet/do-not-merge.md`, which grows every review round and is **not exhaustive**. **Do not write a count of them into this file**: it said "ten" until an audit found roughly forty, and the list is not cleanly countable anyway — some entries defend three sites at once and some are continuations of the entry above, so any number here is a defect waiting to be cited as fact. Read it before proposing a merge there; re-proposing a listed pair isn't a finding unless you can defeat the stated distinction, and an unlisted pair still needs the same argument.
 
 ## Files that must stay in sync
 
@@ -37,10 +39,16 @@ Adding, renaming, or rescoping a skill touches all of:
 (the technical floor its critics depend on), `floor.md` (how to drive that
 harness — flags, exit codes, render honesty), `tools.md` (Codex and Claude
 Design invocation) and `do-not-merge.md` (the pairs a reviewer must not
-collapse). The sidecars exist so SKILL.md carries decision content and gate law
-while operating manuals and review history load on demand. The split rule: if it
-changes what an agent *decides*, it belongs in SKILL.md; if it changes how a
-tool is *invoked* or records a call already made, it belongs in a sidecar. The harness is the only executable in the repo, and its portability
+collapse) and `UNAUDITED.md` (what an audit of never-examined territory found and
+what became of each finding — a status record, not a queue). The sidecars exist so
+SKILL.md carries decision content and gate law while operating manuals and review
+history load on demand. The split rule: if it changes what an agent *decides*, it
+belongs in SKILL.md; if it changes how a tool is *invoked* or records a call already
+made, it belongs in a sidecar. `do-not-merge.md` and `UNAUDITED.md` are both the
+second kind — a record of rulings already made, not a rule any agent reads at
+runtime — which is why neither is ever assembled into a prompt. `harness/floor.mjs`
+is the only executable the plugin ships; `fixtures/shadcn.sh` is the other tracked
+executable in the repo. The harness's portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
