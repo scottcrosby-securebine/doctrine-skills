@@ -12,7 +12,7 @@ finding unless you can defeat the distinction stated with it.
 the next reviewer collapses an unlisted pair and cites this file as proof it checked.
 Known-unlisted pairs of the same shape include direction brief item 3 against "The
 composition claims things the copy never says", direction brief item 4 against "Test the
-grammar against its subject", and builder brief item 5 against critic brief item 6. An
+grammar against its subject", and builder brief item 6 — "Label your own caveats", the near-duplicate — against critic brief item 6. An
 unlisted pair needs the same argument as a listed one, not less.
 
 Pairs are anchored by quoted phrase, not line number — the file has been compressed
@@ -420,3 +420,50 @@ built under the floor, before anything exists, at the one step where killing it 
 The brief tells the *builder* what to author; Technical floor is the orchestrator's gate
 list. Only item 8 can reach a verdict that costs nothing — after step 5 the same defect
 blocks every round and its fix is reopening the direction, which is the user's question.
+
+## Added round 14 — the handover, and three more copies into the fourth prompt
+
+**The critic brief's handover manifest vs items 1-8's "you were handed" clauses.** Same
+three-prompts pattern as the step-6 dispatch line and the single-theme preamble, and the
+same ruled polarity — the preamble is the orchestrator's half and a critic prompt is the
+eight items and nothing else. It is **not** a restatement of the items: the items tell a
+critic to *abstain* when an artifact is missing, the manifest tells the orchestrator to
+*supply* it, and until round 14 only the abstention existed. Modes made "no floor report",
+"no diff" and "no way to crop" blocking against artifacts no line in the skill instructed
+anyone to hand over, while the red team — the newest brief — shipped with an explicit
+manifest from the day it was written. Shortening the manifest to "hand over what the items
+ask for" restores the defect, because the items are not in the prompt the orchestrator
+assembles from and working the set out is exactly the labour that never happened.
+
+**The Modes abstention enumeration gained a fourth entry** — "no predecessor in a restyle
+(item 2)" — plus an open clause, so a future item that instructs an abstention is covered
+without another edit. The round-13 entry above quotes the three-item form; that quotation
+has drifted and its argument has not.
+
+**The red team brief's settled list and RULED-recurrence rule (preamble, item 1) vs the
+docket section and critic item 4; its return sort (item 5) vs critic item 8; its ledger
+carve-out (item 4) vs the ledger section and critic item 4.** One entry, one pattern, and
+it is the round-13 fourth-prompt argument unchanged. **This does not weaken "the critic's
+axes are deliberately not duplicated into the red team".** What was copied is a *disposal*
+rule (what a recurrence is filed as), a *return format*, and a *scope carve-out* on an axis
+item 4 already had — none of them an axis, and each a thing this agent's own items already
+commit it to doing. Copying item 4's carve-out is what stops item 1 pressing the literal
+ledger reading until the round cannot close.
+
+**Red team item 1's duplicate criterion is now keyed to the conclusion, not the axis, and
+that re-keying is part of what this entry defends.** The axis-keyed form told an adversary
+that re-running anything the critic touched is duplicate work, which shielded every false
+clearance the critic filed — most expensively on the reader test — and forbade item 4's own
+instruction in the same breath. The agent holds the critic's *report* and never its *brief*,
+so an axis test is not even runnable from inside that prompt.
+
+**`## The brief`'s floor list gained axe serious/critical**, extending the round-12
+Technical-floor-vs-The-brief entry rather than opening a new one: same accepted cost, one
+more line to update when the floor list changes. Axe is the floor item with **no visible
+symptom** — an `alt`-less image and an unlabelled control render perfectly — so a builder
+holding the rest of the list cannot infer it from anything it sees.
+
+**Critic item 2's composition axis regained the fourth example** (small true numbers in a
+large enterprise's grammar). Restoring it is compliance with the round-12 entry, not a new
+duplication: a copy carrying only the overstatement examples fails the standard the round-13
+note sets — "in full" is the requirement, byte-identity is not.
