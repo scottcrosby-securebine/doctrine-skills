@@ -35,16 +35,21 @@ const EXPECT = (argv.find(a => a.startsWith('--expect=')) || '').split('=').slic
    illustration is reviewed at thumbnail size and its defects are invisible.
    "Read the images at shipped size" needs an instrument, and this is it. */
 const CROP = (argv.find(a => a.startsWith('--crop=')) || '').split('=').slice(1).join('=') || null
-const [target, outPrefix, themeArg = 'both'] = argv.filter(a => !a.startsWith('--'))
+const positional = argv.filter(a => !a.startsWith('-'))
+const [target, outPrefix, themeArg = 'both'] = positional
 const USAGE = 'usage: node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]'
 /* An unknown flag must not run to completion. `--theme_class=dark` matched
    nothing here, rendered both passes in one palette, and reported a false
    "theme switch had no effect" whose remedy text told you to pass the flag you
    thought you had just passed — a confident wrong answer, which costs more than
    a refusal. An empty value is the same bug with a subtler spelling:
-   `--crop=` parses to null and silently shoots no region at all. */
+   `--crop=` parses to null and silently shoots no region at all.
+   ONE DASH, not two, is the same bug again: `-fragment` matched neither the
+   `--` filter that validates nor the one that collects positionals, so it fell
+   through to the positional list as a third argument, and a run configured as
+   something other than what was asked for completed and printed a verdict. */
 const KNOWN_FLAGS = ['--fragment', '--single-theme', '--theme-class=', '--crop=', '--expect=']
-for (const a of argv.filter(a => a.startsWith('--'))) {
+for (const a of argv.filter(a => a.startsWith('-'))) {
   const k = KNOWN_FLAGS.find(k => k.endsWith('=') ? a.startsWith(k) : a === k)
   if (!k) {
     console.error(`${USAGE}\n  unknown flag "${a}" — nothing here reads it, so it would have changed nothing while looking like it had`)
@@ -56,6 +61,12 @@ for (const a of argv.filter(a => a.startsWith('--'))) {
   }
 }
 if (!target || !outPrefix) { console.error(USAGE); process.exit(2) }
+/* A fourth positional is a flag that lost its dashes, or a shell glob that
+   expanded — either way it was meant to change the run and changes nothing. */
+if (positional.length > 3) {
+  console.error(`${USAGE}\n  too many arguments: "${positional.slice(3).join('", "')}" — nothing here reads a fourth positional, so it would have changed nothing while looking like it had`)
+  process.exit(2)
+}
 if (!['dark', 'light', 'both'].includes(themeArg)) {
   console.error(`${USAGE}\n  unknown theme "${themeArg}" — expected dark, light or both`)
   process.exit(2)   // validate before launching, or it throws with a browser open
@@ -68,10 +79,76 @@ if (SINGLE_THEME && themeArg === 'both') {
 /* Exactly one place applies the theme. Two call sites drift: the reduced-motion
    pass set data-theme without the class, so a class-themed project measured
    reduced motion in whichever theme the page happened to load in. */
+/* BOTH ROOTS, not just <html>. Bootstrap 5.3, GitHub Primer and a good share of
+   hand-rolled systems hang the theme on `body`, so a class-themed project run
+   WITH --theme-class still rendered one palette twice and reported "theme switch
+   had no effect" — remedied by a message telling you to pass the flag you had
+   just passed. Setting the class on both roots costs nothing: a selector wants
+   one of them and the other is inert. */
 const applyTheme = (page, theme) => page.evaluate(({ t, cls }) => {
   document.documentElement.setAttribute('data-theme', t)
-  if (cls) document.documentElement.classList.toggle(cls, t === 'dark')
+  if (document.body) document.body.setAttribute('data-theme', t)
+  if (cls) {
+    document.documentElement.classList.toggle(cls, t === 'dark')
+    if (document.body) document.body.classList.toggle(cls, t === 'dark')
+  }
 }, { t: theme, cls: THEME_CLASS })
+
+/* Installed before any page script runs, because none of the three can be
+   recovered afterwards.
+   A CLOSED shadow root is unreachable from outside, and every DOM walk below
+   would report nothing inside it while printing what a passing check prints.
+   Text painted into a CANVAS leaves no node at all, so no contrast check on
+   earth — axe's included — ever sees it.
+   And `document.querySelectorAll` does not cross a shadow boundary in either
+   direction: byte-identical markup measured 28 findings in light DOM and 4
+   inside a shadow root, with nothing in the output saying a subtree went
+   unlooked-at. Every walk in this file goes through `__deep` for that reason. */
+const INSTRUMENT = () => {
+  const attach = Element.prototype.attachShadow
+  window.__closedRoots = []
+  Element.prototype.attachShadow = function (init) {
+    const r = attach.call(this, init)
+    if (init && init.mode === 'closed') window.__closedRoots.push(r)
+    return r
+  }
+  window.__canvasText = 0
+  for (const m of ['fillText', 'strokeText']) {
+    const orig = CanvasRenderingContext2D.prototype[m]
+    CanvasRenderingContext2D.prototype[m] = function (...a) { window.__canvasText++; return orig.apply(this, a) }
+  }
+  /* Flattened order: a host's shadow tree is emitted where the host sits, which
+     is where it paints — heading-skip detection depends on that order and a
+     flat concatenation would get it wrong. Closed roots are walked last, since
+     nothing outside them can say where they belong. */
+  window.__deep = sel => {
+    const out = [], seen = new Set()
+    const walk = root => {
+      for (const el of root.children || []) {
+        if (el.matches && el.matches(sel)) out.push(el)
+        if (el.shadowRoot && !seen.has(el.shadowRoot)) { seen.add(el.shadowRoot); walk(el.shadowRoot) }
+        walk(el)
+      }
+    }
+    walk(document)
+    for (const r of window.__closedRoots) if (r.host && r.host.isConnected && !seen.has(r)) { seen.add(r); walk(r) }
+    return out
+  }
+  /* One definition of "a person cannot see this", used by target size and by
+     reduced motion. checkVisibility is the only thing that sees ANCESTOR
+     opacity: the standard scroll-reveal puts opacity:0 on a wrapper, every
+     child computes opacity 1, none of them paint, and a check reading the
+     element's own computed style calls a blank page "all content visible". */
+  window.__seen = el => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true, contentVisibilityAuto: true })
+}
+
+/* Two call sites, one definition, for the same reason applyTheme has one: the
+   reduced-motion pass and its baseline must ask exactly the same question, or
+   the subtraction below compares two different measurements. */
+const HIDDEN_TEXT = () => window.__deep('h1,h2,h3,p,a,li')
+  .filter(e => e.textContent.trim()
+    && (!window.__seen(e) || /inset\((?!0px 0px 0px 0px)/.test(getComputedStyle(e).clipPath)))
+  .map(e => e.tagName + ':' + e.textContent.trim().slice(0, 40))
 /* fileURLToPath, not .pathname: the latter keeps %20 in spaced paths and
    yields /C:/... on Windows, silently breaking this resolution root. */
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -166,7 +243,24 @@ const DESKTOP = 1440
 let clipAtDesktop = false
 const typeScale = {}   // width -> { container, median, min }
 const loneTargets = new Set()
+const undecidedTargets = new Set()
 const blankImages = new Set()
+/* All run-scoped, all deduped: the same defect otherwise reports eight times,
+   once per configuration, and buries everything else in the report. */
+const badStatus = new Set()      // the navigation itself did not answer 200
+const netFail = new Map()        // url -> a stylesheet, font or image that did not arrive
+const lateRender = new Set()     // the page was still changing after it was measured
+const unscrolled = new Set()     // SETTLE's step cap bit and a tail never loaded
+const canvasText = new Set()     // text painted where no DOM check can read it
+const framesBlind = new Set()    // heading structure lives in a frame nothing here entered
+const rmBaseline = {}            // theme -> what was already hidden WITHOUT reduced motion
+const alwaysHidden = new Set()   // ...and that baseline, put in front of eyes rather than dropped
+let noVisibilityAPI = false      // this runtime cannot answer "can a person see it"
+/* One configuration keeps watching this long after the page looks settled. Paid
+   once per run, not once per configuration: eight of these would cost more than
+   the whole rest of the run and tell you the same thing. */
+const LATE_WATCH = 5000
+let settleWatched = false
 /* axe's third bucket, split by whether the floor list names the thing it could
    not decide. See where these are emptied, below the loops. */
 const contrastUndetermined = new Set()
@@ -241,20 +335,58 @@ const HIDE_OVERLAYS = `
   { display: none !important; }
 `
 
+/* A SUBRESOURCE THAT NEVER ARRIVED IS NOT A DESIGN DECISION. A page whose whole
+   design lives in one stylesheet that 404s renders the user-agent default and
+   passed with exit 0 — the only trace was a `~ console (not gated)` line
+   documented as "usually dev-server hydration chatter", carrying no URL. Same
+   mechanism covers the half of the blank-image check that reads the DOM and
+   therefore cannot see a `background-image` that failed: this counts the
+   request, not the element.
+   ONLY THE THREE TYPES THAT PAINT. Scripts were in this set and came straight
+   back out: a stock Next dev server 403s two of its own dev-only chunks on
+   every page load, which turned a clean stock app into a permanent UNMEASURED
+   nobody could clear — and a floor that cannot close on the commonest stack
+   there is teaches people to waive UNMEASURED by reflex, at which point the one
+   that matters gets waived with it. A script that fails and matters shows up as
+   a `pageerror`, which is gated already, or as content that is visibly absent.
+   Analytics beacons and sourcemaps are out for the same reason. */
+const WATCHED = new Set(['stylesheet', 'image', 'font'])
+const shortUrl = u => u.length > 110 ? `${u.slice(0, 70)}…${u.slice(-35)}` : u
+/* Keyed by URL, first report wins: a request that answers 403 and is then
+   aborted fires both handlers, and the same asset listed twice under two
+   spellings of one failure reads as two broken things. */
+const watchNetwork = page => {
+  page.on('response', r => {
+    const t = r.request().resourceType()
+    if (r.status() >= 400 && WATCHED.has(t) && !netFail.has(r.url())) netFail.set(r.url(), `${t} — HTTP ${r.status()} — ${shortUrl(r.url())}`)
+  })
+  page.on('requestfailed', r => {
+    const t = r.resourceType()
+    if (WATCHED.has(t) && !netFail.has(r.url())) netFail.set(r.url(), `${t} — ${(r.failure() || {}).errorText || 'request failed'} — ${shortUrl(r.url())}`)
+  })
+}
+
 /* Scroll the whole page so lazy images load. Bounded: scrollHeight is re-read
    each pass, so a feed that grows as you scroll would never satisfy the
    condition, and page.evaluate has no timeout — the process would just hang. */
+/* Returns the height the cap never reached, because a cap that bites in silence
+   is the whole failure mode of this file: on a 64,700px page at a 360px
+   viewport this stops at 46,800px, and the tail's lazy images never load, never
+   render, and are shot blank with nothing in the report saying so. */
 const SETTLE = async page => page.evaluate(async () => {
   const step = window.innerHeight
-  for (let y = 0, n = 0; y < document.body.scrollHeight && n < 60; y += step, n++) {
+  let y = 0
+  for (let n = 0; y < document.body.scrollHeight && n < 60; y += step, n++) {
     window.scrollTo(0, y); await new Promise(r => setTimeout(r, 120))
   }
+  const unscrolled = Math.max(0, document.body.scrollHeight - y)
   window.scrollTo(0, 0)
   await Promise.race([
-    Promise.all([...document.images].filter(i => !i.complete)
+    Promise.all([...window.__deep('img')].filter(i => !i.complete)
       .map(i => new Promise(r => { i.onload = i.onerror = r }))),
     new Promise(r => setTimeout(r, 5000)),
   ])
+  return unscrolled
 })
 
 let fatal = null
@@ -263,17 +395,28 @@ try {
     fingerprint[theme] = {}
     for (const [w, h] of WIDTHS) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1 })
+      await ctx.addInitScript(INSTRUMENT)
       try {
         const page = await ctx.newPage()
         const crashes = []   // uncaught exceptions: the page actually broke
         const noise = []     // console.error: usually dev-server chatter
         page.on('pageerror', e => crashes.push(String(e).slice(0, 180)))
         page.on('console', m => { if (m.type() === 'error') noise.push(m.text().slice(0, 160)) })
+        watchNetwork(page)
 
-        await page.goto(url, { waitUntil: 'load' })
+        /* THE STATUS CODE, which this harness used to discard. `page.goto` on a
+           500 renders the server's error page, and every check below then
+           measures that page and reports a clean floor on it — verified: an
+           HTTP 500 came back PASS with `h1: Internal Server Error` printed one
+           line above the verdict. UNMEASURED rather than exit 2, deliberately:
+           a styled 404 page is a real deliverable somebody has to shoot, and
+           the waiver is how they say so. */
+        const resp = await page.goto(url, { waitUntil: 'load' })
+        if (resp && resp.status() >= 400) badStatus.add(`HTTP ${resp.status()} ${resp.statusText() || ''} from ${page.url()}`.trim())
         await applyTheme(page, theme)
         await page.addStyleTag({ content: HIDE_OVERLAYS })
-        await SETTLE(page)
+        const tail = await SETTLE(page)
+        if (tail > 0) unscrolled.add(`${tail}px below the last scroll position at ${theme} ${w}px`)
         await page.waitForTimeout(1200)
         /* Probe AFTER settling: a toggle injected by a deferred bundle does not
            exist at `load`, so probing earlier calls every hydrated app themeless. */
@@ -291,7 +434,11 @@ try {
            not the other site" passed against an empty response body, certifying
            no artifact at all as the right one. */
         if (!identity) {
+          /* The LANDED url, not the requested one. A line whose entire job is
+             "what did this run actually look at?" printed the address you
+             meant: /redir 302s to /404 and it printed /redir. */
           identity = await page.evaluate(() => ({
+            landed: location.href,
             title: document.title || '(no title)',
             h1: (document.querySelector('h1')?.textContent || '').trim().slice(0, 70) || '(no h1)',
             chars: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length,
@@ -332,7 +479,7 @@ try {
            empty beside it, and 73% of it gone at 360, floor green throughout. */
         const clipped = await page.evaluate(() => {
           const out = []
-          for (const el of document.querySelectorAll('*')) {
+          for (const el of window.__deep('*')) {
             const cs = getComputedStyle(el)
             if (!/(auto|scroll|hidden)/.test(cs.overflowX)) continue
             if (el.scrollWidth <= el.clientWidth + 1) continue
@@ -367,16 +514,100 @@ try {
         const targetSize = await page.evaluate(() => {
           const SEL = 'a[href], button, input:not([type=hidden]), select, textarea, summary,'
             + '[role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem]'
-          const targets = [...document.querySelectorAll(SEL)]
-            .filter(el => !el.disabled && el.getAttribute('aria-hidden') !== 'true')
-            .map(el => ({ el, r: el.getBoundingClientRect() }))
-            .filter(t => t.r.width > 0 && t.r.height > 0)
+          /* A CONTROL NOBODY CAN SEE IS NOT A TARGET. The only filter here was
+             a non-zero box, so a closed mobile drawer, an opacity:0 group and
+             the links inside a shut <details> all failed WCAG 2.5.8 — controls
+             that accept no pointer at all: elementFromPoint at the centre of a
+             shut disclosure's 10x10 link returns <body>. Most responsive sites
+             ship a closed menu, so the gate fired on most responsive sites. */
+          /* A control's target includes its label: clicking the words toggles
+             the box, so the label's area is part of the region that accepts the
+             pointer. Both uses below depend on knowing it. */
+          const labelOf = el => {
+            try { return el.closest('label') || (el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null) } catch { return null }
+          }
+          const targets = []
+          const already = new Set()
+          for (const el of window.__deep(SEL)) {
+            if (el.disabled || el.getAttribute('aria-hidden') === 'true') continue
+            let t = el
+            if (!window.__seen(el)) {
+              /* THE VISUALLY-HIDDEN NATIVE INPUT, which every design system
+                 ships: the checkbox is opacity:0 and absolutely positioned, a
+                 span paints the box, and the LABEL is what a pointer hits.
+                 Dropping it as unseen is right — its 20x20 box was never the
+                 target and reporting that number was always wrong — but
+                 dropping it without measuring the label instead leaves a real
+                 control unmeasured, which is how the fix for one blind spot
+                 becomes the next one. Found on the bound system, not reasoned. */
+              const lab = labelOf(el)
+              if (!lab || !window.__seen(lab)) continue
+              t = lab
+            }
+            /* By element, before the rect: two inputs sharing one label would
+               otherwise enter as two entries and each would read as crowding
+               the other at zero distance. */
+            if (already.has(t)) continue
+            already.add(t)
+            const r = t.getBoundingClientRect()
+            if (r.width > 0 && r.height > 0) targets.push({ el: t, r })
+          }
+          /* WCAG measures the region that accepts a pointer. getBoundingClientRect
+             measures a painted box, and the two differ in the commonest way there
+             is of giving a small glyph a big target: `::before{position:absolute;
+             inset:-14px}` turns a 16px icon into a 44px target while the box still
+             reads 16x16, and no rectangle API can see a pseudo-element's box.
+             Gating on 16 there is a WRONG number, not a conservative one.
+             So ask the gate's own question instead of a proxy for it: is a 24x24
+             square centred on the control activated by the control at every point?
+             true = clears the minimum however it was built · false = it does not,
+             whatever the box says · null = the probe could not reach it, which
+             goes to a critic and never to the gate. */
+          const R = 11.5
+          const RING = [[-R, -R], [0, -R], [R, -R], [-R, 0], [R, 0], [-R, R], [0, R], [R, R]]
+          const clears24 = (el, lab) => {
+            const r = el.getBoundingClientRect()
+            const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+            for (const [dx, dy] of RING) {
+              const x = cx + dx, y = cy + dy
+              if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return null
+              /* elementFromPoint stops at a shadow HOST, so without this descent
+                 every control inside a web component reads as "something else is
+                 on top of it" and the probe convicts a compliant button. */
+              let hit = document.elementFromPoint(x, y)
+              while (hit && hit.shadowRoot) {
+                const inner = hit.shadowRoot.elementFromPoint(x, y)
+                if (!inner || inner === hit) break
+                hit = inner
+              }
+              if (!hit) return null
+              /* A hit on the control's own label activates the control, so it
+                 counts: a visible 12x12 checkbox wrapped in a wide label really
+                 does have a target bigger than the checkbox. */
+              if (hit !== el && !el.contains(hit) && !(lab && (hit === lab || lab.contains(hit)))) return false
+            }
+            return true
+          }
+          /* Below the fold there is nothing at those coordinates to hit, so the
+             probe scrolls — and then puts the page back, because every rect in
+             `targets` was measured at this scroll position and the crowding test
+             below compares them to each other. */
+          const atX = window.scrollX, atY = window.scrollY
+          const probe = (el, lab) => {
+            let v = clears24(el, lab)
+            if (v === null) {
+              el.scrollIntoView({ block: 'center', inline: 'center' })
+              v = clears24(el, lab)
+              window.scrollTo(atX, atY)
+            }
+            return v
+          }
           const label = (el, r) => {
             const cls = String(el.getAttribute('class') || '').split(' ')[0]
             const name = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 28)
             return `${el.tagName.toLowerCase()}${cls ? `.${cls}` : ''} ${Math.round(r.width)}x${Math.round(r.height)}px${name ? ` "${name}"` : ''}`
           }
-          const fail = [], lone = []
+          const fail = [], lone = [], undecided = []
           for (const { el, r } of targets) {
             if (r.width >= 24 && r.height >= 24) continue
             /* INLINE exception — "in a sentence, or constrained by the
@@ -389,6 +620,11 @@ try {
             const inProse = [...(el.parentElement?.childNodes || [])]
               .some(n => n.nodeType === 3 && n.textContent.trim())
             if (cs.display === 'inline' && inProse) continue
+            /* Measure the hit area before ruling on the box. Ordered after the
+               inline exception so prose links never pay for the probe. */
+            const reach = probe(el, labelOf(el))
+            if (reach === true) continue
+            if (reach === null) { undecided.push(label(el, r)); continue }
             /* SPACING exception — a 24px DIAMETER circle centred on the target
                reaching no other target: 12px to another target's box, 24px to
                another undersized target's centre. */
@@ -409,10 +645,11 @@ try {
           /* Deduped but NOT capped here. The caps are applied where the lines
              are printed, which is the only place that can also state the total
              — capping in here throws the total away before anyone can print it. */
-          return { fail: [...new Set(fail)], lone: [...new Set(lone)] }
+          return { fail: [...new Set(fail)], lone: [...new Set(lone)], undecided: [...new Set(undecided)] }
         })
         const smallTargets = targetSize.fail
         for (const t of targetSize.lone) loneTargets.add(`${t} at ${theme} ${w}px`)
+        for (const t of targetSize.undecided) undecidedTargets.add(`${t} at ${theme} ${w}px`)
 
         /* Functional type only — what a person must read or click. Decorative
            and display type may be any size it likes; that is the point of
@@ -420,7 +657,7 @@ try {
            Only the two widths the comparison uses: this walks every element
            twice over, and the narrow renders would pay for it unread. */
         if (w === DESKTOP || w === WIDEST) typeScale[w] = await page.evaluate(() => {
-          const sizes = [...document.querySelectorAll('p, li, a, button, label, input, td')]
+          const sizes = window.__deep('p, li, a, button, label, input, td')
             .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
             .map(el => parseFloat(getComputedStyle(el).fontSize))
             .filter(n => n > 0).sort((a, b) => a - b)
@@ -434,19 +671,20 @@ try {
              If a page has no running text at all, container stays 0 and the
              comparison below is skipped rather than guessed. */
           let container = 0
-          for (const el of document.querySelectorAll('p, li, td, h1, h2, h3')) {
+          for (const el of window.__deep('p, li, td, h1, h2, h3')) {
             const bw = el.getBoundingClientRect().width
             if (bw > container && bw <= window.innerWidth) container = bw
           }
           return {
             container: Math.round(container),
+            vw: window.innerWidth,
             median: sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0,
             min: sizes.length ? sizes[0] : 0,
           }
         })
 
         const struct = await page.evaluate(() => {
-          const hs = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(e => +e.tagName[1])
+          const hs = window.__deep('h1,h2,h3,h4,h5,h6').map(e => +e.tagName[1])
           let skip = null
           for (let i = 1; i < hs.length; i++) if (hs[i] - hs[i - 1] > 1) skip = `h${hs[i - 1]}->h${hs[i]}`
           const cs = getComputedStyle(document.body)
@@ -459,13 +697,23 @@ try {
           return {
             hScroll: document.documentElement.scrollWidth > window.innerWidth + 1,
             scrollW: document.documentElement.scrollWidth,
-            h1: document.querySelectorAll('h1').length,
+            h1: window.__deep('h1').length,
             headingSkip: skip,
+            /* Nothing here enters a frame — every walk above is this document's.
+               An app rendered inside one reported `h1 count = 0` and GATED on
+               that number while the page had exactly one. */
+            frames: window.__deep('iframe, frame').length,
+            /* The sentinel shape the getAnimations check already uses. Chromium
+               has had checkVisibility since 105, so this cannot fire today —
+               but a capability that silently degrades to the blind behaviour it
+               replaced is the exact bug this file exists to refuse. */
+            canSeeVisibility: !!Element.prototype.checkVisibility,
+            canvasText: window.__canvasText || 0,
             /* Finished loading and carrying no pixels = the resource failed.
                Two things deliberately excluded, both verified in Chromium: an
                <img> with no src or src="" is deliberate blank markup rather
                than a 404, and a sizeless SVG reports the 150x150 default, not 0. */
-            blankImages: [...document.images]
+            blankImages: window.__deep('img')
               .filter(i => i.complete && !i.naturalWidth && (i.currentSrc || i.getAttribute('src'))).length,
             height: document.body.scrollHeight,
             /* several theme-sensitive values, not one: a page can change an
@@ -474,6 +722,13 @@ try {
           }
         })
         fingerprint[theme][w] = struct.sig
+        if (!struct.canSeeVisibility) noVisibilityAPI = true
+        if (struct.canvasText) canvasText.add(`${struct.canvasText} text draw(s) at ${theme} ${w}px`)
+        /* The reduced-motion baseline, taken from the render this loop already
+           did: what this page hides WITHOUT reduced motion. Free here, and a
+           second page load anywhere else. Same width and same theme as the
+           reduced-motion pass, or the subtraction compares two pages. */
+        if (w === DESKTOP) rmBaseline[theme] = await page.evaluate(HIDDEN_TEXT)
 
         await page.screenshot({ path: `${outPrefix}-${theme}-${w}.png`, fullPage: true })
 
@@ -564,21 +819,61 @@ try {
            leaves the gate unclosable on ordinary pages — which would teach
            people to waive UNMEASURED by reflex, at which point the one that
            matters gets waived with it. */
+        /* `frame-tested` belongs on the blocking side and keyed onto the other
+           one: it means axe never got INTO a frame, so contrast — and every
+           other rule — is genuinely unmeasured for that whole subtree, which is
+           the definition of the first branch and not of the second. */
         for (const inc of axeOut.incomplete) {
-          if (inc.startsWith('color-contrast')) contrastUndetermined.add(`${theme} ${w}px: ${inc}`)
+          if (inc.startsWith('color-contrast') || inc.startsWith('frame-tested')) contrastUndetermined.add(`${theme} ${w}px: ${inc}`)
           else axeIncomplete.add(`${theme} ${w}px: ${inc}`)
+        }
+
+        /* THE PAGE MUST NOT STILL BE MOVING. A hero injected four seconds in —
+           an ordinary slow API on a cold cache — brought four real defects with
+           it, and all four widths reported `ok` with zero findings against
+           screenshots of the unfinished page. Re-reading the height after the
+           slowest step above (axe) is the cheap honest half: it cannot say what
+           changed, only that the thing measured was not the thing that shipped. */
+        const heightAfter = await page.evaluate(() => document.body.scrollHeight)
+        if (Math.abs(heightAfter - struct.height) > 2) {
+          lateRender.add(`${theme} ${w}px: ${struct.height}px when measured, ${heightAfter}px moments later`)
+        }
+        /* ...and once, watch a while longer. The re-read above only spans the
+           measurement window, and the case that matters lands outside it: four
+           real defects arrived at four seconds — an ordinary slow API on a cold
+           cache — and all eight configurations reported `ok` with zero findings
+           against screenshots of the unfinished page. Nothing observable from
+           inside a settled page distinguishes "finished" from "about to
+           change", so the only honest instrument is a longer look; one
+           configuration pays for it, not all eight. */
+        if (!settleWatched) {
+          settleWatched = true
+          await page.waitForTimeout(LATE_WATCH)
+          const later = await page.evaluate(() => document.body.scrollHeight)
+          if (Math.abs(later - heightAfter) > 2) {
+            lateRender.add(`${theme} ${w}px: ${heightAfter}px when it looked settled, ${later}px ${LATE_WATCH / 1000}s later`)
+          }
         }
 
         /* A fragment or design-system card legitimately has no h1; gating on it
            would make that phase unable to ever pass. Two h1s is wrong anywhere. */
-        const h1Bad = FRAGMENT ? struct.h1 > 1 : struct.h1 !== 1
+        /* A page whose application lives in a frame has its h1 in there, and
+           nothing above enters a frame — so "0" is a number this run does not
+           have, and gating on it convicts a page that is correct. Two h1s in
+           THIS document is still two h1s. */
+        const h1Unknown = struct.frames > 0 && struct.h1 === 0
+        if (h1Unknown) framesBlind.add(`${struct.frames} frame(s) at ${theme} ${w}px`)
+        const h1Bad = h1Unknown ? false : (FRAGMENT ? struct.h1 > 1 : struct.h1 !== 1)
         const bad = struct.hScroll || h1Bad || struct.headingSkip
           || axeOut.serious.length || axeOut.critical.length || crashes.length
           || smallTargets.length
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
         if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
-        show(smallTargets, 6, t => `  ! FAILS WCAG 2.5.8 (under 24x24, and crowded): ${t}`)
+        /* The size printed is the painted box. The gate is on the HIT AREA — a
+           24x24 square centred on the control that something else answers for —
+           so the line says which of the two it convicted on. */
+        show(smallTargets, 6, t => `  ! FAILS WCAG 2.5.8 (a 24x24 area centred on it is not all this control's, and it is crowded): ${t}`)
         if (h1Bad) console.log(`  ! h1 count = ${struct.h1} (${FRAGMENT ? 'at most 1 in a fragment' : 'must be exactly 1'})`)
         if (struct.headingSkip) console.log(`  ! heading level skip: ${struct.headingSkip}`)
         for (const v of axeOut.critical) console.log(`  ! axe CRITICAL: ${v}`)
@@ -605,6 +900,7 @@ try {
      always CSS-scoped rather than width-scoped, and four widths is not earned. */
   for (const theme of themes) {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', colorScheme: theme })
+    await ctx.addInitScript(INSTRUMENT)
     try {
       const page = await ctx.newPage()
       await page.goto(url, { waitUntil: 'load' })
@@ -612,20 +908,45 @@ try {
       await page.addStyleTag({ content: HIDE_OVERLAYS })
       await SETTLE(page)   // or below-the-fold reveals are still at opacity 0
       await page.waitForTimeout(1200)
-      const rm = await page.evaluate(() => ({
-        hidden: [...document.querySelectorAll('h1,h2,h3,p,a,li')]
-          .filter(e => e.textContent.trim() && (getComputedStyle(e).opacity === '0'
-            || getComputedStyle(e).visibility === 'hidden'
-            || /inset\((?!0px 0px 0px 0px)/.test(getComputedStyle(e).clipPath)))
-          .map(e => e.tagName + ':' + e.textContent.trim().slice(0, 40)),
-        running: document.getAnimations ? document.getAnimations().filter(a => a.playState === 'running').length : -1,
-      }))
+      const rm = {
+        hidden: await page.evaluate(HIDDEN_TEXT),
+        running: await page.evaluate(() => document.getAnimations ? document.getAnimations().filter(a => a.playState === 'running').length : -1),
+      }
       await page.screenshot({ path: `${outPrefix}-reducedmotion-${theme}.png`, fullPage: true })
+      /* SUBTRACT WHAT THE PAGE ALREADY HID. Reading the element's own computed
+         opacity missed the standard scroll-reveal entirely — opacity:0 on the
+         wrapper, every child computing 1, a blank render, and the printed
+         sentence "ok — all content visible", which is worse than silence.
+         checkVisibility sees the wrapper; it also sees a closed mobile drawer,
+         which is not a reduced-motion defect and is on most responsive sites.
+         So what this pass reports is what reduced motion TOOK AWAY: the same
+         page's ordinary 1440 render, same theme, subtracted.
+         Counted rather than set-differenced, because two controls with the same
+         text — one always closed, one revealed — would otherwise cancel out and
+         a real defect would go unreported. */
+      const budget = new Map()
+      for (const x of rmBaseline[theme] || []) budget.set(x, (budget.get(x) || 0) + 1)
+      const took = []
+      for (const x of rm.hidden) {
+        const n = budget.get(x) || 0
+        if (n) budget.set(x, n - 1); else took.push(x)
+      }
+      rm.hidden = took
+      /* THE BASELINE IS ITSELF A MEASUREMENT, and subtracting it in silence is
+         how the fix for the false positive becomes the next blind spot: a
+         reveal whose trigger never fires is hidden in BOTH renders, cancels
+         out, and the pass prints what a clean pass prints. A closed menu and a
+         dead reveal are indistinguishable from here — one is normal and one is
+         a blank section — so the count goes to eyes rather than to the gate. */
+      if ((rmBaseline[theme] || []).length) {
+        const b = [...new Set(rmBaseline[theme])]
+        alwaysHidden.add(`${theme}: ${b.length} — ${b.slice(0, 5).join(' · ')}${b.length > 5 ? ` · … ${b.length - 5} more not shown` : ''}`)
+      }
       if (rm.hidden.length) {
         failures++
-        console.log(`\n[reduced-motion ${theme}] FAIL — content still hidden:`)
+        console.log(`\n[reduced-motion ${theme}] FAIL — reduced motion removed content the ordinary render shows:`)
         show(rm.hidden, 6, x => '  ! ' + x)
-      } else console.log(`\n[reduced-motion ${theme}] ok — all content visible`)
+      } else console.log(`\n[reduced-motion ${theme}] ok — reduced motion removed nothing the ordinary render shows`)
       if (rm.running > 0) { failures++; console.log(`  ! ${rm.running} animation(s) still running under prefers-reduced-motion in ${theme}`) }
       /* -1 is the sentinel for "this runtime has no getAnimations". Chromium
          always has it, so this cannot fire today — but a sentinel meaning
@@ -667,7 +988,13 @@ if (themes.length === 2) {
   const same = Object.keys(fingerprint.dark || {}).filter(w => fingerprint.dark[w] === fingerprint.light?.[w])
   switchDead = same.length > 0
   if (same.length) {
-    unmeasured.push(`theme switch had no effect at ${same.join(', ')}px — the dark and light renders are the same theme. If the project themes by a class on <html> (Tailwind's \`dark\`, say), re-run with --theme-class=NAME; otherwise drive the project's own theme mechanism before trusting either render.`)
+    /* The remedy must not name the flag that was just passed. It did, and the
+       result was a confident wrong answer telling the reader to do the thing
+       they had already done — which is what the unknown-flag guard above exists
+       to prevent and this line reintroduced downstream. */
+    unmeasured.push(`theme switch had no effect at ${same.join(', ')}px — the dark and light renders are the same theme. ${THEME_CLASS
+      ? `--theme-class=${THEME_CLASS} WAS passed and toggled on both <html> and <body>, and the renders are still identical: that class is not this project's theme hook. Find what the project's own switch sets (read the toggle's handler) and drive that.`
+      : 'If the project themes by a class (Tailwind\'s `dark`, Bootstrap\'s on <body>), re-run with --theme-class=NAME; otherwise drive the project\'s own theme mechanism before trusting either render.'}`)
   }
 } else if (!SINGLE_THEME) {
   unmeasured.push(`only the ${themes[0]} theme was rendered — the other theme is unchecked, and the floor requires both. If this project genuinely ships one theme, re-run with --single-theme and it is measured, not missing.`)
@@ -716,6 +1043,43 @@ if (blankImages.size) {
   unmeasured.push(`images finished loading with no pixels, so the renders are not the page as it ships: ${[...blankImages].join(', ')}. A dev-server 404 and a genuinely broken source look identical from here — serve the built artifact or fix the sources and re-run. Do not let a critic grade these screenshots as a design decision.`)
 }
 
+/* Everything below is the same judgement as the blank-image block above: the
+   renders a critic is about to grade are not the artifact, which is a gap in
+   THIS run rather than a design question — so it blocks, and the user waives it
+   or fixes it. None of them is a page defect and none of them gates. */
+if (badStatus.size) {
+  unmeasured.push(`the server did not answer 200: ${[...badStatus].join(', ')}. Everything below was measured against whatever it did serve — an error page renders, scores a clean floor and prints its own h1 next to the verdict. If this IS the deliverable (a designed 404, say), waive this; otherwise the artifact was never rendered.`)
+}
+if (netFail.size) {
+  unmeasured.push(`a resource the page asked for never arrived, so the renders are not the design:\n    ${[...netFail.values()].join('\n    ')}\n  A stylesheet or font that fails takes the whole palette and type scale with it and the run still reports a page; a failed background-image leaves no element for the blank-image check to find. Serve the built artifact or fix the sources and re-run.`)
+}
+if (lateRender.size) {
+  unmeasured.push(`the page was still changing after it was measured, so the screenshots and every finding above are of an unfinished render:\n    ${[...lateRender].join('\n    ')}\n  Wait for the real load to complete — build and serve production output, or stub the slow call — and re-run. A defect read off a moving instrument is void, and so is a clean report.`)
+}
+if (unscrolled.size) {
+  unmeasured.push(`the settle scroll hit its 60-step cap before the bottom of the page, so the tail was never scrolled into view, its lazy content never loaded, and it was shot blank:\n    ${[...unscrolled].join('\n    ')}\n  Shoot the long page in sections, or raise the cap knowing a feed that grows as you scroll will never satisfy it.`)
+}
+if (canvasText.size) {
+  unmeasured.push(`text was painted into a canvas, where it has no element, no computed style and no node for axe or anything here to read — its contrast and its size are NOT measured by this run: ${[...canvasText].join(', ')}. Read those labels by eye against their background, or waive knowing nobody checked them. (SVG text is a different case and is handled: axe reports it undetermined and it blocks above.)`)
+}
+if (framesBlind.size) {
+  unmeasured.push(`this page renders content inside a frame and nothing here enters one, so heading structure, target size, layout and type scale cover the host document only: ${[...framesBlind].join(', ')}. The h1 gate was suppressed rather than run on a count that is wrong. Point the harness at the frame's own URL to measure it.`)
+}
+if (noVisibilityAPI) {
+  unmeasured.push('this runtime has no Element.checkVisibility, so nothing here could tell a control or a paragraph a person can see from one an ancestor has hidden — target size and reduced motion are both unreliable on it. Run the harness on Chromium 105 or newer.')
+}
+
+/* A JUDGE line and not a gate, for the reason the whole probe exists: a target
+   the probe could not reach is a target this run did not measure, and the file
+   does not fail what it did not measure. */
+if (alwaysHidden.size) {
+  handoff.push(`text hidden in the ORDINARY 1440 render too, and therefore subtracted from the reduced-motion result above rather than blamed on it:\n    ${[...alwaysHidden].join('\n    ')}\n  A closed menu or a collapsed disclosure is exactly this and is fine. A reveal whose trigger never fired is also exactly this and is a blank section. Look at the 1440 renders and say which.`)
+}
+
+if (undecidedTargets.size) {
+  handoff.push(`targets under 24x24 whose hit area could not be probed — off-viewport after scrolling, or covered by something the probe could not resolve — so WCAG 2.5.8 is neither passed nor failed on them:\n    ${[...undecidedTargets].join('\n    ')}`)
+}
+
 /* A JUDGE line: some scrollers are deliberate (a carousel, a wide grid by
    design) and a heuristic must not fail those. But the reader has to be told,
    because the layout check above cannot see it. */
@@ -751,10 +1115,22 @@ if (!FRAGMENT) {
   const ref = typeScale[DESKTOP], top = typeScale[WIDEST]
   if (ref && top && ref.container && top.container > ref.container * 1.05 && top.median <= ref.median) {
     const grew = Math.round((top.container / ref.container - 1) * 100)
-    handoff.push(`type frozen above ${DESKTOP}px — the layout grew ${grew}% from ${DESKTOP} to ${WIDEST}px `
-      + `(container ${ref.container} -> ${top.container}px) while the median functional type did not grow at all `
-      + `(${ref.median}px at both, smallest ${top.min}px). If the sheet scales with the viewport the type has to, `
-      + `or the words become a footnote to the pictures. Decorative type is exempt; controls and body copy are not.`)
+    /* TWO DIFFERENT DEFECTS, and the first one wore the second's name. A page
+       with no reading-column cap at all has a container that IS the viewport,
+       so it "grows" by the full ratio on every run and always reports frozen
+       type — correct numbers, wrong conclusion, on essentially every page. The
+       real finding there is the missing cap: 2496px of line length is
+       unreadable whatever size the type is. Noise in a JUDGE line trains people
+       to skip JUDGE lines, so each defect gets its own sentence. */
+    handoff.push(top.container >= top.vw * 0.95
+      ? `no reading-column cap above ${DESKTOP}px — running text spans ${top.container}px of a ${top.vw}px viewport `
+        + `(${ref.container}px at ${DESKTOP}), so line length grows without limit while the median functional type stays `
+        + `${ref.median}px (smallest ${top.min}px). This is a missing max-width on the text column, not frozen type: `
+        + `capping the column fixes it and scaling the type does not. If the full bleed is deliberate, say so.`
+      : `type frozen above ${DESKTOP}px — the layout grew ${grew}% from ${DESKTOP} to ${WIDEST}px `
+        + `(container ${ref.container} -> ${top.container}px) while the median functional type did not grow at all `
+        + `(${ref.median}px at both, smallest ${top.min}px). If the sheet scales with the viewport the type has to, `
+        + `or the words become a footnote to the pictures. Decorative type is exempt; controls and body copy are not.`)
   }
 }
 
@@ -770,7 +1146,8 @@ const verdict = failures ? `${failures} failing configuration(s)`
    runs once measured a different site than the one intended and reported a
    clean floor; this line alone would have shown it. */
 if (identity) {
-  console.log(`\n[MEASURED] ${url}`)
+  console.log(`\n[MEASURED] ${identity.landed}`)
+  if (identity.landed !== url) console.log(`  (requested ${url} — the server redirected)`)
   console.log(`  title: ${identity.title}`)
   console.log(`  h1:    ${identity.h1}   (${identity.chars} chars of text)`)
 }
