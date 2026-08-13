@@ -1,64 +1,67 @@
-# State [doctrine-gauntlet; gate widened to the whole document | 2026-08-14]
+# State [doctrine-skills; rounds 17–18 — the hub audited, the harness caught lying | 2026-08-14]
 
 ## Resume
 
-The gate ran 16 rounds and then changed shape. Eleven passes against this session's **diff**
-converged to a clean pass — and a twelfth pass, deliberately pointed at territory no earlier
-pass had audited, found **twelve defects in text nobody had touched**. Scott ruled: fix
-everything, so the exit condition is now the whole artifact rather than the diff. A widened
-pass then returned **30 findings**, all fixed across rounds 14–16. See
-`skills/doctrine-gauntlet/UNAUDITED.md` for the register and `do-not-merge.md`'s five
-"Added round N" sections for every duplication and the argument defending it.
+Two more widened rounds ran. **Round 17** (~51 findings) audited the gauntlet's own cold
+ground. **Round 18** reviewed round 17's diff and then audited two files nobody had ever
+looked at — `skills/doctrine/SKILL.md` (the hub, **5 HIGH**) and `tools.md` (8) — and ran an
+*adversarial* pass at the harness that found **5 HIGH the round-17 doc-versus-code lens could
+not see**. All fixed. Version 1.17.0.
 
-**🔴 Seven commits are unpushed** (`17c9d2c`…`d81a7aa`). Nothing else is stranded; tree clean.
-The widened scope has had one round of fixes and **zero clean passes**.
+**🔴 Seventeen commits are unpushed.** Push was never authorised in either round; it is asked
+for and unanswered. Tree clean.
+
+**The widened gate has had zero clean passes and its exit condition is two.** Both rounds
+produced HIGH findings and round 18 out-yielded round 17. Do not read "all fixed" as "closed".
 
 ## Active Work
 
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
-| 🔴 Seven commits unpushed — push was never authorised this session | — | 🔴 | — |
-| Widened gate needs **two consecutive clean passes** and has had none. Every widening so far has paid; expect findings | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
-| Phase 3 field test, staged all session and never run: clone @ `21bc6d4`, deps installed, Playwright resolving, port 3177 free | — | ⏳ | `skills/doctrine-gauntlet/harness/floor.mjs` |
-| `--expect` asserts identity, never freshness — a server on a **deleted** build passes it. Rule needed: own the server you measure | — | ⏳ | `harness/floor.mjs`, `floor.md` |
-| Section render breadth unscoped: 8 renders per section per retry. Cost, not correctness — must not drop 2560 | — | ⏸ | `SKILL.md` critic item 1 |
+| 🔴 Seventeen commits unpushed — asked twice, never answered | — | 🔴 | — |
+| Gate needs **two consecutive clean passes**, has **zero**. Every widening has paid so far | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
+| The other six wrappers were never audited — only the hub and gauntlet have been | — | ⏳ | `skills/doctrine-{code,debug,audit,docs,research,write}/` |
+| Frames are unmeasured by design; canvas covers 2D `fillText` only. Honest limits, not fixes | — | ⏸ | `harness/floor.mjs`, `floor.md` |
+| Render breadth unscoped at section level — 8 renders per section per retry. Cost, not correctness | — | ⏸ | `SKILL.md` critic item 1 |
 
 ## Git State
 
-- Branch `main` | tree clean | **ahead 7, unpushed** | PRs: none | open issues: none | CI: none configured
-- Session commits: `17c9d2c` `4fee93a` `fe30362` `b3ecbab` `8b92311` `d81a7aa` (+ this backup)
+- Branch `main` | tree clean | **ahead 17, unpushed** | PRs: none | issues: none | CI: none
+- Round 17: `1272237` `7564aa0` `569aaf6` `e2f06ea` · Round 18: `0d2e605` `8ee2826` `360ee2c` `da9b44b` `435cbac`
 - HEAD is always the backup commit; compare against the list, not HEAD.
 
 ## Gotchas
 
-- **Scope is a filter on where people look, not on what is wrong.** Eleven passes, three
-  lenses each, all honest — and structurally blind to the gate's own blocking condition
-  (the reader test) being defined where no critic could read it. A green result means
-  exactly what its scope means.
-- **The document is stratified by age.** The newest brief had the best handover discipline;
-  the oldest had none. Auditing recent changes inspects the stratum least likely to be wrong.
-- **Passive voice hides a missing instruction.** "The floor report, which is handed to you"
-  read as documentation of an arrangement that did not exist. In a prompt-assembling spec,
-  "X is handed to you" is always *two* obligations. Grep for it.
-- **A partial check is worse than a missing one.** The reduced-motion pass gated one theme
-  and certified two; `[reduced-motion] ok` looked identical to full coverage. Tamper-test
-  all three clauses — including *confirm the broken half is actually broken*.
-- **Fresh authors beat fresh reviewers.** Rounds 1–4 (one author) each produced the next
-  defect; rounds 5–16 (fresh author per round) repeatedly rejected their own briefs and were
-  right. A reviewer can say a rule is wrong; only a new author can say the framing is.
-- `pkill -f "codex exec"` kills your own wrapper shell; `codex exec` needs `< /dev/null` in
-  non-TTY; `/codex:status` is user-invocation only.
+- **Attention follows the work, so the shared foundation gets none.** The hub had zero audits
+  against the gauntlet's seventeen — and **eight of its nine defects were fixes the gauntlet had
+  already written and never sent up**. Grep for wrapper-local workarounds: each is a base-layer
+  bug with its fix already in the repo.
+- **Consistency is not correctness.** "Does the code match the docs?" returned 13 drift findings.
+  "Where does this lie?" returned 5 HIGH, four invisible to the first — because the code and the
+  docs agreed perfectly about checks that did not work.
+- **The tamper test has three clauses now.** Break it; run known-good; **and prove the broken
+  fixture really carries the defect, independently of the instrument.** The reduced-motion check
+  passed the first two and certified a blank page. Its fixture was hiding content in *both*
+  renders. Corollary: a change that makes an instrument **quieter** needs the same proof —
+  a vanished finding and a new blind spot print identically.
+- **A register is a lens; a wrong one is worse than none.** `do-not-merge.md` certified a
+  placement the document lacked, which stopped anyone looking for two rounds — and the round-17
+  *rewrite carried a new false one*. Record **why** a rule exists, never **where** it sits.
+- **Fresh authors beat fresh reviewers**, still, decisively: this session's authors overturned my
+  briefs seven times and were right every time — including proving one of my own measurements was
+  a truncation artifact of my own options object.
+- `pkill -f <pattern>` kills your own shell when the pattern matches your command line. **I did
+  this twice today.** Kill by PID from `ss -ltnp`.
+- Scope is a filter on where people look, not on what is wrong. Documents stratify by age.
 
 ## Next Session Kickoff
 
-1. **Ask whether to push the seven commits.** Repo norm is push only when told; it was never
-   said this session.
-2. Then: the widened gate's second pass — three lenses, whole document, and point them at
-   sections still unexamined rather than re-walking cleared ground. That is what found 12
-   and then 30.
-3. Phase 3 is the oldest debt and needs no gate: it is read-only against `website_v3` @ `21bc6d4`.
-4. Read the repo's `skills/doctrine-gauntlet/`, never the plugin cache. Read `UNAUDITED.md`
-   and `do-not-merge.md` **before** proposing any merge or simplification.
-5. Standing rule: everything outside `doctrine-skills` is read-only; design deficits are
-   reported, never fixed. Do not re-litigate the sibling-repo registers.
-6. Skills: `doctrine` (hub) before any `doctrine-*` wrapper.
+1. **Ask whether to push the seventeen commits.** Asked twice this session, never answered.
+2. The gate's next pass. Point it at **the six unaudited wrappers** — that is the cold ground now,
+   and the hub audit is the evidence that cold ground pays.
+3. Re-read `UNAUDITED.md` and `do-not-merge.md` **before** proposing any merge or simplification;
+   both now carry round-17/18/19 sections, and one entry records itself as having been stale.
+4. Repo `skills/doctrine-gauntlet/`, never the plugin cache. Everything outside `doctrine-skills`
+   is read-only; design deficits are reported, never fixed.
+5. Skills: `doctrine` (hub) before any `doctrine-*` wrapper. The hub changed substantially — read
+   it fresh rather than from memory.
