@@ -8,7 +8,7 @@ everything later is anchored by quoted phrase rather than numbered. **Read the w
 never a heading.** The sections come in three kinds, and only one kind says "round" in its
 name: the founding list, two undated sections — `## Settled alongside it` and `## Added since
 the pass` — and the `## Added round N` sections. Do not read "Added round N" as the whole
-tail: `## Added since the pass` holds more entries than any other section here, and a reviewer
+tail: `## Added since the pass` carries substantive entries of its own, and a reviewer
 following an earlier version of this map walked straight past it. Each entry was checked
 against the campaign record or the code, and each survives because **a run can comply with one
 and violate the other**. **No count of entries is written anywhere in this file, on purpose** —
@@ -550,11 +550,14 @@ direction while killing is still cheap.
 **The verdict vocabulary (KILL / WEAKEN / CLEAR) vs step 5's "whatever the adversary kills"
 vs the direction brief's trailing paragraph.** Three-prompts pattern with an asymmetry worth
 stating: step 5 and the trailing paragraph are orchestrator-read and both *count* kills,
-while the adversary — whose prompt is the direction brief's numbered items and nothing after
-them — is the only agent that can produce one. A bound that keys on a classification the
-classifier was never asked to produce is inert: step 5 spends exactly one revise-and-reapprove
-cycle "on whatever the adversary kills", so an adversary never given the word returns concerns
-and the cycle fires on nothing.
+while the adversary is the only agent that can produce one. A bound that keys on a
+classification the classifier was never asked to produce is inert: step 5 spends exactly one
+revise-and-reapprove cycle "on whatever the adversary kills", so an adversary never given the
+word returns concerns and the cycle fires on nothing.
+**This entry deliberately states no placement, and that omission is the fix.** Where the
+vocabulary sits is read off the dispatch line in `SKILL.md` and never off this file — twice
+now a placement claim written down here was believed after it went false, once by this very
+entry. Nothing about which paragraphs the adversary's prompt contains is asserted above.
 **The rule, stated so it survives any placement.** The vocabulary must sit inside whatever the
 adversary's prompt is assembled from; the escalation paragraph must stay outside it. Those are
 not in tension — one is dispatched and one is not — and a merge breaks a different thing each
@@ -645,14 +648,15 @@ parameters held by one context, and a compaction takes them with everything else
 **The ledger's "The same file carries the settled list, under a `## Settled — ruled and closed`
 heading" vs the critic brief's manifest entry, critic item 4, the red team's preamble and its
 item 1.** Round 14's entry defends those consumers against each other and against the docket;
-this defends the **producer**, which did not exist until round 17 — four prompts were handed a
-"settled list" that no section defined, gave a path, told anyone to build, or said what an
+this defends the **producer**, which did not exist until round 17 — every reviewer's prompt was
+handed a "settled list" that no section defined, gave a path, told anyone to build, or said what an
 empty one looks like. Collapse toward the consumers and the manifest asks for an artifact
 nobody writes; collapse toward the producer and the list is built and reaches no reviewer,
-where the failure is not mere repetition — critic item 4 tells a fresh critic to file a
-recurrence as a finding, an accepted finding restarts the clean-pass count, and a phase whose
-closed questions keep reappearing can be **structurally unable to reach two consecutive clean
-passes**. **"An empty settled list is a real state and is handed over as one" restates
+where the failure is not mere repetition — critic item 4 downgrades a recurrence to a one-line
+sighting count *only because the critic holds the list*, so without one a fresh critic has
+nothing marking the question closed and files an ordinary finding, an accepted finding restarts
+the clean-pass count, and a phase whose closed questions keep reappearing can be **structurally
+unable to reach two consecutive clean passes**. **"An empty settled list is a real state and is handed over as one" restates
 nothing** and is the clause most likely to be cut as verbiage: from inside a prompt an early
 phase and a section you forgot look identical. (The list reaches the red team through its
 **preamble and item 1** — item 3 is print. Anchor by quoted phrase, never by item number
@@ -770,7 +774,7 @@ escalation paragraph as undispatched **where that paragraph sits** — and it is
 paragraph that hands the reviewer whose entire value is willingness to kill a reason not to
 kill twice.
 
-**Modes' "The same test classifies every other forced question, and the floor collision is not
+**Modes' "One test classifies every other forced question, and the floor collision is not
 the only one" vs the six sections that each raise one of those questions.** **One reader, many
 moments**, and it is a **classification, not a restatement**: step 5's twice-killed direction,
 step 5's missing-fact-that-changes-the-assertion, step 6's twice-deadlocked section, an
@@ -838,3 +842,55 @@ edit, and the diff looks like it removed one. Anyone editing that paragraph must
 consumers, and anyone splitting it must keep both halves inside the preamble — a staleness
 sentence moved into item 7 as "tidier" lands in the only prompt that already has the rule and
 leaves the orchestrator with no instruction to state the fact.
+
+## Added round 18 — a review of round 17's own diff
+
+Three fixes this round created duplication worth defending; the rest were corrections that
+removed a false claim and added nothing. Each entry names what a collapse costs in **both**
+directions, per the preamble.
+
+**`## The brief`'s "A clause of the house law your prompt marks stale is not obeyed" vs the
+capability inventory's staleness row vs the critic brief's staleness dispatch clause vs critic
+item 7's second rule.** This extends the round-17 staleness entry to a **fourth** site and the
+argument is that entry's, unchanged — except that the gap it closes is the sharpest of the set.
+The round-17 entry defended the row (produces the verdict), the preamble (states it) and item 7
+(conditions a critic's verdict on it), and **the agent the row's own words name was not among
+them**: "a stale clause is escalated, **not obeyed**", and the only agent that obeys the law is
+the builder, which the same row hands the law "by path". Delete The brief's copy and the builder
+receives the law, is never told which clauses this run retired, and builds to them — and
+**nothing downstream catches it**, because item 7's second rule fires only where the work
+*fails* a house minimum and work that quietly complied fails nothing. That is a different shape
+from every other collapse in this file: the usual cost is a defect nobody blocks on, and this
+one is a retired clause governing the page while every gate reads clean. Delete the row and no
+verdict exists to state; delete the preamble's clause and it reaches no critic; delete item 7's
+branch and a critic holding the ruling still blocks the round on it. **The "no staleness marker;
+treat the bound law as current" wording is deliberately in the builder's copy too**, for the
+reason the round-17 entry gives about prompts: silence and a clean verdict are the same sentence
+from inside one.
+
+**`## The brief`'s "work from the image-tool instructions handed to you with this brief" vs
+`## Two optional capabilities`' instruction to paste them in.** A producer and its consumer,
+the round-14 manifest pattern applied to the builder: the bullet tells the builder what to work
+from and to say so when it arrives with nothing, the capabilities section tells the orchestrator
+to put it there. Until round 18 the bullet said "read `tools.md` beside this skill", which
+**resolves to nothing from inside a subagent prompt** — the same defect item 5's crop means had,
+fixed the same way. Collapse to the bullet and the instruction points at a file the reader
+cannot open; collapse to the capabilities section and the builder is never told to refuse an
+invocation it was not given, so it guesses one.
+
+**The red team's routing is deliberately *not* the same mechanism, and that asymmetry is the
+entry.** The builder runs the image tool itself, so the invocation detail must be *in its
+prompt*; the red team does not — the **orchestrator** invokes Codex at it, so the `-i` ordering
+rule stays in `## Two optional capabilities`, where the invoker reads it. Anyone "fixing" the
+inconsistency by giving the red team brief a `tools.md` pointer re-creates the exact defect
+round 18 removed from the builder bullet, in the one prompt that has no use for the file.
+
+**Deliberately removed, not merged: the reference's floor-failure record no longer names the red
+team.** `## The reference` told the orchestrator to put that record in "every briefed critic's
+prompt and the red team's", citing a preamble that carries only the briefed-critic manifest, and
+no red team item consumes it. The record exists to stop a reviewer **holding the predecessor**
+demanding parity on a floor-forbidden defect; the red team is handed no predecessor, and it
+receives the record anyway inside the ledger. Re-adding it needs an argument that the red team
+can make a parity finding — and note that handing that agent reference material is in tension
+with item 1's design, which is that an adversary given the critic's inputs returns the critic's
+findings.

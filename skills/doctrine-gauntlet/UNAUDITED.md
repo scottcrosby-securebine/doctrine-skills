@@ -175,8 +175,10 @@ correct and the bound is what keeps it honest.
   make this patch worse than useless — it would take the contrast line with it.
 - **`inc.startsWith('color-contrast')` is a prefix test.** If axe renames the rule, contrast
   silently demotes from `[UNMEASURED]` to `[JUDGE]`. Nothing tests for that today.
-- **Two in-browser caps were removed** so the totals could be printed with the capped lists.
-  Two arrays grow to full length before they are trimmed at print time. Capping in the page
+- **Three in-browser caps were removed** so the totals could be printed with the capped lists —
+  crowded undersized targets, spec-exempt lone targets, and the reduced-motion hidden list.
+  Three arrays grow to full length before they are trimmed at print time; the clipped-elements
+  cap was deliberately kept inside the page and made to return its total alongside its three. Capping in the page
   threw the total away before anyone could state it, and a silent cap is how a builder fixes
   "the 6 undersized targets", ships the seventh, and reads the next round's identically-capped
   report as a fresh finding.
@@ -195,6 +197,42 @@ rule's three clauses each fired live: a declared relative path that does not res
 clone, an override variable unset in a fresh context, and docs giving a concrete value in a
 gate table. A rule that has only ever fired against the design system it grew up beside is not
 yet a general rule.
+
+---
+
+## Round 18 — a review of round 17's own diff, still running
+
+Round 17 fixed about fifty findings in one round. Round 18 pointed a fresh reader at **that
+round's diff** rather than at new territory, and what it found is the class a large single-round
+fix produces: text that is internally correct and **wrong about the document around it** — a
+position claim about a boundary that had just moved, an attribution to critic item 4 of the
+instruction item 4 forbids, a fallback bound looser than the round that recorded it, a
+definitional sentence orphaned by an insertion above it, and new pointers aimed at files the
+prompts holding them cannot open.
+
+Three findings are worth carrying whatever else the round does:
+
+- **The file's own worst failure mode, reproduced inside the entry that records it.**
+  `do-not-merge.md`'s verdict-vocabulary entry was rewritten in round 17 *because* its old
+  placement claim was false — and the rewrite carried a new one, contradicted by both live
+  boundary statements sixteen lines above the warning that says to check them. The entry now
+  states no placement at all. "A register is a lens too" is not a lesson this project has
+  finished paying for.
+- **A ruling that reached every reader except the one who acts on it.** The staleness verdict
+  reached the orchestrator and the critic and never the **builder** — the agent that obeys the
+  law, and the one the inventory row's "not obeyed" is about. Nothing downstream catches a
+  builder that *complied* with a retired clause, because the critic's rule fires on work that
+  fails a house minimum. `## The brief` now carries it.
+- **The one loosening of round 17 had drifted looser still.** The consumer-gate fallback is
+  recorded above as bounded to "none exists and none can be built"; the text shipped listing
+  "no write authority" as an impossibility, which step 9's scratchpad path equips — so any
+  read-only run could cite it verbatim and record a runnable gate item as unrun. Retightened
+  against the bound recorded here. The register was right and the document was wrong, which is
+  the direction this file is for.
+
+**This round is not finished**, and nothing above should be read as a closed count. What is
+recorded is what the diff review found; the audit of the hub and the wrapper set is running
+separately and its findings are not in this file yet.
 
 ---
 
