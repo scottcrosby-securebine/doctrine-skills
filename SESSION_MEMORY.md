@@ -1,91 +1,89 @@
-# State [doctrine-gauntlet v1.13.0; first field use mined, three harness gaps closed | 2026-08-12]
+# State [doctrine-gauntlet v1.15.0; generality-tested against three topologies | 2026-08-13]
 
 ## Resume
 
-`doctrine-gauntlet` **ran in production for the first time** — not by this
-session. Another session used it for website_v3's wave 10: **seven pure-gauntlet
-rounds**, fresh blind critics, mapping withheld, letters re-randomised per round.
-It worked — the candidate won every round on both pages, two critics failed the
-live site outright, and thirteen real defects were caught. Then the client
-looked at the shipped result and named a defect class the whole apparatus was
-structurally blind to.
+`securebine-design` was heavily upgraded, and auditing `doctrine-gauntlet` against it
+produced a bigger result than the audit: **Scott ruled that the skill must also work
+with no design language, or a different one.** That constraint changed the work from
+"fit this kit" to "prove nothing here is kit-shaped", and it is now the standing test.
 
-Mining 24 hours of `website_v3` + `securebine-design` logs produced three
-instrument gaps, all now closed in `d6c6b7b`:
+**Three fixtures, checked in as `fixtures/` — the recipe, not the app.** Bare page
+(nothing became mandatory), stock Next+shadcn (nothing encoded one house's taste, and
+the single-repo topology works), real bound system. Scott's suggestion; strictly better
+than the synthetic inverted fixture I had proposed, because inventing a house's taste is
+weaker evidence than a real one, and only shadcn supplies the topology where the design
+system lives **inside** the deliverable.
 
-1. **A defect class lives above 1440 and no rounds below it can see the class at
-   all.** Nav 13px and an 11px primary CTA, byte-identical at 1440/1920/2560/3840
-   while the sheet reached 1848px and card figures 674px tall. 2560 joins the
-   ladder — and since neither defect shows in any *single* render, the harness
-   reports the **delta** between 1440 and 2560.
-2. **WCAG 2.5.8 target size was measured by nothing** — axe does not test it, a
-   screenshot cannot show it, and a 145x14px call to action survived seven rounds
-   of critics who were looking straight at it.
-3. **Adding a wider width silently re-rules F14.** The inner-clip discriminator
-   asked "does it clip at the *widest* width tested"; it now asks about
-   `DESKTOP` (1440), so a component clipping at 1440 and fitting at 2560 is
-   still a defect.
+They paid out within minutes and kept paying:
 
-Also landed as rules: the moved-content sweep, the moving-instrument void, and
-**the tamper test — both halves — as law**.
+1. **The harness measured the wrong website through two complete runs** and printed a
+   clean floor — another session held port 3000, the fixture silently moved to 3001. The
+   skill has warned about this in prose for months; nothing checked it at the point of
+   measurement. Identity now prints every run; `--expect=TEXT` gates it.
+2. **`.sr-only` read as a blocking layout defect** by the inner-clip check — standard
+   accessibility markup, on most modern sites.
+3. **Frozen-type measured the page wrapper, not the reading column**, so it fired on a
+   stock page whose `<main>` was capped at `max-w-3xl`.
+4. **Precedence made a scaffold's zero-chroma defaults outrank the brief**, shipping a
+   grey, single-typeface page marked house-compliant — the exact generic page the skill
+   exists to prevent. Fixed with "a value nobody ruled is not law", plus an *instrument*
+   for it: provenance, internal inconsistency, and the generator's own stock output.
 
-**Correction carried forward:** the pure-gauntlet exit criterion is **NOT**
-broken. An early read of this session said a three-round win streak would have
-exited before the best findings; re-reading, the streak is conjoined with "no
-blocking findings" and resets on any, so the seven rounds were the mode working.
-**No counter was changed.** The real lesson was an unnamed *axis*, and it went to
-the builder law and critic brief instead. Do not re-open the counters on this.
+Binding got the deepest rework. The sweep now runs **before** the ladder with an
+ownership test; each rung is tested against every surviving candidate; the snapshot
+probes attach to the **condition** rather than to rung 3, and probe 4 decides. Root
+cause: pointed at `website_v3`, the ladder bound a frozen concept directory the source
+of record explicitly demotes.
+
+**Two registers were handed to the sibling repos and Scott confirms both are acting on
+them** — do not re-report those findings as new.
 
 ## Active Work
 
 | Item | Issue | Status | Key Files |
 |------|-------|--------|-----------|
-| The gate has run **one round**, not to exit. Two clean passes, the four-round valve, simplification re-entry and delivery are still unexercised **by this session** — wave 10 exercised pure gauntlet to a real exit, and that record is readable | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md`, `website_v3/docs/RESTYLE-DOCKET.md` #84 |
-| The law-as-critic-axis is still untested — a bound design system exists, and no critic has been run against its law | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
-| **PhaseMU migration deficits — PARTLY STALE.** `securebine-design/docs/APP-SURFACE.md` now exists and independently closes D1 and prices several others. Re-read it before treating the handed-over file as current | — | 🟡 | `securebine-design/docs/APP-SURFACE.md` |
-| Trigger, not a task: docket/counter machinery to the hub when a second wrapper needs it. The claim ledger is a second candidate | — | ⏸ | `skills/doctrine/SKILL.md` |
+| The gate never formally closed — 4 loops, ~50 findings, converging (26 → 15 → 3 → 9+9) but not provably terminated. The last round of mechanical fixes is **unverified**. Next real gauntlet run is a better test than a fifth synthetic one | — | 🟡 | `skills/doctrine-gauntlet/SKILL.md` |
+| A1/A2-class work is done; the **law-as-critic-axis** is still untested — no critic has ever run against a bound system's law with the law named by path | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
+| The fused gate has still never run to exit locally. Pure gauntlet has, in production (wave 10) | — | ⏳ | `website_v3/docs/RESTYLE-DOCKET.md` #84 |
+| Trigger, not a task: hoist docket/counter machinery to the hub when a second wrapper needs it. Claim ledger is a second candidate | — | ⏸ | `skills/doctrine/SKILL.md` |
 
 ## Git State
 
-- Branch `main` @ `d6c6b7b` | clean | pushed | PRs: none | CI: none configured
-- Session commits: `d6c6b7b` (one commit; v1.12.0 → v1.13.0)
+- Branch `main` @ `6d41669` | clean | pushed | PRs: none | CI: none configured
+- Session commits: `e5fdf91` (harness), `01e14f8` (binding, v1.15.0), `6d41669` (fixtures)
 
 ## Gotchas
 
-- **Lane: develop the skills; everything outside this repo is read-only.**
-  Design deficits are reported, never fixed. Nothing was written to
-  `website_v3`, `securebine-design` or `pdd-generator` this session.
-- **The sibling repos are the highest-yield source of skill findings**, and they
-  move fast — four waves shipped in the 24 hours mined here. `git log --since`
-  plus the docket and any `REDTEAM-*.md` is the sweep.
-- **Two width constants now, and conflating them is a live trap.** `WIDEST`
-  (2560) is the top of the ladder; `DESKTOP` (1440) is the "enough room
-  available" reference. The inner-clip discriminator must stay on `DESKTOP`.
-- **Target size is split across the gate and `[JUDGE]` deliberately.** WCAG
-  2.5.8's exceptions are real — an isolated undersized target and an inline link
-  are both spec-compliant — so only a *crowded* one gates. Do not flatten it to
-  a 24x24 gate; that invents a rule the spec does not carry.
-- **Every new check needs a tamper test, both halves.** Writing the fixtures
-  caught two flaws before a single run, and the known-good half caught a third
-  (frozen-type fires on every card in every kit — now suppressed under
-  `--fragment`). This is the second time the known-good half found what the
-  broken case could not.
-- **The Skill tool resolves `doctrine:*` to a stale plugin cache.** Test against
-  the repo copies.
-- **A full-page screenshot is read scaled** — use `--crop=SELECTOR` — **and a
-  canvas caught mid-draw voids findings.** One round lost its five gravest
-  findings to a drawing screenshotted at position 6 of 18.
+- **Run every change against all three fixtures.** `fixtures/README.md` says what each
+  proves. The shadcn app is built on demand and pinned; a rebuild that differs under
+  those pins is information, not noise.
+- **The theme probe is wrong in both directions and that is the point.** It reports
+  "nothing reachable" on a kit card (false — the pane owns theming) and on a stock
+  shadcn app (true — `.dark` ships with no toggle). Identical output, opposite correct
+  answers. Driving the control is the only fix; pattern-matching labels is not.
+- **The dominant defect class is placement, not content.** Six of the last nine, and
+  most of the ~50, were a correct rule sitting where the agent who must obey it never
+  reads. Same taxonomy as the first gauntlet run. Ask "is this rule reachable from the
+  prompt that needs it?" before asking whether it is right.
+- **Scenario testing cannot find seams.** Three rounds of three-fixture waves kept
+  missing contradictions between new text and distant paragraphs. One adversary reading
+  the diff against the *whole file* found 15, two critical. Run that one every time.
+- **I stated three things this session that were false**, each adopted from an agent
+  without re-deriving: "four of four signals", "the gauntlet cannot close on a kit
+  card", "the copy gate appears in no doc". Verify before writing a claim into a rule —
+  a wrong sentence in a report gets corrected next turn; in a skill it ships.
+- **`pkill -f "codex exec"` kills your own wrapper shell**, whose command line contains
+  that string. Cost three background runs. And `codex exec` in a non-TTY context blocks
+  on stdin forever unless you redirect `< /dev/null`.
+- `/codex:status` is user-invocation only. The doctrine's fresh-context fallback is the
+  live path for an agent, and it performed well.
 
 ## Next Session Kickoff
 
 1. Ask which board item Scott wants; do not assume.
-2. **The law-as-critic-axis is still the cheapest untested thing in the skill.**
-   Nothing this session touched it. A bound design system exists
-   (`securebine-design`, `USAGE.md` is the law) and no critic has been run
-   against it with the law named by path, per critic brief item 3.
-3. **Re-mine the sibling repos before anything else** — that is what produced
-   this session's entire yield, and wave 11+ will have run since.
-   `securebine-design` is mid-registry work (shadcn, fontsource) that has
-   already found two of its own instrument holes worth stealing.
+2. **Do not re-litigate the sibling-repo findings.** Both repos have them and are acting.
+3. If touching `SKILL.md`: three fixtures, then the diff-versus-whole-file adversary.
+   Skipping the second is how the last 15 got in.
 4. Read the repo's `skills/doctrine-gauntlet/SKILL.md`, not the plugin cache.
-5. Do not re-open the pure-gauntlet counters — see the Resume correction.
+5. Standing rule: everything outside `doctrine-skills` is read-only. Design deficits are
+   reported, never fixed.
