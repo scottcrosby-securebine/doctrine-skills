@@ -8,7 +8,7 @@
     {
       "name": "doctrine",
       "source": "./",
-      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing."
+      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing. The gauntlet renders and judges real pages, so that one wrapper needs Playwright; the other seven need nothing."
     }
   ]
 }

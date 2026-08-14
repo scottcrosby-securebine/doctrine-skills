@@ -239,11 +239,59 @@ The two markers that carry gate law:
   **Theme reachability** is here rather than in `[UNMEASURED]` on purpose. Both themes
   really were rendered, so nothing went unmeasured; the possible defect is that one of
   them ships to nobody, because this harness applies the theme itself. The probe reports
-  what it found — a media query, a toggle, a script, weak signals, or nothing — and no
-  probe can separate a real switch from a nav link named "Themes", so the verdict is the
-  critic's. It also matters that `[UNMEASURED]` is waivable and a floor failure is not:
-  a genuinely dead palette must not be waivable. `--single-theme` remains the honest
-  answer for a page that really ships one.
+  what it found — a `prefers-color-scheme` rule, a toggle attribute, inline code
+  referencing `data-theme`, a control whose text reads like a theme switch, weak signals, or
+  **no theme mechanism in what it could read** — and no probe can separate a real switch
+  from a nav link named "Themes", so the verdict is the critic's. It also matters that `[UNMEASURED]` is waivable
+  and a floor failure is not: a genuinely dead palette must not be waivable.
+  `--single-theme` remains the honest answer for a page that really ships one.
+
+  **"I could not look" is reported apart from "I looked and found nothing", and that
+  separation is what makes the line worth reading.** External scripts cannot be read from
+  inside the page, so the probe says how many it skipped — a clause of its own, never a
+  signal. It used to be a signal, and it cost the probe its whole informative half: the
+  test read `if (s.src || text.includes(cls))`, so *any* script carrying a `src` pushed a
+  weak signal whatever it contained, every bundled app ships several, and `--theme-class`
+  is mandatory on a Tailwind app — so the weak list was never empty and **the
+  found-nothing branch was unreachable on every real application**. A stock shadcn app
+  whose `.dark` palette is demonstrably dead code printed the same sentence as an app with
+  a working toggle. The inline half was vacuous for a second reason: a plain
+  `includes("dark")` on inline text matches a Next page's own RSC payload, where every
+  Tailwind `dark:` variant in a class attribute is serialised. It now wants the class name
+  as a **quoted token** beside something that touches the root element. The payload escapes
+  its quotes (`\"dark\"`), so the backreference finds a backslash where the closing quote
+  must be and does not match — **re-test that property whenever the regex is touched**.
+
+  **What the probe reads is executable inline code, and that is narrower and wider than
+  `document.scripts` in ways that both cost it findings.** Wider: an event-handler
+  attribute is not a script element, so a page whose entire switch was
+  `onclick="…classList.toggle('dark')"` scored nothing; handler attributes are now read
+  alongside inline scripts, and the `data-theme` scan reads the same list. Narrower: a
+  `<script type="application/json">` state payload — Astro, Nuxt and Remix ship these as a
+  matter of course — is in `document.scripts` and never executes, and one carrying an
+  ordinary serialised `colorScheme` key scored as theming code on a page with no theming
+  at all. Only empty, `module`, `text/javascript` and `application/javascript` types count.
+
+  **The weak signal has two tiers, because one tier could only see code that spells the
+  class out.** Tier one is the quoted class name beside a root-element class API, which
+  scores a hand-written no-flash bootstrap and next-themes' minified one. Tier two is
+  root-element class work — `document.documentElement` or `document.body` next to
+  `classList`/`className` — with no class literal anywhere, which is the ordinary shape of
+  every bootstrap reading its class from `localStorage`, a cookie or `matchMedia`; tier one
+  called all of those pages themeless. Tier two deliberately will not accept a bare
+  `className`: a stock Next RSC payload is full of them, and requiring the root-element
+  expression is what keeps that page quiet. Both tiers say in the message that they
+  observed co-occurrence in one text and not that anything is set, because that is all
+  they measured. **A stock shadcn app measured under `next start` scores neither tier**:
+  it serves 2 inline scripts and 7 external, and neither inline script contains a quoted
+  `"dark"` or a root-element expression. Per-fixture expectations live in
+  `fixtures/README.md`; a harness change is supposed to walk past them.
+
+  **What it still cannot see, and says so.** A class name built by concatenation, a theme
+  switch inside a bundled framework runtime, a switch applied server-side, and anything in
+  an external script — the count of unread external scripts prints for exactly this reason,
+  and the found-nothing branch is phrased as *no theme mechanism in what it could read*
+  rather than as a flat absence, because absence is not what was measured.
 
   **Target size measures the hit area, not the painted box, and only on controls a person
   can see.** Three things had to be true before the number was defensible.

@@ -200,7 +200,7 @@ yet a general rule.
 
 ---
 
-## Round 18 — a review of round 17's own diff, still running
+## Round 18 — a review of round 17's own diff
 
 Round 17 fixed about fifty findings in one round. Round 18 pointed a fresh reader at **that
 round's diff** rather than at new territory, and what it found is the class a large single-round
@@ -230,9 +230,63 @@ Three findings are worth carrying whatever else the round does:
   against the bound recorded here. The register was right and the document was wrong, which is
   the direction this file is for.
 
-**This round is not finished**, and nothing above should be read as a closed count. What is
-recorded is what the diff review found; the audit of the hub and the wrapper set is running
-separately and its findings are not in this file yet.
+Nothing above should be read as a closed count. What is recorded is what the diff review found.
+The audit of the hub and the wrapper set ran separately, and its findings are below.
+
+## Round 19 — the six remaining wrappers, and a restatement is worse than silence
+
+`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research` and
+`doctrine-write` had never been read critically. About forty-three findings, nine HIGH, all
+fixed in `d434e92`. The class that ran through most of them: **a wrapper that restates a hub
+rule locally has forked it.** Silence inherits the base rule and sends the reader to the source;
+a truncated echo reads as authoritative and stops them going. `doctrine-code` said parallel
+waves need "disjoint files or worktrees" and stopped one clause before the correction that
+matters — in the one wrapper whose verification is a screenshot. `doctrine-research`
+re-installed the "no *new* findings" test the hub had just removed. `doctrine-write`'s valve
+counted loops rather than blocking rounds, the exact failure the hub names by hand.
+
+The generalisation, which is why it is recorded here rather than in a commit message: **when a
+base rule is corrected, the fix does not propagate — the stale copy actively blocks it.** Grep
+every dependent for restatements before calling a base fix done.
+
+## The hub gained an anchor; this wrapper's critic list does not name it
+
+Round 20 hoisted **the anchor** into hub step 1 and made it *"handed to every dispatched agent
+whose job is to judge work against intent."* A critic is exactly that, and `## The critic brief`
+opens with a **closed** assembly list that never uses the word. Deliberately left alone: the
+gauntlet's equivalents are already in that list under their own names — the named target reader,
+the one job for this surface, the DNA, the brief — so nothing is missing from any prompt, and
+adding a synonym to a closed enumeration buys a reader nothing but a second name for what they
+already hold. Recorded because a closed list that omits a generally-stated obligation is the
+shape that later reads as a gap: if a future round adds an anchor line here, check first that it
+is not the fifth name for the same artifact.
+
+## A cost accepted on purpose — section-level render breadth
+
+Filed round 9, ruled round 20: **no change**. Critic brief item 1's eight configurations reach
+every step-6 section critic (the preamble's *"only the floor report differs"*), so a 5-section
+page with two retries each renders 120 configurations against a 3-round gate's 24. The filing
+read that as 5x the integrated gate; on **images read into an agent context** it is 1.25x — and
+the reason matters, because the obvious one is wrong. A gate round is *not* one 8-file set read
+three times over; that would be 24 a round, 72 across a three-round exit, and 1.67x. The blind
+pass reads **matched pairs** (The comparison), so a reference round is 16 paired images plus 8
+for the integrated critic plus 8 for the red team — 32 a round, 96 in all. On a **no-reference**
+run there are no pairs to build, so the round is 16 and the ratio is 2.5x. Every narrowing was
+priced against the reset rule: the largest defensible one (drop 768 at section scope) removes 2
+configurations from each of 15 section renders — **30 images, not the 15 that a count forgetting
+the second theme gives** — against ~96 on a single miss, since a blocking finding at step 7 costs
+the round plus two fresh clean rounds. Break-even is one in 3.2: the narrowing must be right
+three times in four merely to pay for itself, which makes it a bet rather than a cost
+optimisation. Rejected in full — including narrowing the *retries* to the width a finding named,
+which item 2 refutes directly (*"judge any fix at 360 before 1440"*) and which would also
+destroy the persisting critic's own before/after delta.
+
+**One honest cost is accepted here, and it is not the spend.** The 2560 section render buys one
+of the two defects that live above 1440, not both: growing images are visible in a single
+render, but frozen type needs the 1440-to-2560 delta the harness prints as `[JUDGE]`, and there
+is no floor report at section scope. That class surfaces at step 7 and nowhere earlier. It stays
+that way because its fix is the root font size — a page-level edit a section builder is not
+sanctioned to make.
 
 ---
 

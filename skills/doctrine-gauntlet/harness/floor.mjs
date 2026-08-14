@@ -310,21 +310,82 @@ const themeReachable = page => page.evaluate(cls => {
     }
   }
   if (document.querySelector('[data-theme-toggle], [data-theme-switch]')) return 'a toggle attribute'
-  const mentions = s => !!s && s.includes('data-theme')
-  for (const s of document.scripts) if (mentions(s.textContent)) return 'a script that sets data-theme'
+  /* EVERY PLACE INLINE CODE LIVES, AND ONLY THE CODE THAT RUNS. `document.scripts`
+     alone was wrong in both directions, and both scans below used it.
+     Too narrow: an event-handler attribute is not a script element at all, so a
+     page whose entire switch is onclick="…classList.toggle('dark')" scored
+     nothing — measured, on a constructed page with a working toggle.
+     Too wide: a <script type="application/json"> state payload IS in
+     document.scripts and never executes. Astro, Nuxt and Remix ship these as a
+     matter of course and `colorScheme` is an ordinary serialised style key, so
+     one scored as theming code on a page with no theming whatever — measured.
+     Both scans read this one list so neither can drift from the other, and the
+     data-theme scan below inherits both fixes. */
+  const runnable = t => { const m = (t || '').split(';')[0].trim().toLowerCase(); return !m || m === 'module' || m === 'text/javascript' || m === 'application/javascript' }
+  const code = []
+  for (const s of document.scripts) if (!s.src && runnable(s.type)) code.push(s.textContent || '')
+  for (const el of document.querySelectorAll('*')) for (const a of el.attributes) if (/^on[a-z]+$/.test(a.name)) code.push(a.value)
+  /* "references", not "sets": this is a substring of executable code, which is
+     evidence the attribute is spoken about here and nothing more. */
+  if (code.some(t => t.includes('data-theme'))) return 'inline code referencing data-theme'
   for (const el of document.querySelectorAll('button, a, input, select')) {
     const t = `${el.id} ${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`.toLowerCase()
     if (t.includes('dark mode') || t.includes('light mode') || /\btheme\b/.test(t)) return 'a control that looks like a theme switch'
   }
   /* Deliberately weak signals, reported as such rather than as a pass: a reset
-     carrying `color-scheme: light dark`, or a bundle merely containing the theme
-     class name, proves nothing about whether this page switches. */
+     carrying `color-scheme: light dark`, or an inline script merely containing
+     the theme class name, proves nothing about whether this page switches. */
   const weak = []
   if ((getComputedStyle(document.documentElement).colorScheme || '').includes('dark')) weak.push('a color-scheme declaration')
   if (document.querySelector('meta[name="color-scheme"]')) weak.push('a color-scheme meta')
-  if (cls) for (const s of document.scripts) if (s.src || (s.textContent || '').includes(cls)) { weak.push(`a script that may reference "${cls}"`); break }
-  if (unreadable) weak.push('a stylesheet this harness could not read (cross-origin)')
-  return weak.length ? `only weak signals: ${weak.join(', ')}` : 'nothing'
+  /* NOT A BARE SUBSTRING. `.includes(cls)` over inline text made the
+     found-nothing return below unreachable on any real application —
+     which is the whole informative half of this probe, since --theme-class is
+     mandatory on a Tailwind app so `cls` is always set. A stock Next page
+     serialises its own markup into an inline RSC payload, so every Tailwind
+     `dark:` variant in a class attribute matched — measured, 11KB of payload
+     tripping it on a page with no theme mechanism at all.
+     So ask for the class name as a QUOTED TOKEN. The payload escapes its quotes
+     (`\"dark\"`), which puts a backslash where the backreference needs the
+     closing quote, so it does not match and must keep not matching — that is the
+     one property to re-test whenever this regex is touched.
+     TWO TIERS, because one tier could only see code that spells the class out.
+     A bootstrap reading its class from localStorage, a cookie or matchMedia
+     never writes the literal — `classList.add(localStorage.getItem('t'))` is the
+     ordinary shape of everything that is not the Tailwind docs snippet — and
+     tier one called every one of those pages themeless. Tier two takes the
+     root-element class work on its own and says, in the message, that it did not
+     see a class name. Both are weak on purpose: co-occurrence in one text is not
+     execution, and neither tier proves anything is ever set. */
+  if (cls) {
+    const quoted = new RegExp(`(^|[^\\w-])(["'\`])${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2`)
+    const rootApi = /classList|className|documentElement|document\.body|colorScheme/
+    /* Deliberately tighter than rootApi: tier two has no class name to lean on,
+       so it needs an actual root-element expression. Bare `className` and `body`
+       both appear thousands of times in an RSC payload; `document.body` and
+       `documentElement` do not appear in one at all. */
+    const rootRef = /documentElement|document\.body/
+    if (code.some(t => quoted.test(t) && rootApi.test(t)))
+      weak.push(`inline code in which a quoted "${cls}" and a root-element class API appear in the same text — co-occurrence, not proof anything sets it`)
+    else if (code.some(t => rootRef.test(t) && /classList|className/.test(t)))
+      weak.push(`inline code that writes classes onto <html> or <body> with no "${cls}" literal in it — a class name read from storage, a cookie or matchMedia looks exactly like this, and so does class work that has nothing to do with theming`)
+  }
+  /* "I could not look" is not "I looked and found nothing", and it is not
+     evidence of theming either — so it is reported apart from `weak` rather
+     than inside it. Folding it in is what made the informative branch vacuous:
+     a weak signal every bundled app trips tells a critic nothing. */
+  const blind = []
+  const ext = [...document.scripts].filter(s => s.src).length
+  if (ext) blind.push(`${ext} external script(s) whose source this harness cannot read`)
+  if (unreadable) blind.push('a stylesheet this harness could not read (cross-origin)')
+  /* NOT a bare 'no theme mechanism'. That is a positive claim of absence, and
+     this probe reads inline code and readable stylesheets only — it cannot see a
+     class name built by concatenation, a framework runtime inside a bundle, or a
+     switch a server sets. A critic told "no theme mechanism" has been told
+     something the harness did not measure; the qualifier is the whole difference
+     between a finding and a false one. */
+  const found = weak.length ? `only weak signals: ${weak.join(', ')}` : 'no theme mechanism in what it could read'
+  return blind.length ? `${found}; it did not look inside ${blind.join(' or ')} — a switch living in there is invisible to this probe` : found
 }, THEME_CLASS)
 
 /* dev-server overlays are harness artifacts, not design; hide before shooting */
@@ -1017,7 +1078,11 @@ if (themes.length === 2 && !SINGLE_THEME && !FRAGMENT) {
      reads as two harnesses arguing. Tailwind emits those media queries whether
      or not the app's own theme (MUI, say) honours them. */
   handoff.push(switchDead
-    ? `theme reachability — the switch above had NO effect, so whatever this page themes by, it is not what the harness drove. The probe found ${reachedBy}, which on this evidence is not the live mechanism. Either drive the project's own switch and re-run, or if it genuinely ships one theme, say so with --single-theme.`
+    /* reachedBy goes LAST in both branches. It now ends in a clause of its own
+       when scripts went unread, so anything after it lands mid-sentence: the
+       old `found ${reachedBy}, which on this evidence…` read as "…invisible to
+       this probe, which on this evidence is not the live mechanism". */
+    ? `theme reachability — the switch above had NO effect, so whatever this page themes by, it is not what the harness drove, and on this evidence nothing the probe turned up is the live mechanism. Either drive the project's own switch and re-run, or if it genuinely ships one theme, say so with --single-theme. The probe found ${reachedBy}.`
     : `theme reachability — this harness APPLIED the theme itself, so both renders exist whether or not the page can switch. Probing the page found ${reachedBy}. Confirm a user can actually reach the second theme; if they cannot, its palette is dead code and that is a floor failure, not a note.`)
 }
 
