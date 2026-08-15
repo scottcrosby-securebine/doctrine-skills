@@ -1,4 +1,4 @@
-# State [doctrine-skills; the critic got a roll call — driven, shipped, v1.20.0 | 2026-08-15]
+# State [doctrine-skills; roll call shipped v1.20.0, and the repo got its first issue | 2026-08-15]
 
 ## Resume
 
@@ -11,7 +11,10 @@ instead of parsing prose, and a missing line is itself blocking. **Driven, not j
 one fresh-context critic ran the edited brief against a pinned fixture — all 5 pre-registered
 criteria passed, 9/9 floor lines mapped, and the run found a real defect (an honest critic
 folded two axes sharing one missing artifact; the counting rule would have filed a false
-blocking finding) — fixed before commit. Shipped as `72c2005`, v1.20.0.
+blocking finding) — fixed before commit. Shipped as `72c2005`, v1.20.0. Late in session:
+answered "does the gauntlet have ultracode?" (**no, deliberately** — the skill structures its
+own waves instead of delegating to the harness keyword) and filed the repo's **first GitHub
+issue** to track scripting the waves via the Workflow tool.
 
 ## Active Work
 
@@ -19,6 +22,7 @@ blocking finding) — fixed before commit. Shipped as `72c2005`, v1.20.0.
 |------|-------|--------|-----------|
 | **Carve-out restructure** — collapse five scattered exemptions (inherited/fragment/single-theme/stale/section-scope) into one pre-enumerated not-gradeable set. Video-derived, deliberately NOT taken; needs its own round, fresh author | — | ⏳ | `skills/doctrine-gauntlet/SKILL.md` |
 | **Red team brief has no roll call** — item 8's fix was critic-only; the red team's return (brief item 5) still sorts prose | — | ⏳ | same file, `## The red team brief` |
+| **Wire the waves to the Workflow tool** — scripted orchestration, crash-resumable, journaled. Blocked behind the carve-out restructure; filed to track, not schedule | #1 | ⏸ | `skills/doctrine-gauntlet/SKILL.md` |
 | Docket-on-GitHub-issues via stock wayfinder — parked at re-scope; needs fallback + README prereq bullet; wayfinder is `disable-model-invocation` | — | ⏸ | `skills/doctrine-gauntlet/SKILL.md` docket section |
 | Format drift, recorded not acted: validated critic invented a middle category ("Escalations / verify") between blocking and polish | — | ⏸ | scratchpad `phase2/VALIDATION-CRITERIA.md` |
 | Unread primaries: Opus 5 System Card, arXiv 2607.03048 / 2603.15401 / 2606.08878 | — | ⏸ | dossier §EXTENSIONS |
