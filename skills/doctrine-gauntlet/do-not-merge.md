@@ -929,3 +929,29 @@ incident loses it; cut SKILL.md's and a gauntlet's own new instrument ships with
 readers** — fixture-and-render for the repo editor, instrument-authoring for the orchestrator —
 so a merger finding "the same paragraph three times" has found three paragraphs that are not the
 same one, and reconciling their wording is how the reader-specific half gets planed off.
+
+**The critic's `CLEAR` / `BLOCKING` / `CANNOT JUDGE` (critic brief item 8) vs the direction
+adversary's `KILL` / `WEAKEN` / `CLEAR` (direction brief, the verdict-vocabulary paragraph).**
+Two three-word vocabularies in one file, sharing the word `CLEAR` with the same meaning in both
+— the shape a reviewer collapses on sight. They cannot merge, because **the two reviewers can
+return different things about different objects.** The adversary rules on a *direction* and its
+whole value is that it may reject the object; `KILL` says the thing cannot be built as proposed.
+The critic rules on *execution* of a direction already settled and **may not reject the object
+at all** — it shares the builder's frame because it read the same brief, which is why step 5's
+adversary exists in the first place. Give the critic a `KILL` and you have handed the object
+back to the one reviewer this skill says cannot judge it; give the adversary a `CANNOT JUDGE`
+and you have invented an abstention for a reviewer that is handed a plan rather than artifacts,
+so it has nothing to abstain for. `WEAKEN` and `BLOCKING` are not the same word twice either:
+a `WEAKEN` is a defect the direction *survives* and nothing counts it, while a `BLOCKING`
+resets the round's clean-pass counter. **The counters are the tell** — one vocabulary feeds a
+one-shot revise-and-reapprove cycle, the other feeds the exit gate — so collapsing them wires
+two different bounds to one classification.
+
+**Both are subject to the placement rule the round-15 entry above was rewritten to state, and
+the critic's is deliberately placed where that failure cannot recur.** The adversary's
+vocabulary is a paragraph that must be named into the dispatched set, and was once outside it,
+which made the loop bound inert while `do-not-merge.md` certified it fixed. The critic's sits
+**inside item 8**, and item 8 is in the numbered list the critic brief's preamble already
+assembles every prompt from — so no separate boundary claim exists to go stale. Do not
+"consistency"-refactor it out into a trailing paragraph beside the adversary's: that is not
+tidying, it is reintroducing the one defect this file has already been wrong about once.
