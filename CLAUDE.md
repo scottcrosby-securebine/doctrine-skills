@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no automated test suite. The only machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing). Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun. **That test carries a standing debt: it has not been rerun since, and the hub and all seven wrappers have been rewritten in the rounds since it last ran.** What they now say has been audited, not driven. The two find different things — an audit reads for contradiction against other text, a scenario run finds the instruction an agent cannot act on — so do not read a clean audit as coverage of this.
 
@@ -41,7 +41,9 @@ Adding, renaming, or rescoping a skill touches all of:
 
 `doctrine-gauntlet` is the only skill with bundled files: `harness/floor.mjs`
 (the technical floor its critics depend on), `floor.md` (how to drive that
-harness — flags, exit codes, render honesty), `tools.md` (Codex and Claude
+harness — flags, exit codes, render honesty), `harness/round.workflow.mjs` (one
+fused-gate round as a Workflow-tool script: structure and counters only, never a
+brief), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
 Design invocation) and `do-not-merge.md` (the pairs a reviewer must not
 collapse) and `UNAUDITED.md` (what an audit of never-examined territory found and
 what became of each finding — a status record, not a queue). The sidecars exist so
@@ -51,9 +53,14 @@ belongs in SKILL.md; if it changes how a tool is *invoked* or records a call alr
 made, it belongs in a sidecar. `do-not-merge.md` and `UNAUDITED.md` are both the
 second kind — a record of rulings already made, not a rule any agent reads at
 runtime — which is why neither is ever assembled into a prompt. `harness/floor.mjs`
-is the only code the plugin ships, and it is run as `node floor.mjs` rather than
-executed — `git ls-files -s` shows exactly one mode-100755 file in the repo, and it is
-`fixtures/shadcn.sh`. The harness's portability
+and `harness/round.workflow.mjs` are the only code the plugin ships. The floor is run as
+`node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
+which wraps its body in an async function — so `node --check` rejects its top-level `return`
+and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
+shows exactly one mode-100755 file in the repo, and it is `fixtures/shadcn.sh`. The workflow
+script carries no brief text, for the reasons and with the disclosed exceptions `workflow.md` gives, and its
+tamper test is the same three-clause law as the harness's — the fixtures ship as
+`harness/round.tamper.json` and run through the Workflow tool. The harness's portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
