@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define, plus `node tools/doc-check.mjs`. Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun. **That test carries a standing debt: it has not been rerun since, and the hub and all seven wrappers have been rewritten in the rounds since it last ran.** What they now say has been audited, not driven. The two find different things — an audit reads for contradiction against other text, a scenario run finds the instruction an agent cannot act on — so do not read a clean audit as coverage of this.
 
@@ -53,7 +53,7 @@ belongs in SKILL.md; if it changes how a tool is *invoked* or records a call alr
 made, it belongs in a sidecar. `do-not-merge.md` and `UNAUDITED.md` are both the
 second kind — a record of rulings already made, not a rule any agent reads at
 runtime — which is why neither is ever assembled into a prompt. `harness/floor.mjs`
-and `harness/round.workflow.mjs` are the only code the plugin ships. The floor is run as
+and `harness/round.workflow.mjs` are the only code any skill ships; the repo also tracks `tools/doc-check.mjs` and `fixtures/shadcn.sh`, which no skill loads. The floor is run as
 `node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
 which wraps its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
@@ -130,7 +130,39 @@ instrument that creates the state it measures will otherwise pass a dead palette
 exactly like a working one. Keep the probe honest if you touch theming — it is
 the one check whose absence is invisible in the output.
 
+**The prose has a gate now, and it exists because it did not.** `tools/doc-check.mjs` reads
+`doctrine-gauntlet`'s documents against its fixture file and fails on a document naming a fixture
+that no longer exists, on three or more fixture names listed inside one sentence, on the same long claim
+appearing in two places, and on a fixture the documents' own derivation rule cannot classify. **Its
+header states what it does not catch, and that list is longer than what it does** — read it before
+trusting a clean run. It sits outside `skills/`, so no skill loads it and the two harness files are
+still the only code any skill ships; it is tracked and would be distributed with the repo like
+`fixtures/shadcn.sh`. Run it with `--selftest` for its tamper test, whose third clause asserts the
+synthetic inputs really carry their defects without calling the checker at all.
+
+None of its rules is arbitrary — each is a failure that actually shipped here. A review round
+found a document pointing at an enumeration deleted in the same batch. Review rounds repeatedly found a roster
+that had gone stale because a fixture was added elsewhere; a roster rots whenever any
+*other* fixture changes, while a claim about one named fixture rots only when that fixture does,
+which is why the check counts names per **sentence** and not per paragraph. And a rule copied
+into seven fixture notes forked from the original the first time the original was corrected —
+the copies were found by five expensive review rounds and then, after a fix that replaced one
+identical sentence with another identical sentence, by this script in under a second. **Prefer
+stating a convention once and pointing at it.** Silence inherits a correction; an echo blocks it.
+
 **Capability and accuracy outrank size.** A missing rule costs a defect in shipped work; a present one costs tokens, and those are not comparable prices. Don't compress for its own sake, don't report length as a concern, and don't cut a rule because a file feels long. The test is whether a rule **fires**, and whether it reaches the prompt of the agent who must obey it — a rule nobody has tripped, in a prompt nobody assembles, is the thing to cut. Sidecars are still right when they change *who loads what*, and wrong when they exist to make a number smaller.
+
+## Two tracked things that are not the plugin
+
+`SESSION_MEMORY.md` at the root is **session state, not documentation**: a working record of where
+the last session stopped, what it decided and what it left open, rewritten wholesale rather than
+appended. Commits touching only that file are backups, not changes to the plugin. Read it to
+resume; never cite it as law, and never let a claim in it outrank the code.
+
+`docs/research/` holds dated dossiers from investigations whose results shaped the skills — one of
+them a **negative** result, an adoption test that rejected all four rules it proposed. They are
+historical records: correct as of their date, never updated to match later code, and not a place
+to look for how anything currently works. Treat a claim in one as evidence about that day.
 
 ## Conventions
 

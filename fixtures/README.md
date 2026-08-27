@@ -39,7 +39,7 @@ need Playwright and axe resolvable — see `floor.md`; on a host where they are 
 installed globally, prefix with `NODE_PATH=$(npm root -g)`.
 
 **Case 1 — `bare.html`.** Copy it out of this repo before a gauntlet run: it lives
-beside a `CLAUDE.md` that law discovery will find, and "no repo, no package.json" is the
+under a repo whose root `CLAUDE.md` law discovery finds by walking up, and "no repo, no package.json" is the
 whole property being tested. Serve the copy and point the harness at it.
 
 ```bash

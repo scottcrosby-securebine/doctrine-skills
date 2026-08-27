@@ -391,7 +391,7 @@ Exit codes: `0` clean · `1` failing configurations · `2` could not run ·
 
 ## Changing it
 
-**Every new check ships with a tamper test, both halves.** Break what it measures and
+**Every new check ships with a tamper test. Two halves here, and a third clause below.** Break what it measures and
 confirm it trips; then run it against a known-good artifact and confirm it stays quiet. A
 check that silently measures nothing prints exactly what a passing check prints — a
 sibling repo's contrast gate keyed pair discovery on `endswith('-foreground')`, which
