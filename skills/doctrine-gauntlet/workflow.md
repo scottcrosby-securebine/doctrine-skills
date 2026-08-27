@@ -165,7 +165,7 @@ arrived is a fact about the run a user may rule on.
 
 Write the returned counters and every roll call to the ledger's run-state block, per step
 7, and with them the per-finding lines doctrine step 5 requires: the script returns
-`blocking[]` but never the artifact a finding landed in, its fresh/fallout label, what
+`blocking[]` but never the artifact a finding landed in, what the class question found, what
 cleared it, or whether a check was built for its class, because all four are round history
 and the script carries none. Without them the valve stop above has nothing to diagnose from. Run the blast-radius check on any shared token or stylesheet the round touched — the
 script does not render sibling pages. The script resets `cleanPasses` on a round that was not clean and on a round that
