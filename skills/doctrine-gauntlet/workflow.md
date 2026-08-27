@@ -164,7 +164,8 @@ arrived is a fact about the run a user may rule on.
 ## What stays yours between rounds
 
 Write the returned counters and every roll call to the ledger's run-state block, per step
-7, and with them the per-finding lines doctrine step 5 requires: the script returns
+7, and with them each wave this round dispatched — seat, what it was handed, its return or
+that it is still out — and the per-finding lines doctrine step 5 requires: the script returns
 `blocking[]` but never the artifact a finding landed in, what the class question found, what
 cleared it, or whether a check was built for its class, because all four are round history
 and the script carries none. Without them the valve stop above has nothing to diagnose from. Run the blast-radius check on any shared token or stylesheet the round touched — the

@@ -20,7 +20,10 @@ the run finished, not that a file landed — it can answer in prose and exit cle
 time, including a regeneration mid-loop:
 
 1. **Read the exit code.** Non-zero, or a sandbox denial anywhere in the output, means
-   nothing was written where you asked: fix the `-C` root or the path and re-run. Never
+   nothing was written where you asked: fix the `-C` root or the path and re-run, and
+   once more if that fails — the doctrine's bound, two retries after the original. A
+   third failure is the seat failing: this asset takes the native-art fallback the skill
+   names, recorded as such. Never
    re-report the previous round's file as this round's asset.
 2. **`ls -l` the exact path you named.** No file there, or a zero-length one, is a failed
    run whatever the transcript said.
