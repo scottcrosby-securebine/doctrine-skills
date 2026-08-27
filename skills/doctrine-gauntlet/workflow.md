@@ -98,7 +98,7 @@ each, readable without interpretation; `recorded` is every reason that would hav
 and was ruled inherited or waived, plus the script's own informational lines — the
 blind-pass skip and the ruling flags, each labelled not a failure — so nothing silent ever
 passes. `exit` is the fused gate's two consecutive clean
-passes. `valve` is the four-round stop: put it to the user. `deadlocked` is a section whose
+passes. `valve` is the four-round stop: put it to the user as doctrine step 5's diagnosis, never as a bare count. `deadlocked` is a section whose
 critic rejected it three times: the round returns before any gate runs, because the
 counters never see section loops and the user rules. A dead builder or critic returns the
 same way — that section never passed, and the gate begins only after every section does —
@@ -164,7 +164,10 @@ arrived is a fact about the run a user may rule on.
 ## What stays yours between rounds
 
 Write the returned counters and every roll call to the ledger's run-state block, per step
-7. Run the blast-radius check on any shared token or stylesheet the round touched — the
+7, and with them the per-finding lines doctrine step 5 requires: the script returns
+`blocking[]` but never the artifact a finding landed in, its fresh/fallout label, what
+cleared it, or whether a check was built for its class, because all four are round history
+and the script carries none. Without them the valve stop above has nothing to diagnose from. Run the blast-radius check on any shared token or stylesheet the round touched — the
 script does not render sibling pages. The script resets `cleanPasses` on a round that was not clean and on a round that
 rebuilt any section; reset it yourself for an accepted diff between rounds —
 simplification included — and for a broken instrument voiding a round it passed, both of
