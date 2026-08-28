@@ -96,7 +96,28 @@ Each rule replaced a specific failure rather than a theory about good process. T
 
 `doctrine-gauntlet` renders every page at four widths up to 2560px. Seven earlier review rounds passed a page whose navigation rendered at 13px at every resolution up to 4K, and no number of rounds below a width can see a defect that lives above it.
 
-Its harness prints `TECHNICAL FLOOR: PASS` only when every check actually ran. If one could not, it prints `NOT CLEAN`, names what went unmeasured, and exits `3` rather than `0`, so no caller can read "nothing failed" as "it passed".
+Its harness prints `TECHNICAL FLOOR: PASS` only when every check actually ran. If one could not, it names what went unmeasured and exits `3` rather than `0`, so no caller can read "nothing failed" as "it passed". Run against [`fixtures/bare.html`](fixtures/bare.html), eight configurations pass and it still refuses to call itself clean:
+
+```text
+[dark 1440px] ok  height=427
+[light 1440px] ok  height=427
+[reduced-motion dark] ok — reduced motion removed nothing the ordinary render shows
+
+[UNMEASURED] theme switch had no effect at 360, 768, 1440, 2560px — the dark and
+light renders are the same theme.
+
+[JUDGE] theme reachability — the switch above had NO effect, so whatever this page
+themes by, it is not what the harness drove.
+
+[MEASURED] file:///…/fixtures/bare.html
+  title: Fen Ridge Bindery — repairs and rebinding
+  h1:    Fen Ridge Bindery   (292 chars of text)
+
+=== TECHNICAL FLOOR: NOT CLEAN — nothing failed, but 1 item(s) went unmeasured ===
+Unmeasured is not clean. Report it; the user waives it or the run stops.
+```
+
+Trimmed to one width; the run covers four in both themes. That page has no theming to drive, so the theme line is correct rather than a page defect, and the harness cannot tell that apart from a site whose dark mode is broken. So it hands the question to a person instead of deciding it. `[MEASURED]` prints because two runs once scored a clean floor against a different page than the one intended.
 
 That is also the limit of the evidence. These rules came out of real work, but the failures behind them are ones the author hit. There is no third-party benchmark.
 
@@ -107,8 +128,11 @@ That is also the limit of the evidence. These rules came out of real work, but t
 One skill needs a browser: `doctrine-gauntlet` judges rendered pages, and without one its harness refuses to run rather than reporting a pass.
 
 ```text
-npm i -D playwright-core axe-core && npx playwright install chromium
+npm i -D playwright-core axe-core
+node node_modules/playwright-core/cli.js install chromium
 ```
+
+Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
 Everything else is optional and improves one skill or another. Each entry below says what happens when it is missing.
 

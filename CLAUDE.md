@@ -21,6 +21,20 @@ python3 -m json.tool .claude-plugin/plugin.json       # after editing either man
 python3 -m json.tool .claude-plugin/marketplace.json
 ```
 
+To run the floor against `fixtures/` **from this repo**, a browser is needed here. The install is
+deliberately untracked — `node_modules/`, `package.json` and `package-lock.json` are all in
+`.gitignore`, because a tracked `package.json` would ship to every installer and contradict this
+repo's "pure markdown, no build step" shape. The two commands:
+
+```
+npm i -D playwright-core axe-core
+node node_modules/playwright-core/cli.js install chromium
+```
+
+**The second is not `npx playwright install`.** That belongs to the full `playwright` package and
+refuses when only `playwright-core` is present, pointing you at `@playwright/test`. The README
+carried the wrong command from the day it was written until 2026-08-29, when running it found out.
+
 `node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme]
 [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]` — run from the **target project**, not from
 here, so it resolves that project's Playwright and axe. It rejects an unknown flag rather than
