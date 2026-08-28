@@ -30,7 +30,13 @@ Seven rules, applied to every job.
 
 ## What a run looks like
 
-You ask for an audit of the payments module.
+You type something like this:
+
+```text
+audit the payments module for bugs with the doctrine
+```
+
+Then:
 
 1. It asks two or three questions first. What is in scope. Whether the legacy adapter counts. What you mean by "bug." It will not guess when the answer changes the direction of the work.
 2. Several agents read different parts of the module at once.
@@ -165,6 +171,19 @@ Most of this is prose, and prose has no suite to run. Four things stand in.
 - **[`fixtures/`](fixtures/)** is a standing regression suite for `doctrine-gauntlet`: three generality cases, each proving something the other two cannot.
 - **The harness code** carries manual gates, rerun by hand after any change: a syntax gate and three-clause tamper fixtures, defined in [`skills/doctrine-gauntlet/workflow.md`](skills/doctrine-gauntlet/workflow.md).
 - **The documents have a gate too.** `node tools/doc-check.mjs` reads every skill's markdown and fails on a stale fixture reference, a roster of fixture names in one sentence, a claim restated in two places, an unclassifiable fixture, or a citation that no longer resolves. It states its own blind spots in its header, and no skill loads it.
+
+Here is that last one catching a real defect. The same sentence was added to two skills, which is an unversioned fork: correcting one can no longer reach the other.
+
+```text
+$ node tools/doc-check.mjs
+echo: the same 23-word claim appears in 2 places (doctrine-audit/SKILL.md; doctrine-docs/SKILL.md) — "the critic must be handed the artifact and never the filename it lives…"
+
+1 finding(s)
+$ echo $?
+1
+```
+
+With the duplicate removed it prints `0 finding(s)` and exits `0`.
 
 `doctrine-gauntlet` also cites incidents from real engagements, deliberately anonymized. No client, product, person or repository is named. They are mnemonics for the rule beside them, not citations you can follow.
 
