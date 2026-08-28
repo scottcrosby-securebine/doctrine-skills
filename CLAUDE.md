@@ -4,11 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. `node tools/doc-check.mjs` is a separate gate over every skill's prose, not part of that harness. Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`, plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. `node tools/doc-check.mjs` is a separate gate over every skill's prose, not part of that harness. Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun. **That test carries a standing debt.** The hub's step 5 was driven once, on 2026-08-27, by four fresh-context agents each executing a phase (docs, code, debug, gauntlet) on a synthetic project against `9a96069`; that run found three defects fifteen reading rounds had missed, and the two rewrites of step 5 that followed it have been read, not driven. **The seven wrappers have not been driven since the original validation, and all seven have been rewritten since.** What they now say has been audited, not driven. The two find different things — an audit reads for contradiction against other text, a scenario run finds the instruction an agent cannot act on — so do not read a clean audit as coverage of this.
 
 **One standing regression suite exists, and it is manual: `fixtures/`.** Three generality cases — `bare.html` (no design system, no repo, no package.json), `fixtures/shadcn.sh` (a recipe that builds a stock Next + shadcn install on demand; the app is deliberately not vendored, so a rebuild resolves fresh — `fixtures/README.md` records what that recipe actually holds still and what it lets float, which is what decides whether a rebuild's diff is signal or weather), and a real bound system — exist because `doctrine-gauntlet` grew up against one design system, which is how a skill acquires rules that only make sense for that system without anyone noticing. Run a gauntlet or harness change against all three; each proves something the other two cannot, and `fixtures/README.md` says what. The sharpest case is the theme probe, and the lesson is about the probe, not about any line it currently prints: the same probe output is a false alarm on one fixture and a true defect on another, because what decides it is who owns theming *outside* the specimen — which is exactly what the probe cannot see. One fixture can therefore never tell you which you are looking at. Don't record the probe's current wording here; it moves whenever the harness does, and per-fixture expectations belong in `fixtures/README.md` where a harness change is forced to walk past them.
+
+## Commands
+
+Every gate is run by hand. Each invocation is stated here once, or pointed at where it is stated once.
+
+```
+node tools/doc-check.mjs              # prose gate over every .md under skills/; exit 0 clean, 1 on any finding
+node tools/doc-check.mjs --selftest   # its three-clause tamper test
+python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
+python3 -m json.tool .claude-plugin/marketplace.json
+```
+
+`node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both] [--fragment] [--single-theme]
+[--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]` — run from the **target project**, not from
+here, so it resolves that project's Playwright and axe. It rejects an unknown flag rather than
+ignoring one. `floor.md` is the manual.
+
+The round script's syntax gate is **not** `node --check` (see "The one skill with code in it" for
+why); the one-liner is written down in `skills/doctrine-gauntlet/workflow.md` and is deliberately
+not copied here, because a copy forks the first time the original is corrected. Its tamper fixtures
+(`harness/round.tamper.json`) run through the Workflow tool, per the same file.
+
+There is no single command that runs all of these, and there is no CI that will run them for you.
 
 ## Architecture
 
@@ -22,9 +45,9 @@ Skills were validated by running fresh-context agents through each wrapper again
 
 **Every external reference needs a fallback.** Any skill a wrapper invokes must have a graceful-degradation path, either in the doctrine skill's Fallbacks table or stated inline in the wrapper. A reference with no fallback is a bug.
 
-**Gate semantics are load-bearing.** The two-clean-pass exit gate, the blocking/non-blocking split that defines a "finding" (blocking = the deliverable is wrong or unfinished without a change to it; non-blocking improvements, style nitpicks declined with a reason, findings the user rules closed, and red-team claims verified false from source don't reset the counter), the four-loop escalation valve, the five terminal states a phase can end in (only one of them clean; *Unable* is the one where resume is false), the class question asked of every blocking finding with its fix-the-class rule (deliberately **not** a label naming the cause: causation is usually unprovable and a guessed label gets counted as a fact by the diagnosis), the build-the-check-first rule, the diagnostic form of the valve's escalation, which leads with ship risk and only then explains the loop, and the nine invariants from the 2026-08-28 three-session field audit (a pass certified against one frozen revision, only a post-firing ruling re-arms the valve, seat deadlines with liveness read from the job's own record, simplification before the certifying passes, non-mutating reviewers, the pre-delivery gate statement, the record authoritative on resume, the deleted no-path-resolves rationale, the placeholder red flag — issue #15, each one a failure observed in production transcripts) are deliberate design (see README's posture step 5 and Design notes) — don't loosen them casually when editing skills. The terminal states, the class question and the diagnostic escalation were added after a six-round run in this repo whose rounds 5 and 6 found no code defect and kept finding prose the earlier rounds' own fixes had made stale: the gate was right to count each one, and wrong only in that nothing cheaper than a review round could see them. The class question shipped first as a fresh/fallout *label*, in `9a96069`, and was cut back to a question the same day, because a cross-model review pointed out that it made the orchestrator assert a cause it could rarely show. **Two more came from a driven 13-round run on 2026-08-28** (an internal tracker issue Phase 1, a prose-heavy two-repo deliverable): the pass after a repair is pointed at the repair, and the valve's diagnosis says whether the exit condition is reachable at all and may propose a narrowed blocking definition for the user to rule on. Both are additive and neither loosens the gate: the first adds a target to a pass that was already running, the second adds a question to a diagnosis and a proposal the *user* rules on. The evidence for the first is that eight of that run's thirteen rounds found their worst blocking finding inside the previous round's fix. The evidence for the second is that the run reached round 13 without one clean pass, not because the artifact was bad but because a false claim is blocking by definition and three adversarial seats over several hundred lines of prose will find one every round; the findings fell from state-loss defects to comment accuracy while the counter never moved. That run is also the first time the hub's own step 5 was driven end to end rather than read, which was this repo's top-ranked next move.
+**Gate semantics are load-bearing.** The two-clean-pass exit gate, the blocking/non-blocking split that defines a "finding" (blocking = the deliverable is wrong or unfinished without a change to it; non-blocking improvements, style nitpicks declined with a reason, findings the user rules closed, and red-team claims verified false from source don't reset the counter), the four-loop escalation valve, the five terminal states a phase can end in (only one of them clean; *Unable* is the one where resume is false), the class question asked of every blocking finding with its fix-the-class rule (deliberately **not** a label naming the cause: causation is usually unprovable and a guessed label gets counted as a fact by the diagnosis), the build-the-check-first rule, the diagnostic form of the valve's escalation, which leads with ship risk and only then explains the loop, and the nine invariants from the 2026-08-28 three-session field audit (a pass certified against one frozen revision, only a post-firing ruling re-arms the valve, seat deadlines with liveness read from the job's own record, simplification before the certifying passes, non-mutating reviewers, the pre-delivery gate statement, the record authoritative on resume, the deleted no-path-resolves rationale, the placeholder red flag — issue #15, each one a failure observed in production transcripts) are deliberate design (see README's posture step 5 and Design notes) — don't loosen them casually when editing skills. The terminal states, the class question and the diagnostic escalation were added after a six-round run in this repo whose rounds 5 and 6 found no code defect and kept finding prose the earlier rounds' own fixes had made stale: the gate was right to count each one, and wrong only in that nothing cheaper than a review round could see them. The class question shipped first as a fresh/fallout *label*, in `9a96069`, and was cut back to a question the same day, because a cross-model review pointed out that it made the orchestrator assert a cause it could rarely show. **Two more came from a driven 13-round run on 2026-08-28** (a prose-heavy two-repo deliverable): the pass after a repair is pointed at the repair, and the valve's diagnosis says whether the exit condition is reachable at all and may propose a narrowed blocking definition for the user to rule on. Both are additive and neither loosens the gate: the first adds a target to a pass that was already running, the second adds a question to a diagnosis and a proposal the *user* rules on. The evidence for the first is that eight of that run's thirteen rounds found their worst blocking finding inside the previous round's fix. The evidence for the second is that the run reached round 13 without one clean pass, not because the artifact was bad but because a false claim is blocking by definition and three adversarial seats over several hundred lines of prose will find one every round; the findings fell from state-loss defects to comment accuracy while the counter never moved. That run is also the first time the hub's own step 5 was driven end to end rather than read, which was this repo's top-ranked next move.
 
-**Some rules only look redundant.** `doctrine-gauntlet` records a running list of pairs that read as the same rule stated twice and are not — each survives because a run can comply with one and violate the other, and several exist because the two halves reach two different agents' prompts. They are recorded with their distinctions in `skills/doctrine-gauntlet/do-not-merge.md`, which grows every review round and is **not exhaustive**. **Do not write a count of them into this file**: it said "ten" until an audit found roughly forty, and the list is not cleanly countable anyway — some entries defend three sites at once and some are continuations of the entry above, so any number here is a defect waiting to be cited as fact. Read it before proposing a merge there; re-proposing a listed pair isn't a finding unless you can defeat the stated distinction, and an unlisted pair still needs the same argument.
+**Some rules only look redundant.** `doctrine-gauntlet` records a running list of pairs that read as the same rule stated twice and are not — each survives because a run can comply with one and violate the other, and several exist because the two halves reach two different agents' prompts. The register that recorded them with their distinctions was removed from the repo on 2026-08-29 and is recoverable from history before that date. **Do not write a count of them into this file**: it said "ten" until an audit found roughly forty, and any number here is a defect waiting to be cited as fact. Before proposing that two rules there are one, make the argument yourself against the current text: show a run that can comply with one and violate the other, and check whether the two halves reach two different agents' prompts, which is why several of them exist.
 
 ## Files that must stay in sync
 
@@ -45,15 +68,14 @@ Adding, renaming, or rescoping a skill touches all of:
 harness — flags, exit codes, render honesty), `harness/round.workflow.mjs` (one
 fused-gate round as a Workflow-tool script: structure and counters only, never a
 brief), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
-Design invocation) and `do-not-merge.md` (the pairs a reviewer must not
-collapse) and `UNAUDITED.md` (what an audit of never-examined territory found and
-what became of each finding — a status record, not a queue). The sidecars exist so
+Design invocation). The sidecars exist so
 SKILL.md carries decision content and gate law while operating manuals and review
 history load on demand. The split rule: if it changes what an agent *decides*, it
 belongs in SKILL.md; if it changes how a tool is *invoked* or records a call already
-made, it belongs in a sidecar. `do-not-merge.md` and `UNAUDITED.md` are both the
-second kind — a record of rulings already made, not a rule any agent reads at
-runtime — which is why neither is ever assembled into a prompt. `harness/floor.mjs`
+made, it belongs in a sidecar. A third kind existed and no longer ships: a record
+of rulings already made, read by a maintainer and never assembled into a prompt.
+Two of those were removed on 2026-08-29 because this repo is used by people other
+than its author and internal review history is not theirs to download. `harness/floor.mjs`
 and `harness/round.workflow.mjs` are the only code any skill ships; the repo also tracks `tools/doc-check.mjs` and `fixtures/shadcn.sh`, which no skill loads. The floor is run as
 `node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
 which wraps its body in an async function — so `node --check` rejects its top-level `return`
@@ -168,10 +190,10 @@ history, so a claim that the repo has never carried session state is wrong; what
 it stops being distributed, and that a fresh clone starts with no memory file at all rather than
 with another machine's.
 
-`docs/research/` holds dated dossiers from investigations whose results shaped the skills — one of
-them a **negative** result, an adoption test that rejected all four rules it proposed. They are
-historical records: correct as of their date, never updated to match later code, and not a place
-to look for how anything currently works. Treat a claim in one as evidence about that day.
+`docs/research/` held dated dossiers from investigations whose results shaped the skills, one of
+them a negative result that rejected all four rules it proposed. It was removed on 2026-08-29 for
+the same reason and is recoverable from history. Nothing in the repo depends on it: a dossier was
+always evidence about the day it was written, never a description of how anything currently works.
 
 ## Conventions
 
