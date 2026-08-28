@@ -157,12 +157,16 @@ stating a convention once and pointing at it.** Silence inherits a correction; a
 
 **Capability and accuracy outrank size.** A missing rule costs a defect in shipped work; a present one costs tokens, and those are not comparable prices. Don't compress for its own sake, don't report length as a concern, and don't cut a rule because a file feels long. The test is whether a rule **fires**, and whether it reaches the prompt of the agent who must obey it — a rule nobody has tripped, in a prompt nobody assembles, is the thing to cut. Sidecars are still right when they change *who loads what*, and wrong when they exist to make a number smaller.
 
-## Two tracked things that are not the plugin
+## Session state, and one tracked thing that is not the plugin
 
-`SESSION_MEMORY.md` at the root is **session state, not documentation**: a working record of where
-the last session stopped, what it decided and what it left open, rewritten wholesale rather than
-appended. Commits touching only that file are backups, not changes to the plugin. Read it to
-resume; never cite it as law, and never let a claim in it outrank the code.
+`SESSION_MEMORY.md` at the root is **session state, not documentation, and it is untracked**: a
+working record of where the last session stopped, what it decided and what it left open, rewritten
+wholesale rather than appended. It is in `.gitignore`, so it is local to this machine and does not
+ship to anyone installing the plugin. Read it to resume; never cite it as law, and never let a
+claim in it outrank the code. **It was tracked until 2026-08-28** and 34 commits of it remain in
+history, so a claim that the repo has never carried session state is wrong; what changed is that
+it stops being distributed, and that a fresh clone starts with no memory file at all rather than
+with another machine's.
 
 `docs/research/` holds dated dossiers from investigations whose results shaped the skills — one of
 them a **negative** result, an adoption test that rejected all four rules it proposed. They are
