@@ -245,15 +245,15 @@ const comparable = (t) => {
 // A bullet is its own sentence. Without the list-marker boundaries a three-item list reads as
 // one sentence and trips the roster rule, which is a false positive in a gate.
 //
-// The five ways a sentence can end, named rather than left as one regex to decode. Order does not
-// matter to the alternation; it is the boundaries themselves that are the rule.
-const SENTENCE_BOUNDARY = new RegExp([
-  '(?<=[.!?][*_"\')\\]]*)\\s+',                            // terminal punctuation, trailing quotes and emphasis included
-  '\\n\\n+',                                                 // a blank line
-  '\\n(?=\\s*[-*+]\\s)',                                     // the next bullet
-  '\\n(?=\\s*\\d+[.)]\\s)',                                  // the next numbered item
-  '\\n(?=(?:[ \\t]*(?:>|[-*+][ \\t]|\\d+[.)][ \\t]))*[ \\t]*\\|)', // the next table row, however deeply nested in quotes or lists
-].join('|'))
+// The five ways a sentence can end, in the order the alternation tries them:
+//   1. terminal punctuation, with trailing quotes and emphasis pulled along
+//   2. a blank line
+//   3. the next bullet
+//   4. the next numbered item
+//   5. the next table row, however deeply nested in quotes or lists
+// Written as one literal rather than a joined array of commented parts: a literal is checked by the
+// parser on every run, where a constructed pattern is checked by nothing here.
+const SENTENCE_BOUNDARY = /(?<=[.!?][*_"')\]]*)\s+|\n\n+|\n(?=\s*[-*+]\s)|\n(?=\s*\d+[.)]\s)|\n(?=(?:[ \t]*(?:>|[-*+][ \t]|\d+[.)][ \t]))*[ \t]*\|)/
 
 /** Splits prose into sentence-like units. Two checks count against these, the roster/dangling pass
     and the echo pass; derivation reads fixture objects and the anchor pass scans whole prose. */
@@ -278,7 +278,7 @@ function buildCorpus(keys, tamper, docs) {
   }))
   const sources = [...docs, ...noted]
   if (tamper._readme) sources.push({ name: 'round.tamper.json → _readme', text: tamper._readme })
-  return { keySet: new Set(keys), sources }
+  return sources
 }
 
 /** The set of source names that name at least one real fixture, and are therefore documents *about*
@@ -306,7 +306,8 @@ function checkDerivation(keys, tamper) {
     document carrying one of each reports them interleaved. Splitting these into two passes would
     reorder real findings, and no clause below pins that, so this comment is the only thing keeping
     it. */
-function checkFixtureReferences(sources, keySet, aboutFixtures) {
+function checkFixtureReferences(sources, keySet) {
+  const aboutFixtures = documentsAboutFixtures(sources, keySet)
   const findings = []
   for (const src of sources) {
     for (const s of sentences(prose(src.text))) {
@@ -398,10 +399,13 @@ function checkEchoes(sources) {
       placesByClaim.get(claim).push(src.name)
     }
   }
-  return [...placesByClaim]
-    .filter(([, where]) => where.length > 1)
-    .map(([claim, where]) =>
-      `echo: the same ${claim.split(' ').length}-word claim appears in ${where.length} places (${where.join('; ')}) — "${claim.slice(0, 70)}…"`)
+  const findings = []
+  for (const [claim, where] of placesByClaim) {
+    if (where.length > 1) {
+      findings.push(`echo: the same ${claim.split(' ').length}-word claim appears in ${where.length} places (${where.join('; ')}) — "${claim.slice(0, 70)}…"`)
+    }
+  }
+  return findings
 }
 
 // The gate itself.
@@ -412,16 +416,12 @@ function checkEchoes(sources) {
     of them can observe an ordering at all. */
 function check({ tamper, docs }) {
   const keys = fixtureKeys(tamper)
-  // Derivation runs first because it reads each fixture's `expect`, and before this function was
-  // split that read happened before anything read `_note`. The only difference anyone found was the
-  // message of the exception thrown by a null fixture entry, which `JSON.parse` cannot produce. No
-  // clause pins this order.
+  // Derivation first, which is the order the reads happened in before this was split up.
   const derivation = checkDerivation(keys, tamper)
-  const { keySet, sources } = buildCorpus(keys, tamper, docs)
-  const aboutFixtures = documentsAboutFixtures(sources, keySet)
+  const sources = buildCorpus(keys, tamper, docs)
   return [
     ...derivation,
-    ...checkFixtureReferences(sources, keySet, aboutFixtures),
+    ...checkFixtureReferences(sources, new Set(keys)),
     ...checkAnchors(sources),
     ...checkEchoes(sources),
   ]
@@ -447,7 +447,7 @@ if (process.argv.includes('--selftest')) {
     console.error('doc-check: tools/doc-check.selftest.mjs must sit beside this file. No clause ran.')
     process.exit(2)
   })
-  process.exit(sidecar.runSelftest({ check, sentences, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }))
+  process.exit(sidecar.runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }))
 }
 
 const findings = check(loadRepo())

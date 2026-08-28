@@ -17,7 +17,7 @@
 // Run it through the checker, never directly:  node tools/doc-check.mjs --selftest
 
 /** Runs every clause and reports each one. Returns the process exit code: 0 all passed, 1 otherwise. */
-export function runSelftest({ check, sentences, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) {
+export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) {
   // Three clauses, per CLAUDE.md. The fixtures are synthetic and inline so the test never
   // depends on the repo's current prose, which is the thing under review.
   const base = {
@@ -504,8 +504,8 @@ export function runSelftest({ check, sentences, CUT, ECHO_MIN_WORDS, CITATION_MI
     !keysOf.includes('delta-four') && danglingDoc.includes('`delta-four`') && danglingDoc.includes('`alpha-one`'),
     `keys=${keysOf.join(',')}`)
   clause('clause 3b — the roster sentence really names three keys, counted without the check',
-    countKeys(rosterDoc) === 3 && sentences(rosterDoc).length === 1,
-    `named=${countKeys(rosterDoc)} sentences=${sentences(rosterDoc).length}`)
+    countKeys(rosterDoc) === 3 && rosterDoc.split('. ').length === 1,
+    `named=${countKeys(rosterDoc)} sentence-splits=${rosterDoc.split('. ').length}`)
   clause('clause 3c — the two notes really are byte-identical and long enough to qualify',
     echoed['alpha-one']._note === echoed['beta-two']._note && line.split(' ').length >= ECHO_MIN_WORDS,
     `identical=${echoed['alpha-one']._note === echoed['beta-two']._note} words=${line.split(' ').length}`)
