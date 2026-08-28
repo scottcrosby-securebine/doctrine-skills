@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define, plus `node tools/doc-check.mjs`. Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step and no CI. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json` (check with `python3 -m json.tool <file>` after editing), plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. `node tools/doc-check.mjs` is a separate gate over every skill's prose, not part of that harness. Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun. **That test carries a standing debt.** The hub's step 5 was driven once, on 2026-08-27, by four fresh-context agents each executing a phase (docs, code, debug, gauntlet) on a synthetic project against `9a96069`; that run found three defects fifteen reading rounds had missed, and the two rewrites of step 5 that followed it have been read, not driven. **The seven wrappers have not been driven since the original validation, and all seven have been rewritten since.** What they now say has been audited, not driven. The two find different things — an audit reads for contradiction against other text, a scenario run finds the instruction an agent cannot act on — so do not read a clean audit as coverage of this.
 
@@ -34,6 +34,7 @@ Adding, renaming, or rescoping a skill touches all of:
 - Every count in `README.md`, not just the obvious one: the skill table heading, the wrapper count in the `doctrine` row, **and the install line further down**. Grep the file for the old number rather than trusting this bullet to have listed every site.
 - The wrapper list in `skills/doctrine/SKILL.md`'s intro
 - Descriptions in `.claude-plugin/plugin.json` and `marketplace.json`
+- `tools/doc-check.mjs`, whose corpus is every `.md` under `skills/`. A new skill enters that corpus the moment it exists, so run it; its header is a contract and a claim in it that a change makes false is a defect like any other.
 - **This file.** `CLAUDE.md` states the skill count and the wrapper count in more than one place, and it is the only file no other file's checklist points at — grep it for the old numbers. This is not hypothetical: the round-18 change to the definition of a "finding" was synced into `README.md` and missed here, and the commit that fixed it says so.
 - If the new wrapper brings a new external dependency: **a fallback, and a Prerequisites bullet in `README.md`.** The fallback goes wherever the law above allows — a row in the Fallbacks table in `skills/doctrine/SKILL.md`, *or* stated inline in the wrapper; four of the current prerequisites take the inline form and are correct, so a checklist demanding a table row would be failed by this repo on the day it was written. The README bullet has no such alternative: Prerequisites is the only list a user reads before installing, and a dependency missing from it is invisible.
 
@@ -130,10 +131,14 @@ instrument that creates the state it measures will otherwise pass a dead palette
 exactly like a working one. Keep the probe honest if you touch theming — it is
 the one check whose absence is invisible in the output.
 
-**The prose has a gate now, and it exists because it did not.** `tools/doc-check.mjs` reads
-`doctrine-gauntlet`'s documents against its fixture file and fails on a document naming a fixture
-that no longer exists, on three or more fixture names listed inside one sentence, on the same long claim
-appearing in two places, and on a fixture the documents' own derivation rule cannot classify. **Its
+**The prose has a gate now, and it exists because it did not.** `tools/doc-check.mjs` reads every
+`.md` under `skills/` against `doctrine-gauntlet`'s fixture file and fails on a stale fixture name in a
+document that names a live hyphenated one, on three or more fixture names listed inside one sentence, on
+the same long claim appearing in two places, on a fixture the documents' own derivation rule cannot
+classify, and on an attributed citation that no longer resolves — against the document it names where it
+names one, against the corpus where it names only a section. Every one of those rules is
+narrower than that sentence makes it sound, and the tool's own header is where each narrowing is
+written down. **Its
 header states what it does not catch, and that list is longer than what it does** — read it before
 trusting a clean run. It sits outside `skills/`, so no skill loads it and the two harness files are
 still the only code any skill ships; it is tracked and would be distributed with the repo like
