@@ -15,8 +15,8 @@ Skills were validated by running fresh-context agents through each wrapper again
 Every gate is run by hand. Each invocation is stated here once, or pointed at where it is stated once.
 
 ```
-node tools/doc-check.mjs              # prose gate over every .md under skills/; exit 0 clean, 1 on any finding
-node tools/doc-check.mjs --selftest   # its three-clause tamper test
+node tools/doc-check.mjs              # prose gate over every .md under skills/; exit 0 clean, 1 on any finding, 2 if --selftest found no sidecar
+node tools/doc-check.mjs --selftest   # its three-clause tamper test, which lives in tools/doc-check.selftest.mjs
 python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
 python3 -m json.tool .claude-plugin/marketplace.json
 ```
@@ -76,7 +76,7 @@ made, it belongs in a sidecar. A third kind existed and no longer ships: a recor
 of rulings already made, read by a maintainer and never assembled into a prompt.
 Two of those were removed on 2026-08-29 because this repo is used by people other
 than its author and internal review history is not theirs to download. `harness/floor.mjs`
-and `harness/round.workflow.mjs` are the only code any skill ships; the repo also tracks `tools/doc-check.mjs` and `fixtures/shadcn.sh`, which no skill loads. The floor is run as
+and `harness/round.workflow.mjs` are the only code any skill ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs` and `fixtures/shadcn.sh`, which no skill loads. The floor is run as
 `node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
 which wraps its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
