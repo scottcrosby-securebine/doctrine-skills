@@ -1,8 +1,9 @@
 // Gate for the one artifact in this repo that had none: the prose.
 //
-// The harness code is held down by round.tamper.json and a mutation battery. The documents
-// beside it were checked only by reading, which is why every hard finding across five review
-// rounds was a claim that had gone stale rather than a defect in the code. Each of those
+// The harness code has tamper fixtures: `round.tamper.json` for the workflow script, and the
+// clauses `floor.md` defines for the floor. Both are run by hand. The documents beside it were
+// checked only by reading, which is why every hard finding across five review rounds was a claim
+// that had gone stale rather than a defect in the code. Each of those
 // failures was mechanically detectable. This is the detector.
 //
 //   node tools/doc-check.mjs            run the gate over the repo

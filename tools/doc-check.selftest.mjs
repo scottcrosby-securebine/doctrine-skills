@@ -176,8 +176,9 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   const tilde = run(clone(), [{ name: 'a.md', text: tildeText }])
   clause('clause 2h — a tilde-fenced example is not treated as a citation', tilde.length === 0, JSON.stringify(tilde))
 
-  // comparable() removes inline code and emphasis from both sides. Both are stated behaviour and
-  // neither was pinned: a citation and its source differing only by those must still resolve.
+  // comparable() removes emphasis from both sides. That is stated behaviour and was not pinned: a
+  // citation and its source differing only by emphasis must still resolve. Inline code goes the
+  // other way and is kept verbatim, which clause 1z ten lines below is what pins.
   const normQuote = 'the **builder** receives the artifact and never the filename it lives under'
   const normSource = 'The rule: the builder receives the artifact and never the _filename_ it lives under.'
   const normed = run(clone(), [

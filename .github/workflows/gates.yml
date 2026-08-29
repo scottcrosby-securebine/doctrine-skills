@@ -1,0 +1,44 @@
+# The gates that need nothing installed. Every one of these is documented in CLAUDE.md as a
+# command run by hand; this file is the same commands, run on push, and it is not a substitute
+# for the ones it cannot run.
+#
+# What this does NOT run, so a green tick here is never read as a full pass:
+#   - the floor harness against fixtures/, which needs Playwright and a Chromium download. Its
+#     package.json is deliberately gitignored (CLAUDE.md, "Commands"), so CI has nothing to
+#     install from and adding one would ship a build shape to every installer.
+#   - harness/round.tamper.json, whose fixtures run through Claude Code's Workflow tool.
+#   - the driven fresh-context runs through each wrapper, which are agents and not a command.
+name: gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: prose gate over every skill
+        run: node tools/doc-check.mjs
+
+      - name: doc-check tamper test
+        # Exit 2 means the sidecar did not load and no clause ran, which is the quiet
+        # direction: the gate above still exits 0 while its own tamper test stops existing.
+        run: node tools/doc-check.mjs --selftest
+
+      - name: manifests parse
+        run: |
+          python3 -m json.tool .claude-plugin/plugin.json > /dev/null
+          python3 -m json.tool .claude-plugin/marketplace.json > /dev/null
+
+      - name: workflow script syntax gate
+        # Not `node --check`: the Workflow tool wraps the body in an async function, so the
+        # script's top-level `return` is legal there and nowhere else. Same wrap as workflow.md.
+        working-directory: skills/doctrine-gauntlet/harness
+        run: |
+          node -e 'const s=require("fs").readFileSync("round.workflow.mjs","utf8").replace(/^export const meta/m,"const meta");new Function("args","agent","parallel","pipeline","phase","log","budget","workflow","return (async()=>{"+s+"})()")'

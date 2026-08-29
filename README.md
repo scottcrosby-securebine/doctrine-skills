@@ -193,8 +193,8 @@ Most of this is prose, and prose has no suite to run. Four things stand in.
 
 - **Driven runs.** Fresh-context agents are put through each wrapper against realistic scenarios, and every ambiguity they hit gets patched. This is periodic, not per-commit, so the skills can be ahead of the last full run.
 - **[`fixtures/`](fixtures/)** is a standing regression suite for `doctrine-gauntlet`: three generality cases, each proving something the other two cannot.
-- **The harness code** carries manual gates, rerun by hand after any change: a syntax gate and three-clause tamper fixtures, defined in [`skills/doctrine-gauntlet/workflow.md`](skills/doctrine-gauntlet/workflow.md).
-- **The documents have a gate too.** `node tools/doc-check.mjs` reads every skill's markdown and fails on a stale fixture reference, a roster of fixture names in one sentence, a claim restated in two places, an unclassifiable fixture, or a citation that no longer resolves. It states its own blind spots in its header, and no skill loads it.
+- **The harness code** carries a syntax gate and three-clause tamper fixtures, both defined in [`skills/doctrine-gauntlet/workflow.md`](skills/doctrine-gauntlet/workflow.md). The syntax gate runs on every push; the fixtures run through Claude Code's Workflow tool and are rerun by hand after any change.
+- **The documents have a gate too.** `node tools/doc-check.mjs` reads every skill's markdown and fails on a stale fixture reference, a roster of fixture names in one sentence, a claim restated in two places, an unclassifiable fixture, or a citation that no longer resolves. It states its own blind spots in its header, and no skill loads it. It runs on every push, along with its own tamper test and both manifests — that workflow is the whole of what is automated here, and the driven runs and the fixture suite below are not in it.
 
 Here is that last one catching a real defect. The same sentence was added to two skills, which is an unversioned fork: correcting one can no longer reach the other.
 
