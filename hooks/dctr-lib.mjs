@@ -146,5 +146,19 @@ export function parseHerdr(stdout) {
  */
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 
-/** What to do with a seat's tab once the seat has stopped. */
-export const stopAction = (focused) => (focused ? 'relabel' : 'close')
+/**
+ * What to do with a seat's tab once the seat has stopped, given the tab's record from this
+ * session's workspace list — or `undefined` where the list does not carry it. An unlisted tab is
+ * closed by id (herdr tab ids are global), never skipped: a skipped tab outlives its marker, and
+ * once the marker is gone nothing — not even the SessionEnd sweep — can ever reach it (issue #20).
+ */
+export const stopAction = (tab) => (tab && tab.focused ? 'relabel' : 'close')
+
+/**
+ * The full argument list for creating a seat's tab. `--workspace` is not optional: without it the
+ * tab lands in whatever workspace the *user* has focused, which under several concurrent sessions
+ * is usually somebody else's — four seats from two sessions landed in a third session's workspace
+ * the first multi-session evening (issue #20). The id is the one `skipReason` already validated.
+ */
+export const tabCreateArgs = (workspaceId, label) =>
+  ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus']

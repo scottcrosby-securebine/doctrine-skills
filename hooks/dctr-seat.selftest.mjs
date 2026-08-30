@@ -13,7 +13,7 @@
 
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
-  renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq,
+  renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -66,8 +66,24 @@ clause('clause 1g — an index already taken by a live seat is skipped',
   `${nextIndex('Explore', taken)} / ${nextIndex('Explore', [])}`)
 
 clause('clause 1h — a focused tab is relabelled and an unfocused one is closed',
-  stopAction(true) === 'relabel' && stopAction(false) === 'close',
-  `${stopAction(true)} / ${stopAction(false)}`)
+  stopAction({ tab_id: 'w4W:t2', focused: true }) === 'relabel' && stopAction({ tab_id: 'w4W:t2', focused: false }) === 'close',
+  `${stopAction({ focused: true })} / ${stopAction({ focused: false })}`)
+
+// Issue #20 defect 2: a tab the workspace list does not carry was skipped, its marker deleted, and
+// nothing could ever reach it again. The seat's tab, mislocated into w4X by defect 1, is absent
+// from this session's own w4Z list — the stop decision must still be a close, by recorded id.
+const FOREIGN_LIST = [{ tab_id: 'w4X:t2', focused: false }, { tab_id: 'w4X:t3', focused: true }]
+const SEAT_TAB_ID = 'w4Z:t9'
+clause('clause 1p — a tab absent from the workspace list is closed by id, never skipped',
+  stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'close',
+  'a skipped tab outlives its marker and the SessionEnd sweep can never reach it')
+
+// Issue #20 defect 1: without --workspace the tab lands in whatever workspace the user focused.
+const CREATE_ARGS = tabCreateArgs('w4Z', 'dctr · explore · 1')
+clause('clause 1q — the create args pin the tab to the dispatching session\'s workspace',
+  CREATE_ARGS[CREATE_ARGS.indexOf('--workspace') + 1] === 'w4Z' && CREATE_ARGS.includes('--no-focus') &&
+  CREATE_ARGS[0] === 'tab' && CREATE_ARGS[1] === 'create',
+  CREATE_ARGS.join(' '))
 
 clause('clause 1i — an attachment record renders nothing',
   renderRecord(attachment) === null && renderRecord({ type: 'user', message: { role: 'user', content: 'hello' } }) !== null,
@@ -154,5 +170,16 @@ clause('clause 3h — the hostile fixture really carries live metacharacters, an
   JSON.stringify(HOSTILE).includes('$(touch /tmp/PWNED)') && JSON.stringify(HOSTILE).includes('`x`') &&
   JSON.stringify(HOSTILE).startsWith('"'),
   `a double-quoted shell string still expands $() and backticks: ${JSON.stringify(HOSTILE)}`)
+
+// 1.47.0's literal create call, verbatim from the shipped hook — the defect-1 shape.
+const PRE_FIX_ARGS = ['tab', 'create', '--label', 'dctr · explore · 1', '--no-focus']
+clause('clause 3i — the pre-fix args really lack a workspace, and the fix adds exactly that pair',
+  !PRE_FIX_ARGS.includes('--workspace') &&
+  JSON.stringify(CREATE_ARGS.filter((a, i) => a !== '--workspace' && CREATE_ARGS[i - 1] !== '--workspace')) === JSON.stringify(PRE_FIX_ARGS),
+  'if the fixed args drifted anywhere else, 1q would be certifying a different call than the one that failed')
+
+clause('clause 3j — the foreign-list fixture really does not carry the seat\'s tab',
+  FOREIGN_LIST.every((t) => t.tab_id !== SEAT_TAB_ID) && FOREIGN_LIST.length > 0 && FOREIGN_LIST.some((t) => t.focused),
+  'if the list held the tab, 1p would be testing the focused branch rather than the unlisted one')
 
 process.exit(bad ? 1 : 0)

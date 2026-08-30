@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq,
+  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
 } from './dctr-lib.mjs'
 
 const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
@@ -77,7 +77,7 @@ try {
     const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
     if (!file) stand_down('could not resolve the seat transcript path')
 
-    const tab = herdr(['tab', 'create', '--label', tabLabel(payload.agent_type, n), '--no-focus'])
+    const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(payload.agent_type, n)))
     const tabId = tab.result.tab.tab_id
     const paneId = tab.result.root_pane.pane_id
 
@@ -99,10 +99,17 @@ try {
       herdr(['pane', 'report-agent', seat.paneId, '--source', `custom:${PREFIX}`, '--agent', seat.agent, '--state', 'idle'])
     } catch { /* the pane may already be gone; the tab handling below still runs */ }
 
-    const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
-    const mine = tabs.find((t) => t.tab_id === seat.tabId)
-    if (mine && stopAction(mine.focused) === 'relabel') herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`])
-    else if (mine) herdr(['tab', 'close', seat.tabId])
+    // The list is advisory: it decides relabel-vs-close and supplies the label, nothing more. A tab
+    // the list does not carry — mislocated by a pre-#20 hook, or the list call itself failing — is
+    // closed by its recorded id, which is global. Skipping it here would orphan it for good, since
+    // the marker removal below also takes the seat out of the SessionEnd sweep.
+    let mine
+    try {
+      const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
+      mine = tabs.find((t) => t.tab_id === seat.tabId)
+    } catch { /* fall through to close-by-id */ }
+    if (stopAction(mine) === 'relabel') herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`])
+    else herdr(['tab', 'close', seat.tabId])
 
     fs.rmSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), { force: true })
   }
