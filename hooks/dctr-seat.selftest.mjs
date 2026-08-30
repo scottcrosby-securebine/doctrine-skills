@@ -15,6 +15,7 @@ import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
+  metadataTokenArgs, TOKEN_TTL_MS,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -183,6 +184,17 @@ clause('clause 1v — with the layout in hand, the tallest side pane is the one 
   BALANCED[BALANCED.indexOf('--direction') + 1] === 'down',
   BALANCED.join(' '))
 
+// Issue #19: the counter tokens the orchestrator publishes at each record write. The payload is
+// built from a run-state fixture (round 3, exit 1, valve 4) and must target the session's own
+// pane under the custom:doctrine source, with the ttl that lets a dead run's row expire.
+const TOKEN_ARGS = metadataTokenArgs(SESSION_PANE, 3, 1, 4)
+clause('clause 1x — counter tokens are the exact call verified on 0.8.2, argument for argument',
+  // The whole array, not indexOf probes: a reordered flag, a duplicate, or a trailing extra all
+  // passed the probe form, and the ruled sequence is the one thing this clause exists to pin.
+  JSON.stringify(TOKEN_ARGS) === JSON.stringify(['pane', 'report-metadata', SESSION_PANE,
+    '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--ttl-ms', String(TOKEN_TTL_MS)]),
+  TOKEN_ARGS.join(' '))
+
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
@@ -240,5 +252,12 @@ clause('clause 3k — the placement fixtures really are the shapes their clauses
   Boolean(TAB_SEAT(1).paneId && TAB_SEAT(1).tabId) && Object.keys(RESERVATION).length === 0 &&
   JSON.parse('{}').paneId === undefined,
   'the reservation must be the literal O_EXCL placeholder ({}), or 1s tests an invented shape')
+
+clause('clause 3l — the ttl really is the hour the README promises, not merely some positive number',
+  // Pinned to the value, because both documented failure directions are numbers this would
+  // otherwise accept: shorter blinks a live run out between writes, longer leaves a dead run's
+  // row up past the expiry the README states.
+  TOKEN_TTL_MS === 3600000,
+  String(TOKEN_TTL_MS))
 
 process.exit(bad ? 1 : 0)

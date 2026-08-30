@@ -194,6 +194,23 @@ export const reportsSidebarRow = (seat) => Boolean(seat && seat.tabId)
 export const seatPlacement = (liveSeats, sessionPaneId, cap = SIDE_CAP) =>
   sessionPaneId && liveSeats.filter(isSideSeat).length < cap ? 'pane' : 'tab'
 
+/** How long a run's sidebar tokens live without a refresh (issue #19). Each per-round record write
+ *  republishes them, so a live run never blinks out; a run that dies stops writing and its row
+ *  clears itself within the hour instead of sitting stale forever. An hour rather than the ten
+ *  minutes the issue's probe used, because a single wave can outlast ten minutes between writes. */
+export const TOKEN_TTL_MS = 3600000
+
+/**
+ * The report-metadata call that publishes doctrine's round and gate counters as sidebar tokens
+ * (issue #19). Invoked by the orchestrator at step 5's per-round record write via dctr-token.mjs,
+ * never by a hook: counters move when a gate pass completes, which is not a hook event, so a
+ * hook-written token would show round 3 while the run is at round 5 — the stale-display failure
+ * #16's D9 rejected. Dark by default: rendering needs `$doctrine` in the sidebar's rows config.
+ */
+export const metadataTokenArgs = (paneId, round, exitCount, valve) =>
+  ['pane', 'report-metadata', paneId, '--source', 'custom:doctrine',
+    '--token', `doctrine=r${round}·e${exitCount}·v${valve}`, '--ttl-ms', String(TOKEN_TTL_MS)]
+
 /**
  * The split that creates a seat's side pane. The first side seat splits the session's pane right at
  * SIDE_RATIO, founding the column; each later one splits the **tallest** side pane down. Tallest,

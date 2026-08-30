@@ -151,7 +151,7 @@ Everything else is optional and improves one skill or another. Each entry below 
 
 - [herdr](https://herdr.dev) 0.8.2 or later: live visibility of dispatched seats. The plugin ships a Claude Code hook set that gives each seat a live pane — side panes beside the session up to a cap of six, tabs (reported to herdr's sidebar with a live state) beyond it — so a long run stops being a black box.
 
-  Nothing to configure. The hooks read `HERDR_ENV`, which herdr sets in every pane it manages.
+  Nothing to configure for the seats. The hooks read `HERDR_ENV`, which herdr sets in every pane it manages. One opt-in extra: a doctrine run also publishes its round number and both gate counters as sidebar tokens (`r3·e1·v4`, refreshed at each round's record write, expiring within the hour if the run dies). herdr renders custom tokens only when its config asks for them, so this is dark until you add `$doctrine` to a row under `[ui.sidebar.agents]` in herdr's config — one line, and without it nothing changes.
 
   Without it: every hook exits on its first check, costing one process spawn per dispatched seat. Nothing else changes, and a run is never blocked, delayed or altered by it. A failure to reach herdr is recorded with its reason rather than passing silently.
 
