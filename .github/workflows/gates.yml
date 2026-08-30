@@ -31,6 +31,15 @@ jobs:
         # direction: the gate above still exits 0 while its own tamper test stops existing.
         run: node tools/doc-check.mjs --selftest
 
+      - name: herdr seat hook tamper test
+        # Every decision in hooks/dctr-lib.mjs is pure, so this needs no herdr server, no codex
+        # plugin and no Claude Code. What it cannot cover is the live path: the first real run
+        # found a defect nineteen passing clauses did not, and clause 1m exists because of it.
+        run: node hooks/dctr-seat.selftest.mjs
+
+      - name: plugin hook manifest parses
+        run: python3 -m json.tool hooks/hooks.json > /dev/null
+
       - name: manifests parse
         run: |
           python3 -m json.tool .claude-plugin/plugin.json > /dev/null

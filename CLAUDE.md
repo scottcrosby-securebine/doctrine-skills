@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Claude Code plugin ("doctrine") distributing eight skills as pure markdown — there is no build or lint step. CI runs only the gates that need nothing installed (`.github/workflows/gates.yml`), which is three of the five below and never the two that matter most. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`, plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. `node tools/doc-check.mjs` is a separate gate over every skill's prose, not part of that harness. Bump `version` in `plugin.json` when shipping a change.
+A Claude Code plugin ("doctrine") distributing eight skills as markdown, plus a small amount of code that is not part of any skill — there is no build or lint step. **The "pure markdown" description was true until 2026-08-30 and is not any more**: `hooks/` ships a Claude Code hook set (issue #17) that puts each dispatched seat in the herdr sidebar while it runs. Every hook stands down in its first lines unless `HERDR_ENV=1`, so an installer without herdr pays one process spawn per seat and nothing else. CI runs only the gates that need nothing installed (`.github/workflows/gates.yml`), which is five of the seven below and never the two that matter most. The machine-validated files are `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`, plus `doctrine-gauntlet`'s harness code, whose gates are manual and run by hand: the syntax gate and tamper fixtures that `workflow.md` and `floor.md` define. `node tools/doc-check.mjs` is a separate gate over every skill's prose, not part of that harness. Bump `version` in `plugin.json` when shipping a change.
 
 Skills were validated by running fresh-context agents through each wrapper against realistic scenarios and patching every ambiguity they hit — when changing a skill's flow, that's the test to rerun. **That test carries a standing debt.** The hub's step 5 was driven once, on 2026-08-27, by four fresh-context agents each executing a phase (docs, code, debug, gauntlet) on a synthetic project against `9a96069`; that run found three defects fifteen reading rounds had missed, and the two rewrites of step 5 that followed it have been read, not driven. **The seven wrappers have not been driven since the original validation, and all seven have been rewritten since.** What they now say has been audited, not driven. The two find different things — an audit reads for contradiction against other text, a scenario run finds the instruction an agent cannot act on — so do not read a clean audit as coverage of this.
 
@@ -12,19 +12,22 @@ Skills were validated by running fresh-context agents through each wrapper again
 
 ## Commands
 
-Each invocation is stated here once, or pointed at where it is stated once. **A green CI tick covers the first three only.**
+Each invocation is stated here once, or pointed at where it is stated once. **A green CI tick covers every command in the block below, and nothing under it.**
 
 ```
 node tools/doc-check.mjs              # prose gate over every .md under skills/; exit 0 clean, 1 on any finding, 2 if --selftest found no sidecar
 node tools/doc-check.mjs --selftest   # its three-clause tamper test, which lives in tools/doc-check.selftest.mjs
 python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
 python3 -m json.tool .claude-plugin/marketplace.json
+node hooks/dctr-seat.selftest.mjs   # three-clause tamper test for the seat hook's pure decisions
+python3 -m json.tool hooks/hooks.json
 ```
 
 To run the floor against `fixtures/` **from this repo**, a browser is needed here. The install is
 deliberately untracked — `node_modules/`, `package.json` and `package-lock.json` are all in
-`.gitignore`, because a tracked `package.json` would ship to every installer and contradict this
-repo's "pure markdown, no build step" shape. The two commands:
+`.gitignore`, because a tracked `package.json` would ship a build shape to every installer. That
+reason survives the arrival of `hooks/`: a hook the harness runs is not a build step, and nothing
+here is compiled, bundled or installed before use. The two commands:
 
 ```
 npm i -D playwright-core axe-core
@@ -45,13 +48,14 @@ why); the one-liner is written down in `skills/doctrine-gauntlet/workflow.md` an
 not copied here, because a copy forks the first time the original is corrected. Its tamper fixtures
 (`harness/round.tamper.json`) run through the Workflow tool, per the same file.
 
-There is no single command that runs all of these. `.github/workflows/gates.yml` runs the four that need no
-install — `doc-check`, its `--selftest`, both manifests, and the workflow script's syntax gate — on every push.
+There is no single command that runs all of these. `.github/workflows/gates.yml` runs the six that need no
+install — `doc-check`, its `--selftest`, the seat hook's `--selftest`, all three manifests, and the workflow
+script's syntax gate — on every push.
 **What it cannot run is the part with the most defects in it**: the floor against `fixtures/`, because
 `package.json` is gitignored on purpose and CI has nothing to install from; `harness/round.tamper.json`, whose
 fixtures run through the Workflow tool; and the driven fresh-context runs, which are agents rather than a
 command. So a green tick means the prose gate and the parsers are clean, and says nothing about the harness or
-the skills. Read it as the cheapest third of the suite, never as the suite.
+the skills. Read it as the cheap end of the suite, never as the suite. No proportion is written down: it would rot the next time a gate is added, which is what just happened to the one that used to sit here.
 
 ## Architecture
 
@@ -96,7 +100,7 @@ made, it belongs in a sidecar. A third kind existed and no longer ships: a recor
 of rulings already made, read by a maintainer and never assembled into a prompt.
 Two of those were removed on 2026-08-29 because this repo is used by people other
 than its author and internal review history is not theirs to download. `harness/floor.mjs`
-and `harness/round.workflow.mjs` are the only code any skill ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs` and `fixtures/shadcn.sh`, which no skill loads. The floor is run as
+and `harness/round.workflow.mjs` are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `fixtures/shadcn.sh` and the files under `hooks/`, none of which a skill loads. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
 `node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
 which wraps its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`

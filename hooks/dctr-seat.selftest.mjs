@@ -1,0 +1,135 @@
+// Three-clause tamper test for the seat hook's decisions, per CLAUDE.md.
+//
+//   node hooks/dctr-seat.selftest.mjs      exit 0 all clauses passed, 1 otherwise
+//
+// Every decision in `dctr-lib.mjs` is pure, so all of this runs with no herdr server, no codex
+// plugin and no Claude Code — which is exactly what CI is. The hook and the renderer hold only I/O
+// around these functions, and that split exists so this file can exist.
+//
+// Clause 1 breaks something and confirms the right rule trips. Clause 2 confirms a known-good input
+// stays silent, without which clause 1 proves nothing. Clause 3 proves each fixture really carries
+// the property its clause depends on, without calling the function under test — the clause that
+// catches a check which silently measures nothing.
+
+import {
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
+  renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr,
+} from './dctr-lib.mjs'
+
+let bad = 0
+const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
+
+// Observed on this host 2026-08-30. The derived path matched SubagentStop's authoritative
+// agent_transcript_path byte for byte; both are pinned here so a change to either is a failure.
+const PARENT = '/home/u/.claude/projects/-proj/4a9392da-bd72-4f3f-9e18-76a56c437909.jsonl'
+const AGENT_ID = 'ad1a7dbb0d453a08d'
+const AUTHORITATIVE = '/home/u/.claude/projects/-proj/4a9392da-bd72-4f3f-9e18-76a56c437909/subagents/agent-ad1a7dbb0d453a08d.jsonl'
+
+const seatEvent = { hook_event_name: 'SubagentStart', session_id: 's1', agent_id: AGENT_ID, agent_type: 'Explore', transcript_path: PARENT }
+const parentEvent = { hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Agent', transcript_path: PARENT }
+const goodEnv = { HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w4W' }
+const LONG_ROLE = 'a-very-long-agent-type-name-that-will-not-fit'
+const attachment = { type: 'attachment', message: { role: 'user', content: 'system context nobody asked for' } }
+
+// Clause 2 first: a valid seat event in a herdr pane must raise nothing at all.
+clause('clause 2 — a well-formed seat event in a herdr pane is accepted silently',
+  skipReason(goodEnv) === null && isSeatEvent(seatEvent) === true &&
+  transcriptPath(seatEvent.transcript_path, seatEvent.agent_id) === AUTHORITATIVE,
+  JSON.stringify({ skip: skipReason(goodEnv), seat: isSeatEvent(seatEvent) }))
+
+// Clause 1 — one defect at a time.
+clause('clause 1a — the derived transcript path matches the authoritative one',
+  transcriptPath(PARENT, AGENT_ID) === AUTHORITATIVE, transcriptPath(PARENT, AGENT_ID))
+
+clause('clause 1b — the parent\'s own Agent call is not a seat',
+  isSeatEvent(parentEvent) === false && isSeatEvent(seatEvent) === true,
+  'PostToolUse fires twice per dispatch; only the one carrying agent_id is a seat')
+
+clause('clause 1c — no HERDR_ENV stands the hook down',
+  typeof skipReason({ HERDR_WORKSPACE_ID: 'w4W' }) === 'string', String(skipReason({ HERDR_WORKSPACE_ID: 'w4W' })))
+
+clause('clause 1d — no workspace id stands the hook down',
+  typeof skipReason({ HERDR_ENV: '1' }) === 'string', String(skipReason({ HERDR_ENV: '1' })))
+
+clause('clause 1e — generated names satisfy herdr\'s own constraint',
+  ['Explore', 'general-purpose', 'Red Team!!', '', LONG_ROLE].every((r) => AGENT_NAME_RE.test(agentName(r, 7))),
+  ['Explore', 'general-purpose', 'Red Team!!', '', LONG_ROLE].map((r) => agentName(r, 7)).join(','))
+
+clause('clause 1f — a long role is truncated but its counter survives intact',
+  agentName(LONG_ROLE, 12).endsWith('-12') && agentName(LONG_ROLE, 12).length <= 32,
+  agentName(LONG_ROLE, 12))
+
+// Two seats of one role starting in the same wave: the second must not be handed the first's name.
+const taken = [agentName('Explore', 1), agentName('Explore', 2)]
+clause('clause 1g — an index already taken by a live seat is skipped',
+  nextIndex('Explore', taken) === 3 && nextIndex('Explore', []) === 1,
+  `${nextIndex('Explore', taken)} / ${nextIndex('Explore', [])}`)
+
+clause('clause 1h — a focused tab is relabelled and an unfocused one is closed',
+  stopAction(true) === 'relabel' && stopAction(false) === 'close',
+  `${stopAction(true)} / ${stopAction(false)}`)
+
+clause('clause 1i — an attachment record renders nothing',
+  renderRecord(attachment) === null && renderRecord({ type: 'user', message: { role: 'user', content: 'hello' } }) !== null,
+  JSON.stringify(renderRecord(attachment)))
+
+const longResult = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n') }] } }
+const rendered = renderRecord(longResult)
+clause('clause 1j — a long tool result is truncated and the cut is marked, never silently elided',
+  rendered.includes('line 0') && rendered.includes('line 39') && !rendered.includes('line 20') && /line\(s\) cut/.test(rendered),
+  rendered)
+
+clause('clause 1k — a tool call renders with its tool name',
+  renderRecord({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'wc -l x' } }] } }).startsWith('→ Bash'),
+  'the call is the signal you judge a running seat on')
+
+clause('clause 1l — thinking blocks render nothing',
+  renderRecord({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'x'.repeat(9000) }] } }) === null,
+  'the longest content in a transcript and the least useful for deciding to kill a seat')
+
+// Wrapped: the defect this covers is a *throw*, so an unguarded assertion would crash the run
+// instead of reporting a failed clause, and a crash names no clause.
+const emptyOk = (() => {
+  try {
+    return parseHerdr('') === null && parseHerdr('   \n') === null &&
+      parseHerdr('{"result":{"tab":{"tab_id":"w4W:t3"}}}').result.tab.tab_id === 'w4W:t3'
+  } catch (e) { return `threw: ${e.message}` }
+})()
+clause('clause 1m — a herdr command that answers with nothing is a success, not a parse error',
+  emptyOk === true,
+  `pane run and report-agent exit 0 with empty stdout; parsing that unconditionally aborts the hook (${emptyOk})`)
+
+// Clause 3 — the fixtures really carry their properties, shown without the functions above.
+clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
+  `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
+  `untruncated length ${`${PREFIX}-${LONG_ROLE}-12`.length}`)
+
+clause('clause 3b — the parent and seat fixtures really differ only in the agent fields',
+  parentEvent.agent_id === undefined && seatEvent.agent_id !== undefined &&
+  parentEvent.transcript_path === seatEvent.transcript_path && parentEvent.session_id === seatEvent.session_id,
+  'if they differed elsewhere, 1b would be testing something other than the agent_id test')
+
+clause('clause 3c — the pinned pair really is a derivation and not two hardcoded strings',
+  AUTHORITATIVE.startsWith(PARENT.replace(/\.jsonl$/, '') + '/') && AUTHORITATIVE.includes(AGENT_ID) &&
+  PARENT.endsWith('.jsonl') && !PARENT.includes('subagents'),
+  'the authoritative path must be reachable from the parent path by the rule under test')
+
+clause('clause 3d — the truncation fixture really is longer than the window that would keep it whole',
+  40 > RESULT_HEAD + RESULT_TAIL + 1 && truncate('a\nb', RESULT_HEAD, RESULT_TAIL) === 'a\nb',
+  'a short block must pass through untouched, or 1j proves only that truncate always fires')
+
+clause('clause 3e — the attachment fixture really is otherwise renderable',
+  attachment.message && typeof attachment.message.content === 'string' && attachment.message.content.length > 0 &&
+  renderRecord({ ...attachment, type: 'user' }) !== null,
+  'change only its type and it renders, so 1i tests the type check rather than an empty payload')
+
+clause('clause 3f — the tab label and the agent name really are different shapes',
+  tabLabel('Explore', 1) !== agentName('Explore', 1) && tabLabel('Explore', 1).includes(' · ') &&
+  !AGENT_NAME_RE.test(tabLabel('Explore', 1)) && slug('Explore') === 'explore',
+  'the tab label is deliberately unconstrained; only the agent name must satisfy herdr')
+
+clause('clause 3g — the empty-output fixture really is what the CLI returns, not an invented case',
+  ''.trim().length === 0 && (() => { try { JSON.parse(''); return false } catch { return true } })(),
+  'JSON.parse must genuinely throw on it, or 1m proves nothing about why the hook aborted')
+
+process.exit(bad ? 1 : 0)

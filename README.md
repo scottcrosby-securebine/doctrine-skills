@@ -134,6 +134,8 @@ node node_modules/playwright-core/cli.js install chromium
 
 Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
+One optional integration runs outside the skills entirely: with [herdr](https://herdr.dev) as your terminal multiplexer, every agent doctrine dispatches appears in herdr's sidebar as `dctr-<role>-<n>` while it runs, with its own tab showing what it is doing. Without herdr the hooks stand down on their first line and doctrine behaves exactly as it does today.
+
 Everything else is optional and improves one skill or another. Each entry below says what happens when it is missing.
 
 <details>
@@ -146,6 +148,12 @@ Everything else is optional and improves one skill or another. Each entry below 
   One special case: install `code-review` as `matts-code-review`, because the original name collides with Claude Code's own `/code-review`. Copy it to `~/.claude/skills/matts-code-review/` and set its frontmatter `name:` to match. It is a copy, not a symlink, so re-sync it when his repo changes.
 
   Without them: the `doctrine` skill's fallback table names a substitute for each. `matts-code-review` degrades to `/code-review` or two parallel review subagents.
+
+- [herdr](https://herdr.dev) 0.8.2 or later: live visibility of dispatched seats. The plugin ships a Claude Code hook set that creates a tab per seat and reports it to herdr's sidebar with a live state, so a long run stops being a black box.
+
+  Nothing to configure. The hooks read `HERDR_ENV`, which herdr sets in every pane it manages.
+
+  Without it: every hook exits on its first check, costing one process spawn per dispatched seat. Nothing else changes, and a run is never blocked, delayed or altered by it. A failure to reach herdr is recorded with its reason rather than passing silently.
 
 - [superpowers](https://github.com/obra/superpowers): brainstorming, parallel dispatch, verification-before-completion, git worktrees.
 
