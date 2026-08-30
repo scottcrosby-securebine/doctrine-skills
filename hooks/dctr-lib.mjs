@@ -133,5 +133,18 @@ export function parseHerdr(stdout) {
   return JSON.parse(text)
 }
 
+/**
+ * Shell-quotes one argument for a command string.
+ *
+ * `herdr pane run` types its argument into the pane's shell, so the string is shell-interpreted.
+ * `JSON.stringify` is not sufficient: it produces double quotes, and a double-quoted shell string
+ * still expands `$`, backticks and `${...}`. Single quotes suppress all three, and an embedded
+ * single quote is closed, escaped and reopened. Both values interpolated into that command are
+ * paths the harness supplies — a plugin install directory and a transcript path containing the
+ * project directory — so neither is attacker-chosen in the ordinary case and both are outside this
+ * code's control.
+ */
+export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
+
 /** What to do with a seat's tab once the seat has stopped. */
 export const stopAction = (focused) => (focused ? 'relabel' : 'close')

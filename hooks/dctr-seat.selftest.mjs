@@ -13,7 +13,7 @@
 
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
-  renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr,
+  renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -99,6 +99,21 @@ clause('clause 1m — a herdr command that answers with nothing is a success, no
   emptyOk === true,
   `pane run and report-agent exit 0 with empty stdout; parsing that unconditionally aborts the hook (${emptyOk})`)
 
+// `herdr pane run` types its argument into a shell, so a path is shell-interpreted. Both values
+// come from the harness, but one of them carries the project directory, and this ships to every
+// installer.
+const HOSTILE = "/tmp/$(touch /tmp/PWNED)/a'b/`x`/t.jsonl"
+const quoted = shq(HOSTILE)
+clause('clause 1n — a path carrying shell metacharacters is quoted so none of them can expand',
+  quoted.startsWith("'") && quoted.endsWith("'") &&
+  quoted.includes('$(touch /tmp/PWNED)') && quoted.includes('`x`') &&
+  quoted.split("'\\''").length === 2,
+  quoted)
+
+clause('clause 1o — quoting is applied to an ordinary path without mangling it',
+  shq('/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl') === "'/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl'",
+  shq('/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl'))
+
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
@@ -131,5 +146,13 @@ clause('clause 3f — the tab label and the agent name really are different shap
 clause('clause 3g — the empty-output fixture really is what the CLI returns, not an invented case',
   ''.trim().length === 0 && (() => { try { JSON.parse(''); return false } catch { return true } })(),
   'JSON.parse must genuinely throw on it, or 1m proves nothing about why the hook aborted')
+
+clause('clause 3h — the hostile fixture really carries live metacharacters, and JSON.stringify really would not stop them',
+  // Not merely "contains a backtick": an escaped one is inert, and an earlier version of this
+  // fixture used String.raw and shipped `\\`x\\`` — the check below is what caught it.
+  HOSTILE.includes('$(touch') && HOSTILE.includes('`x`') && !HOSTILE.includes('\\`') && HOSTILE.includes("'") &&
+  JSON.stringify(HOSTILE).includes('$(touch /tmp/PWNED)') && JSON.stringify(HOSTILE).includes('`x`') &&
+  JSON.stringify(HOSTILE).startsWith('"'),
+  `a double-quoted shell string still expands $() and backticks: ${JSON.stringify(HOSTILE)}`)
 
 process.exit(bad ? 1 : 0)

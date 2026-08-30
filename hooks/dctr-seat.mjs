@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr,
+  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq,
 } from './dctr-lib.mjs'
 
 const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
@@ -82,7 +82,7 @@ try {
     const paneId = tab.result.root_pane.pane_id
 
     const renderer = path.join(import.meta.dirname, 'dctr-render.mjs')
-    herdr(['pane', 'run', paneId, `node ${JSON.stringify(renderer)} ${JSON.stringify(file)}`])
+    herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
     herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name,
       '--state', 'working', '--message', `doctrine seat ${payload.agent_type}`])
 
