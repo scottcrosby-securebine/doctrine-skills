@@ -10,13 +10,14 @@
 //   blindPrompt,                         // the blind comparison pass; '' on a no-reference run
 //   candidateIs: 'A',                    // which neutral filename is the build
 //   inherited: [],                       // failures step 7 rules inherited; recorded, not blocking
+//   stale: [],                           // clauses the run marked stale; a recorded violation of one is recorded, not blocking
 //   waived: [],                          // reasons the user has waived; recorded, not blocking
 //   criticPrompt,                        // the integrated critic, assembled from the critic brief
 //   criticAxes: [...],                   // the roll-call set the dispatcher fixed for it; the
 //                                        // floor's [JUDGE]/[UNMEASURED] lines are added by the script
 //   redTeamPrompt,                       // assembled from the red team brief
 //   redTeamItems: [1, 2, 3, 4],
-//   tieIsPass: false,                    // fidelity runs score a tie as a pass
+//   tieIsPass: false,                    // true only where fidelity is the run's bar; a named-material grant keeps it false
 //   counters: { cleanPasses, unresolvedRounds, sectionRejections: { [name]: n }, sectionResets: { [name]: n } },
 // }
 // Returns the round's structured results and the counters after this round. The
@@ -85,13 +86,15 @@ const RED_TEAM = {
 const a = args || {}
 const ITEMS = a.redTeamItems || [1, 2, 3, 4]
 const INHERITED = a.inherited || []
+const STALE = a.stale || []
 const WAIVED = a.waived || []
 const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const blocking = []   // every reason this round is not clean, as a string the orchestrator can read
-const recorded = []   // reasons that would block but the user ruled inherited or waived; named, never silent
+const recorded = []   // reasons that would block but the run ruled inherited, stale or waived; named, never silent
 const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
 
-// A reason blocks unless the user already ruled it inherited (step 7) or waived it; either
+// A reason blocks unless the run already ruled it inherited (step 7) or waived it; a
+// marked-stale roll-call word is excused before it reaches here (staleExplained below); either
 // way it is written down, because a recorded failure that nobody can see is a silent pass.
 // A ruling matches by containment, because the same fact reaches here under more than one
 // name — an [UNMEASURED] item's text, and the full report line that became a critic axis.
@@ -260,15 +263,26 @@ else {
     // round comes back clean, and a phase can exit on a critic that abstained and filed a
     // defect on the same axis. Observed at cleanPasses 2 with exit true before this line.
     if (r.word === 'CANNOT JUDGE' && (critic.blocking.some((b) => b.axis === axis && said(b)) || critic.recorded.some((c) => c.axis === axis && said(c)))) malformed(`critic roll call: ${axis} CANNOT JUDGE with a finding under it — evidence that never reached you cannot have produced one`)
-    if (r.word !== 'CLEAR') block(`critic roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
+    // Item 8 rules a stale-only axis BLOCKING with its finding in `recorded`. The ruling that
+    // excuses it names a *clause*, never the axis, so block()'s axis-name containment can never
+    // see it — the check reads the axis's own findings instead: no blocking finding, and at
+    // least one recorded finding naming a marked-stale clause, means the word is explained.
+    // The inherited twin needs none of this because the orchestrator's inherited line names the
+    // axis and block() matches it directly.
+    const staleExplained = r.word === 'BLOCKING' &&
+      !critic.blocking.some((b) => b.axis === axis) &&
+      critic.recorded.some((c) => c.axis === axis && match([c.finding], STALE))
+    if (staleExplained) recorded.push(`critic roll call, stale clause per its prompt: ${axis} BLOCKING`)
+    else if (r.word !== 'CLEAR') block(`critic roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
   }
   for (const f of [...critic.blocking, ...critic.recorded]) if (!said(f)) malformed(`critic: a finding on ${f.axis} carries no text — the word carries its finding below`)
   for (const b of critic.blocking) {
     if (!criticAxes.includes(b.axis)) malformed(`critic finding names no axis: ${b.finding}`)
     else block(`critic: ${b.axis} — ${b.finding}`, [b.axis])
   }
-  // Step 7's inherited failures are recorded, named as inherited, and do not block — the
-  // same per-finding rule as the red team's recorded list, checked against the same list.
+  // Step 7's inherited failures and the run's marked-stale clause violations are recorded,
+  // named as which they are, and do not block — the same per-finding rule as the red team's
+  // recorded list, checked against the same two lists.
   for (const r of critic.recorded) {
     // The axis test comes first and short-circuits, and both halves of that matter. A finding on
     // an axis nobody named must not *also* be filed as a legitimate inherited record, and must not
@@ -278,11 +292,13 @@ else {
     // this one is not, and two identical strings with opposite waivability cannot be read apart
     // in the return.
     if (!criticAxes.includes(r.axis)) { malformed(`critic recorded finding names no axis: ${r.finding}`); continue }
-    const named = match([r.finding], INHERITED)
-    if (!named) malformed(`critic: recorded finding names no inherited failure of this dispatch — ${r.axis}: ${r.finding}`)
+    const inh = match([r.finding], INHERITED)
+    const stale = inh ? null : match([r.finding], STALE)
+    const named = inh || stale
+    if (!named) malformed(`critic: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${r.axis}: ${r.finding}`)
     else {
       usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
-      recorded.push(`critic, inherited per its prompt: ${r.axis} — ${r.finding}`)
+      recorded.push(`critic, ${inh ? 'inherited' : 'stale clause'} per its prompt: ${r.axis} — ${r.finding}`)
     }
   }
 }
@@ -293,16 +309,19 @@ const redTeam = await agent(redTeamPrompt, { label: 'red-team', phase: 'Gate', s
 if (!redTeam) malformed('red team: no return')
 else {
   const seen = checkRollCall(redTeam.rollCall, ITEMS, WORDS.redTeam, 'item', 'red team')
-  // A recorded finding exists only where the prompt named its failure inherited, and the prompt's
-  // inherited lines are exactly `inherited` — so each recorded finding must name one of them,
+  // A recorded finding exists only where the prompt named its failure inherited or marked its
+  // clause stale — the prompt's lines are exactly `inherited` and `stale` — so each recorded
+  // finding must name one of them,
   // checked by the same containment rule; anything else is a defect parked where the counters
   // cannot see it.
   for (const r of redTeam.recorded) {
-    const named = match([r.finding], INHERITED)
-    if (!named) malformed(`red team: recorded finding names no inherited failure of this dispatch — item ${r.item}: ${r.finding}`)
+    const inh = match([r.finding], INHERITED)
+    const stale = inh ? null : match([r.finding], STALE)
+    const named = inh || stale
+    if (!named) malformed(`red team: recorded finding names no inherited failure or marked-stale clause of this dispatch — item ${r.item}: ${r.finding}`)
     else {
       usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
-      recorded.push(`red team, inherited per its prompt: item ${r.item} — ${r.finding}`)
+      recorded.push(`red team, ${inh ? 'inherited' : 'stale clause'} per its prompt: item ${r.item} — ${r.finding}`)
     }
   }
   for (const item of ITEMS) {
@@ -336,7 +355,7 @@ else {
 // A ruling that matched nothing is a typo or a stale line the user believes took; one that
 // matched several distinct reasons may have excused a failure nobody meant it to. Neither
 // line is itself a failure — both are the script refusing to be quiet about a ruling.
-for (const r of [...INHERITED, ...WAIVED]) {
+for (const r of [...INHERITED, ...STALE, ...WAIVED]) {
   const n = usedRulings.get(r) || 0
   if (n === 0) recorded.push(`unused ruling (not a failure): "${r}" matched nothing this round — a fixed defect, or a spelling that matches nothing the script names`)
   if (n > 1) recorded.push(`broad ruling (not a failure — check it): "${r}" excused ${n} reasons this round, listed above — if any was not meant, re-run without it`)
