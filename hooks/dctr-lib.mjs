@@ -162,3 +162,56 @@ export const stopAction = (tab) => (tab && tab.focused ? 'relabel' : 'close')
  */
 export const tabCreateArgs = (workspaceId, label) =>
   ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus']
+
+/** How many seats stack beside the session before the rest overflow to tabs. Scott's call,
+ *  2026-08-31: six. On a 56-row terminal a full column leaves ~9 rows per seat; the seventh seat
+ *  and beyond keep the tab behavior. */
+export const SIDE_CAP = 6
+/** Width of the seat column: the session keeps 60% of the tab. */
+export const SIDE_RATIO = 0.4
+
+/**
+ * A live seat riding in a side pane rather than a tab. A marker without a tabId is a side seat —
+ * no separate mode field, so the two can never disagree. The paneId requirement excludes another
+ * seat's reservation ('{}', written with O_EXCL before the record): counting one would be harmless
+ * for placement (it overflows to a tab early) but fatal for splitting (no paneId to split).
+ */
+export const isSideSeat = (s) => Boolean(s && s.paneId && !s.tabId)
+
+/**
+ * Whether a seat gets a row in the sidebar's agent list. Scott's ruling, 2026-08-31: a side pane is
+ * already on screen, so it gets no row — the left list stays for real sessions; a tab seat keeps
+ * its row, because a tab with no row anywhere is invisible. Both report-agent calls (working at
+ * start, idle at stop) gate on this, or the stop call would create the very row the start withheld.
+ */
+export const reportsSidebarRow = (seat) => Boolean(seat && seat.tabId)
+
+/**
+ * Where a starting seat goes: a side pane while a slot is free and the session's own pane is known,
+ * else a tab. No HERDR_PANE_ID means the hook cannot know what to split beside, and the tab path is
+ * the one that needs nothing it does not already have.
+ */
+export const seatPlacement = (liveSeats, sessionPaneId, cap = SIDE_CAP) =>
+  sessionPaneId && liveSeats.filter(isSideSeat).length < cap ? 'pane' : 'tab'
+
+/**
+ * The split that creates a seat's side pane. The first side seat splits the session's pane right at
+ * SIDE_RATIO, founding the column; each later one splits the **tallest** side pane down. Tallest,
+ * not newest: stacking under the newest halves the same pane every time and a six-seat column comes
+ * out 28/14/7/4/2/1 rows (measured), while splitting the tallest keeps the skew within a factor of
+ * two and re-balances by itself when a mid-column seat closes and donates its rows to a neighbour.
+ * `layoutPanes` is the observed layout (pane_id + rect); without it the newest side pane stands in.
+ * `--no-focus` for the same reason as the tab path: a seat must never steal the user's cursor.
+ */
+export function splitArgs(liveSeats, sessionPaneId, layoutPanes) {
+  const side = liveSeats.filter(isSideSeat)
+  if (!side.length) {
+    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus']
+  }
+  let target = side[side.length - 1]
+  if (layoutPanes?.length) {
+    const height = new Map(layoutPanes.map((p) => [p.pane_id, p.rect?.height ?? 0]))
+    target = side.reduce((a, b) => ((height.get(b.paneId) ?? 0) > (height.get(a.paneId) ?? 0) ? b : a))
+  }
+  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus']
+}

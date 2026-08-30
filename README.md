@@ -134,7 +134,7 @@ node node_modules/playwright-core/cli.js install chromium
 
 Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
-One optional integration runs outside the skills entirely: with [herdr](https://herdr.dev) as your terminal multiplexer, every agent doctrine dispatches appears in herdr's sidebar as `dctr-<role>-<n>` while it runs, with its own tab showing what it is doing. Without herdr the hooks stand down on their first line and doctrine behaves exactly as it does today.
+One optional integration runs outside the skills entirely: with [herdr](https://herdr.dev) as your terminal multiplexer, every agent doctrine dispatches gets a live pane showing what it is doing — the first six stack in a column beside your session, and any seat past that opens its own tab, listed in herdr's sidebar as `dctr-<role>-<n>`. Without herdr the hooks stand down on their first line and doctrine behaves exactly as it does today.
 
 Everything else is optional and improves one skill or another. Each entry below says what happens when it is missing.
 
@@ -149,7 +149,7 @@ Everything else is optional and improves one skill or another. Each entry below 
 
   Without them: the `doctrine` skill's fallback table names a substitute for each. `matts-code-review` degrades to `/code-review` or two parallel review subagents.
 
-- [herdr](https://herdr.dev) 0.8.2 or later: live visibility of dispatched seats. The plugin ships a Claude Code hook set that creates a tab per seat and reports it to herdr's sidebar with a live state, so a long run stops being a black box.
+- [herdr](https://herdr.dev) 0.8.2 or later: live visibility of dispatched seats. The plugin ships a Claude Code hook set that gives each seat a live pane — side panes beside the session up to a cap of six, tabs (reported to herdr's sidebar with a live state) beyond it — so a long run stops being a black box.
 
   Nothing to configure. The hooks read `HERDR_ENV`, which herdr sets in every pane it manages.
 

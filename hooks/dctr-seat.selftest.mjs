@@ -14,6 +14,7 @@
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
+  seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -130,6 +131,58 @@ clause('clause 1o — quoting is applied to an ordinary path without mangling it
   shq('/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl') === "'/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl'",
   shq('/home/u/.claude/projects/-p/s/subagents/agent-a1.jsonl'))
 
+// Side-pane placement fixtures: a full column, a column with room, and the shapes that must never
+// count toward the cap — tab seats, and another seat's O_EXCL reservation caught mid-write.
+const SIDE_SEAT = (i) => ({ agent: `dctr-explore-${i}`, paneId: `w4Z:p${i + 1}`, tabId: null })
+const TAB_SEAT = (i) => ({ agent: `dctr-review-${i}`, paneId: `w4Z:p${90 + i}`, tabId: `w4Z:t${i}` })
+const RESERVATION = {}
+const FULL_COLUMN = Array.from({ length: SIDE_CAP }, (_, i) => SIDE_SEAT(i + 1))
+const SESSION_PANE = 'w4Z:p1'
+
+clause('clause 1r — seats side-stack until the cap, then overflow to tabs',
+  seatPlacement([], SESSION_PANE) === 'pane' &&
+  seatPlacement(FULL_COLUMN.slice(0, SIDE_CAP - 1), SESSION_PANE) === 'pane' &&
+  seatPlacement(FULL_COLUMN, SESSION_PANE) === 'tab',
+  `${seatPlacement([], SESSION_PANE)} / ${seatPlacement(FULL_COLUMN, SESSION_PANE)}`)
+
+clause('clause 1s — tab seats and reservations never consume a side slot',
+  seatPlacement([...FULL_COLUMN.slice(0, SIDE_CAP - 1), TAB_SEAT(1), RESERVATION], SESSION_PANE) === 'pane' &&
+  isSideSeat(TAB_SEAT(1)) === false && isSideSeat(RESERVATION) === false && isSideSeat(SIDE_SEAT(1)) === true,
+  'a reservation has no paneId to split and a tab seat holds no column row')
+
+clause('clause 1t — no session pane id means the tab path, which needs nothing extra',
+  seatPlacement([], undefined) === 'tab' && seatPlacement([], '') === 'tab',
+  seatPlacement([], undefined))
+
+const FOUNDING = splitArgs([], SESSION_PANE)
+const STACKING = splitArgs([SIDE_SEAT(1), TAB_SEAT(1), SIDE_SEAT(2)], SESSION_PANE)
+clause('clause 1u — the first side seat founds the column right of the session, later ones stack down',
+  FOUNDING.includes(SESSION_PANE) && FOUNDING[FOUNDING.indexOf('--direction') + 1] === 'right' &&
+  FOUNDING[FOUNDING.indexOf('--ratio') + 1] === String(SIDE_RATIO) &&
+  STACKING.includes(SIDE_SEAT(2).paneId) && !STACKING.includes(TAB_SEAT(1).paneId) &&
+  STACKING[STACKING.indexOf('--direction') + 1] === 'down' &&
+  FOUNDING.includes('--no-focus') && STACKING.includes('--no-focus'),
+  `${FOUNDING.join(' ')} | ${STACKING.join(' ')}`)
+
+clause('clause 1w — only tab seats get a sidebar row; a side pane is already on screen',
+  reportsSidebarRow(TAB_SEAT(1)) === true && reportsSidebarRow(SIDE_SEAT(1)) === false &&
+  reportsSidebarRow(RESERVATION) === false,
+  'the stop-side idle report gates on the same rule, or stop would create the row start withheld')
+
+// The measured defect this guards: stacking under the newest pane halves the same pane every time,
+// and a six-seat column rendered 28/14/7/4/2/1 rows. With the layout observed, the tallest side
+// pane is the one that splits — the session's own taller pane must never be the target.
+const LAYOUT = [
+  { pane_id: SESSION_PANE, rect: { height: 56 } },
+  { pane_id: SIDE_SEAT(1).paneId, rect: { height: 28 } },
+  { pane_id: SIDE_SEAT(2).paneId, rect: { height: 14 } },
+]
+const BALANCED = splitArgs([SIDE_SEAT(1), SIDE_SEAT(2)], SESSION_PANE, LAYOUT)
+clause('clause 1v — with the layout in hand, the tallest side pane is the one that splits',
+  BALANCED.includes(SIDE_SEAT(1).paneId) && !BALANCED.includes(SESSION_PANE) && !BALANCED.includes(SIDE_SEAT(2).paneId) &&
+  BALANCED[BALANCED.indexOf('--direction') + 1] === 'down',
+  BALANCED.join(' '))
+
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
@@ -181,5 +234,11 @@ clause('clause 3i — the pre-fix args really lack a workspace, and the fix adds
 clause('clause 3j — the foreign-list fixture really does not carry the seat\'s tab',
   FOREIGN_LIST.every((t) => t.tab_id !== SEAT_TAB_ID) && FOREIGN_LIST.length > 0 && FOREIGN_LIST.some((t) => t.focused),
   'if the list held the tab, 1p would be testing the focused branch rather than the unlisted one')
+
+clause('clause 3k — the placement fixtures really are the shapes their clauses lean on',
+  FULL_COLUMN.length === SIDE_CAP && FULL_COLUMN.every((s) => s.paneId && s.tabId === null) &&
+  Boolean(TAB_SEAT(1).paneId && TAB_SEAT(1).tabId) && Object.keys(RESERVATION).length === 0 &&
+  JSON.parse('{}').paneId === undefined,
+  'the reservation must be the literal O_EXCL placeholder ({}), or 1s tests an invented shape')
 
 process.exit(bad ? 1 : 0)
