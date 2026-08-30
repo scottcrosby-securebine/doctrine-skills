@@ -44,7 +44,42 @@ at runtime.
 
 ## Codex — as a visual red team
 
-Codex **sees** images, which is what makes it usable as an adversary on rendered work:
+Codex **sees** images, which is what makes it usable as an adversary on rendered work.
+Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
+
+### With herdr — a visible seat (issue #18)
+
+Inside a herdr pane, run the adversary as a live seat instead of a silent `codex exec`:
+its output is on screen while it reviews, and the command-timeout ceiling stops mattering
+because nothing blocks on the review.
+
+```bash
+herdr pane split --current --direction right --ratio 0.4 --no-focus   # note .result.pane.pane_id
+herdr agent start red-team --kind codex --pane <pane-id> --timeout 60000 -- --sandbox read-only
+herdr agent prompt red-team "<what to attack>. View these renders before judging: <path> <path> …"
+herdr agent wait red-team --timeout <under-your-command-ceiling>      # repeat until it returns idle
+herdr agent get red-team    # liveness — see below — BEFORE trusting any wait or read
+herdr agent read red-team --lines 200
+herdr pane close <pane-id>  # when the round is done with the seat
+```
+
+Three rules, each one a failure observed 2026-08-30/31 while this path was tested:
+
+1. **Interactive codex takes neither `-i` nor `--skip-git-repo-check`** — the second kills
+   startup outright. Name the render paths in the prompt text instead; codex views them
+   itself (verified: its `Viewed Image` tool call puts the pixels, not the metadata, in
+   front of the model). The attach-everything rule below still binds: name **every** render
+   the round produced, by path, plus the reference and any `--crop` shots.
+2. **A prompt against a dead seat succeeds.** `agent prompt` and `agent wait` can return
+   cleanly when the seat died at startup (a codex self-update loop produced exactly this).
+   `herdr agent get red-team` must show an `agent_session` id before you treat any answer
+   as the seat's; no session id means the seat never took the prompt — restart it, and
+   apply the doctrine's two-retry bound.
+3. **Do not block on the review.** Prompt without `--wait`, then poll `agent wait` with a
+   timeout under the harness's command ceiling — the same ceiling rule as the exec path,
+   solved by polling instead of backgrounding.
+
+### Without herdr — `codex exec`
 
 ```bash
 codex exec --sandbox read-only --skip-git-repo-check "<what to attack>" \
