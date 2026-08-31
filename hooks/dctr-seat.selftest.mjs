@@ -15,7 +15,7 @@ import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
-  metadataTokenArgs, TOKEN_TTL_MS,
+  metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -195,6 +195,16 @@ clause('clause 1x — counter tokens are the exact call verified on 0.8.2, argum
     '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--ttl-ms', String(TOKEN_TTL_MS)]),
   TOKEN_ARGS.join(' '))
 
+// F13 (QuoteBine, 2026-08-31): markers whose panes are gone must be dropped before placement, or
+// the split targets a dead pane and every later seat demotes to a tab. The layout fixture carries
+// seats 1 and 2 and not seat 3; a tab seat is never judged; no layout means nothing is dropped.
+const STALE = staleSideSeats([SIDE_SEAT(1), SIDE_SEAT(2), SIDE_SEAT(3), TAB_SEAT(1)], LAYOUT)
+clause('clause 1y — a side seat whose pane the layout lacks is stale; tab seats and unobserved layouts are not judged',
+  STALE.length === 1 && STALE[0].paneId === SIDE_SEAT(3).paneId &&
+  staleSideSeats([SIDE_SEAT(3)], null).length === 0 && staleSideSeats([SIDE_SEAT(3)], []).length === 0 &&
+  staleSideSeats([TAB_SEAT(1)], LAYOUT).length === 0,
+  JSON.stringify(STALE))
+
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
@@ -259,5 +269,10 @@ clause('clause 3l — the ttl really is the hour the README promises, not merely
   // row up past the expiry the README states.
   TOKEN_TTL_MS === 3600000,
   String(TOKEN_TTL_MS))
+
+clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',
+  LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
+  !LAYOUT.some((p) => p.pane_id === SIDE_SEAT(3).paneId) && !LAYOUT.some((p) => p.pane_id === TAB_SEAT(1).paneId),
+  'if the layout carried seat 3, 1y would prove staleSideSeats never fires; if it carried the tab pane, the tab clause would be vacuous')
 
 process.exit(bad ? 1 : 0)

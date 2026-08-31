@@ -23,18 +23,29 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
-  seatPlacement, splitArgs, reportsSidebarRow,
+  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats,
 } from './dctr-lib.mjs'
 
 const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
 const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
+
+// Hook output goes to a stream nobody reads, so a stand-down or a fallback that fired left no
+// trace the first time it mattered (F14, 2026-08-31). Best-effort append; never throws.
+let logSession = null
+const log = (msg) => {
+  if (!logSession) return
+  try {
+    fs.mkdirSync(stateDir(logSession), { recursive: true })
+    fs.appendFileSync(path.join(stateDir(logSession), 'hook.log'), `${new Date().toISOString()} ${msg}\n`)
+  } catch { /* logging must never be the failure */ }
+}
 
 const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
 // A marker reserved but not yet completed. A failure between the two would otherwise leak a
 // half-written file that permanently consumes that seat name, so every exit path clears it.
 let reserved = null
 const releaseReserved = () => { if (reserved) { try { fs.rmSync(reserved, { force: true }) } catch { /* nothing to undo */ } reserved = null } }
-const stand_down = (why) => { releaseReserved(); process.stderr.write(`${PREFIX}: skipped — ${why}\n`); process.exit(0) }
+const stand_down = (why) => { releaseReserved(); log(`${payload.hook_event_name || 'event'} skipped — ${why}`); process.stderr.write(`${PREFIX}: skipped — ${why}\n`); process.exit(0) }
 
 let payload = {}
 try {
@@ -44,6 +55,7 @@ try {
 const event = payload.hook_event_name
 const sessionId = payload.session_id
 if (!sessionId) stand_down('no session_id in the payload')
+logSession = sessionId
 
 const why = skipReason(process.env)
 if (why) stand_down(why)
@@ -90,7 +102,16 @@ try {
       // Allocate the counter by creating the marker with O_EXCL and retrying on collision. The
       // lock covers this today, but the loop stays collision-safe on its own merits: a read-then-
       // write allocation loses one of two same-millisecond seats the moment the lock ever widens.
-      const seats = liveSeats()
+      // The layout is read first and is authoritative: a marker whose pane it no longer carries is
+      // dropped before it can count toward the cap or become the split target (see staleSideSeats).
+      let layout = null
+      try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* newest stands in */ }
+      let seats = liveSeats()
+      for (const s of staleSideSeats(seats, layout)) {
+        try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
+        log(`dropped stale marker ${s.agent}: pane ${s.paneId} not in layout`)
+      }
+      seats = seats.filter((s) => !staleSideSeats([s], layout).length)
       const taken = seats.map((s) => s.agent)
       let n = nextIndex(payload.agent_type, taken)
       let marker = null, name = null
@@ -104,15 +125,18 @@ try {
       }
       if (!marker) return 'could not allocate a seat name'
 
-      // A side pane while a slot is free, a tab past the cap. A failed split falls back to the tab
-      // path rather than standing down: the split target can vanish between the read and the call
-      // (the user closed the column), and a seat with a tab beats a seat with nothing.
+      // A side pane while a slot is free, a tab past the cap. A failed split is retried once from
+      // the session pane itself — the target can still vanish between the layout read and the
+      // call — and only then falls back to the tab path, logged, rather than standing down: a
+      // seat with a tab beats a seat with nothing, but a silent demotion hid F13 for seven hours.
       let tabId = null, paneId = null
       if (seatPlacement(seats, process.env.HERDR_PANE_ID) === 'pane') {
-        let layout = null
-        try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* newest stands in */ }
         try { paneId = herdr(splitArgs(seats, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
-        catch { paneId = null }
+        catch (e) {
+          log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
+          try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID)).result.pane.pane_id }
+          catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
+        }
       }
       if (!paneId) {
         const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(payload.agent_type, n)))
@@ -163,11 +187,12 @@ try {
       // cannot find is treated as unfocused and the close is best-effort — it is already gone.
       let pane
       try { pane = herdr(['pane', 'get', seat.paneId]).result.pane } catch { /* gone */ }
-      if (stopAction(pane) === 'relabel') herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`])
+      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }
       else try { herdr(['pane', 'close', seat.paneId]) } catch { /* already gone */ }
     }
 
     fs.rmSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), { force: true })
+    log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
   }
 
   if (event === 'SessionEnd') {

@@ -194,6 +194,21 @@ export const reportsSidebarRow = (seat) => Boolean(seat && seat.tabId)
 export const seatPlacement = (liveSeats, sessionPaneId, cap = SIDE_CAP) =>
   sessionPaneId && liveSeats.filter(isSideSeat).length < cap ? 'pane' : 'tab'
 
+/**
+ * Side-seat markers whose pane the observed layout no longer carries. The marker is advisory and
+ * the layout authoritative: a pane closed by hand, or a stop whose cleanup never ran, leaves a
+ * marker that still counts toward the cap and — worse — becomes the split target, so the split
+ * fails on pane_not_found and every later seat in the session demotes to a tab (QuoteBine,
+ * 2026-08-31: two markers from 08:56 sent the 15:25 seat to a tab). With no layout observed
+ * nothing is known stale, so nothing is dropped; a tab seat is never judged here because its pane
+ * lives in another tab the session-pane layout does not show.
+ */
+export function staleSideSeats(liveSeats, layoutPanes) {
+  if (!layoutPanes?.length) return []
+  const live = new Set(layoutPanes.map((p) => p.pane_id))
+  return liveSeats.filter((s) => isSideSeat(s) && !live.has(s.paneId))
+}
+
 /** How long a run's sidebar tokens live without a refresh (issue #19). Each per-round record write
  *  republishes them, so a live run never blinks out; a run that dies stops writing and its row
  *  clears itself within the hour instead of sitting stale forever. An hour rather than the ten
