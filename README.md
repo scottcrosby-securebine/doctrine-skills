@@ -62,7 +62,7 @@ The wording varies. What that line contains does not, and there is no third form
 
 ## Watch it work
 
-A doctrine run sends out a lot of agents, and normally they are invisible: your terminal goes quiet, and some minutes later the results appear. If your terminal is [herdr](https://herdr.dev) (0.8.2 or later), the run becomes something you can watch.
+A doctrine run sends out a lot of agents, and normally they are invisible: your terminal goes quiet, and some minutes later the results appear. [herdr](https://herdr.dev) is a new terminal multiplexer — a terminal window that splits into panes and tabs and knows which agent is running in each. Run Claude Code inside it (herdr 0.8.2 or later) and a doctrine run becomes something you can watch.
 
 **Live panes.** The moment an agent is dispatched, a pane opens beside your session showing what it is doing — the opening line of its instructions, then the files it reads and the commands it runs, as they happen. Up to six panes at a time stack in a column on the right, and your session keeps the bigger share of the screen. A pane reads like this:
 
@@ -172,7 +172,15 @@ Not `npx playwright install`. That command belongs to the full `playwright` pack
 
 The herdr integration in [Watch it work](#watch-it-work) is optional too, and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today.
 
-Everything else is optional and improves one skill or another. Each entry below says what happens when it is missing — and a tool that is installed but reports itself unusable degrades the same way, rather than stalling the run.
+Everything else is optional and improves one skill or another. The doctrine is built on other authors' work, layered on rather than forked, and the credit is theirs. Their names go here in the visible text, because the detailed list below renders collapsed:
+
+- [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) — the build and review disciplines the wrappers invoke.
+- [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc) — the different-model red team.
+- [superpowers](https://github.com/obra/superpowers), by Jesse Vincent and the folks at Prime Radiant — parallel dispatch and git worktree isolation.
+- [ponytail](https://github.com/DietrichGebert/ponytail), by Dietrich Gebert — the simplification review.
+- [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) — the editing pass; original skill by Josh Thomas (@joshuadavidthomas), adapted in softaworks' agent-toolkit.
+
+Three Claude-side capabilities join them below. Each entry in the collapsed list says what happens when something is missing — every one has a fallback, and a tool that is installed but reports itself unusable degrades the same way, rather than stalling the run.
 
 <details>
 <summary>Optional integrations and their fallbacks</summary>
