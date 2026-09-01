@@ -153,11 +153,19 @@ try {
       if (view) {
         // The pane is a host process and this filesystem is a container's: hand the host a request
         // it validates, never a command it trusts. Written before the pane command runs so the
-        // viewer finds it on its first read.
+        // viewer finds it on its first read. A failed write is diagnosed here, not left to the
+        // outer catch — that one blames herdr, and the likeliest cause is the bridge mount — and
+        // the pane just created is closed first, because a marker never gets written for this seat
+        // and an unmarked pane is beyond even the SessionEnd sweep.
         let cid = null
         try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
         requestPath = viewRequestPath(view.requestDir, paneId)
-        fs.writeFileSync(requestPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, name)))
+        try {
+          fs.writeFileSync(requestPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, name)))
+        } catch (e) {
+          try { herdr(tabId ? ['tab', 'close', tabId] : ['pane', 'close', paneId]) } catch { /* best effort */ }
+          return `view request write failed (${String(e.message).split('\n')[0]}) — is ${view.requestDir} mounted?`
+        }
         herdr(['pane', 'run', paneId, view.viewCmd])
       } else {
         herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
