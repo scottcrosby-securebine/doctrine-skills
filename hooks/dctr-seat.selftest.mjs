@@ -16,6 +16,7 @@ import {
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
+  viewMode, paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -270,9 +271,56 @@ clause('clause 3l — the ttl really is the hour the README promises, not merely
   TOKEN_TTL_MS === 3600000,
   String(TOKEN_TTL_MS))
 
+// Pane containment: inside a container the pane is a host process, so the hook must hand the host
+// a validated request, never a command — and must do so only when the launcher opted in.
+const VIEW_ENV = { DCTR_VIEW_REQUEST_DIR: '/bridge', DCTR_SEAT_VIEW_CMD: 'sudo /opt/x/agent-shell view' }
+clause('clause 1z — view indirection engages only when the launcher set both variables',
+  viewMode({}) === null && viewMode(goodEnv) === null &&
+  viewMode({ DCTR_VIEW_REQUEST_DIR: '/bridge' }) === null &&
+  viewMode({ DCTR_SEAT_VIEW_CMD: 'x' }) === null &&
+  viewMode(VIEW_ENV)?.requestDir === '/bridge' && viewMode(VIEW_ENV)?.viewCmd === 'sudo /opt/x/agent-shell view',
+  JSON.stringify(viewMode(VIEW_ENV)))
+
+// The host rebuilds the token from its own HERDR_PANE_ID, so the mapping must be deterministic —
+// and a pane id is the one request field that becomes part of a path, so it must not traverse.
+const HOSTILE_PANE = '../../etc/passwd'
+clause('clause 1aa — pane tokens are filename-safe, deterministic, and cannot traverse',
+  paneToken('w66:p18') === 'w66_p18' &&
+  viewRequestPath('/bridge', 'w66:p18') === '/bridge/view-w66_p18.json' &&
+  viewRequestPath('/bridge/', 'w66:p18') === '/bridge/view-w66_p18.json' &&
+  !viewRequestPath('/bridge', HOSTILE_PANE).includes('..') &&
+  !paneToken(HOSTILE_PANE).includes('/'),
+  `${paneToken(HOSTILE_PANE)} -> ${viewRequestPath('/bridge', HOSTILE_PANE)}`)
+
+// A compose file may set `hostname:`, so the id comes from mountinfo where docker bind-mounts
+// /etc/hostname from /var/lib/docker/containers/<id>/ — and a 12-hex short id must not satisfy it.
+const CID = 'a3f9'.repeat(16)
+const MOUNTINFO = `1537 1489 8:1 /var/lib/docker/containers/${CID}/hostname /etc/hostname rw,relatime - ext4 /dev/sda1 rw`
+clause('clause 1ab — the container id parses from mountinfo, and short or absent ids return null',
+  containerIdFromMountinfo(MOUNTINFO) === CID &&
+  containerIdFromMountinfo('1537 1489 8:1 / / rw - ext4 /dev/sda1 rw') === null &&
+  containerIdFromMountinfo(`x /containers/${CID.slice(0, 12)}/hostname y`) === null &&
+  containerIdFromMountinfo('') === null,
+  String(containerIdFromMountinfo(MOUNTINFO)))
+
+clause('clause 1ac — a view request carries exactly the four claims the host validates, no more',
+  JSON.stringify(Object.keys(viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'dctr-explore-1'))) ===
+    JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'seat']) &&
+  viewRequest(CID, '/p/r.mjs', '/t/a.jsonl', 's').container_id === CID,
+  JSON.stringify(viewRequest(CID, '/p/r.mjs', '/t/a.jsonl', 's')))
+
 clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
   !LAYOUT.some((p) => p.pane_id === SIDE_SEAT(3).paneId) && !LAYOUT.some((p) => p.pane_id === TAB_SEAT(1).paneId),
   'if the layout carried seat 3, 1y would prove staleSideSeats never fires; if it carried the tab pane, the tab clause would be vacuous')
+
+clause('clause 3n — the mountinfo fixture really carries a 64-hex id under /containers/, shown without the parser',
+  MOUNTINFO.includes('/containers/') && CID.length === 64 && [...CID].every((c) => '0123456789abcdef'.includes(c)) &&
+  MOUNTINFO.includes(`/containers/${CID}/`),
+  'if the fixture lacked the docker shape, 1ab would prove the parser matches an invented format')
+
+clause('clause 3o — the hostile pane fixture really carries live traversal, and the id fixture really does not',
+  HOSTILE_PANE.includes('../') && !'w66:p18'.includes('.') && !'w66:p18'.includes('/'),
+  'if the hostile fixture were already clean, 1aa would prove sanitizing changes nothing')
 
 process.exit(bad ? 1 : 0)

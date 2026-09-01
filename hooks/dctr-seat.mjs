@@ -15,7 +15,10 @@
 // it stood down is printed to stderr so that a skip and a silent success are never the same signal.
 //
 // It never writes into another tool's data directory. It reads the transcript path the harness
-// hands it and writes only under its own session-scoped state directory.
+// hands it and writes only under its own session-scoped state directory — plus, when the launcher
+// set DCTR_VIEW_REQUEST_DIR, the view-request files that directory explicitly exists to receive
+// (see viewMode in dctr-lib.mjs: inside a container the pane is a host process, so the renderer
+// cannot be run directly and the host side takes a validated request instead).
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -23,7 +26,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
-  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats,
+  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewMode, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
 const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
@@ -145,8 +148,21 @@ try {
       }
 
       const renderer = path.join(import.meta.dirname, 'dctr-render.mjs')
-      herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file }
+      const view = viewMode(process.env)
+      let requestPath = null
+      if (view) {
+        // The pane is a host process and this filesystem is a container's: hand the host a request
+        // it validates, never a command it trusts. Written before the pane command runs so the
+        // viewer finds it on its first read.
+        let cid = null
+        try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
+        requestPath = viewRequestPath(view.requestDir, paneId)
+        fs.writeFileSync(requestPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, name)))
+        herdr(['pane', 'run', paneId, view.viewCmd])
+      } else {
+        herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
+      }
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, requestPath }
       if (reportsSidebarRow(record)) {
         herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name,
           '--state', 'working', '--message', `doctrine seat ${payload.agent_type}`])
@@ -191,6 +207,7 @@ try {
       else try { herdr(['pane', 'close', seat.paneId]) } catch { /* already gone */ }
     }
 
+    if (seat.requestPath) try { fs.rmSync(seat.requestPath, { force: true }) } catch { /* mount gone; nothing to clean */ }
     fs.rmSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), { force: true })
     log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
   }
@@ -199,6 +216,7 @@ try {
     // A seat whose SubagentStop never fired leaves a pane or tab behind. Nothing else will clear it.
     for (const seat of liveSeats()) {
       try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) } catch { /* already gone */ }
+      if (seat.requestPath) try { fs.rmSync(seat.requestPath, { force: true }) } catch { /* mount gone */ }
     }
     fs.rmSync(stateDir(sessionId), { recursive: true, force: true })
   }

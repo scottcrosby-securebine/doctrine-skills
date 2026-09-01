@@ -227,6 +227,49 @@ export const metadataTokenArgs = (paneId, round, exitCount, valve) =>
     '--token', `doctrine=r${round}·e${exitCount}·v${valve}`, '--ttl-ms', String(TOKEN_TTL_MS)]
 
 /**
+ * Container-side viewer indirection (pane containment). When the session runs inside a container,
+ * the pane its herdr server spawns is a HOST process: handing it `node <renderer> <transcript>`
+ * executes on the host, where the paths do not exist — and the pattern lets in-container code choose
+ * what runs on the host, which is the containment breach the fix exists to close. The launcher that
+ * wired the session (agent-shell on sbsforge) opts in by setting both variables; the hook then
+ * writes a view-request file the host side validates, and puts the launcher's own fixed command in
+ * the pane instead. Either variable absent means the pane shares this filesystem and the direct
+ * renderer path stays. Both-or-neither, so a half-set environment fails loudly at the launcher, not
+ * silently here: one variable alone is ignored.
+ */
+export function viewMode(env) {
+  if (!env.DCTR_VIEW_REQUEST_DIR || !env.DCTR_SEAT_VIEW_CMD) return null
+  return { requestDir: env.DCTR_VIEW_REQUEST_DIR, viewCmd: env.DCTR_SEAT_VIEW_CMD }
+}
+
+/** Filename-safe token for a pane id: `w66:p18` -> `w66_p18`. The host side rebuilds exactly this
+ *  from its own HERDR_PANE_ID, so the mapping must be deterministic and collision-free over herdr's
+ *  id alphabet (`[A-Za-z0-9:_-]`, observed 0.8.2) — only `:` needs mapping and `_` maps to itself,
+ *  which cannot collide because no herdr id carries `_` and `:` in the same position. */
+export const paneToken = (paneId) => String(paneId).replace(/[^A-Za-z0-9_-]/g, '_')
+
+/** Where a pane's view request lives. POSIX join by construction: the dir is a container mount
+ *  point the launcher chose, never user input. */
+export const viewRequestPath = (dir, paneId) => `${String(dir).replace(/\/+$/, '')}/view-${paneToken(paneId)}.json`
+
+/** The request body the host-side viewer validates before it execs anything. Every field is a
+ *  claim, not an instruction: the host checks the container against its own docker inspect and the
+ *  paths against its own rules before any of this reaches an argv. */
+export const viewRequest = (containerId, rendererPath, transcriptPath, seatName) =>
+  ({ container_id: containerId, renderer_path: rendererPath, transcript_path: transcriptPath, seat: seatName })
+
+/**
+ * The container's own 64-hex id, parsed from a /proc/self/mountinfo listing — the hostname trick is
+ * not enough because compose files may set `hostname:`. Docker bind-mounts /etc/hostname et al from
+ * `/var/lib/docker/containers/<id>/`, so the id rides every such line. Null when the text carries
+ * none, which the caller treats as "not in a docker container" and falls back to os.hostname().
+ */
+export function containerIdFromMountinfo(text) {
+  const m = String(text).match(/\/containers\/([0-9a-f]{64})\//)
+  return m ? m[1] : null
+}
+
+/**
  * The split that creates a seat's side pane. The first side seat splits the session's pane right at
  * SIDE_RATIO, founding the column; each later one splits the **tallest** side pane down. Tallest,
  * not newest: stacking under the newest halves the same pane every time and a six-seat column comes
