@@ -149,35 +149,40 @@ try {
 
       const renderer = path.join(import.meta.dirname, 'dctr-render.mjs')
       const view = viewMode(process.env)
-      let requestPath = null
+      const requestPath = view ? viewRequestPath(view.requestDir, paneId) : null
+
+      // Finalize the marker the instant the pane exists, BEFORE any step that can throw — the
+      // request write, the pane command, the sidebar report. Once it is on disk the seat is
+      // tracked, so whatever fails after this, SubagentStop and the SessionEnd sweep both find the
+      // pane (and the request file, by its recorded path) and tear them down. The old order wrote
+      // the marker last, so a throw anywhere in setup left an unmarked pane beyond even the sweep;
+      // recording teardown first is what makes a mid-setup failure recoverable (codex, 2026-09-01).
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, requestPath }
+      fs.writeFileSync(marker, JSON.stringify(record))
+      reserved = null   // complete: the marker is now a record rather than a reservation
+
       if (view) {
         // The pane is a host process and this filesystem is a container's: hand the host a request
-        // it validates, never a command it trusts. Written before the pane command runs so the
-        // viewer finds it on its first read. A failed write is diagnosed here, not left to the
-        // outer catch — that one blames herdr, and the likeliest cause is the bridge mount — and
-        // the pane just created is closed first, because a marker never gets written for this seat
-        // and an unmarked pane is beyond even the SessionEnd sweep.
+        // it validates, never a command it trusts. A failed write leaves the seat tracked (the
+        // marker is already down), so the pane is torn down at SubagentStop; here we just skip the
+        // view command, since there is nothing to show, and say why. Diagnosed here rather than in
+        // the outer catch, which blames herdr when the likeliest cause is the bridge mount.
         let cid = null
         try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
-        requestPath = viewRequestPath(view.requestDir, paneId)
         try {
           fs.writeFileSync(requestPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, name)))
         } catch (e) {
-          try { herdr(tabId ? ['tab', 'close', tabId] : ['pane', 'close', paneId]) } catch { /* best effort */ }
-          return `view request write failed (${String(e.message).split('\n')[0]}) — is ${view.requestDir} mounted?`
+          log(`view request write failed (${String(e.message).split('\n')[0]}) — is ${view.requestDir} mounted?`)
+          return null
         }
         herdr(['pane', 'run', paneId, view.viewCmd])
       } else {
         herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
       }
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, requestPath }
       if (reportsSidebarRow(record)) {
         herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name,
           '--state', 'working', '--message', `doctrine seat ${payload.agent_type}`])
       }
-
-      fs.writeFileSync(marker, JSON.stringify(record))
-      reserved = null   // complete: the marker is now a record rather than a reservation
       return null
     })
     if (why) stand_down(why)

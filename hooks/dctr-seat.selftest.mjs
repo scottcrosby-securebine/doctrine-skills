@@ -303,11 +303,15 @@ clause('clause 1ab — the container id parses from mountinfo, and short or abse
   containerIdFromMountinfo('') === null,
   String(containerIdFromMountinfo(MOUNTINFO)))
 
-clause('clause 1ac — a view request carries exactly the four claims the host validates, no more',
-  JSON.stringify(Object.keys(viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'dctr-explore-1'))) ===
-    JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'seat']) &&
-  viewRequest(CID, '/p/r.mjs', '/t/a.jsonl', 's').container_id === CID,
-  JSON.stringify(viewRequest(CID, '/p/r.mjs', '/t/a.jsonl', 's')))
+// Each of the four values is checked, not just the key set: the host reads
+// renderer_path and transcript_path straight into an argv, so a request that
+// swapped or dropped either while keeping the right key names must fail here.
+const REQ = viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'dctr-explore-1')
+clause('clause 1ac — a view request carries exactly the four claims the host validates, each to its own field',
+  JSON.stringify(Object.keys(REQ)) === JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'seat']) &&
+  REQ.container_id === CID && REQ.renderer_path === '/p/dctr-render.mjs' &&
+  REQ.transcript_path === '/t/a.jsonl' && REQ.seat === 'dctr-explore-1',
+  JSON.stringify(REQ))
 
 clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
