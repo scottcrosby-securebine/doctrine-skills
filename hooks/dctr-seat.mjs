@@ -15,10 +15,10 @@
 // it stood down is printed to stderr so that a skip and a silent success are never the same signal.
 //
 // It never writes into another tool's data directory. It reads the transcript path the harness
-// hands it and writes only under its own session-scoped state directory — plus, when the launcher
-// set DCTR_VIEW_REQUEST_DIR, the view-request files that directory explicitly exists to receive
-// (see viewMode in dctr-lib.mjs: inside a container the pane is a host process, so the renderer
-// cannot be run directly and the host side takes a validated request instead).
+// hands it and writes only under its own session-scoped state directory — plus, in the contained
+// posture (DCTR_VIEW_REQUEST_DIR set, no herdr socket), the view-request files it drops into that
+// mount for a host-side watcher to render. A contained agent must reach nothing on the host, so in
+// that posture the hook makes no herdr call at all: it only writes and removes request files.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -26,7 +26,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
-  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewMode, viewRequestPath, viewRequest, containerIdFromMountinfo,
+  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
 const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
@@ -59,6 +59,40 @@ const event = payload.hook_event_name
 const sessionId = payload.session_id
 if (!sessionId) stand_down('no session_id in the payload')
 logSession = sessionId
+
+// Contained posture. DCTR_VIEW_REQUEST_DIR is an allowed mount (sbsforge: /bridge); its
+// presence means this session runs inside a container that must reach nothing on the host.
+// The hook therefore makes NO herdr call and needs no HERDR_* variable: it only writes a
+// request file a host-side watcher renders, and removes it when the seat stops. Selected
+// before the HERDR_ENV gate so it works with the socket and every HERDR_* var absent.
+const requestDir = process.env.DCTR_VIEW_REQUEST_DIR
+if (requestDir) {
+  if (event === 'SubagentStart' || event === 'SubagentStop') {
+    if (!isSeatEvent(payload)) stand_down('not a seat event: no agent_id, so this is the parent')
+    const reqPath = viewRequestPath(requestDir, payload.agent_id)
+    if (event === 'SubagentStop') {
+      try { fs.rmSync(reqPath, { force: true }) } catch { /* mount gone; the watcher reaps stale requests */ }
+      log(`contained stop ${payload.agent_id}: request removed`)
+      process.exit(0)
+    }
+    const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
+    if (!file) stand_down('could not resolve the seat transcript path')
+    let cid = null
+    try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
+    const renderer = path.join(import.meta.dirname, 'dctr-render.mjs')
+    try {
+      fs.writeFileSync(reqPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, payload.agent_type)))
+    } catch (e) {
+      stand_down(`could not write the view request (${String(e.message).split('\n')[0]}) — is ${requestDir} mounted?`)
+    }
+    log(`contained start ${payload.agent_id}: request written`)
+    process.exit(0)
+  }
+  // SessionEnd in contained mode: nothing to sweep from here. Requests are removed at
+  // SubagentStop, and a seat that never stopped leaves one file the host watcher reaps by
+  // age. The hook holds no host handle to close.
+  process.exit(0)
+}
 
 const why = skipReason(process.env)
 if (why) stand_down(why)
@@ -148,37 +182,23 @@ try {
       }
 
       const renderer = path.join(import.meta.dirname, 'dctr-render.mjs')
-      const view = viewMode(process.env)
-      const requestPath = view ? viewRequestPath(view.requestDir, paneId) : null
 
       // Finalize the marker the instant the pane exists, BEFORE any step that can throw — the
-      // request write, the pane command, the sidebar report. Once it is on disk the seat is
-      // tracked, so whatever fails after this, SubagentStop and the SessionEnd sweep both find the
-      // pane (and the request file, by its recorded path) and tear them down. The old order wrote
-      // the marker last, so a throw anywhere in setup left an unmarked pane beyond even the sweep;
-      // recording teardown first is what makes a mid-setup failure recoverable (codex, 2026-09-01).
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, requestPath }
+      // pane command and the sidebar report. Once it is on disk the seat is tracked, so whatever
+      // fails after this, SubagentStop and the SessionEnd sweep both find the pane and tear it
+      // down. The old order wrote the marker last, so a throw anywhere in setup left an unmarked
+      // pane beyond even the sweep; recording teardown first is what makes a mid-setup failure
+      // recoverable (codex, 2026-09-01).
+      //
+      // This is the operator's-own-herdr path (HERDR_ENV=1, no bridge): hook and pane share one
+      // filesystem, node is present, so the renderer runs directly in the pane. A CONTAINED agent
+      // never reaches here — DCTR_VIEW_REQUEST_DIR routes it to the bridge-write path above, which
+      // makes no herdr call at all.
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file }
       fs.writeFileSync(marker, JSON.stringify(record))
       reserved = null   // complete: the marker is now a record rather than a reservation
 
-      if (view) {
-        // The pane is a host process and this filesystem is a container's: hand the host a request
-        // it validates, never a command it trusts. A failed write leaves the seat tracked (the
-        // marker is already down), so the pane is torn down at SubagentStop; here we just skip the
-        // view command, since there is nothing to show, and say why. Diagnosed here rather than in
-        // the outer catch, which blames herdr when the likeliest cause is the bridge mount.
-        let cid = null
-        try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
-        try {
-          fs.writeFileSync(requestPath, JSON.stringify(viewRequest(cid || os.hostname(), renderer, file, name)))
-        } catch (e) {
-          log(`view request write failed (${String(e.message).split('\n')[0]}) — is ${view.requestDir} mounted?`)
-          return null
-        }
-        herdr(['pane', 'run', paneId, view.viewCmd])
-      } else {
-        herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
-      }
+      herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
       if (reportsSidebarRow(record)) {
         herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name,
           '--state', 'working', '--message', `doctrine seat ${payload.agent_type}`])
@@ -220,7 +240,6 @@ try {
       else try { herdr(['pane', 'close', seat.paneId]) } catch { /* already gone */ }
     }
 
-    if (seat.requestPath) try { fs.rmSync(seat.requestPath, { force: true }) } catch { /* mount gone; nothing to clean */ }
     fs.rmSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), { force: true })
     log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
   }
@@ -229,7 +248,6 @@ try {
     // A seat whose SubagentStop never fired leaves a pane or tab behind. Nothing else will clear it.
     for (const seat of liveSeats()) {
       try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) } catch { /* already gone */ }
-      if (seat.requestPath) try { fs.rmSync(seat.requestPath, { force: true }) } catch { /* mount gone */ }
     }
     fs.rmSync(stateDir(sessionId), { recursive: true, force: true })
   }

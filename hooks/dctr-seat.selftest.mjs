@@ -16,7 +16,7 @@ import {
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
-  viewMode, paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
+  paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -271,23 +271,14 @@ clause('clause 3l — the ttl really is the hour the README promises, not merely
   TOKEN_TTL_MS === 3600000,
   String(TOKEN_TTL_MS))
 
-// Pane containment: inside a container the pane is a host process, so the hook must hand the host
-// a validated request, never a command — and must do so only when the launcher opted in.
-const VIEW_ENV = { DCTR_VIEW_REQUEST_DIR: '/bridge', DCTR_SEAT_VIEW_CMD: 'sudo /opt/x/agent-shell view' }
-clause('clause 1z — view indirection engages only when the launcher set both variables',
-  viewMode({}) === null && viewMode(goodEnv) === null &&
-  viewMode({ DCTR_VIEW_REQUEST_DIR: '/bridge' }) === null &&
-  viewMode({ DCTR_SEAT_VIEW_CMD: 'x' }) === null &&
-  viewMode(VIEW_ENV)?.requestDir === '/bridge' && viewMode(VIEW_ENV)?.viewCmd === 'sudo /opt/x/agent-shell view',
-  JSON.stringify(viewMode(VIEW_ENV)))
-
-// The host rebuilds the token from its own HERDR_PANE_ID, so the mapping must be deterministic —
-// and a pane id is the one request field that becomes part of a path, so it must not traverse.
+// Pane containment: a contained agent writes a request file named by its agent_id and reaches
+// nothing on the host; the id becomes part of a path, so it must never traverse.
 const HOSTILE_PANE = '../../etc/passwd'
-clause('clause 1aa — pane tokens are filename-safe, deterministic, and cannot traverse',
+clause('clause 1aa — request tokens are filename-safe, deterministic, and cannot traverse',
   paneToken('w66:p18') === 'w66_p18' &&
-  viewRequestPath('/bridge', 'w66:p18') === '/bridge/view-w66_p18.json' &&
-  viewRequestPath('/bridge/', 'w66:p18') === '/bridge/view-w66_p18.json' &&
+  paneToken('ad1a7dbb0d453a08d') === 'ad1a7dbb0d453a08d' &&
+  viewRequestPath('/bridge', 'ad1a7dbb0d453a08d') === '/bridge/view-ad1a7dbb0d453a08d.json' &&
+  viewRequestPath('/bridge/', 'ad1a7dbb0d453a08d') === '/bridge/view-ad1a7dbb0d453a08d.json' &&
   !viewRequestPath('/bridge', HOSTILE_PANE).includes('..') &&
   !paneToken(HOSTILE_PANE).includes('/'),
   `${paneToken(HOSTILE_PANE)} -> ${viewRequestPath('/bridge', HOSTILE_PANE)}`)
@@ -303,14 +294,14 @@ clause('clause 1ab — the container id parses from mountinfo, and short or abse
   containerIdFromMountinfo('') === null,
   String(containerIdFromMountinfo(MOUNTINFO)))
 
-// Each of the four values is checked, not just the key set: the host reads
-// renderer_path and transcript_path straight into an argv, so a request that
-// swapped or dropped either while keeping the right key names must fail here.
-const REQ = viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'dctr-explore-1')
-clause('clause 1ac — a view request carries exactly the four claims the host validates, each to its own field',
-  JSON.stringify(Object.keys(REQ)) === JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'seat']) &&
+// Each field is checked, not just the key set: the host reads renderer_path and transcript_path
+// straight into an argv, so a request that swapped or dropped either while keeping the right key
+// names must fail here. role is display only.
+const REQ = viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'Explore')
+clause('clause 1ac — a view request carries exactly the four claims, each to its own field',
+  JSON.stringify(Object.keys(REQ)) === JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'role']) &&
   REQ.container_id === CID && REQ.renderer_path === '/p/dctr-render.mjs' &&
-  REQ.transcript_path === '/t/a.jsonl' && REQ.seat === 'dctr-explore-1',
+  REQ.transcript_path === '/t/a.jsonl' && REQ.role === 'Explore',
   JSON.stringify(REQ))
 
 clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',

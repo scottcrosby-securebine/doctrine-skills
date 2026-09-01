@@ -226,37 +226,23 @@ export const metadataTokenArgs = (paneId, round, exitCount, valve) =>
   ['pane', 'report-metadata', paneId, '--source', 'custom:doctrine',
     '--token', `doctrine=r${round}·e${exitCount}·v${valve}`, '--ttl-ms', String(TOKEN_TTL_MS)]
 
-/**
- * Container-side viewer indirection (pane containment). When the session runs inside a container,
- * the pane its herdr server spawns is a HOST process: handing it `node <renderer> <transcript>`
- * executes on the host, where the paths do not exist — and the pattern lets in-container code choose
- * what runs on the host, which is the containment breach the fix exists to close. The launcher that
- * wired the session (agent-shell on sbsforge) opts in by setting both variables; the hook then
- * writes a view-request file the host side validates, and puts the launcher's own fixed command in
- * the pane instead. Either variable absent means the pane shares this filesystem and the direct
- * renderer path stays. Both-or-neither, so a half-set environment fails loudly at the launcher, not
- * silently here: one variable alone is ignored.
- */
-export function viewMode(env) {
-  if (!env.DCTR_VIEW_REQUEST_DIR || !env.DCTR_SEAT_VIEW_CMD) return null
-  return { requestDir: env.DCTR_VIEW_REQUEST_DIR, viewCmd: env.DCTR_SEAT_VIEW_CMD }
-}
+/** Filename-safe token for an id: `w66:p18` -> `w66_p18`, an agent_id passes through unchanged.
+ *  The contained hook names a request file by the subagent's `agent_id` (unique per seat, no herdr
+ *  pane exists to name it by); the host watcher and `agent-shell view` rebuild the same token from
+ *  the token the watcher carries, so the mapping must be deterministic. Every char outside
+ *  `[A-Za-z0-9_-]` becomes `_`, so no traversal or separator survives into the filename. */
+export const paneToken = (id) => String(id).replace(/[^A-Za-z0-9_-]/g, '_')
 
-/** Filename-safe token for a pane id: `w66:p18` -> `w66_p18`. The host side rebuilds exactly this
- *  from its own HERDR_PANE_ID, so the mapping must be deterministic and collision-free over herdr's
- *  id alphabet (`[A-Za-z0-9:_-]`, observed 0.8.2) — only `:` needs mapping and `_` maps to itself,
- *  which cannot collide because no herdr id carries `_` and `:` in the same position. */
-export const paneToken = (paneId) => String(paneId).replace(/[^A-Za-z0-9_-]/g, '_')
-
-/** Where a pane's view request lives. POSIX join by construction: the dir is a container mount
- *  point the launcher chose, never user input. */
-export const viewRequestPath = (dir, paneId) => `${String(dir).replace(/\/+$/, '')}/view-${paneToken(paneId)}.json`
+/** Where a request lives. The dir is a container mount point the launcher chose, never user input;
+ *  the id is tokenised so the leaf cannot escape it. */
+export const viewRequestPath = (dir, id) => `${String(dir).replace(/\/+$/, '')}/view-${paneToken(id)}.json`
 
 /** The request body the host-side viewer validates before it execs anything. Every field is a
  *  claim, not an instruction: the host checks the container against its own docker inspect and the
- *  paths against its own rules before any of this reaches an argv. */
-export const viewRequest = (containerId, rendererPath, transcriptPath, seatName) =>
-  ({ container_id: containerId, renderer_path: rendererPath, transcript_path: transcriptPath, seat: seatName })
+ *  paths against its own rules before any of this reaches an argv. `role` is display only (the
+ *  watcher labels the pane from it) and the validator never reads it. */
+export const viewRequest = (containerId, rendererPath, transcriptPath, role) =>
+  ({ container_id: containerId, renderer_path: rendererPath, transcript_path: transcriptPath, role })
 
 /**
  * The container's own 64-hex id, parsed from a /proc/self/mountinfo listing — the hostname trick is
