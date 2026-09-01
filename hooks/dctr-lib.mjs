@@ -239,8 +239,9 @@ export const viewRequestPath = (dir, id) => `${String(dir).replace(/\/+$/, '')}/
 
 /** The request body the host-side viewer validates before it execs anything. Every field is a
  *  claim, not an instruction: the host checks the container against its own docker inspect and the
- *  paths against its own rules before any of this reaches an argv. `role` is display only (the
- *  watcher labels the pane from it) and the validator never reads it. */
+ *  paths against its own rules before any of this reaches an argv. `role` is display metadata only;
+ *  neither the validator nor today's watcher reads it, and a host viewer that ever does must treat
+ *  it as untrusted text (a label, never a path or command). */
 export const viewRequest = (containerId, rendererPath, transcriptPath, role) =>
   ({ container_id: containerId, renderer_path: rendererPath, transcript_path: transcriptPath, role })
 

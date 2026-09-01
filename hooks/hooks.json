@@ -1,5 +1,5 @@
 {
-  "description": "doctrine — shows each dispatched seat in the herdr sidebar while it runs. Every hook stands down immediately unless HERDR_ENV=1, so it costs a non-herdr install one process spawn per seat and nothing else.",
+  "description": "doctrine — shows each dispatched seat while it runs. In a herdr session (HERDR_ENV=1) it panes the seat directly; in a contained agent (DCTR_VIEW_REQUEST_DIR set) it only writes a request file to that mount for a host-side watcher, calling no herdr. With neither set it stands down, costing one process spawn per seat and nothing else.",
   "hooks": {
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-seat.mjs\"", "timeout": 10 } ] }
