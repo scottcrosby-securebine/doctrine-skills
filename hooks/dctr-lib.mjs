@@ -226,6 +226,36 @@ export const metadataTokenArgs = (paneId, round, exitCount, valve) =>
   ['pane', 'report-metadata', paneId, '--source', 'custom:doctrine',
     '--token', `doctrine=r${round}·e${exitCount}·v${valve}`, '--ttl-ms', String(TOKEN_TTL_MS)]
 
+/** Filename-safe token for an id: `w66:p18` -> `w66_p18`, an agent_id passes through unchanged.
+ *  The contained hook names a request file by the subagent's `agent_id` (unique per seat, no herdr
+ *  pane exists to name it by); the host watcher and `agent-shell view` rebuild the same token from
+ *  the token the watcher carries, so the mapping must be deterministic. Every char outside
+ *  `[A-Za-z0-9_-]` becomes `_`, so no traversal or separator survives into the filename. */
+export const paneToken = (id) => String(id).replace(/[^A-Za-z0-9_-]/g, '_')
+
+/** Where a request lives. The dir is a container mount point the launcher chose, never user input;
+ *  the id is tokenised so the leaf cannot escape it. */
+export const viewRequestPath = (dir, id) => `${String(dir).replace(/\/+$/, '')}/view-${paneToken(id)}.json`
+
+/** The request body the host-side viewer validates before it execs anything. Every field is a
+ *  claim, not an instruction: the host checks the container against its own docker inspect and the
+ *  paths against its own rules before any of this reaches an argv. `role` is display metadata only;
+ *  neither the validator nor today's watcher reads it, and a host viewer that ever does must treat
+ *  it as untrusted text (a label, never a path or command). */
+export const viewRequest = (containerId, rendererPath, transcriptPath, role) =>
+  ({ container_id: containerId, renderer_path: rendererPath, transcript_path: transcriptPath, role })
+
+/**
+ * The container's own 64-hex id, parsed from a /proc/self/mountinfo listing — the hostname trick is
+ * not enough because compose files may set `hostname:`. Docker bind-mounts /etc/hostname et al from
+ * `/var/lib/docker/containers/<id>/`, so the id rides every such line. Null when the text carries
+ * none, which the caller treats as "not in a docker container" and falls back to os.hostname().
+ */
+export function containerIdFromMountinfo(text) {
+  const m = String(text).match(/\/containers\/([0-9a-f]{64})\//)
+  return m ? m[1] : null
+}
+
 /**
  * The split that creates a seat's side pane. The first side seat splits the session's pane right at
  * SIDE_RATIO, founding the column; each later one splits the **tallest** side pane down. Tallest,

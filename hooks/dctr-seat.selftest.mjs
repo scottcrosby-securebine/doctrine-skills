@@ -16,6 +16,7 @@ import {
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
+  paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -270,9 +271,51 @@ clause('clause 3l — the ttl really is the hour the README promises, not merely
   TOKEN_TTL_MS === 3600000,
   String(TOKEN_TTL_MS))
 
+// Pane containment: a contained agent writes a request file named by its agent_id and reaches
+// nothing on the host; the id becomes part of a path, so it must never traverse.
+const HOSTILE_PANE = '../../etc/passwd'
+clause('clause 1aa — request tokens are filename-safe, deterministic, and cannot traverse',
+  paneToken('w66:p18') === 'w66_p18' &&
+  paneToken('ad1a7dbb0d453a08d') === 'ad1a7dbb0d453a08d' &&
+  viewRequestPath('/bridge', 'ad1a7dbb0d453a08d') === '/bridge/view-ad1a7dbb0d453a08d.json' &&
+  viewRequestPath('/bridge/', 'ad1a7dbb0d453a08d') === '/bridge/view-ad1a7dbb0d453a08d.json' &&
+  !viewRequestPath('/bridge', HOSTILE_PANE).includes('..') &&
+  !paneToken(HOSTILE_PANE).includes('/'),
+  `${paneToken(HOSTILE_PANE)} -> ${viewRequestPath('/bridge', HOSTILE_PANE)}`)
+
+// A compose file may set `hostname:`, so the id comes from mountinfo where docker bind-mounts
+// /etc/hostname from /var/lib/docker/containers/<id>/ — and a 12-hex short id must not satisfy it.
+const CID = 'a3f9'.repeat(16)
+const MOUNTINFO = `1537 1489 8:1 /var/lib/docker/containers/${CID}/hostname /etc/hostname rw,relatime - ext4 /dev/sda1 rw`
+clause('clause 1ab — the container id parses from mountinfo, and short or absent ids return null',
+  containerIdFromMountinfo(MOUNTINFO) === CID &&
+  containerIdFromMountinfo('1537 1489 8:1 / / rw - ext4 /dev/sda1 rw') === null &&
+  containerIdFromMountinfo(`x /containers/${CID.slice(0, 12)}/hostname y`) === null &&
+  containerIdFromMountinfo('') === null,
+  String(containerIdFromMountinfo(MOUNTINFO)))
+
+// Each field is checked, not just the key set: the host reads renderer_path and transcript_path
+// straight into an argv, so a request that swapped or dropped either while keeping the right key
+// names must fail here. role is display only.
+const REQ = viewRequest(CID, '/p/dctr-render.mjs', '/t/a.jsonl', 'Explore')
+clause('clause 1ac — a view request carries exactly the four claims, each to its own field',
+  JSON.stringify(Object.keys(REQ)) === JSON.stringify(['container_id', 'renderer_path', 'transcript_path', 'role']) &&
+  REQ.container_id === CID && REQ.renderer_path === '/p/dctr-render.mjs' &&
+  REQ.transcript_path === '/t/a.jsonl' && REQ.role === 'Explore',
+  JSON.stringify(REQ))
+
 clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
   !LAYOUT.some((p) => p.pane_id === SIDE_SEAT(3).paneId) && !LAYOUT.some((p) => p.pane_id === TAB_SEAT(1).paneId),
   'if the layout carried seat 3, 1y would prove staleSideSeats never fires; if it carried the tab pane, the tab clause would be vacuous')
+
+clause('clause 3n — the mountinfo fixture really carries a 64-hex id under /containers/, shown without the parser',
+  MOUNTINFO.includes('/containers/') && CID.length === 64 && [...CID].every((c) => '0123456789abcdef'.includes(c)) &&
+  MOUNTINFO.includes(`/containers/${CID}/`),
+  'if the fixture lacked the docker shape, 1ab would prove the parser matches an invented format')
+
+clause('clause 3o — the hostile pane fixture really carries live traversal, and the id fixture really does not',
+  HOSTILE_PANE.includes('../') && !'w66:p18'.includes('.') && !'w66:p18'.includes('/'),
+  'if the hostile fixture were already clean, 1aa would prove sanitizing changes nothing')
 
 process.exit(bad ? 1 : 0)
