@@ -181,7 +181,7 @@ const pw = tryRequire(['playwright-core', 'playwright'])
 if (!pw) {
   console.error(`FLOOR: CANNOT RUN — no Playwright available.
 Install it where the deliverable lives, then re-run:
-  npm i -D playwright-core && npx playwright install chromium
+  npm i -D playwright-core && node node_modules/playwright-core/cli.js install chromium
 Or, for a project with no node_modules of its own, point at an existing one:
   NODE_PATH=/path/to/node_modules node floor.mjs ...
 The gauntlet does not proceed on an unrendered page: a critic that cannot
@@ -218,7 +218,7 @@ try {
   console.error(`FLOOR: CANNOT RUN — Playwright is installed but no browser launched.
   ${String(e).split('\n')[0]}
 Install the browser, then re-run:
-  npx playwright install chromium`)
+  node node_modules/playwright-core/cli.js install chromium`)
   process.exit(2)
 }
 
