@@ -1,5 +1,5 @@
 {
-  "description": "doctrine — shows each dispatched seat while it runs. In a herdr session (HERDR_ENV=1) it panes the seat directly; in a contained agent (DCTR_VIEW_REQUEST_DIR set) it only writes a request file to that mount for a host-side watcher, calling no herdr. With neither set it stands down, costing one process spawn per seat and nothing else.",
+  "description": "doctrine — shows each dispatched seat while it runs. In a herdr session (HERDR_ENV=1) it panes the seat directly; in a contained agent (DCTR_VIEW_REQUEST_DIR set) it only writes a request file to that mount for a host-side watcher, calling no herdr. With neither set it stands down, costing one process spawn per hook event and nothing else — and that is more than one per seat: Claude Code also fires SubagentStop for its own forked queries (a prompt suggestion after most turns, memory extraction), each with an empty agent_type, so a session that dispatches no seats still spawns roughly once per turn.",
   "hooks": {
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-seat.mjs\"", "timeout": 10 } ] }

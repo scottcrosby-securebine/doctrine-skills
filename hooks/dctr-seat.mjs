@@ -25,7 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
+  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
 
@@ -68,7 +68,7 @@ logSession = sessionId
 const requestDir = process.env.DCTR_VIEW_REQUEST_DIR
 if (requestDir) {
   if (event === 'SubagentStart' || event === 'SubagentStop') {
-    if (!isSeatEvent(payload)) stand_down('not a seat event: no agent_id, so this is the parent')
+    if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
     const reqPath = viewRequestPath(requestDir, payload.agent_id)
     if (event === 'SubagentStop') {
       try { fs.rmSync(reqPath, { force: true }) } catch { /* mount gone; the watcher reaps stale requests */ }
@@ -129,7 +129,7 @@ function withPlacementLock(fn) {
 
 try {
   if (event === 'SubagentStart') {
-    if (!isSeatEvent(payload)) stand_down('not a seat event: no agent_id, so this is the parent')
+    if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
     fs.mkdirSync(seatsDir(sessionId), { recursive: true })
 
     const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
@@ -209,7 +209,7 @@ try {
   }
 
   if (event === 'SubagentStop') {
-    if (!isSeatEvent(payload)) stand_down('not a seat event: no agent_id, so this is the parent')
+    if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
     const seat = liveSeats().find((s) => s.agent_id === payload.agent_id)
     if (!seat) stand_down(`no live seat recorded for ${payload.agent_id}`)
 

@@ -12,7 +12,7 @@
 // catches a check which silently measures nothing.
 
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, skipReason, nextIndex, stopAction,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
@@ -30,6 +30,9 @@ const AUTHORITATIVE = '/home/u/.claude/projects/-proj/4a9392da-bd72-4f3f-9e18-76
 
 const seatEvent = { hook_event_name: 'SubagentStart', session_id: 's1', agent_id: AGENT_ID, agent_type: 'Explore', transcript_path: PARENT }
 const parentEvent = { hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Agent', transcript_path: PARENT }
+// Shape of the SubagentStop Claude Code emits for its own forked queries (2.1.261): an agent_id,
+// an empty agent_type. Observed 62 times against four seats in one session, 2026-09-02.
+const forkEvent = { hook_event_name: 'SubagentStop', session_id: 's1', agent_id: 'c1e0c2f6b7', agent_type: '', agent_transcript_path: '/x', transcript_path: PARENT }
 const goodEnv = { HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w4W' }
 const LONG_ROLE = 'a-very-long-agent-type-name-that-will-not-fit'
 const attachment = { type: 'attachment', message: { role: 'user', content: 'system context nobody asked for' } }
@@ -47,6 +50,15 @@ clause('clause 1a — the derived transcript path matches the authoritative one'
 clause('clause 1b — the parent\'s own Agent call is not a seat',
   isSeatEvent(parentEvent) === false && isSeatEvent(seatEvent) === true,
   'PostToolUse fires twice per dispatch; only the one carrying agent_id is a seat')
+
+clause('clause 1z — an internal forked query is not a seat, and the reason names the fork, not the parent',
+  isSeatEvent(forkEvent) === false && /agent_type is empty/.test(notSeatReason(forkEvent)) &&
+  /no agent_id/.test(notSeatReason(parentEvent)) && notSeatReason(seatEvent) === null,
+  `${notSeatReason(forkEvent)} / ${notSeatReason(parentEvent)} / ${notSeatReason(seatEvent)}`)
+
+clause('clause 3p — the fork fixture really carries an agent_id and an empty agent_type',
+  typeof forkEvent.agent_id === 'string' && forkEvent.agent_id.length > 0 && forkEvent.agent_type === '' && !('agent_id' in parentEvent),
+  JSON.stringify({ id: forkEvent.agent_id, type: forkEvent.agent_type, parentHasId: 'agent_id' in parentEvent }))
 
 clause('clause 1c — no HERDR_ENV stands the hook down',
   typeof skipReason({ HERDR_WORKSPACE_ID: 'w4W' }) === 'string', String(skipReason({ HERDR_WORKSPACE_ID: 'w4W' })))

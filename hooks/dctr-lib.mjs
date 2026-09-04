@@ -50,8 +50,23 @@ export function transcriptPath(parentTranscript, agentId) {
  * `PostToolUse` fires twice per dispatch — once in the parent with `tool_name: "Agent"` and no
  * `agent_id`, once inside the subagent with one. Only the second is a seat. Nothing here subscribes
  * to PostToolUse, but the same test guards every event: no `agent_id` means the parent, not a seat.
+ *
+ * `agent_type` is required too, and that half fires far more often. Claude Code runs its own
+ * forked queries after a turn — a prompt suggestion after most turns, memory extraction every so
+ * often — and each one ends with a SubagentStop that carries an `agent_id` and an empty
+ * `agent_type` (the emitter falls back to "" when the fork has no type). Read from the 2.1.261
+ * bundle on 2026-09-05, after one session logged 62 of these against four real seats. They are
+ * not seats, and a hooks.json matcher cannot exclude them: the dispatcher runs every matcher when
+ * the match query is empty. So every one of them costs one process spawn that ends here.
  */
 export const isSeatEvent = (p) => Boolean(p && p.agent_id && p.agent_type)
+
+/** Why a payload failed `isSeatEvent`, for the stand-down log; null for a seat. */
+export const notSeatReason = (p) => {
+  if (isSeatEvent(p)) return null
+  if (!p || !p.agent_id) return 'not a seat event: no agent_id, so this is the parent'
+  return 'not a seat event: agent_type is empty, so this is one of Claude Code\'s own forked queries (prompt suggestion, memory extraction), not a dispatched seat'
+}
 
 /**
  * Guard for every hook. Returns a reason string when doctrine must stand down, else null.
