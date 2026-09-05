@@ -314,11 +314,12 @@ export const GATE_ROLE = 'gate'
 /**
  * The line typed into the gate's pane: this script in `--run` mode, which runs the check, tees its
  * output to `out`, appends `exit=N`, then relabels or closes the pane and drops the marker. Every
- * argument goes through shq, so a command carrying quotes, `$` or `;` reaches bash as the one string
- * the caller wrote. `paneId` is empty on the detached path, and `--run` then touches no pane.
+ * argument goes through shq, one per argv element, so `bash -c "a; b"` reaches `--run` as the three
+ * arguments the caller gave and not one flattened string (the first live use lost its quoting this
+ * way). `paneId` is empty on the detached path, and `--run` then touches no pane.
  */
 export const gateRunCommand = (script, out, marker, paneId, label, command) =>
-  `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(label)} -- ${shq(command)}`
+  `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
 
 /** The last line the output file ends with; the orchestrator's completion signal and the record's
  *  exit status in one. A file without it is a check still running, or one that never finished. */

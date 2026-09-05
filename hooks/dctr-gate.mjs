@@ -2,6 +2,10 @@
 //
 //   node hooks/dctr-gate.mjs <label> <out-file> -- <command...>
 //
+// Everything after `--` is the check's argv, passed through exactly as given: one argument runs
+// under `bash -c`, several are executed as they stand, so `bash -c "a; b"` keeps its quoting. The
+// first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+//
 // Run by the doctrine orchestrator at step 3 for a check that will outrun the Bash tool's own
 // ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
@@ -19,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
-  PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs,
+  PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine,
 } from './dctr-lib.mjs'
 import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock } from './dctr-state.mjs'
@@ -36,15 +40,22 @@ if (argv[0] === '--run') {
   const [, out, marker, paneId, label] = argv
   const dash = argv.indexOf('--')
   if (dash < 0 || !out || !label) usage()
-  const command = argv.slice(dash + 1).join(' ')
+  const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
-  const both = (chunk) => { fs.writeSync(file, chunk); try { process.stdout.write(chunk) } catch { /* no terminal on the detached path */ } }
-  both(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command}\n`)
-  const child = spawn('bash', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let atLineStart = true
+  const both = (chunk) => { fs.writeSync(file, chunk); atLineStart = String(chunk).endsWith('\n'); try { process.stdout.write(chunk) } catch { /* no terminal on the detached path */ } }
+  both(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`)
+  const child = command.length === 1
+    ? spawn('bash', ['-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
+    : spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
+  child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })
   child.stdout.on('data', both)
   child.stderr.on('data', both)
   child.on('close', (code) => {
+    // A check whose last write has no newline would otherwise fuse with the exit line, and the
+    // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
+    if (!atLineStart) both('\n')
     both(`${exitLine(code)}\n`)
     fs.closeSync(file)
     // The marker goes before the pane: closing the pane kills the shell this process runs in, so
@@ -63,12 +74,12 @@ if (argv[0] === '--run') {
   const dash = argv.indexOf('--')
   const [label, out] = argv
   if (dash !== 2 || !label || !out || argv.length < 4) usage()
-  const command = argv.slice(dash + 1).join(' ')
+  const command = argv.slice(dash + 1)
   const outFile = path.resolve(out)
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID
 
   const detached = (reason) => {
-    const child = spawn('node', [self, '--run', outFile, '', '', label, '--', command], { detached: true, stdio: 'ignore' })
+    const child = spawn('node', [self, '--run', outFile, '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
     console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; output ${outFile}, done when its last line is exit=N`)

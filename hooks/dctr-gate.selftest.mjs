@@ -25,7 +25,7 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 // CLAUDE_CODE_SESSION_ID is cleared so a selftest run inside a live session never writes into that
 // session's hook.log (it did, the first time it ran there).
 const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', CLAUDE_CODE_SESSION_ID: '' }
-const launch = (label, out, command) => execFileSync('node', [script, label, out, '--', command], { env, encoding: 'utf8' })
+const launch = (label, out, ...command) => execFileSync('node', [script, label, out, '--', ...command], { env, encoding: 'utf8' })
 const waitDone = (out, ms = 8000) => {
   const until = Date.now() + ms
   while (Date.now() < until) {
@@ -60,6 +60,15 @@ clause('clause 2b — the no-herdr path called herdr ZERO times',
   !fs.existsSync(tripwire),
   'the tripwire herdr on PATH fired on the detached path')
 
+// argv form: `bash -c "<string>"` given as three arguments must keep its quoting through the pane
+// line and the runner both, which is what the first live use lost.
+const out3 = path.join(tmp, 'argv.out')
+launch('argv gate', out3, 'bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4')
+const t3 = waitDone(out3)
+clause('clause 1c — an argv-form command keeps its quoting: two spaces survive and it exits 4',
+  lastLine(t3) === exitLine(4) && t3.includes('a  b'),
+  JSON.stringify(t3))
+
 const direct = spawnSync('bash', ['-c', BROKEN], { encoding: 'utf8' })
 clause('clause 3 — the broken fixture really exits 3 under bash alone, without the script',
   direct.status === 3 && direct.stdout.includes('about to fail'),
@@ -67,10 +76,10 @@ clause('clause 3 — the broken fixture really exits 3 under bash alone, without
 
 // The pane line is the one piece of pure shell assembly: a command with a single quote must reach
 // bash as one argument, or the quote ends the string and the rest runs as a second command.
-const line = gateRunCommand('/p/dctr-gate.mjs', '/o', '/m', 'w1:p2', 'lbl', GOOD)
-const roundTrip = spawnSync('bash', ['-c', `printf '%s' ${line.slice(line.indexOf('-- ') + 3)}`], { encoding: 'utf8' })
-clause('clause 1b — the pane line carries the command through bash as one string, quotes intact',
-  roundTrip.stdout === GOOD && line.startsWith(`node ${shq('/p/dctr-gate.mjs')} --run `),
+const line = gateRunCommand('/p/dctr-gate.mjs', '/o', '/m', 'w1:p2', 'lbl', ['bash', '-c', GOOD])
+const roundTrip = spawnSync('bash', ['-c', `printf '%s\\n' ${line.slice(line.indexOf('-- ') + 3)}`], { encoding: 'utf8' })
+clause('clause 1b — the pane line carries an argv command through bash as the same three words, quotes intact',
+  roundTrip.stdout === `bash\n-c\n${GOOD}\n` && line.startsWith(`node ${shq('/p/dctr-gate.mjs')} --run `),
   JSON.stringify(roundTrip.stdout))
 
 fs.rmSync(tmp, { recursive: true, force: true })
