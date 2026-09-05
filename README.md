@@ -182,6 +182,7 @@ Everything else is optional and improves one skill or another. The doctrine is b
 - [superpowers](https://github.com/obra/superpowers), by Jesse Vincent and the folks at Prime Radiant — parallel dispatch and git worktree isolation.
 - [ponytail](https://github.com/DietrichGebert/ponytail), by Dietrich Gebert — the simplification review.
 - [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) — the editing pass; original skill by Josh Thomas (@joshuadavidthomas), adapted in softaworks' agent-toolkit.
+- [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands) — the backup command that writes a run's handoff document under `docs/handoffs/`, and the loaders that act on the memory file's kickoff line: read the handoff by path, and load the doctrine first when that line says a phase is open.
 
 Three Claude-side capabilities join them below. Each entry in the collapsed list says what happens when something is missing — every one has a fallback, and a tool that is installed but reports itself unusable degrades the same way, rather than stalling the run.
 
@@ -223,6 +224,10 @@ Three Claude-side capabilities join them below. Each entry in the collapsed list
 - **Claude Design**, on a claude.ai login. A gauntlet run with a bound Design project can push finished sections for you to watch in the Design pane as the run goes. A Design project is a rendering, never a design-system binding.
 
   Without it: git is the source of record either way — the run says the sync was skipped and delivers from the repo.
+
+- [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands): `/BackupMemory`, `/LoadMemory`, `/primer`. The hub's step 5 names the backup command as the writer of a phase's handoff document and the loaders as what acts on its first line.
+
+  Without it: the hub says where to write the handoff yourself and what its header lines carry, and the handoff carries an `invoke doctrine:doctrine first` header line, since no loader is there to do it by rule.
 
 </details>
 
