@@ -15,6 +15,7 @@ import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
+  seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
@@ -99,6 +100,15 @@ clause('clause 1q — the create args pin the tab to the dispatching session\'s 
   CREATE_ARGS[CREATE_ARGS.indexOf('--workspace') + 1] === 'w4Z' && CREATE_ARGS.includes('--no-focus') &&
   CREATE_ARGS[0] === 'tab' && CREATE_ARGS[1] === 'create',
   CREATE_ARGS.join(' '))
+
+// 2026-09-05: seat shells wrote their typed renderer line into the user's ~/.bash_history — 1,388
+// of its 2,000 lines. Every creation path must hand the pane shell its own HISTFILE.
+const ENV_PAIR = seatEnvArgs()
+const envOf = (args) => args[args.indexOf('--env') + 1]
+clause('clause 1ad — tab create and both split shapes hand the seat shell its own HISTFILE',
+  [CREATE_ARGS, splitArgs([], 'w4Z:p1'), splitArgs([{ agent: 'dctr-explore-1', paneId: 'w4Z:p7', tabId: null }], 'w4Z:p1')].every((a) =>
+    a.includes('--env') && envOf(a) === ENV_PAIR[1] && envOf(a).startsWith('HISTFILE=')),
+  `${CREATE_ARGS.join(' ')} | ${splitArgs([], 'w4Z:p1').join(' ')}`)
 
 clause('clause 1i — an attachment record renders nothing',
   renderRecord(attachment) === null && renderRecord({ type: 'user', message: { role: 'user', content: 'hello' } }) !== null,
@@ -261,10 +271,16 @@ clause('clause 3h — the hostile fixture really carries live metacharacters, an
 
 // 1.47.0's literal create call, verbatim from the shipped hook — the defect-1 shape.
 const PRE_FIX_ARGS = ['tab', 'create', '--label', 'dctr · explore · 1', '--no-focus']
-clause('clause 3i — the pre-fix args really lack a workspace, and the fix adds exactly that pair',
+const PAIRED = ['--workspace', '--env']
+clause('clause 3i — the pre-fix args really lack a workspace and an env, and the two fixes add exactly those pairs',
   !PRE_FIX_ARGS.includes('--workspace') &&
-  JSON.stringify(CREATE_ARGS.filter((a, i) => a !== '--workspace' && CREATE_ARGS[i - 1] !== '--workspace')) === JSON.stringify(PRE_FIX_ARGS),
+  JSON.stringify(CREATE_ARGS.filter((a, i) => !PAIRED.includes(a) && !PAIRED.includes(CREATE_ARGS[i - 1]))) === JSON.stringify(PRE_FIX_ARGS),
   'if the fixed args drifted anywhere else, 1q would be certifying a different call than the one that failed')
+
+clause('clause 3q — the seat HISTFILE really is a different file from bash\'s default, under the same home',
+  !PRE_FIX_ARGS.includes('--env') && SEAT_HISTFILE().endsWith('/.dctr_history') &&
+  SEAT_HISTFILE() !== `${process.env.HOME}/.bash_history` && SEAT_HISTFILE().startsWith(process.env.HOME),
+  SEAT_HISTFILE())
 
 clause('clause 3j — the foreign-list fixture really does not carry the seat\'s tab',
   FOREIGN_LIST.every((t) => t.tab_id !== SEAT_TAB_ID) && FOREIGN_LIST.length > 0 && FOREIGN_LIST.some((t) => t.focused),

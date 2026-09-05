@@ -1,3 +1,5 @@
+import os from 'node:os'
+
 // Shared decisions for doctrine's herdr seat visibility (issue #17).
 //
 // Everything here is a pure function of a hook payload plus observed state. No herdr, no
@@ -176,7 +178,18 @@ export const stopAction = (tab) => (tab && tab.focused ? 'relabel' : 'close')
  * the first multi-session evening (issue #20). The id is the one `skipReason` already validated.
  */
 export const tabCreateArgs = (workspaceId, label) =>
-  ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus']
+  ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus', ...seatEnvArgs()]
+
+/**
+ * Every seat pane runs an interactive shell, and `pane run` types the renderer command into it, so
+ * the shell records that line and writes it to the user's `~/.bash_history` when the pane closes.
+ * 1,388 of the 2,000 lines Scott's history held on 2026-09-05 were seat renderers, and his own
+ * commands had scrolled off the end. The pane shell gets its own HISTFILE instead: the record is
+ * kept, and kept out of his. Both creation paths carry it, since a seat is a pane on either.
+ * Bash reads HISTFILE from the environment at start-up; a bashrc that sets it would win.
+ */
+export const SEAT_HISTFILE = () => `${os.homedir()}/.dctr_history`
+export const seatEnvArgs = () => ['--env', `HISTFILE=${SEAT_HISTFILE()}`]
 
 /** How many seats stack beside the session before the rest overflow to tabs. Scott's call,
  *  2026-08-31: six. On a 56-row terminal a full column leaves ~9 rows per seat; the seventh seat
@@ -283,12 +296,12 @@ export function containerIdFromMountinfo(text) {
 export function splitArgs(liveSeats, sessionPaneId, layoutPanes) {
   const side = liveSeats.filter(isSideSeat)
   if (!side.length) {
-    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus']
+    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs()]
   }
   let target = side[side.length - 1]
   if (layoutPanes?.length) {
     const height = new Map(layoutPanes.map((p) => [p.pane_id, p.rect?.height ?? 0]))
     target = side.reduce((a, b) => ((height.get(b.paneId) ?? 0) > (height.get(a.paneId) ?? 0) ? b : a))
   }
-  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus']
+  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus', ...seatEnvArgs()]
 }
