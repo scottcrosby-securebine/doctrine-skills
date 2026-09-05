@@ -27,18 +27,10 @@ import {
   PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
-import { stateDir, seatsDir, herdr, liveSeats as readSeats, withPlacementLock as placementLock } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats as readSeats, withPlacementLock as placementLock } from './dctr-state.mjs'
 
-// Hook output goes to a stream nobody reads, so a stand-down or a fallback that fired left no
-// trace the first time it mattered (F14, 2026-08-31). Best-effort append; never throws.
 let logSession = null
-const log = (msg) => {
-  if (!logSession) return
-  try {
-    fs.mkdirSync(stateDir(logSession), { recursive: true })
-    fs.appendFileSync(path.join(stateDir(logSession), 'hook.log'), `${new Date().toISOString()} ${msg}\n`)
-  } catch { /* logging must never be the failure */ }
-}
+const log = (msg) => hookLog(logSession, msg)
 
 // A marker reserved but not yet completed. A failure between the two would otherwise leak a
 // half-written file that permanently consumes that seat name, so every exit path clears it.

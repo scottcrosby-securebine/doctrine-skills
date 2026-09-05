@@ -173,7 +173,7 @@ node node_modules/playwright-core/cli.js install chromium
 
 Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
-The herdr integration in [Watch it work](#watch-it-work) is optional too, and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today.
+The herdr integration in [Watch it work](#watch-it-work) is optional too, and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today, and a long check launched through `dctr-gate.mjs` still runs, detached, with the same output file; only the pane is missing.
 
 Everything else is optional and improves one skill or another. The doctrine is built on other authors' work, layered on rather than forked, and the credit is theirs. Their names go here in the visible text, because the detailed list below renders collapsed:
 

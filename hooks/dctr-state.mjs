@@ -14,6 +14,17 @@ import { PREFIX, parseHerdr } from './dctr-lib.mjs'
 export const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
 export const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
 
+/** Best-effort append to the session's hook.log; never throws. Hook output goes to a stream nobody
+ *  reads, so a stand-down or a fallback that fired left no trace the first time it mattered (F14,
+ *  2026-08-31). The launcher writes here too, so a gate that stood down is found where a seat is. */
+export function hookLog(sessionId, msg) {
+  if (!sessionId) return
+  try {
+    fs.mkdirSync(stateDir(sessionId), { recursive: true })
+    fs.appendFileSync(path.join(stateDir(sessionId), 'hook.log'), `${new Date().toISOString()} ${msg}\n`)
+  } catch { /* logging must never be the failure */ }
+}
+
 export const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
 
 /** Every seat this session has live, newest last. */
