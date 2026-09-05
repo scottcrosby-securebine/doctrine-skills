@@ -83,6 +83,8 @@ A doctrine run sends out a lot of agents, and normally they are invisible: your 
 
 **Tidy exits.** When an agent finishes, its pane or tab closes itself. If you happen to be reading it at that moment it stays, renamed with a `· done` suffix, so nothing disappears while you are looking at it. And nothing ever steals your cursor: panes and tabs open unfocused.
 
+**Long checks get a pane too.** A project's slowest gate (a full mutation run is the usual one) outlasts the ten minutes Claude Code allows a command, so a run used to push it into the background where nothing showed it working. Doctrine now launches such a check through `hooks/dctr-gate.mjs`, which runs it in a pane beside the session under the same placement rules as an agent, streaming its output as it goes and writing the same output to a file that ends with `exit=N` when the check is done. Outside herdr the check runs detached with the same file, so the record is identical either way.
+
 **The score, in the sidebar.** This one is opt-in. A doctrine run publishes its progress as a small token — `r3·e1·v4` means round 3, 1 clean pass of the 2 needed to finish, and 4 unresolved rounds on the counter that stops and asks you at every fourth. It refreshes as the run goes and expires within the hour if the run dies. herdr shows custom tokens only where your config asks for them, so add `$doctrine` to a row under `[ui.sidebar.agents]` in herdr's `config.toml` (under `~/.config/herdr/` on Linux):
 
 ```toml

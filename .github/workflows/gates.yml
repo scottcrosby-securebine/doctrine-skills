@@ -43,6 +43,11 @@ jobs:
         # Proves the negative with a tripwire herdr on PATH. Needs only node.
         run: node hooks/dctr-seat.contained.selftest.mjs
 
+      - name: gate launcher tamper test
+        # Runs the launcher's detached path with a tripwire herdr on PATH: the check runs, its
+        # output file ends with exit=N, and herdr is called zero times. Needs only node and bash.
+        run: node hooks/dctr-gate.selftest.mjs
+
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null
 
