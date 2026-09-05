@@ -23,14 +23,11 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, parseHerdr, shq, tabCreateArgs,
+  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
 } from './dctr-lib.mjs'
-
-const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
-const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
+import { stateDir, seatsDir, herdr, liveSeats as readSeats, withPlacementLock as placementLock } from './dctr-state.mjs'
 
 // Hook output goes to a stream nobody reads, so a stand-down or a fallback that fired left no
 // trace the first time it mattered (F14, 2026-08-31). Best-effort append; never throws.
@@ -43,7 +40,6 @@ const log = (msg) => {
   } catch { /* logging must never be the failure */ }
 }
 
-const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
 // A marker reserved but not yet completed. A failure between the two would otherwise leak a
 // half-written file that permanently consumes that seat name, so every exit path clears it.
 let reserved = null
@@ -97,35 +93,8 @@ if (requestDir) {
 const why = skipReason(process.env)
 if (why) stand_down(why)
 
-/** Every seat this session has live, newest last. */
-function liveSeats() {
-  try {
-    return fs.readdirSync(seatsDir(sessionId))
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => JSON.parse(fs.readFileSync(path.join(seatsDir(sessionId), f), 'utf8')))
-  } catch { return [] }
-}
-
-// Placement is a read-decide-split sequence, and doctrine dispatches waves: six SubagentStarts in
-// one millisecond is the proven load. Unserialized, every one of them sees zero side seats and
-// founds its own right-hand column. The lock makes marker state and pane geometry move together;
-// a holder that died is stolen after 10s so one crashed hook cannot blind every later seat.
-function withPlacementLock(fn) {
-  const lock = path.join(stateDir(sessionId), 'placement.lock')
-  const deadline = Date.now() + 5000
-  for (;;) {
-    try { fs.mkdirSync(lock); break } catch {
-      let stale = false
-      try { stale = Date.now() - fs.statSync(lock).mtimeMs > 10000 } catch { continue }
-      if (stale) { try { fs.rmdirSync(lock) } catch { /* another waiter beat us to the steal */ } continue }
-      if (Date.now() > deadline) throw new Error('placement lock timed out')
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
-    }
-  }
-  // fn stands down by returning a reason, never by exiting: process.exit skips finally and the
-  // leaked lock would cost every seat behind it the full staleness window.
-  try { return fn() } finally { try { fs.rmdirSync(lock) } catch { /* already released */ } }
-}
+const liveSeats = () => readSeats(sessionId)
+const withPlacementLock = (fn) => placementLock(sessionId, fn)
 
 try {
   if (event === 'SubagentStart') {

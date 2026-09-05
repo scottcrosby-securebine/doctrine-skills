@@ -305,3 +305,20 @@ export function splitArgs(liveSeats, sessionPaneId, layoutPanes) {
   }
   return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus', ...seatEnvArgs()]
 }
+
+/** The role a long native check is registered under. It shares the seat markers, the cap and the
+ *  lock, so a wave arriving while a gate runs stacks beside it instead of founding a second column. */
+export const GATE_ROLE = 'gate'
+
+/**
+ * The line typed into the gate's pane: this script in `--run` mode, which runs the check, tees its
+ * output to `out`, appends `exit=N`, then relabels or closes the pane and drops the marker. Every
+ * argument goes through shq, so a command carrying quotes, `$` or `;` reaches bash as the one string
+ * the caller wrote. `paneId` is empty on the detached path, and `--run` then touches no pane.
+ */
+export const gateRunCommand = (script, out, marker, paneId, label, command) =>
+  `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(label)} -- ${shq(command)}`
+
+/** The last line the output file ends with; the orchestrator's completion signal and the record's
+ *  exit status in one. A file without it is a check still running, or one that never finished. */
+export const exitLine = (code) => `exit=${code === null || code === undefined ? 'signal' : code}`
