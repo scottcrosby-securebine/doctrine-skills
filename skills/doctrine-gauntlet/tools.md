@@ -54,7 +54,7 @@ its output is on screen while it reviews, and the command-timeout ceiling stops 
 because nothing blocks on the review.
 
 ```bash
-herdr pane split --current --direction right --ratio 0.4 --no-focus   # note .result.pane.pane_id
+herdr pane split --current --direction right --ratio 0.4 --no-focus --env HISTFILE=~/.dctr_history   # note .result.pane.pane_id; the env keeps the seat's shell history out of the user's
 herdr agent start red-team --kind codex --pane <pane-id> --timeout 60000 -- --sandbox read-only
 herdr agent prompt red-team "<what to attack>. View these renders before judging: <path> <path> …"
 herdr agent wait red-team --timeout <under-your-command-ceiling>      # repeat until it returns idle

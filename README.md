@@ -94,6 +94,7 @@ rows = [["state_icon", "workspace", "tab"], ["agent", "$doctrine"]]
 
 - With the plugin installed, every agent Claude Code dispatches gets a pane, not only doctrine's. You will see them on ordinary subagent work too.
 - Closing a seat's pane by hand is safe. The run carries on, and the freed slot goes to a later agent. And when a side pane cannot be created at all, the seat opens as a tab instead, so it stays visible.
+- A seat's pane keeps its own shell history in `~/.dctr_history`, so the renderer command the hook types into it never lands in your `~/.bash_history`.
 - If a pane you expected never appears, the reason is in `hook.log`, in the session's `dctr-<session-id>` folder under your temp directory.
 
 ## Install
