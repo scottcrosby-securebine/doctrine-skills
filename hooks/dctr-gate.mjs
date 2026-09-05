@@ -22,7 +22,7 @@ import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine,
 } from './dctr-lib.mjs'
-import { seatsDir, herdr, liveSeats, withPlacementLock } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock } from './dctr-state.mjs'
 
 const self = path.resolve(process.argv[1])
 const argv = process.argv.slice(2)
@@ -70,6 +70,7 @@ if (argv[0] === '--run') {
   const detached = (reason) => {
     const child = spawn('node', [self, '--run', outFile, '', '', label, '--', command], { detached: true, stdio: 'ignore' })
     child.unref()
+    hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
     console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; output ${outFile}, done when its last line is exit=N`)
     process.exit(0)
   }
@@ -128,5 +129,6 @@ if (argv[0] === '--run') {
   } catch (e) {
     detached(`herdr refused — ${String(e.message).split('\n')[0]}`)
   }
+  hookLog(sessionId, `gate "${label}" ${placed.name}: ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}, output ${outFile}`)
   console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; output ${outFile}, done when its last line is exit=N`)
 }

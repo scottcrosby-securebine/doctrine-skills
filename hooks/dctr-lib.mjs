@@ -6,7 +6,8 @@ import os from 'node:os'
 // filesystem, no clock. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
 // fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is.
 //
-// The I/O lives in `dctr-seat.mjs` (the hook) and `dctr-render.mjs` (the pane renderer).
+// The I/O lives in `dctr-seat.mjs` (the hook), `dctr-render.mjs` (the pane renderer), `dctr-gate.mjs`
+// (the long-check launcher) and `dctr-state.mjs` (the markers, lock, log and herdr call they share).
 
 /** Prefix that marks everything doctrine owns. Scott's term; do not paraphrase it. */
 export const PREFIX = 'dctr'

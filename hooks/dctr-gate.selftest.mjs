@@ -22,7 +22,9 @@ const tripwire = path.join(tmp, 'herdr-was-called')
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/bin/sh\ntouch ${JSON.stringify(tripwire)}\nexit 0\n`)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 
-const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '' }
+// CLAUDE_CODE_SESSION_ID is cleared so a selftest run inside a live session never writes into that
+// session's hook.log (it did, the first time it ran there).
+const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', CLAUDE_CODE_SESSION_ID: '' }
 const launch = (label, out, command) => execFileSync('node', [script, label, out, '--', command], { env, encoding: 'utf8' })
 const waitDone = (out, ms = 8000) => {
   const until = Date.now() + ms
