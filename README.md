@@ -24,7 +24,7 @@ Seven rules, applied to every job.
 2. **Split the work.** The job becomes phases with checkable exit gates, and independent tasks inside a phase run as parallel agents. Work shown to have small reach shares a neighbouring phase's gate instead of carrying its own.
 3. **Run every check your project documents.** Not just the ones an agent thinks of. A check that did not run is recorded as not run — never as clean.
 4. **Send an adversary.** A fresh reviewer — a different model, when one is installed — attacks the work. Its findings are checked against the source first, because adversarial reviewers invent things too.
-5. **Loop until two passes in a row come back clean.** Any change resets the count. A second counter never resets, and every fourth unresolved round the run stops and hands you the decision.
+5. **Loop until two passes in a row come back clean.** A change to a non-comment line of the code, or to a claim about what it does, resets the count; a wording or test-only fix does not. A second counter never resets, and every fourth unresolved round the run stops and hands you the decision.
 6. **Cut what nobody asked for.** Once per phase, before the passes that certify what ships.
 7. **Deliver the way your repo delivers**, and say whether the shipped version earned its two clean passes.
 
@@ -229,7 +229,7 @@ The seven rules above are a summary. The specification is [`skills/doctrine/SKIL
 
 Three things worth knowing before you rely on the gate:
 
-- A finding is **blocking** when the deliverable is wrong or unfinished without a change to it. Declined nitpicks and deferred improvements do not reset the two-pass count, so they cannot loop forever — but any change to the artifact, even a typo fix taken by choice, restarts the count from zero. A pass is clean when it leaves nothing outstanding, including a finding carried over from an earlier pass.
+- A finding is **blocking** when someone acting on the deliverable as it stands would do the wrong thing. Wording with the right meaning, and any claim about the gate itself (a count, a coverage note, a round number), never blocks; wording that changes neither what the code does nor what it is for is not filed at all. A repair that touches a non-comment line of shipping code, or changes a claim about what it does, restarts the two-pass count from zero; anything else leaves it standing. A pass is clean when it leaves nothing outstanding, including a finding carried over from an earlier pass. Where the deliverable is itself prose (a report, a spec), the wrappers replace the two-pass exit with one diff-scoped closing round after the first clean pass, or at the first valve firing where none came clean, since no prose deliverable ever closed on two.
 - The escalation valve leads with what shipping now would mean, before anything about the loop.
 - The doctrine is a **layer, not a fork**. It invokes other authors' skills at runtime so their updates flow through untouched. The one exception is the renamed `matts-code-review` copy.
 
