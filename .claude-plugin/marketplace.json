@@ -8,7 +8,7 @@
     {
       "name": "doctrine",
       "source": "./",
-      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing. The gauntlet renders and judges real pages, so that one wrapper needs Playwright; the other seven need nothing."
+      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing, plus doctrine-pane for an interactive terminal session \u2014 a router, a switch, a server \u2014 in a pane you watch and can take over. Two skills need something installed and neither degrades quietly: the gauntlet renders and judges real pages, so it needs Playwright, and doctrine-pane needs herdr. The other seven need nothing."
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Doctrine Skills
 
-Eight skills for Claude Code that make an agent work like a small team with a QA gate, instead of one confident pass.
+Nine skills for Claude Code that make an agent work like a small team with a QA gate, instead of one confident pass.
 
 ## The problem
 
@@ -79,7 +79,7 @@ A doctrine run sends out a lot of agents, and normally they are invisible: your 
 → Grep  {"pattern":"SIDE_CAP"}
 ```
 
-**Tabs for the overflow.** When more than six agents are running at once, the extras open as tabs instead, listed in herdr's sidebar with a live working/idle state under a name like `dctr-explore-2` — `dctr` for doctrine, then the agent's role, then a number to tell simultaneous seats of one role apart.
+**Tabs for the overflow.** Six is the whole column, and agents share it with anything else doctrine puts there — a long check running in a gate pane, an interactive session opened by `doctrine-pane`. Once those six slots are full the extras open as tabs instead, listed in herdr's sidebar. An overflow *agent* carries a live working/idle state under a name like `dctr-explore-2` — `dctr` for doctrine, then the agent's role, then a number to tell simultaneous seats of one role apart. An overflow *session* from `doctrine-pane` is named for the label you gave it and carries no such state, because nothing is reporting on its behalf.
 
 **Tidy exits.** When an agent finishes, its pane or tab closes itself. If you happen to be reading it at that moment it stays, renamed with a `· done` suffix, so nothing disappears while you are looking at it. And nothing ever steals your cursor: panes and tabs open unfocused.
 
@@ -108,13 +108,13 @@ Two commands inside Claude Code:
 /plugin install doctrine@doctrine-skills
 ```
 
-That brings all eight skills. One extra step, sometimes: if the install message tells you to, run `/reload-plugins` (or restart Claude Code) — a freshly installed plugin does not always load into the session that installed it. Then ask in task terms, "hunt bugs in the payments module with the doctrine", or name one directly, "use doctrine-debug on this flaky test".
+That brings all nine skills. One extra step, sometimes: if the install message tells you to, run `/reload-plugins` (or restart Claude Code) — a freshly installed plugin does not always load into the session that installed it. Then ask in task terms, "hunt bugs in the payments module with the doctrine", or name one directly, "use doctrine-debug on this flaky test".
 
-## The eight skills
+## The nine skills
 
 | Skill | Use it for |
 |---|---|
-| [`doctrine`](skills/doctrine/) | The shared posture. The other seven invoke it. |
+| [`doctrine`](skills/doctrine/) | The shared posture. The seven wrappers invoke it. |
 | [`doctrine-code`](skills/doctrine-code/) | Features, specs and tickets. |
 | [`doctrine-debug`](skills/doctrine-debug/) | Anything broken, throwing, failing or slow. |
 | [`doctrine-audit`](skills/doctrine-audit/) | Bug hunts and deep code audits. |
@@ -122,6 +122,7 @@ That brings all eight skills. One extra step, sometimes: if the install message 
 | [`doctrine-write`](skills/doctrine-write/) | Proposals, briefs, PRDs, reports. |
 | [`doctrine-research`](skills/doctrine-research/) | Multi-source questions needing a fact-checked answer. |
 | [`doctrine-gauntlet`](skills/doctrine-gauntlet/) | Web design, judged on the rendered page. Visual work only. |
+| [`doctrine-pane`](skills/doctrine-pane/) | An interactive terminal session — a router, a switch, a server — in a pane you watch and can take over. Not a wrapper: it does not load the posture. |
 
 ## What it costs
 
@@ -164,7 +165,9 @@ That is also the limit of the evidence. These rules came out of real work, but t
 
 ## Requirements
 
-**Seven of the eight skills need nothing installed.** The eighth, `doctrine-gauntlet`, judges real rendered pages, so it needs a browser — without one its harness refuses to run rather than report a pass:
+**Seven of the nine skills need nothing installed. Two do, and neither degrades into a weaker version of itself — both refuse.**
+
+`doctrine-gauntlet` judges real rendered pages, so it needs a browser. Without one its harness refuses to run rather than report a pass:
 
 ```text
 npm i -D playwright-core axe-core
@@ -173,7 +176,9 @@ node node_modules/playwright-core/cli.js install chromium
 
 Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
-The herdr integration in [Watch it work](#watch-it-work) is optional too, and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today, and a long check launched through `dctr-gate.mjs` still runs, detached, with the same output file; only the pane is missing.
+`doctrine-pane` opens a terminal session in a [herdr](#watch-it-work) pane, so it needs herdr, and it is the one place where herdr is not optional. Outside a herdr session — or inside a container, where a pane would be a process on the host — it refuses rather than falling back, because an interactive session nobody can watch has no purpose. The other eight skills are unaffected.
+
+For everything else the herdr integration in [Watch it work](#watch-it-work) is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today, and a long check launched through `dctr-gate.mjs` still runs, detached, with the same output file; only the pane is missing.
 
 Everything else is optional and improves one skill or another. The doctrine is built on other authors' work, layered on rather than forked, and the credit is theirs. Their names go here in the visible text, because the detailed list below renders collapsed:
 

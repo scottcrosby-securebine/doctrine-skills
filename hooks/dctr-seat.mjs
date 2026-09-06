@@ -25,9 +25,8 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
-  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
-} from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats as readSeats, withPlacementLock as placementLock } from './dctr-state.mjs'
+  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo } from './dctr-lib.mjs'
+import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
 
 let logSession = null
 const log = (msg) => hookLog(logSession, msg)
@@ -102,9 +101,15 @@ try {
       // write allocation loses one of two same-millisecond seats the moment the lock ever widens.
       // The layout is read first and is authoritative: a marker whose pane it no longer carries is
       // dropped before it can count toward the cap or become the split target (see staleSideSeats).
+      // A failed layout read is "I could not look": sideOccupants returns null below and this seat
+      // takes the tab path rather than splitting onto a column it cannot see. It did once fall back
+      // to stacking on the newest side pane, and that could stack onto a pane in another tab.
       let layout = null
-      try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* newest stands in */ }
-      let seats = liveSeats()
+      try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* tab path below */ }
+      // An unreadable marker makes the seat count unknown, and an unknown count must not become a
+      // small one: standing down costs this seat its pane, placing blind costs the whole column.
+      let seats
+      try { seats = liveSeats() } catch (e) { return `could not read this session's seat markers (${e.message})` }
       for (const s of staleSideSeats(seats, layout)) {
         try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
         log(`dropped stale marker ${s.agent}: pane ${s.paneId} not in layout`)
@@ -112,15 +117,30 @@ try {
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
       const taken = seats.map((s) => s.agent)
       let n = nextIndex(payload.agent_type, taken)
-      let marker = null, name = null
-      while (n && !marker) {
+      let marker = null, name = null, fatal = null
+      // EEXIST is the name being taken, and it is the ONLY reason to try the next one. Every other
+      // errno — EACCES on a seats directory we cannot write, ENOSPC on a full disk — will hit the
+      // next name identically, so treating them all as collisions spun this loop forever WHILE
+      // HOLDING THE PLACEMENT LOCK: measured at 1000 reservation attempts with no exit and no
+      // deadline, blocking every seat behind it.
+      //
+      // No index bound here on purpose. One was added and removed in the same round: with the errno
+      // split above, a real failure leaves through `fatal`, and unbounded EEXIST would need another
+      // process to steal each freshly-chosen name in turn, which a six-pane cap does not produce.
+      // The mutation gate reported it as pinned by nothing, and a guard whose absence no fixture can
+      // show is the class this repo keeps finding. `nextIndex` carries the only bound that fires.
+      while (n && !marker && !fatal) {
         name = agentName(payload.agent_type, n)
         try {
           marker = path.join(seatsDir(sessionId), `${name}.json`)
-          fs.writeFileSync(marker, '{}', { flag: 'wx' })
+          reserveMarker(marker)
           reserved = marker
-        } catch { marker = null; n += 1 }
+        } catch (e) {
+          if (e.code !== 'EEXIST') { fatal = e; marker = null; break }
+          marker = null; n += 1
+        }
       }
+      if (fatal) return `could not reserve a seat marker (${fatal.message})`
       if (!marker) return 'could not allocate a seat name'
 
       // A side pane while a slot is free, a tab past the cap. A failed split is retried once from
@@ -128,8 +148,21 @@ try {
       // call — and only then falls back to the tab path, logged, rather than standing down: a
       // seat with a tab beats a seat with nothing, but a silent demotion hid F13 for seven hours.
       let tabId = null, paneId = null
-      if (seatPlacement(seats, process.env.HERDR_PANE_ID) === 'pane') {
-        try { paneId = herdr(splitArgs(seats, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
+      // An interactive pane (dctr-pane.mjs) occupies a column slot but is never swept, so it joins
+      // the placement count and the split-target list without joining `seats`. sideOccupants
+      // returns null for "I could not look" — an unreadable marker directory or a failed layout
+      // read — and that must read as a FULL column, not an empty one. Filtering an unknown layout
+      // silently dropped every interactive pane from the count and split on top of six of them.
+      const occupants = sideOccupants(seats, layout)
+      if (!occupants) {
+        // Name the cause. A malformed marker in the shared directory stops every placement on the
+        // host, and a line that does not say which file leaves the operator nothing to remove.
+        let why = 'the layout could not be read'
+        try { interactivePanes() } catch (e) { why = e.message }
+        log(`could not observe the side column (${why}); taking the tab path rather than splitting blind`)
+      }
+      if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
+        try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
         catch (e) {
           log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
           try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID)).result.pane.pane_id }
@@ -156,7 +189,7 @@ try {
       // never reaches here — DCTR_VIEW_REQUEST_DIR routes it to the bridge-write path above, which
       // makes no herdr call at all.
       const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file }
-      fs.writeFileSync(marker, JSON.stringify(record))
+      writeMarker(marker, record)
       reserved = null   // complete: the marker is now a record rather than a reservation
 
       herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
@@ -171,14 +204,29 @@ try {
 
   if (event === 'SubagentStop') {
     if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
-    const seat = liveSeats().find((s) => s.agent_id === payload.agent_id)
+    // The readable seats are enough to close THIS one. Using the strict reader here meant one
+    // truncated marker stood every other seat down, leaving live panes and renderer processes that
+    // nothing would ever close: preserving a record we cannot read must not abandon the ones we can.
+    const { seats: readable, unreadable } = liveSeatsPartial(sessionId)
+    if (unreadable.length) log(`markers that could not be read, left in place: ${unreadable.join(', ')}`)
+    const seat = readable.find((s) => s.agent_id === payload.agent_id)
     if (!seat) stand_down(`no live seat recorded for ${payload.agent_id}`)
 
+    let closeFailed = null
     try {
       if (reportsSidebarRow(seat)) {
         herdr(['pane', 'report-agent', seat.paneId, '--source', `custom:${PREFIX}`, '--agent', seat.agent, '--state', 'idle'])
       }
     } catch { /* the pane may already be gone; the tab handling below still runs */ }
+
+    // A close that answered "not found" is NOT a failed close. herdr replies to a missing pane or tab
+    // with a structured error CODE and exit 1, so execFileSync throws either way and the throw alone
+    // cannot tell "it is already gone" from "I could not reach it". `isPaneNotFound` was added to
+    // dctr-state.mjs to make exactly that distinction and was called only from the launcher; this
+    // file read every throw as a failure, so a pane the USER closed — the lifecycle Q4 ruled and
+    // SKILL.md documents — kept its marker forever and left the state directory unswept on every
+    // such session. Tabs answer a different code, hence two predicates rather than one widened one.
+    const alreadyGone = (e) => (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e))
 
     if (seat.tabId) {
       // The list is advisory: it decides relabel-vs-close and supplies the label, nothing more. A tab
@@ -190,27 +238,106 @@ try {
         const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
         mine = tabs.find((t) => t.tab_id === seat.tabId)
       } catch { /* fall through to close-by-id */ }
-      if (stopAction(mine) === 'relabel') herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`])
-      else herdr(['tab', 'close', seat.tabId])
+      if (stopAction(mine) === 'relabel') try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
+      else try { herdr(['tab', 'close', seat.tabId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     } else {
       // A side seat: same relabel-vs-close rule, read from the pane's own record. A pane the get
       // cannot find is treated as unfocused and the close is best-effort — it is already gone.
-      let pane
-      try { pane = herdr(['pane', 'get', seat.paneId]).result.pane } catch { /* gone */ }
-      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }
-      else try { herdr(['pane', 'close', seat.paneId]) } catch { /* already gone */ }
+      // THE SAME DISTINCTION ON THE READ, and it fails the opposite way. `stopAction(undefined)` is
+      // 'close', so a lookup that merely FAILED used to close the pane anyway — and the one pane
+      // stopAction would have spared is the focused one, the pane the user is watching. "It is gone"
+      // and "I could not look" need separating here for the same reason they do on the close.
+      let pane, lookupFailed = null
+      try { pane = herdr(['pane', 'get', seat.paneId]).result.pane }
+      catch (e) { if (!isPaneNotFound(e)) lookupFailed = String(e.message).split('\n')[0] }
+      if (lookupFailed) {
+        // Keep the record rather than act blind. SessionEnd will try again, which is the whole
+        // reason a marker survives a close it could not make.
+        closeFailed = `could not look up ${seat.paneId} (${lookupFailed})`
+      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }
+      else try { herdr(['pane', 'close', seat.paneId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     }
 
-    fs.rmSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), { force: true })
-    log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
+    // The same rule SessionEnd follows, and this is where it was missing: a close that FAILED is not
+    // "already gone". Removing the marker anyway throws away the only record of a pane that may
+    // still be on screen, and SessionEnd's own preservation cannot help — the record is gone first.
+    if (closeFailed) {
+      log(`stop ${seat.agent}: close failed (${closeFailed}); keeping its marker so SessionEnd can try again`)
+    } else {
+      // Remove by IDENTITY, under the same lock SubagentStart allocates names in. Removing by NAME,
+      // outside the lock, let a finishing seat delete a REPLACEMENT's marker: SubagentStart sees this
+      // seat's pane gone from the layout, drops the stale marker, reuses the freed name for a new
+      // agent and publishes it — and this unlink then takes the new one. The new pane stays alive
+      // with nothing on disk naming it, so no later SubagentStop and no SessionEnd can ever find it.
+      // The read above already matched on agent_id; it was the WRITE that trusted the name alone.
+      placementLock(sessionId, () => {
+        const file = path.join(seatsDir(sessionId), `${seat.agent}.json`)
+        let current = null, unreadable = false
+        try { current = JSON.parse(fs.readFileSync(file, 'utf8')) }
+        catch (e) { if (e.code !== 'ENOENT') unreadable = true }
+        if (unreadable) {
+          // A record we cannot read is not an answer, here as everywhere else in this file.
+          log(`stop ${seat.agent}: marker could not be read; leaving it for SessionEnd`)
+        } else if (current && current.agent_id !== seat.agent_id) {
+          log(`stop ${seat.agent}: that name now belongs to ${current.agent_id}; leaving its marker alone`)
+        } else {
+          fs.rmSync(file, { force: true })
+          log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
+        }
+      })
+    }
   }
 
   if (event === 'SessionEnd') {
     // A seat whose SubagentStop never fired leaves a pane or tab behind. Nothing else will clear it.
-    for (const seat of liveSeats()) {
-      try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) } catch { /* already gone */ }
+    //
+    // Enumerate, close and remove ALL INSIDE the placement lock. Reading the seats outside it let a
+    // placement finish while this waited, and its brand-new marker was then deleted without its
+    // pane being closed — an untracked pane nothing can ever find.
+    try {
+      let removable = false
+      placementLock(sessionId, () => {
+        const { seats, unreadable } = liveSeatsPartial(sessionId)
+        // Close every seat we can read. A close that FAILS is not "already gone" — a timeout or a
+        // transport error leaves the pane alive — so it is counted, and anything uncounted keeps
+        // the records that say how to tear it down.
+        let failed = 0
+        for (const seat of seats) {
+          try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) }
+          catch (e) {
+            // Same rule as SubagentStop above: "not found" is an answer, and the thing we were
+            // about to close is already gone, which is the outcome we wanted.
+            if (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e)) log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`)
+            else { failed += 1; log(`SessionEnd: could not close ${seat.tabId || seat.paneId} (${String(e.message).split('\n')[0]}); keeping its record`) }
+          }
+        }
+        if (unreadable.length) log(`SessionEnd: ${unreadable.length} marker(s) could not be read; keeping the state directory`)
+        if (failed || unreadable.length) return
+        // Remove the CONTENTS while still holding the lock, and leave the lock itself: it lives
+        // inside this directory, and a recursive removal deletes it part-way through, which lets a
+        // waiting launcher place a seat into the very directory still being deleted.
+        for (const name of fs.readdirSync(stateDir(sessionId))) {
+          if (name === 'placement.lock') continue
+          try { fs.rmSync(path.join(stateDir(sessionId), name), { recursive: true, force: true }) } catch { /* best effort */ }
+        }
+        removable = true
+      })
+      // The lock is released by now, so the directory can go. If anything above kept a record, this
+      // does not run and the directory stays for a human to look at.
+      // rmdir, NOT a recursive remove. The lock was released a line ago, and a waiting placement can
+      // have taken it and published a marker by now; a recursive remove would carry both off, which
+      // is the race moved outside the critical section rather than removed. rmdir fails ENOTEMPTY
+      // against exactly that, and failing is the correct outcome.
+      if (removable) try { fs.rmdirSync(stateDir(sessionId)) } catch { /* someone got in first, or it is already gone */ }
+    } catch (e) {
+      // NOTHING is removed on this path, deliberately, and the two ways to get here are why. A read
+      // that failed must not authorize a deletion: one truncated marker would otherwise destroy the
+      // records of every healthy seat. And a lock that could not be taken must not be deleted out
+      // from under whoever holds it. The cost of leaving it is a stale directory under the temp
+      // directory that no later session reads; the cost of the alternatives is a live lock or the
+      // only record of how to tear down a pane.
+      log(`SessionEnd: swept nothing (${e.message}); state directory left in place for a human to remove`)
     }
-    fs.rmSync(stateDir(sessionId), { recursive: true, force: true })
   }
   if (!['SubagentStart', 'SubagentStop', 'SessionEnd'].includes(event)) {
     stand_down(`no handler for ${event || 'an unnamed event'}; hooks.json subscribes to three`)

@@ -24,9 +24,12 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
-  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine,
-} from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock } from './dctr-state.mjs'
+  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine } from './dctr-lib.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker } from './dctr-state.mjs'
+
+/** Why the column could not be observed. sideOccupants answers null and throws the reason away, and
+ *  a log line naming no file is one the operator cannot act on. Read again only on the failure. */
+const sideColumnReason = () => { try { interactivePanes(); return 'the layout could not be read' } catch (e) { return e.message } }
 
 const self = path.resolve(process.argv[1])
 const argv = process.argv.slice(2)
@@ -98,29 +101,58 @@ if (argv[0] === '--run') {
   try {
     fs.mkdirSync(seatsDir(sessionId), { recursive: true })
     placed = withPlacementLock(sessionId, () => {
+      // A failed layout read is "I could not look": sideOccupants returns null below and this seat
+      // takes the tab path rather than splitting onto a column it cannot see. It did once fall back
+      // to stacking on the newest side pane, and that could stack onto a pane in another tab.
       let layout = null
-      try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* newest stands in */ }
-      let seats = liveSeats(sessionId)
+      try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* tab path below */ }
+      // THROW, never return a reason. This callback's contract is a placement object and the caller
+      // reads its fields; a string return made every field undefined, skipped `pane run` entirely,
+      // and printed "undefined running in pane undefined" while the check never ran. The seat hook
+      // stands down by returning a reason; this launcher does not have that protocol.
+      let seats
+      try { seats = liveSeats(sessionId) } catch (e) { throw new Error(`could not read this session's seat markers (${e.message})`) }
       for (const s of staleSideSeats(seats, layout)) {
         try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
       }
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
       const taken = seats.map((s) => s.agent)
       let n = nextIndex(GATE_ROLE, taken)
-      let marker = null, name = null
-      while (n && !marker) {
+      let marker = null, name = null, fatal = null
+      // EEXIST is the name being taken, and it is the ONLY reason to try the next one. Every other
+      // errno — EACCES on a seats directory we cannot write, ENOSPC on a full disk — will hit the
+      // next name identically, so treating them all as collisions spun this loop forever WHILE
+      // HOLDING THE PLACEMENT LOCK: measured at 1000 reservation attempts with no exit and no
+      // deadline, blocking every seat behind it.
+      //
+      // No index bound here on purpose. One was added and removed in the same round: with the errno
+      // split above, a real failure leaves through `fatal`, and unbounded EEXIST would need another
+      // process to steal each freshly-chosen name in turn, which a six-pane cap does not produce.
+      // The mutation gate reported it as pinned by nothing, and a guard whose absence no fixture can
+      // show is the class this repo keeps finding. `nextIndex` carries the only bound that fires.
+      while (n && !marker && !fatal) {
         name = agentName(GATE_ROLE, n)
         try {
           marker = path.join(seatsDir(sessionId), `${name}.json`)
-          fs.writeFileSync(marker, '{}', { flag: 'wx' })
-        } catch { marker = null; n += 1 }
+          reserveMarker(marker)
+        } catch (e) {
+          if (e.code !== 'EEXIST') { fatal = e; marker = null; break }
+          marker = null; n += 1
+        }
       }
+      if (fatal) throw new Error(`could not reserve a gate marker (${fatal.message})`)
       if (!marker) throw new Error('could not allocate a gate name')
 
       let tabId = null, paneId = null
       try {
-        if (seatPlacement(seats, process.env.HERDR_PANE_ID) === 'pane') {
-          try { paneId = herdr(splitArgs(seats, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
+        // Same rule as the seat hook: an interactive pane counts toward the cap and can be the
+        // split target, but is never swept and never allocated a seat name. A null return is "I
+        // could not look" and takes the tab path; counting an unobservable column as empty is how
+        // a seventh pane got split on top of six.
+        const occupants = sideOccupants(seats, layout)
+        if (!occupants) hookLog(sessionId, `gate "${label}": could not observe the side column (${sideColumnReason()}); taking the tab path`)
+        if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
+          try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
           catch { try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID)).result.pane.pane_id } catch { paneId = null } }
         }
         if (!paneId) {
@@ -128,7 +160,7 @@ if (argv[0] === '--run') {
           tabId = tab.result.tab.tab_id
           paneId = tab.result.root_pane.pane_id
         }
-        fs.writeFileSync(marker, JSON.stringify({ agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label }))
+        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
         herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, label, command)])
       } catch (e) {
         try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
@@ -138,7 +170,7 @@ if (argv[0] === '--run') {
       return { name, paneId, tabId }
     })
   } catch (e) {
-    detached(`herdr refused — ${String(e.message).split('\n')[0]}`)
+    detached(`could not place a pane — ${String(e.message).split('\n')[0]}`)
   }
   hookLog(sessionId, `gate "${label}" ${placed.name}: ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}, output ${outFile}`)
   console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; output ${outFile}, done when its last line is exit=N`)
