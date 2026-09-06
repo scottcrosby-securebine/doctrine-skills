@@ -2,3 +2,4 @@ SESSION_MEMORY.md
 node_modules/
 package.json
 package-lock.json
+docs/handoffs/
