@@ -129,9 +129,14 @@ export function truncate(text, head, tail) {
  * marker with O_EXCL and retries on collision — doctrine dispatches waves, so two seats of one role
  * can start in the same millisecond and a read-then-write allocation loses one of them.
  */
+/** The highest index a seat name can carry. `nextIndex` stops here, and so must any caller that
+ *  increments past its answer — one that did not spun past this bound forever. Stated once, and
+ *  exported, so the bound and the loops that respect it cannot drift apart. */
+export const MAX_SEAT_INDEX = 999
+
 export function nextIndex(role, takenNames) {
   const taken = new Set(takenNames)
-  for (let n = 1; n <= 999; n++) if (!taken.has(agentName(role, n))) return n
+  for (let n = 1; n <= MAX_SEAT_INDEX; n++) if (!taken.has(agentName(role, n))) return n
   return null
 }
 

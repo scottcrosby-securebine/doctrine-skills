@@ -48,6 +48,24 @@ jobs:
         # output file ends with exit=N, and herdr is called zero times. Needs only node and bash.
         run: node hooks/dctr-gate.selftest.mjs
 
+      - name: interactive pane launcher tamper test
+        # Three clauses over dctr-pane.mjs: every refusal path trips AND calls herdr zero times
+        # (tripwire on PATH), a valid session is not refused, and the fixtures are proved to carry
+        # their defects without calling the checker. Also asserts BOTH script(1) invocations, so the
+        # macOS argument shape — file first, no -c — is checked on Linux without a Mac.
+        run: node hooks/dctr-pane.selftest.mjs
+
+      - name: seat hook teardown tamper test
+        # The destructive paths: SubagentStop and SessionEnd. A close that failed keeps its record,
+        # one unreadable marker does not abandon the readable seats, and a healthy teardown still
+        # removes everything. Drives the hook with a tripwire herdr; needs only node and bash.
+        run: node hooks/dctr-seat.teardown.selftest.mjs
+
+      - name: mutation gate over the hook selftests
+        # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
+        # check that answers whether the other checks pin anything.
+        run: node hooks/dctr-mutations.mjs
+
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null
 
