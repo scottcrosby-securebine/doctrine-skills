@@ -24,9 +24,9 @@ Seven rules, applied to every job.
 2. **Split the work.** The job becomes phases with checkable exit gates, and independent tasks inside a phase run as parallel agents. Work shown to have small reach shares a neighbouring phase's gate instead of carrying its own.
 3. **Run every check your project documents.** Not just the ones an agent thinks of. A check that did not run is recorded as not run — never as clean.
 4. **Send an adversary.** A fresh reviewer — a different model, when one is installed — attacks the work. Its findings are checked against the source first, because adversarial reviewers invent things too.
-5. **Loop until two passes in a row come back clean.** A change to a non-comment line of the code, or to a claim about what it does, resets the count; a wording or test-only fix does not. A second counter never resets, and every fourth unresolved round the run stops and hands you the decision.
-6. **Cut what nobody asked for.** Once per phase, before the passes that certify what ships.
-7. **Deliver the way your repo delivers**, and say whether the shipped version earned its two clean passes.
+5. **Loop until one full pass comes back clean with nothing outstanding**, certified by a reviewer that did not write the fix, on a version that has actually run. A code fix after that pass gets a pass of its own. Two alarms stop the loop and hand you the decision: every Nth round that still finds a blocker (you set N, default 4), and a phase past your time budget (default two hours) without a round closing.
+6. **Cut what nobody asked for.** Before the pass that certifies what ships.
+7. **Deliver the way your repo delivers**, and say whether the shipped version is the one the clean pass certified.
 
 ## What a run looks like
 
@@ -43,12 +43,12 @@ Then:
 3. It runs your project's checks — whatever the repo documents as a gate.
 4. The work goes to a reviewer with no memory of writing it.
 5. Blocking findings get fixed. Each one is asked where else the same mistake appears, so it is fixed as a class.
-6. The gate runs again. Two clean rounds and the phase exits. Four unresolved rounds and it stops to tell you what shipping now would mean.
+6. The gate runs again. One clean round and the phase exits. Every fourth round that still finds a blocker, or two hours without a round closing, and it stops to tell you what shipping now would mean.
 
 Then it opens the report with one line about the gate, before anything about the work:
 
 ```text
-Gate: two consecutive clean passes on 4a3e4ca. No blockers open.
+Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
 or:
@@ -85,7 +85,7 @@ A doctrine run sends out a lot of agents, and normally they are invisible: your 
 
 **Long checks get a pane too.** A project's slowest gate (a full mutation run is the usual one) outlasts the ten minutes Claude Code allows a command, so a run used to push it into the background where nothing showed it working. Doctrine now launches such a check through `hooks/dctr-gate.mjs`, which runs it in a pane beside the session under the same placement rules as an agent, streaming its output as it goes and writing the same output to a file that ends with `exit=N` when the check is done. Outside herdr the check runs detached with the same file, so the record is identical either way.
 
-**The score, in the sidebar.** This one is opt-in. A doctrine run publishes its progress as a small token — `r3·e1·v4` means round 3, 1 clean pass of the 2 needed to finish, and 4 unresolved rounds on the counter that stops and asks you at every fourth. It refreshes as the run goes and expires within the hour if the run dies. herdr shows custom tokens only where your config asks for them, so add `$doctrine` to a row under `[ui.sidebar.agents]` in herdr's `config.toml` (under `~/.config/herdr/` on Linux):
+**The score, in the sidebar.** This one is opt-in. A doctrine run publishes its progress as a small token — `r3·e1·v4` means round 3, a clean pass on record for the current version (e0 until there is one), and 4 rounds that found a blocker on the alarm that stops and asks you at every Nth (default 4). It refreshes as the run goes and expires within the hour if the run dies. herdr shows custom tokens only where your config asks for them, so add `$doctrine` to a row under `[ui.sidebar.agents]` in herdr's `config.toml` (under `~/.config/herdr/` on Linux):
 
 ```toml
 [ui.sidebar.agents]
@@ -242,8 +242,8 @@ The seven rules above are a summary. The specification is [`skills/doctrine/SKIL
 
 Three things worth knowing before you rely on the gate:
 
-- A finding is **blocking** when someone acting on the deliverable as it stands would do the wrong thing. Wording with the right meaning, and any claim about the gate itself (a count, a coverage note, a round number), never blocks; wording that changes neither what the code does nor what it is for is not filed at all. A repair that touches a non-comment line of shipping code, or changes a claim about what it does, restarts the two-pass count from zero; anything else leaves it standing. A pass is clean when it leaves nothing outstanding, including a finding carried over from an earlier pass. Where the deliverable is itself prose (a report, a spec), the wrappers replace the two-pass exit with one diff-scoped closing round after the first clean pass, or at the first valve firing where none came clean, since no prose deliverable ever closed on two.
-- The escalation valve leads with what shipping now would mean, before anything about the loop.
+- A finding is **blocking** when someone acting on the deliverable as it stands would do the wrong thing. Wording with the right meaning, and any claim about the gate itself (a count, a coverage note, a round number), never blocks; wording that changes neither what the code does nor what it is for is not filed at all. A code repair after the clean pass needs a pass of its own, and what counts as a code repair is read from the diff, never from a label. A pass is clean when it leaves nothing outstanding, including a finding carried over from an earlier pass. Where the deliverable is itself prose (a report, a spec) and no pass has come clean by the round alarm's first firing, the phase runs one closing round scoped to the diff since the last fully reviewed revision and exits with a punch list of what it did not fix.
+- An alarm's stop leads with what shipping now would mean, before anything about the loop.
 - The doctrine is a **layer, not a fork**. It invokes other authors' skills at runtime so their updates flow through untouched. The one exception is the renamed `matts-code-review` copy.
 
 ## How this is tested
