@@ -58,6 +58,11 @@ fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
+if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_STEAL_ON_RUN" ]; then
+  # A replacement seat takes this name while the codex stop sits between its pane-run call and its
+  # marker write, which is the window that write must not clobber.
+  printf '%s' "$DCTR_TEST_STEAL_RECORD" > "$DCTR_TEST_STEAL_ON_RUN"
+fi
 if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_STEAL_MARKER" ]; then
   # A replacement seat takes this name while the close is in flight — the exact window between the
   # stop's identity-matched READ and its removal. Writing it here is what makes the race drivable.
@@ -341,6 +346,17 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     JSON.stringify(R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).codexJob))
   check("and a record in another workspace's state directory is not chosen, though newer", runs.length === 1 && !runs[0].includes(foreignJob), runs.join(' | '))
 
+  // B3: between the stop's `pane run` and its marker write, a placement can drop this seat's stale
+  // marker and reuse the name for a NEW agent. A write that trusted the name replaced that agent's
+  // record with this one's, leaving its live pane tracked by nothing.
+  reset(); codexSeat()
+  const stolen = JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-NEW', role: 'codex:codex-rescue', n: 1, tabId: null, paneId: 'w1:sNEW', file: '/t/new.jsonl', label: 'a replacement' })
+  run({ hook_event_name: 'SubagentStop', agent_id: 'cx-1', agent_type: 'codex:codex-rescue', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS },
+    { HOME: home, DCTR_TEST_STEAL_ON_RUN: path.join(seatsDir, 'dctr-codex-codex-rescue-1.json'), DCTR_TEST_STEAL_RECORD: stolen })
+  check('the stop does not overwrite a marker that now belongs to a replacement seat',
+    R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).agent_id === 'cx-NEW',
+    JSON.stringify(R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json'))))
+
   reset(); codexSeat(); stop(path.join(tmp, 'ws', 'nowhere'))
   const logged = (() => { try { return fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { return '' } })()
   check('a codex seat whose job cannot be found closes as any other seat', called(/^pane close w1:s1/m) && !called(/--codex-tail/) && !fs.existsSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')))
@@ -375,6 +391,18 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
 
   reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_GET_FOCUSED: 'w1:s1' })
   check('a FINISHED codex pane someone is looking at still stays', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
+
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_GET_FAILS: 'w1:s1' })
+  check('a finished codex pane whose focus lookup FAILED is spared: unknown is not unfocused',
+    !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane (get|close)/).join(' | '))
+
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_CLOSE_GONE: 'w1:s1' })
+  check('a pane herdr says is NOT THERE has its marker removed, since already-gone is an answer',
+    !stillSeatOne(), `marker: ${(() => { try { return JSON.stringify(R(MARK)) } catch { return '(absent)' } })()}`)
+
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_CLOSE_FAILS: 'w1:s1' })
+  check('but a close that merely FAILED keeps its marker, so SessionEnd can try again', stillSeatOne(),
+    callLines(/^pane close/).join(' | '))
 
   reset(); followedSeat(doneJobRec); startSeat('Explore')
   check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
@@ -426,6 +454,26 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('and exits once it completes', qCode === 0, `exit ${qCode}`)
   const qRenames = callLines(/^pane rename w1:s1 /)
   check('with exactly one rename, to completed', qRenames.length === 1 && qRenames[0] === `pane rename w1:s1 ${LABEL} · completed`, qRenames.join(' | '))
+
+  // The injected interval must be HONOURED, not merely accepted. Reverting dctr-seat.mjs to the
+  // literal 250/2000 leaves every OTHER clause in this suite green — a reviewer proved it by doing
+  // exactly that — because every bound here is generous enough to swallow a 2000ms poll. So this
+  // measures the latency the interval decides: a job that turns terminal while the watcher runs is
+  // noticed one poll later. At the injected 25ms that is tens of milliseconds; at the production
+  // 2000ms it cannot come in under the bound, which is what makes this clause discriminate.
+  reset()
+  const latencyJob = job('task-latency', now, WS, 'running')
+  const lw = spawn('node', [hook, '--codex-tail', latencyJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_PUMP_MS: '10', DCTR_POLL_MS: '25' } })
+  const lwExit = new Promise((resolve) => lw.on('exit', (code) => resolve(code)))
+  await new Promise((r) => setTimeout(r, 150))
+  const flipped = Date.now()
+  fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
+  const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)
+  const lwCode = await lwExit
+  clearTimeout(lwBound)
+  const latency = Date.now() - flipped
+  check('the injected poll interval is HONOURED: a job turning terminal is noticed far inside the production interval',
+    lwCode === 0 && latency < 800, `exit ${lwCode} after ${latency}ms; at the production 2000ms poll this cannot pass`)
 
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs

@@ -20,7 +20,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool } from './dctr-lib.mjs'
+import { mapPool, poolShortfall } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
@@ -207,21 +207,60 @@ const MUTATIONS = [
   { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
     from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
     to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'focus that could not be read never closes a pane', file: 'dctr-lib.mjs', clause: 'focus that could not be READ never closes a pane',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
+    to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)' },
+  { name: 'a non-finite pool limit still runs every item', file: 'dctr-lib.mjs', clause: 'a non-finite limit still runs every item',
+    from: 'Math.min(Number.isFinite(limit) ? limit : 1, items.length)',
+    to: 'Math.min(limit, items.length)' },
+  { name: 'poolShortfall counts the results a pool never produced', file: 'dctr-lib.mjs', clause: 'poolShortfall counts the results a pool never produced',
+    from: '  Math.max(0, expected - results.filter((r) => r !== undefined).length)',
+    to: '  Math.max(0, expected - results.length)' },
+  { name: 'the watcher honours an injected poll interval', file: 'dctr-seat.mjs', clause: 'the injected poll interval is HONOURED',
+    from: '  setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)',
+    to: '  setInterval(poll, POLL_MS)' },
+  { name: 'close-on-next reads the not-found code as an answer', file: 'dctr-seat.mjs', clause: 'a pane herdr says is NOT THERE has its marker removed',
+    from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)\n            if (!gone) {',
+    to: '            const gone = false\n            if (!gone) {' },
+  { name: 'the stop write checks the marker is still this seat', file: 'dctr-seat.mjs', clause: 'the stop does not overwrite a marker that now belongs to a replacement seat',
+    from: "            if (!current || current.agent_id !== seat.agent_id) {",
+    to: "            if (false) {" },
+  { name: 'the gate ticker reports real elapsed time', file: 'dctr-gate.mjs', clause: 'elapsed time that INCREASES',
+    from: 'elapsedLabel(label, Date.now() - started)',
+    to: 'elapsedLabel(label, 0)' },
+  { name: 'mapPool keeps at most `limit` in flight', file: 'dctr-lib.mjs', clause: 'mapPool never runs more than `limit` at once',
+    from: '  await Promise.all(Array.from({ length: Math.max(1, Math.min(Number.isFinite(limit) ? limit : 1, items.length)) }, worker))',
+    to: '  await Promise.all(Array.from({ length: Math.max(1, items.length) }, worker))' },
+  { name: 'mapPool returns results in INPUT order', file: 'dctr-lib.mjs', clause: 'mapPool visits every item exactly once and returns results in INPUT order',
+    from: '    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i], i)',
+    to: '    for (let i = next++; i < items.length; i = next++) results.push(await fn(items[i], i))' },
+  { name: 'elapsedLabel switches to m/s at one minute', file: 'dctr-lib.mjs', clause: 'elapsedLabel prints seconds under a minute and zero-padded m/s at or above one',
+    from: '  return `${label} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, \'0\')}s`} elapsed`',
+    to: '  return `${label} · ${s < 3600 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, \'0\')}s`} elapsed`' },
+  { name: 'elapsedLabel zero-pads the seconds half', file: 'dctr-lib.mjs', clause: 'zero-padded m/s',
+    from: "String(s % 60).padStart(2, '0')",
+    to: 'String(s % 60)' },
+  { name: 'elapsedLabel floors a negative age at zero', file: 'dctr-lib.mjs', clause: 'elapsedLabel never prints a negative age',
+    from: '  const s = Math.max(0, Math.floor(ms / 1000))',
+    to: '  const s = Math.floor(ms / 1000)' },
+  { name: 'only the SPLIT path is renamed at placement', file: 'dctr-gate.mjs', clause: 'the tab path is NOT renamed at placement',
+    from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) }",
+    to: "        if (true) try { herdr(['pane', 'rename', paneId, label]) }" },
   { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
     from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
     to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
   { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'a FINISHED codex pane someone is looking at still stays',
-    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
     to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status)).map((c) => c.seat)' },
   { name: 'close-on-next only considers seats following a codex job', file: 'dctr-lib.mjs', clause: 'close-on-next closes exactly the terminal, unfocused, codex-job panes',
-    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)',
-    to: '  candidates.filter((c) => codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)' },
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
+    to: '  candidates.filter((c) => codexTerminal(c.status) && c.focused === false).map((c) => c.seat)' },
   { name: 'only a CODEX placement sweeps finished codex panes', file: 'dctr-seat.mjs', clause: 'an ordinary seat placement closes nothing',
     from: '      if (payload.agent_type === CODEX_ROLE) {',
     to: '      if (true) {' },
   { name: 'the stop path records which job the pane follows', file: 'dctr-seat.mjs', clause: 'the marker records WHICH job the pane follows',
-    from: "        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat, codexJob: job.file }) }",
-    to: "        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat }) }" },
+    from: "            writeMarker(file, { ...seat, codexJob: job.file })",
+    to: "            writeMarker(file, { ...seat })" },
   { name: 'the gate names the pane it split', file: 'dctr-gate.mjs', clause: 'the pane path NAMES the pane it split',
     from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate \"${label}\": rename of ${paneId} failed (${String(e.message).split('\\n')[0]})`) }\n",
     to: '' },
@@ -273,7 +312,12 @@ let failures = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
-for (const r of await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))) {
+const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))
+if (poolShortfall(baselineResults, SUITES.length)) {
+  console.log(`  FAIL the baseline pool produced ${SUITES.length - poolShortfall(baselineResults, SUITES.length)} of ${SUITES.length} results`)
+  failures += 1
+}
+for (const r of baselineResults) {
   if (r.res.code !== 0) {
     console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
@@ -307,6 +351,16 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
   }
   drain()
 })
+
+// The gate's guard against its own machinery. A pool that silently ran nothing would leave every
+// slot undefined and this file would still print "all N repairs are pinned" and exit 0 — a red team
+// produced exactly that footer, with zero suites executed, by substituting a pool that returned []
+// without invoking its callback. Counting the results is what makes that impossible to miss.
+const shortfall = poolShortfall(results, MUTATIONS.length)
+if (shortfall) {
+  console.log(`  FAIL the pool produced ${MUTATIONS.length - shortfall} of ${MUTATIONS.length} results; this run certifies nothing`)
+  failures += shortfall
+}
 
 fs.rmSync(work, { recursive: true, force: true })
 console.log(failures ? `\n${failures} FAILED` : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)

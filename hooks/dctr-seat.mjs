@@ -186,14 +186,31 @@ try {
         const candidates = seats.filter((s) => s.codexJob).map((s) => {
           let status = null
           try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* unreadable is not terminal */ }
+          // "It is gone" and "I could not look" are different answers, and only the first is one.
+          // A pane the lookup cannot REACH keeps focus unknown, and codexPanesToClose spares it —
+          // the same separation the ordinary stop path makes, and for the same reason: the pane a
+          // blind close destroys is the focused one the user is watching.
           let focused
-          try { focused = herdr(['pane', 'get', s.paneId]).result.pane.focused } catch { /* unknown; the close below decides */ }
+          try { focused = herdr(['pane', 'get', s.paneId]).result.pane?.focused === true }
+          catch (e) { if (isPaneNotFound(e)) focused = false /* already gone: sweeping it is the point */ }
           return { seat: s, status, focused }
         })
         const closed = new Set()
         for (const s of codexPanesToClose(candidates)) {
           try { herdr(s.tabId ? ['tab', 'close', s.tabId] : ['pane', 'close', s.paneId]) }
-          catch (e) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
+          catch (e) {
+            // A not-found code is an ANSWER: that pane or tab is already gone, so its marker should
+            // go too. Every other error is "I could not", and the marker stays for SessionEnd. A
+            // catch that kept the marker on both left a confirmed-gone tab counted against the cap
+            // for the rest of the session, once per placement, forever.
+            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)
+            if (!gone) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
+          }
+          // Removed by name, and that is safe HERE and nowhere else: this runs inside the placement
+          // lock, `seats` was read from disk in the same critical section, and every writer of a
+          // marker — placement, and since this change the codex stop path too — holds that lock. No
+          // identity check, because no interleaving can change the name under it and a guard whose
+          // absence no fixture can show is the class this repo removes.
           try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
           closed.add(s.agent)
           log(`close-on-next: closed finished codex seat ${s.agent}`)
@@ -339,7 +356,21 @@ try {
         // has finished (close-on-next, Scott's ruling 2026-09-07). Written after `pane run` has
         // succeeded: a marker claiming a watcher that does not exist would have the next placement
         // close a pane still showing a live renderer.
-        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat, codexJob: job.file }) }
+        // Under the placement lock and matched on identity, for the reason the removal below is:
+        // between this seat's read and this write, SubagentStart can drop this marker as stale and
+        // reuse the name for a NEW seat. A write that trusted the name would replace that seat's
+        // record with this one's, and its live pane would then be tracked by nothing.
+        try {
+          placementLock(sessionId, () => {
+            const file = path.join(seatsDir(sessionId), `${seat.agent}.json`)
+            let current = null
+            try { current = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { /* gone or unreadable */ }
+            // Absent counts as "not mine" too: if placement removed this marker while the stop
+            // waited on the lock, recreating it publishes a record for a pane that is already gone.
+            if (!current || current.agent_id !== seat.agent_id) { log(`stop ${seat.agent}: that marker is no longer this seat's; not recording the job path`); return }
+            writeMarker(file, { ...seat, codexJob: job.file })
+          })
+        }
         catch (e) { log(`stop ${seat.agent}: could not record the job path (${String(e.message).split('\n')[0]}); this pane will stay until SessionEnd`) }
         log(`stop ${seat.agent}: codex job ${job.id || job.file} is ${job.status}; the pane follows it and the marker stays`)
         process.exit(0)

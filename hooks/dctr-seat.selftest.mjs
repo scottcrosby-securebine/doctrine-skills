@@ -18,7 +18,7 @@ import {
   seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal,
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -439,6 +439,34 @@ clause('clause 3o — the hostile pane fixture really carries live traversal, an
   clause('clause 1al — mapPool on an empty list returns an empty list and runs nothing', Array.isArray(empty) && empty.length === 0, JSON.stringify(empty))
 }
 
+// elapsedLabel, both branches. Gate clause 1g only ever sees the seconds branch — a selftest check
+// finishes in well under a minute — so the minutes branch shipped executed by nothing at all.
+clause('clause 1ao — elapsedLabel prints seconds under a minute and zero-padded m/s at or above one',
+  elapsedLabel('gate', 5000) === 'gate · 5s elapsed' &&
+  elapsedLabel('gate', 59999) === 'gate · 59s elapsed' &&
+  elapsedLabel('gate', 60000) === 'gate · 1m00s elapsed' &&
+  elapsedLabel('gate', 65000) === 'gate · 1m05s elapsed' &&
+  elapsedLabel('gate', 3671000) === 'gate · 61m11s elapsed',
+  `${elapsedLabel('gate', 65000)} / ${elapsedLabel('gate', 60000)}`)
+
+clause('clause 1ap — elapsedLabel never prints a negative age, so a clock that moves backwards reads 0s',
+  elapsedLabel('gate', -1) === 'gate · 0s elapsed' && elapsedLabel('gate', 0) === 'gate · 0s elapsed',
+  elapsedLabel('gate', -1))
+
+clause('clause 1aq — poolShortfall counts the results a pool never produced, which is how the gate refuses to certify an empty run',
+  poolShortfall([], 3) === 3 && poolShortfall([1, undefined, 3], 3) === 1 && poolShortfall([1, 2, 3], 3) === 0 &&
+  poolShortfall(new Array(5), 5) === 5 && poolShortfall([0, false, ''], 3) === 0,
+  `${poolShortfall([], 3)}/${poolShortfall([1, undefined, 3], 3)}/${poolShortfall([0, false, ''], 3)}`)
+
+{
+  // A non-finite limit made Array.from({length: NaN}) produce ZERO workers, so the pool ran nothing
+  // and returned a sparse array — the gate's silent-success mode, reachable from a bad env value.
+  let ran = 0
+  const out = await mapPool([1, 2, 3], NaN, async (v) => { ran += 1; return v })
+  clause('clause 1ar — a non-finite limit still runs every item rather than silently running none',
+    ran === 3 && out.join(',') === '1,2,3', `ran ${ran}, out ${out.join(',')}`)
+}
+
 // Item 2 (Scott's ruling, 2026-09-07): a finished codex pane stays until the next codex seat is
 // placed, then closes; a focused pane still stays. The decision is pure so the five cases can be
 // stated at once; the hook only gathers the inputs.
@@ -451,11 +479,16 @@ clause('clause 3o — the hostile pane fixture really carries live traversal, an
     { seat: S('waiting', '/j/wait.json'), status: 'queued', focused: false },   // stays: not started yet
     { seat: S('watched', '/j/watched.json'), status: 'completed', focused: true }, // stays: someone is looking
     { seat: S('unreadable', '/j/gone.json'), status: null, focused: false },    // stays: a read failure is not an answer
+    { seat: S('unreachable', '/j/unreach.json'), status: 'completed', focused: undefined }, // stays: focus UNKNOWN is not "unfocused"
     { seat: S('ordinary'), status: 'completed', focused: false },               // never a candidate: no codex job
   ]
   const closing = codexPanesToClose(CANDIDATES).map((s) => s.agent)
   clause('clause 1am — close-on-next closes exactly the terminal, unfocused, codex-job panes',
     closing.join(',') === 'done,failed', `closing ${closing.join(',') || '(none)'}`)
+
+  clause('clause 1ba — focus that could not be READ never closes a pane: unknown is not unfocused',
+    !codexPanesToClose(CANDIDATES).some((x) => x.agent === 'unreachable'),
+    'a pane get that FAILED leaves focus undefined, and the pane that costs is the focused one')
 
   clause('clause 1an — an unreadable job record is NOT terminal, matching the watcher, which keeps waiting on one',
     codexTerminal('completed') && codexTerminal('failed') && !codexTerminal('running') && !codexTerminal('queued') &&
@@ -468,9 +501,10 @@ clause('clause 3o — the hostile pane fixture really carries live traversal, an
     CANDIDATES.filter((c) => c.status === 'running' || c.status === 'queued').length === 2 &&
     CANDIDATES.some((c) => c.focused === true && codexTerminal(c.status)) &&
     CANDIDATES.some((c) => c.status === null) &&
+    CANDIDATES.some((c) => c.focused === undefined && codexTerminal(c.status)) &&
     CANDIDATES.some((c) => !c.seat.codexJob) &&
-    CANDIDATES.filter((c) => c.seat.codexJob && codexTerminal(c.status) && !c.focused).length === 2,
-    'if the fixture lacked the focused-and-finished case, 1am would prove nothing about focus')
+    CANDIDATES.filter((c) => c.seat.codexJob && codexTerminal(c.status) && c.focused === false).length === 2,
+    'if the fixture lacked the focused-and-finished case, 1am would prove nothing about focus; without the focus-unknown case, 1ba would be vacuous')
 }
 
 process.exit(bad ? 1 : 0)

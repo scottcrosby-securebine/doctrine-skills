@@ -146,20 +146,27 @@ clause('clause 1f2: the tab path is NOT renamed at placement, keeping the name t
 // executes there and this clause would pass or fail for reasons having nothing to do with it.
 // `--run` is the mode that actually runs the check and ticks, on the pane and detached paths both.
 fs.writeFileSync(calls, '')
-execFileSync('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 0.4'],
+execFileSync('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 1.15'],
   { env: paneEnv({ DCTR_ELAPSED_MS: '50' }), encoding: 'utf8' })
-clause('clause 1g: while the check runs, the pane name carries elapsed time, refreshed on the injected interval',
-  /^pane rename w1:pS ticking gate · \d+s elapsed$/m.test(fs.readFileSync(calls, 'utf8')),
+// It must be shown to READ A CLOCK, not to print a constant: `\d+s` matches "0s", so a ticker
+// passing a hardcoded 0 satisfied the old assertion exactly as a working one did. Over 1.15s at a
+// 50ms interval both a 0s and a 1s label must appear. ~23 ticks are expected where 2 distinct ones
+// are required, and that margin is the answer to running this under N-way parallel load.
+clause('clause 1g: while the check runs, the pane name carries elapsed time that INCREASES, on the injected interval',
+  /^pane rename w1:pS ticking gate · 0s elapsed$/m.test(fs.readFileSync(calls, 'utf8')) &&
+  /^pane rename w1:pS ticking gate · 1s elapsed$/m.test(fs.readFileSync(calls, 'utf8')),
   `rename calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename')))}`)
 
-// A focused pane is relabelled to its exit name on completion. The ticker must be stopped BEFORE
-// that, or a tick still in flight puts the elapsed name back over it and the pane ends up lying
-// about a check that has finished. Asserted on the LAST rename, which is what ordering decides.
+// A focused pane is relabelled to its exit name on completion, and that must be the LAST name it
+// carries: an elapsed tick landing after it would leave the pane lying about a check that has
+// finished. Nothing cancels the ticker — the close handler runs synchronously through to
+// process.exit, so no timer can interleave — and this asserts the outcome that ordering gives,
+// which is the thing worth pinning either way.
 fs.writeFileSync(calls, '')
 execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:pS', 'ending gate', '--', 'sleep 0.3'],
   { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
 const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
-clause('clause 1h: the ticker stops before the exit rename, so the LAST name a finished pane carries is its exit status',
+clause('clause 1h: the LAST name a finished pane carries is its exit status, not a leftover elapsed tick',
   renames.length > 1 && renames[renames.length - 1] === `pane rename w1:pS ending gate · ${exitLine(0)}`,
   `renames: ${JSON.stringify(renames)}`)
 

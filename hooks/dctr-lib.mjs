@@ -253,6 +253,19 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  *  republishes them, so a live run never blinks out; a run that dies stops writing and its row
  *  clears itself within the hour instead of sitting stale forever. An hour rather than the ten
  *  minutes the issue's probe used, because a single wave can outlast ten minutes between writes. */
+/**
+ * How many of `expected` results a pool never produced. The mutation gate's own guard against the
+ * defect it exists to catch, one level up: a pool that silently runs nothing leaves every slot
+ * undefined and the gate would otherwise print "all N repairs are pinned" having executed no suite
+ * at all. A red team demonstrated exactly that by substituting a pool that returned [] without
+ * invoking its callback, and got `exit=0` with zero suites run.
+ *
+ * Pure, so a clause and a mutation can pin it; the gate's wiring of it cannot be pinned by the gate
+ * itself, which is the honest limit of a harness that tests with the machinery it is testing.
+ */
+export const poolShortfall = (results, expected) =>
+  Math.max(0, expected - results.filter((r) => r !== undefined).length)
+
 export const TOKEN_TTL_MS = 3600000
 
 /** How often a running gate re-names its pane with elapsed time (user ruling, 2026-09-07: a long
@@ -291,7 +304,7 @@ export async function mapPool(items, limit, fn) {
   const worker = async () => {
     for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i], i)
   }
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(Number.isFinite(limit) ? limit : 1, items.length)) }, worker))
   return results
 }
 
@@ -393,10 +406,15 @@ export const codexTerminal = (status) => Boolean(status) && status !== 'running'
  * Each candidate is `{ seat, status, focused }`; the hook gathers those, this decides. A seat with
  * no `codexJob` was never handed to a watcher and is not a candidate at all: an ordinary seat's
  * pane is closed by its own SubagentStop and must never be swept by somebody else's placement.
+ *
+ * `focused === false`, never `focused !== true`. The caller cannot always answer: a `pane get` that
+ * FAILED leaves focus unknown, and unknown must not read as unfocused. The one pane that costs is
+ * the focused one, the pane the user is watching — which is the same trap the ordinary stop path
+ * fell into and documents at length. Only a definite "not focused" closes anything.
  * Pinned by clauses 1am, 1an and 3v in dctr-seat.selftest.mjs.
  */
 export const codexPanesToClose = (candidates) =>
-  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)
+  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)
 
 /**
  * The codex job a stopping seat started: the newest record for this workspace created at or after
