@@ -52,6 +52,9 @@ fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
+if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_GONE" ]; then
+  echo '{"error":{"code":"pane_not_found","message":"pane '"$3"' not found"},"id":"cli:pane:get"}' >&2; exit 1
+fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_EMPTY" ]; then
   echo '{"result":{}}'; exit 0
 fi
@@ -431,6 +434,16 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('a finished codex TAB herdr says is not there has its marker removed too, on the tab code',
     called(/^tab close w1:t8/m) && !stillSeatOne(), callLines(/^tab close/).join(' | '))
 
+  // The lifecycle a deleted branch leaked for a whole session: a finished codex TAB whose pane has
+  // gone. `pane get` answers pane_not_found, which IS an observation (it is not focused), so the tab
+  // is closed and its marker removed. staleSideSeats cannot rescue this one — it never judges a tab
+  // seat — so without the not-found branch the marker survives every later placement.
+  reset()
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_GET_GONE: 'w1:s1' })
+  check('a finished codex tab whose PANE has gone is still swept: pane_not_found is an observation, not a blind spot',
+    called(/^tab close w1:t8/m) && !stillSeatOne(), callLines(/^(pane get|tab close)/).join(' | '))
+
   reset(); followedSeat(doneJobRec); startSeat('Explore')
   check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
 
@@ -499,6 +512,12 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   // let the very first poll land AFTER the flip, and the clause then passed at any interval.
   const seen = Date.now() + 8000
   while (!lwOut.includes('codex output for task-latency') && Date.now() < seen) await new Promise((r) => setTimeout(r, 5))
+  const ready = lwOut.includes('codex output for task-latency')
+  // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
+  // watcher start AFTER the flip and exit on its own first poll, passing at any interval. And the
+  // poll emits its log BEFORE it reads the record, so the output alone does not prove the record was
+  // read as running — one full injected interval after readiness does.
+  if (ready) await new Promise((r) => setTimeout(r, TEST_POLL_MS * 2))
   const flipped = Date.now()
   fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
   const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)
@@ -510,8 +529,8 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   // ~2000ms if the injection is ignored. 500ms sits an order of magnitude above the first and a
   // factor of four below the second, which is the margin that survives 8-way parallel load.
   check('the injected poll interval is HONOURED: a job turning terminal right after a poll is noticed within one INJECTED interval, not one production interval',
-    lwCode === 0 && lwOut.includes('codex output for task-latency') && latency < 500,
-    `exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 2000ms`)
+    ready && lwCode === 0 && latency < 500,
+    `ready ${ready}, exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 2000ms`)
 
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs

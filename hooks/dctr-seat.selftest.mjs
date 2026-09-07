@@ -18,7 +18,7 @@ import {
   seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall,
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -452,6 +452,11 @@ clause('clause 1ao — elapsedLabel prints seconds under a minute and zero-padde
 clause('clause 1ap — elapsedLabel never prints a negative age, so a clock that moves backwards reads 0s',
   elapsedLabel('gate', -1) === 'gate · 0s elapsed' && elapsedLabel('gate', 0) === 'gate · 0s elapsed',
   elapsedLabel('gate', -1))
+
+clause('clause 1as — anchorCount counts occurrences, so the gate can require exactly one and not merely presence',
+  anchorCount('a b a', 'a') === 2 && anchorCount('a b a', 'b') === 1 && anchorCount('a b a', 'z') === 0 &&
+  anchorCount('aaa', 'aa') === 1,
+  `${anchorCount('a b a', 'a')}/${anchorCount('a b a', 'z')}`)
 
 clause('clause 1aq — poolShortfall counts the results a pool never produced, which is how the gate refuses to certify an empty run',
   poolShortfall([], 3) === 3 && poolShortfall([1, undefined, 3], 3) === 1 && poolShortfall([1, 2, 3], 3) === 0 &&

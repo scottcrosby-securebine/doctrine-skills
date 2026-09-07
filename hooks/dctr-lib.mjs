@@ -263,6 +263,14 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  * Pure, so a clause and a mutation can pin it; the gate's wiring of it cannot be pinned by the gate
  * itself, which is the honest limit of a harness that tests with the machinery it is testing.
  */
+/**
+ * How many times a mutation's anchor text occurs in its file. The gate requires exactly one: it
+ * tested only PRESENCE and then replaced the FIRST hit, so an anchor that came to appear twice would
+ * mutate one site, leave the other intact, and pass — a mutation that guards half of what it names
+ * reports the same "ok" as one that guards all of it.
+ */
+export const anchorCount = (text, from) => text.split(from).length - 1
+
 export const poolShortfall = (results, expected) =>
   Math.max(0, expected - results.filter((r) => r !== undefined).length)
 
@@ -282,8 +290,9 @@ export const elapsedLabel = (label, ms) => {
 }
 
 /** The codex watcher's two intervals: how often it drains the job's log, and how often it re-reads
- *  the job record to see whether the job has left running. Overridden by DCTR_PUMP_MS/DCTR_POLL_MS
- *  for the same reason as ELAPSED_MS. */
+ *  the job record to see whether the job has left running. POLL_MS alone is overridable, by
+ *  DCTR_POLL_MS, for the same reason as ELAPSED_MS. PUMP_MS is NOT: an override existed briefly,
+ *  nothing needed it, and no clause could show whether it was honoured. */
 export const PUMP_MS = 250
 export const POLL_MS = 2000
 

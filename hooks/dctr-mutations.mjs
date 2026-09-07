@@ -20,7 +20,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
@@ -207,6 +207,12 @@ const MUTATIONS = [
   { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
     from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
     to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'a pane_not_found lookup is an observation of unfocused', file: 'dctr-seat.mjs', clause: 'a finished codex tab whose PANE has gone is still swept',
+    from: '            if (isPaneNotFound(e)) focused = false',
+    to: '            if (false) focused = false' },
+  { name: 'the gate requires an anchor to occur exactly once', file: 'dctr-lib.mjs', clause: 'anchorCount counts occurrences',
+    from: 'export const anchorCount = (text, from) => text.split(from).length - 1',
+    to: 'export const anchorCount = (text, from) => (text.includes(from) ? 1 : 0)' },
   { name: 'the tab close reads the TAB not-found code', file: 'dctr-seat.mjs', clause: 'a finished codex TAB herdr says is not there has its marker removed too',
     from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)',
     to: '            const gone = isPaneNotFound(e)' },
@@ -349,9 +355,12 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
   for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(dir, f))
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
-  if (!before.includes(m.from)) {
+  const hits = anchorCount(before, m.from)
+  if (hits !== 1) {
     failures += 1
-    results[idx] = `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
+    results[idx] = hits === 0
+      ? `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
+      : `  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}; replace() takes the first and the rest go unguarded`
   } else {
     fs.writeFileSync(target, before.replace(m.from, m.to))
     if (!await anySuiteNotices(dir)) {

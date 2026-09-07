@@ -12,7 +12,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync, spawn } from 'node:child_process'
 import { gateRunCommand, exitLine, shq } from './dctr-lib.mjs'
 
 const script = path.join(import.meta.dirname, 'dctr-gate.mjs')
@@ -146,15 +146,26 @@ clause('clause 1f2: the tab path is NOT renamed at placement, keeping the name t
 // executes there and this clause would pass or fail for reasons having nothing to do with it.
 // `--run` is the mode that actually runs the check and ticks, on the pane and detached paths both.
 fs.writeFileSync(calls, '')
-execFileSync('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 1.15'],
-  { env: paneEnv({ DCTR_ELAPSED_MS: '50' }), encoding: 'utf8' })
+// Spawned and POLLED, not run for a fixed duration: the old form ran `sleep 1.15` and hoped enough
+// ticks accrued inside it, which is a duration wearing a condition's clothes and the one clause
+// shape that reddens without a defect under N-way load. This waits for the labels to appear and
+// stops as soon as they do, so a slow machine takes longer instead of failing.
+const tickProc = spawn('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 6'],
+  { env: paneEnv({ DCTR_ELAPSED_MS: '50' }), stdio: 'ignore' })
+const wantTick = (re) => { try { return re.test(fs.readFileSync(calls, 'utf8')) } catch { return false } }
+{
+  const until = Date.now() + 15000
+  while (Date.now() < until && !(wantTick(/^pane rename w1:pS ticking gate · 0s elapsed$/m) && wantTick(/^pane rename w1:pS ticking gate · 1s elapsed$/m))) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+  }
+  tickProc.kill('SIGKILL')
+}
 // It must be shown to READ A CLOCK, not to print a constant: `\d+s` matches "0s", so a ticker
 // passing a hardcoded 0 satisfied the old assertion exactly as a working one did. Over 1.15s at a
 // 50ms interval both a 0s and a 1s label must appear. ~23 ticks are expected where 2 distinct ones
 // are required, and that margin is the answer to running this under N-way parallel load.
 clause('clause 1g: while the check runs, the pane name carries elapsed time that INCREASES, on the injected interval',
-  /^pane rename w1:pS ticking gate · 0s elapsed$/m.test(fs.readFileSync(calls, 'utf8')) &&
-  /^pane rename w1:pS ticking gate · 1s elapsed$/m.test(fs.readFileSync(calls, 'utf8')),
+  wantTick(/^pane rename w1:pS ticking gate · 0s elapsed$/m) && wantTick(/^pane rename w1:pS ticking gate · 1s elapsed$/m),
   `rename calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename')))}`)
 
 // A focused pane is relabelled to its exit name on completion, and that must be the LAST name it
