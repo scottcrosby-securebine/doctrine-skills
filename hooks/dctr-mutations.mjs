@@ -23,8 +23,14 @@ import { fileURLToPath } from 'node:url'
 import { mapPool, poolShortfall, anchorCount, anchorVerdict } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+// Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
+// pins SESSION_END_WAIT_MS against the SessionEnd timeout declared there; without the copy that
+// clause threw ENOENT, the whole pure suite died on load, and eleven previously-pinned functions
+// reported unpinned in one run. A suite that reads a file outside this list is silently disabled
+// inside the gate, which is the loudest quiet failure this harness has.
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
-  'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs']
+  'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
+  'hooks.json']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -225,15 +231,21 @@ const MUTATIONS = [
   { name: 'a successful pane lookup carrying no pane becomes a close', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
     from: "      const act = lookupFailed ? 'unknown' : gone ? 'close' : stopAction(pane)",
     to: "      const act = lookupFailed ? 'unknown' : 'close'" },
-  { name: 'close-on-next reads a TAB seat\'s focus from its root pane again', file: 'dctr-seat.mjs', clause: 'a finished codex tab that is FOCUSED is spared',
-    from: '          if (s.tabId) {',
-    to: '          if (false) {' },
+  { name: 'close-on-next trusts the hoisted snapshot instead of re-asking', file: 'dctr-seat.mjs', clause: 'a finished codex tab that is FOCUSED is spared',
+    from: "            if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }",
+    to: '            if (false) continue' },
   { name: 'the gate launcher treats a pane that is GONE as unobservable', file: 'dctr-gate.mjs', clause: 'a pane the lookup says is GONE keeps no marker',
     from: "      catch (e) { if (isPaneNotFound(e)) gone = true }",
     to: '      catch { /* gone */ }' },
-  { name: 'the gate launcher does not put a marker back', file: 'dctr-gate.mjs', clause: 'a close that FAILED puts the marker back',
-    from: "      catch (e) { if (!isPaneNotFound(e)) keepMarker('the close failed') }",
-    to: '      catch { /* already gone */ }' },
+  { name: 'the gate launcher drops the record of a pane it could not observe', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
+    from: "        process.stderr.write(`${PREFIX}: focus of ${paneId} could not be observed; leaving it for SessionEnd\\n`)",
+    to: '        dropMarker()' },
+  { name: 'the gate launcher drops a FOCUSED pane\'s record', file: 'dctr-gate.mjs', clause: 'a FOCUSED pane is relabelled and keeps its record',
+    from: "        try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
+    to: "        dropMarker(); try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
+  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
+    from: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); process.exit(127) })",
+    to: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
   { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
     from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
     to: '    ? `script -q -F ${shq(tee)} `' },
@@ -307,8 +319,11 @@ const MUTATIONS = [
     from: '  const ticker = paneId\n',
     to: '  const ticker = null && paneId\n' },
   { name: 'a finished pane is relabelled with its exit status', file: 'dctr-gate.mjs', clause: 'the LAST name a finished pane carries is its exit status',
-    from: "      else if (act === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
-    to: "      if (false) try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
+    from: "      } else if (act === 'relabel') {",
+    to: '      } else if (false) {' },
+  { name: 'SESSION_END_WAIT_MS outgrows the hook timeout that kills it', file: 'dctr-state.mjs', clause: "SESSION_END_WAIT_MS fits inside the SessionEnd hook's own configured timeout",
+    from: 'export const SESSION_END_WAIT_MS = 8000',
+    to: 'export const SESSION_END_WAIT_MS = 30000' },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
     from: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
     to: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
@@ -370,6 +385,15 @@ for (const r of baselineResults) {
     console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
   }
+}
+// STOP HERE. Every mutation below compares against a suite that is already red, so all of them
+// report "reverted, and the suite stayed green" whether they are pinned or not. Running them anyway
+// cost four minutes and printed eleven confident, meaningless failures under one true line at the
+// top — which the operator then read from the bottom. A result nobody can act on is worse than no
+// result, because it looks like one.
+if (failures) {
+  console.log(`\nBASELINE RED — ${failures} suite(s) fail before any mutation. Nothing below would mean anything, so nothing below ran.`)
+  process.exit(1)
 }
 
 // Printed in INPUT order as results settle, never completion order: a run must read the same twice,

@@ -73,6 +73,16 @@ fi
 if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
+# The snapshot and the re-ask must be able to DISAGREE, or nothing can show that re-asking matters.
+# First call answers DCTR_TEST_TABS, every later call answers DCTR_TEST_TABS2: the user focusing a
+# tab between the hoisted read and the close, which is the window the hoist introduced.
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABS2" ]; then
+  if [ -f "$TMPDIR/tablist-seen" ]; then
+    echo '{"result":{"tabs":'"$DCTR_TEST_TABS2"'}}'; exit 0
+  fi
+  : > "$TMPDIR/tablist-seen"
+  echo '{"result":{"tabs":'"$DCTR_TEST_TABS"'}}'; exit 0
+fi
 if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_REMOVE_ON_RUN" ]; then
   rm -f "$DCTR_TEST_REMOVE_ON_RUN"
 fi
@@ -508,13 +518,34 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('a finished codex SIDE PANE that pane_not_found reports gone is swept, though the layout still lists it',
     called(/^pane close w1:s1/m) && !stillSeatOne(), callLines(/^(pane get|pane close)/).join(' | ') || '(no calls)')
 
+  // THE HOIST'S OWN WINDOW. The snapshot is taken once and candidate collection then makes a herdr
+  // round trip per pane seat; the user can focus a tab inside it, and the placement lock serializes
+  // placements, not attention. First `tab list` answers unfocused, every later one answers focused:
+  // the seat is a candidate on the snapshot and must still be spared by the re-ask before the close.
+  reset()
+  try { fs.rmSync(path.join(tmp, 'tablist-seen'), { force: true }) } catch { /* first run */ }
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', {
+    DCTR_TEST_TABS: '[{"tab_id":"w1:t8","focused":false}]',
+    DCTR_TEST_TABS2: '[{"tab_id":"w1:t8","focused":true}]' })
+  check('a tab focused BETWEEN the hoisted snapshot and the close is spared: the re-ask is what makes the snapshot safe',
+    !called(/^tab close w1:t8/m) && stillSeatOne(),
+    `${callLines(/^tab (list|close)/).join(' | ') || '(no tab calls)'}`)
+  check('and the fixture really did answer twice and differently, proved without the hook',
+    fs.existsSync(path.join(tmp, 'tablist-seen')) && callLines(/^tab list/).length >= 2,
+    `tab list calls: ${callLines(/^tab list/).length}`)
+
   // And a list call that failed closes nothing at all: unobservable is not unfocused, for a tab
   // exactly as for a pane.
   reset()
   fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
   startSeat('codex:codex-rescue', { DCTR_TEST_TABLIST_FAILS: '1' })
   check('and a finished codex tab whose LIST CALL FAILED is spared, marker intact',
-    !called(/^tab close w1:t8/m) && stillSeatOne(), callLines(/^tab close/).join(' | ') || '(no tab close)')
+    // `called(/^tab list/)` is what makes the two negatives mean something: without it, a run where
+    // the codex block never executed at all satisfies "did not close" and "marker survives" exactly
+    // as a correct spare does. A clause whose predicate is only absences must prove it was there.
+    called(/^tab list/m) && !called(/^tab close w1:t8/m) && stillSeatOne(),
+    `tab list attempted: ${called(/^tab list/m)}; ${callLines(/^tab (list|close)/).join(' | ') || '(no tab calls)'}`)
 
   reset(); followedSeat(doneJobRec); startSeat('Explore')
   check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
@@ -597,22 +628,27 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     while (!lwOut.includes(marker) && Date.now() < until) await new Promise((r) => setTimeout(r, 5))
     return lwOut.includes(marker)
   }
+  const OFF_BEAT_MS = 2100   // just past where a PRODUCTION poll would land, see below
   // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
   // watcher start AFTER the flip and exit on its own first poll, passing at any interval.
   //
-  // TWO MARKERS, not a timed wait. The poll emits its log BEFORE it reads the record, so one drain
-  // proves only that a poll STARTED. Waiting one injected interval after that assumed the watcher
-  // was scheduled during it, and a watcher descheduled between its log emit and its record read
-  // resumed after the flip, read `completed` on its FIRST poll, and finished inside the 500ms bound
-  // even at the production 2000ms interval — the clause passing while measuring nothing, which is
-  // the very shape this repair was written to remove.
+  // FLIP OFF THE PRODUCTION BEAT. An earlier repair claimed two log markers proved a record read had
+  // completed between them; they do not. `pump` runs on its OWN setInterval, independent of the poll
+  // (dctr-seat.mjs), so both drains can come from the pump with no record read anywhere between
+  // them — a red team produced a schedule passing at 249ms with the injected interval ignored.
   //
-  // Seeing marker B means drain(A) -> read record -> drain(B): a record read COMPLETED between the
-  // two, and at that moment the record still said running. That is the thing the clause needs.
+  // What the clause can actually prove is timing, so prove timing. A watcher on the PRODUCTION
+  // 2000ms interval polls at 2000, 4000, ...; flipping at ~2100ms after start puts the next such
+  // poll ~1900ms away, well outside the 500ms bound. A watcher honouring the injected 25ms interval
+  // notices within one interval wherever the flip lands. The bound is what discriminates, and the
+  // off-beat offset is what stops a production-interval poll landing on the flip by luck.
   const latencyLog = path.join(jobs, 'task-latency.log')
-  let ready = await drained('codex output for task-latency')
-  if (ready) { fs.appendFileSync(latencyLog, 'poll marker A\n'); ready = await drained('poll marker A') }
-  if (ready) { fs.appendFileSync(latencyLog, 'poll marker B\n'); ready = await drained('poll marker B') }
+  const lwStarted = Date.now()
+  const ready = await drained('codex output for task-latency')
+  if (ready) {
+    const untilOffBeat = lwStarted + OFF_BEAT_MS
+    while (Date.now() < untilOffBeat) await new Promise((r) => setTimeout(r, 10))
+  }
   const flipped = Date.now()
   fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
   const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)

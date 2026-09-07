@@ -220,6 +220,10 @@ try {
             if (!tabListFailed) {
               const mine = tabs.find((t) => t.tab_id === s.tabId)
               if (!mine) focused = false
+              // NOT pinned by a mutation, and deliberately kept. Since the close loop re-asks before
+              // destroying anything, forcing this to `false` only makes a tab a candidate that the
+              // re-ask then spares — defence in depth, so no clause can redden. The failure it
+              // prevents is a wasted round trip, not a wrong close. Missing fixture, not dead code.
               else if (typeof mine.focused === 'boolean') focused = mine.focused
             }
           } else {
@@ -237,6 +241,21 @@ try {
         })
         const closed = new Set()
         for (const s of codexPanesToClose(candidates)) {
+          // RE-ASK IMMEDIATELY BEFORE DESTROYING. The snapshot above is taken once, and candidate
+          // collection then makes a herdr round trip for every PANE seat after it. The user can focus
+          // a tab inside that window, and the placement lock serializes placements, not the user's
+          // attention. Hoisting the read fixed a wrong question and introduced a stale answer.
+          if (s.tabId) {
+            let stillUnfocused = false
+            try {
+              const now = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result?.tabs
+              if (Array.isArray(now)) {
+                const t = now.find((x) => x.tab_id === s.tabId)
+                stillUnfocused = !t || t.focused === false   // absent is an observed absence; unknown focus is not
+              }
+            } catch (e) { stillUnfocused = isTabNotFound(e) }
+            if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }
+          }
           try { herdr(s.tabId ? ['tab', 'close', s.tabId] : ['pane', 'close', s.paneId]) }
           catch (e) {
             // A not-found code is an ANSWER: that pane or tab is already gone, so its marker should

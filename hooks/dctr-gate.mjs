@@ -55,7 +55,10 @@ if (argv[0] === '--run') {
   const child = command.length === 1
     ? spawn('bash', ['-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
-  child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })
+  // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
+  // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
+  // completion path above is written to avoid, one screen up in the same function.
+  child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); process.exit(127) })
   child.stdout.on('data', both)
   child.stderr.on('data', both)
   // The progress name. Only on the pane path: `paneId` is empty when this same mode serves the
@@ -78,23 +81,15 @@ if (argv[0] === '--run') {
     if (!atLineStart) both('\n')
     both(`${exitLine(code)}\n`)
     fs.closeSync(file)
-    // The marker goes before the pane: closing the pane kills the shell this process runs in, so
-    // nothing after that call is guaranteed to run (the first live run left a marker behind). Its
-    // CONTENT is kept in hand, because the ordering that is right for the success path leaves the
-    // FAILURE path holding a live pane whose record is already gone, and SessionEnd finds panes by
-    // record. A close that failed is not a pane that closed.
-    let markerBody = null
-    if (marker) {
-      try { markerBody = fs.readFileSync(marker, 'utf8') } catch { /* nothing to put back */ }
-      try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
-    }
-    const keepMarker = (why) => {
-      if (!marker || markerBody === null) return
-      try {
-        fs.writeFileSync(marker, markerBody)
-        process.stderr.write(`${PREFIX}: ${why}; marker kept so SessionEnd can reach ${paneId}\n`)
-      } catch { /* the pane is orphaned and there is nothing left to try */ }
-    }
+    // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`
+    // kills the shell this process runs in; `pane get` and `pane rename` do not, and an earlier
+    // revision never checked which. Removing the record up front and restoring it on failure was
+    // remove-then-write-BY-NAME across a herdr round trip — the hazard dctr-seat.mjs declines in
+    // writing, because nextIndex reissues a freed name and the restore then clobbers a live gate's
+    // record. It also wrote with writeFileSync, the only non-atomic marker write in shipping code,
+    // against a file whose own module says a truncated marker stands down every later seat.
+    // Removing the machinery removes all three defects: there is no window and nothing to restore.
+    const dropMarker = () => { if (marker) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ } }
     if (paneId) {
       // Same rule as a seat's stop, and the same THREE answers. A lookup that FAILED is not a pane
       // that is unfocused: this bare catch fed `stopAction` an undefined it could not distinguish
@@ -108,13 +103,24 @@ if (argv[0] === '--run') {
       // clause stayed green, which for a guard whose two paths are behaviourally identical is the
       // dead-branch case and not the missing-fixture one.
       const act = gone ? 'gone' : stopAction(pane)
-      // `gone` keeps NO marker: the removal above was the right answer for a pane that is not there.
-      if (act === 'unknown') keepMarker('focus could not be observed')
-      else if (act === 'gone') { /* already closed by someone; nothing to do and nothing to keep */ }
-      else if (act === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
-      else try { herdr(['pane', 'close', paneId]) }
-      catch (e) { if (!isPaneNotFound(e)) keepMarker('the close failed') }
-    }
+      if (act === 'unknown') {
+        // Keep the record. SessionEnd is the only thing that can still reach this pane.
+        process.stderr.write(`${PREFIX}: focus of ${paneId} could not be observed; leaving it for SessionEnd\n`)
+      } else if (act === 'gone') {
+        dropMarker()   // nothing to close, and nothing left for a record to point at
+      } else if (act === 'relabel') {
+        // The pane LIVES and the user is watching it, so its record must live too: dropping it here
+        // left a focused gate pane that SessionEnd could no longer find.
+        try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
+      } else {
+        // The record goes FIRST here and only here, because this call kills the shell and nothing
+        // after it is guaranteed to run (the first live run left a marker behind). A close that then
+        // fails for any reason other than not-found has cost us the record, which is the price of
+        // the one ordering the shell forces; every other branch above avoids paying it.
+        dropMarker()
+        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }
+      }
+    } else dropMarker()
     process.exit(code ?? 1)
   })
 } else {
@@ -223,7 +229,19 @@ if (argv[0] === '--run') {
         if (paneId) try { herdr(tabId ? ['tab', 'close', tabId] : ['pane', 'close', paneId]) }
         catch (ce) { orphaned = !(tabId ? isTabNotFound(ce) : isPaneNotFound(ce)) }
         if (!orphaned) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
-        else hookLog(sessionId, `gate "${label}": rollback could not close ${tabId || paneId}; keeping its marker for SessionEnd`)
+        else {
+          // PUBLISH a real record, do not just keep whatever is there. If writeMarker was what
+          // failed, the file is still reserveMarker's `{}` — it carries no paneId and no tabId, so
+          // SessionEnd receives a marker it cannot act on while the log line claims otherwise.
+          // NOT pinned, and no fixture currently reaches it: the placement writeMarker above runs
+          // BEFORE `pane run`, so by the time a rollback happens the record normally already carries
+          // its ids. This branch is for the narrow case where THAT write is what failed, leaving
+          // reserveMarker's `{}` — which SessionEnd cannot act on. Reaching it needs the seats
+          // directory to become unwritable between reserve and write. Missing fixture, not dead code.
+          try { writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label }) }
+          catch (we) { hookLog(sessionId, `gate "${label}": could not publish a record for the pane it could not close (${String(we.message).split('\n')[0]})`) }
+          hookLog(sessionId, `gate "${label}": rollback could not close ${tabId || paneId}; its record is published for SessionEnd`)
+        }
         throw e
       }
       return { name, paneId, tabId }

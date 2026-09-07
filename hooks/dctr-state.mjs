@@ -310,13 +310,18 @@ export function breakStaleLock(lock, condemnedPid = null) {
  *  a lock or poll a file, so the wait blocks the thread. */
 export const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
-/** How long a caller waits for the placement lock. A placement gives up quickly because another
- *  wave is behind it; SessionEnd waits far longer because it is the LAST chance — nothing races it
- *  for long, and a sweep that gives up leaves a live pane with nobody left to reclaim it. The claim
- *  that losing close-on-next is "bounded by SessionEnd" is only true if SessionEnd actually gets
- *  the lock, and at one shared 5s deadline it did not have to. */
+/** How long a caller waits for the placement lock. A placement gives up quickly because another wave
+ *  is behind it; SessionEnd waits longer because it is the LAST chance, and a sweep that gives up
+ *  leaves a live pane with nobody left to reclaim it.
+ *
+ *  SESSION_END_WAIT_MS MUST STAY UNDER THE SessionEnd HOOK'S OWN TIMEOUT IN hooks.json. It was set
+ *  to 30000 against a hook Claude Code SIGKILLs at 10s, which is strictly worse than the 5s it
+ *  replaced: the 5s deadline threw, reached its caller's catch and logged, where the 30s one is
+ *  killed mid-wait and logs nothing. A deadline past the lifetime of the process holding it is not
+ *  a longer wait, it is a silent death. `dctr-seat.selftest.mjs` reads hooks.json and pins the
+ *  relationship, so drift on either side fails rather than going quiet. */
 const PLACEMENT_WAIT_MS = 5000
-export const SESSION_END_WAIT_MS = 30000
+export const SESSION_END_WAIT_MS = 8000
 
 export function withPlacementLock(sessionId, fn, waitMs = PLACEMENT_WAIT_MS) {
   const lock = path.join(stateDir(sessionId), 'placement.lock')

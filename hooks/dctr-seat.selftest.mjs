@@ -11,6 +11,8 @@
 // the property its clause depends on, without calling the function under test — the clause that
 // catches a check which silently measures nothing.
 
+import fs from 'node:fs'
+import { SESSION_END_WAIT_MS } from './dctr-state.mjs'
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
@@ -96,6 +98,23 @@ clause('clause 1h — a focused tab is relabelled and an unfocused one is closed
 // The close-by-id behaviour is pinned where the distinction exists, in dctr-seat.teardown.selftest.mjs.
 const FOREIGN_LIST = [{ tab_id: 'w4X:t2', focused: false }, { tab_id: 'w4X:t3', focused: true }]
 const SEAT_TAB_ID = 'w4Z:t9'
+// The one round-2 finding whose repair no fixture in the diff could drive, which is why it was the
+// one that was wrong. A constant expressing "wait longer" is meaningless past the lifetime of the
+// process doing the waiting, and nothing connected the two numbers until this clause.
+{
+  const hooksJson = JSON.parse(fs.readFileSync(new URL('./hooks.json', import.meta.url), 'utf8'))
+  const sessionEnd = (hooksJson.hooks?.SessionEnd || []).flatMap((m) => m.hooks || [])
+  const timeoutMs = Math.min(...sessionEnd.map((h) => (h.timeout ?? 60) * 1000))
+  clause('clause 1ay — SESSION_END_WAIT_MS fits inside the SessionEnd hook\'s own configured timeout',
+    Number.isFinite(timeoutMs) && SESSION_END_WAIT_MS < timeoutMs,
+    `wait ${SESSION_END_WAIT_MS}ms vs hooks.json timeout ${timeoutMs}ms — a deadline past the process's lifetime is a silent death, not a longer wait`)
+  clause('clause 1az — and it is still longer than a placement waits, which is the point of having two',
+    SESSION_END_WAIT_MS > 5000, `${SESSION_END_WAIT_MS}`)
+  clause('clause 3t — hooks.json really declares a SessionEnd timeout, so the clause above is reading something',
+    sessionEnd.length > 0 && Number.isFinite(timeoutMs) && timeoutMs > 0,
+    `parsed ${sessionEnd.length} SessionEnd hook(s), timeout ${timeoutMs}ms`)
+}
+
 clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
   anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
   `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
