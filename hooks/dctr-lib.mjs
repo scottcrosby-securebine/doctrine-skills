@@ -482,7 +482,9 @@ export const GATE_ROLE = 'gate'
  *  the only tab read this codebase has. Deriving the workspace from the tab id's prefix was rejected
  *  on evidence — dctr-seat.selftest.mjs runs workspace `w4W` with tab ids `w4Z:t9`, so the prefix is
  *  not the workspace id even here, and `workspaceOf` in dctr-pane.mjs only ever compares two ids
- *  with it. Both are empty for a side-column gate, which has no tab and takes the pane path. */
+ *  with it. For a side-column gate `tabId` is empty and the WORKSPACE IS NOT: the launcher passes
+ *  HERDR_WORKSPACE_ID on both paths, and only the empty tab id is what sends the completion down the
+ *  pane branch. */
 export const gateRunCommand = (script, out, marker, paneId, tabId, workspace, label, command) =>
   `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(tabId || '')} ${shq(workspace || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
 

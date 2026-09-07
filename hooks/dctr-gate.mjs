@@ -42,14 +42,22 @@ const self = path.resolve(process.argv[1])
 const argv = process.argv.slice(2)
 const usage = () => {
   console.error('usage: node dctr-gate.mjs <label> <out-file> -- <command...>')
+  console.error("   or: node dctr-gate.mjs --run <out> <marker> <pane-id|''> <tab-id|''> <workspace|''> <label> -- <command...>")
   process.exit(1)
 }
 
 if (argv[0] === '--run') {
   // Inside the pane, or detached. Run the check, tee, mark the exit, tidy the pane.
   const [, out, marker, paneId, tabId, workspace, label] = argv
+  // THE SEPARATOR'S POSITION IS THE CONTRACT, not merely its presence. These arguments are read by
+  // position, so a caller that omits one slides every later value left: omit the workspace and
+  // `workspace` becomes the label while `label` becomes `--`, which the old guard accepted because
+  // `--` is truthy. The launcher then queried the wrong workspace and, on a successful list that did
+  // not carry this tab, closed the tab by id. Requiring the separator at exactly index 7 and a
+  // non-empty command makes the whole class of slid arguments impossible rather than relying on
+  // every caller to remember its placeholders. Same shape as the outer form's guard below.
   const dash = argv.indexOf('--')
-  if (dash < 0 || !out || !label) usage()
+  if (dash !== 7 || !out || !label || argv.length < 9) usage()
   const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
