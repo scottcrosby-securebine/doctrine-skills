@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { readMeta } from './dctr-state.mjs'
+import { readMeta, sleepMs } from './dctr-state.mjs'
 
 const hook = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dctr-seat.mjs')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-teardown-'))
@@ -51,6 +51,9 @@ if [ "$1 $2" = "tab close" ] && [ "$3" = "$DCTR_TEST_CLOSE_GONE" ]; then
 fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
+fi
+if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FOCUSED" ]; then
+  echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0
 fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
@@ -179,6 +182,20 @@ console.log('clause 1 — a lookup that FAILED must not become a close')
   run({ hook_event_name: 'SubagentStop', agent_id: 'agent-1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_GET_FAILS: 'w1:s1' })
   check('a pane whose lookup failed is NOT closed', !called(/pane close w1:s1/), 'closed a pane it could not see')
   check('and its marker is kept, so SessionEnd can try again', fs.existsSync(path.join(seatsDir, 'dctr-explore-1.json')))
+}
+
+console.log('clause 1: a focused side seat is relabelled under its own title, not closed')
+{
+  // The pane the user is watching keeps its status-line title with a done suffix. The stop path once
+  // renamed it to the seat name instead, so the title the user had been reading was replaced by
+  // `dctr-explore-1 · done` at the moment the seat finished.
+  reset()
+  fs.writeFileSync(path.join(seatsDir, 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', agent_id: 'agent-1', role: 'Explore', n: 1, tabId: null, paneId: 'w1:s1', file: '/t/x.jsonl', label: 'explore · Sweep the hooks' }))
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_GET_FOCUSED: 'w1:s1' })
+  check('a focused side pane is renamed to its label plus done', called(/^pane rename w1:s1 explore · Sweep the hooks · done$/m), callLines(/^pane rename/).join(' | '))
+  check('and is not closed', !called(/^pane close w1:s1/m), callLines(/^pane close/).join(' | '))
+  const focused = execFileSync('bash', ['-c', `${bin}/herdr pane get w1:s1`], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_GET_FOCUSED: 'w1:s1' } })
+  check('the focused fixture really answers focused, proved without the hook', /"focused":true/.test(focused), focused)
 }
 
 console.log('clause 1 — a finishing seat must not delete a replacement that reused its name')
@@ -321,8 +338,8 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('a general-purpose seat in the same session still closes', called(/^pane close w1:s1/m) && !called(/--codex-tail/))
 
   // The watcher on a job that is still running: it stays up and leaves the label alone until the
-  // record changes, then shows the log's last bytes, relabels and exits. The record is replaced by
-  // rename so the watcher never reads a half-written file, which is how the plugin writes it too.
+  // record changes, then shows the log's last bytes, relabels and exits. The test replaces the record
+  // by temp-write and rename so the watcher never reads a half-written file.
   reset()
   const live = spawn('node', [hook, '--codex-tail', runningJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
   let liveOut = ''
@@ -338,9 +355,67 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const liveCode = await liveExit
   clearTimeout(bound)
   check('and exits once the record leaves running', liveCode === 0, `exit ${liveCode}: ${liveOut}`)
-  check('having shown the log written after it started', liveOut.includes('last line of task-run'), liveOut)
+  check('having shown the log written while it waited', liveOut.includes('last line of task-run'), liveOut)
   check('and relabelled the pane with the final status', called(/^pane rename w1:s1 codex-codex-rescue · Red team the spec · completed$/m), callLines(/^pane rename/).join(' | '))
   job('task-run', now, WS, 'running')
+
+  // The plugin writes the record `queued` first and its worker rewrites it `running`; a watcher that
+  // reads any status but running as the end exits on the first read with `· queued`.
+  reset()
+  const queuedJob = job('task-queued', now, WS, 'queued')
+  const queuedAtStart = R(queuedJob).status
+  const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
+  const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
+  await new Promise((r) => setTimeout(r, 1000))
+  rewrite('running')
+  await new Promise((r) => setTimeout(r, 2500))
+  check('the watcher outlives a record that was queued before it ran', q.exitCode === null, `exit ${q.exitCode}`)
+  rewrite('completed')
+  const qBound = setTimeout(() => q.kill('SIGKILL'), 8000)
+  const qCode = await qExit
+  clearTimeout(qBound)
+  check('and exits once it completes', qCode === 0, `exit ${qCode}`)
+  const qRenames = callLines(/^pane rename w1:s1 /)
+  check('with exactly one rename, to completed', qRenames.length === 1 && qRenames[0] === `pane rename w1:s1 ${LABEL} · completed`, qRenames.join(' | '))
+
+  // The bytes the job writes between the watcher's last periodic read of the log and its read of the
+  // record would be lost without one more read of the log after the record. The interval read runs
+  // every quarter second, so no ordinary fixture can put bytes into that window: the record is served
+  // through a FIFO, whose open blocks the watcher inside its record read, and the log is appended
+  // while it is held there. The watcher is single-threaded, so nothing else reads the log first.
+  reset()
+  const fifo = path.join(jobs, 'task-fifo.json'); execFileSync('mkfifo', [fifo])
+  const fifoLog = path.join(jobs, 'task-fifo.log'); fs.writeFileSync(fifoLog, 'codex output for task-fifo\n')
+  // A non-blocking writer open succeeds only while a reader holds the FIFO open. It also succeeds
+  // against the reader's descriptor from the previous read, before it closes, and a record written
+  // there is lost with the next read waiting on a FIFO with no writer; so each serve first waits for
+  // ENXIO, the reader having closed, and then for the next reader. Both waits are bounded, since a
+  // watcher that exits early leaves no reader and a blocking open would then hold this suite forever.
+  const openWriter = () => { try { return fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK) } catch (e) { if (e.code === 'ENXIO') return null; throw e } }
+  const serve = (status, beforeWrite) => {
+    const until = Date.now() + 8000
+    for (let fd = openWriter(); fd !== null && Date.now() < until; fd = openWriter()) { fs.closeSync(fd); sleepMs(5) }
+    let fd = null
+    while (fd === null && Date.now() < until) { fd = openWriter(); if (fd === null) sleepMs(5) }
+    if (fd === null) return
+    if (beforeWrite) beforeWrite()
+    fs.writeSync(fd, JSON.stringify({ id: 'task-fifo', workspaceRoot: WS, createdAt: new Date(now).toISOString(), status, pid: null, logFile: fifoLog }))
+    fs.closeSync(fd)
+  }
+  const fw = spawn('node', [hook, '--codex-tail', fifo, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  let fwOut = ''
+  fw.stdout.on('data', (d) => { fwOut += d })
+  const fwExit = new Promise((resolve) => fw.on('exit', (code) => resolve(code)))
+  serve('running')   // the read that starts the watcher
+  serve('running')   // its first poll
+  let appendedWhileHeld = false
+  serve('completed', () => { fs.appendFileSync(fifoLog, 'last line of task-fifo\n'); appendedWhileHeld = true })
+  const fwBound = setTimeout(() => fw.kill('SIGKILL'), 8000)
+  const fwCode = await fwExit
+  clearTimeout(fwBound)
+  check('the watcher exits after the record served through the FIFO leaves running', fwCode === 0, `exit ${fwCode}: ${fwOut}`)
+  check('having shown the log written after it started', fwOut.includes('last line of task-fifo'), fwOut)
 
   // The watcher itself, against a job that has already left `running`: it prints the log, renames
   // the pane with the status and exits, leaving the pane's shell where the output is.
@@ -360,6 +435,8 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('the old job really is older than the window and the other job really is another workspace, though newer',
     Date.parse(R(oldJob).createdAt) < now - 60000 && R(otherJob).workspaceRoot !== WS && Date.parse(R(otherJob).createdAt) > Date.parse(R(runningJob).createdAt))
   check('the done job really is not running', R(doneJob).status !== 'running')
+  check('the FIFO fixture really is a FIFO, and its last line really was appended while the watcher was held in its record read', fs.statSync(fifo).isFIFO() && appendedWhileHeld && fs.readFileSync(fifoLog, 'utf8').endsWith('last line of task-fifo\n'))
+  check('the queued fixture really read queued before its watcher started, and is completed now', queuedAtStart === 'queued' && R(queuedJob).status === 'completed', `${queuedAtStart} / ${R(queuedJob).status}`)
   check('the foreign record really claims this workspace, is newer than the running job, and sits in a directory not named for it',
     R(foreignJob).workspaceRoot === WS && Date.parse(R(foreignJob).createdAt) > Date.parse(R(runningJob).createdAt) && !path.basename(path.dirname(foreignJobs)).startsWith('doctrine-skills-'))
   const metaFixture = JSON.parse(fs.readFileSync(path.join(tmp, 'proj', 'sess', 'subagents', 'agent-a7.meta.json'), 'utf8'))

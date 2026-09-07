@@ -335,7 +335,7 @@ clause('clause 1ac — a view request carries exactly the four claims, each to i
 
 // F1 (field audit 2026-09-07): a gate pane started in the herdr server's cwd, so a relative check
 // path ran somewhere else while the detached path ran it here. Both creation calls carry the cwd
-// they are handed; a caller that hands none gets the old call, which is what the pane launcher does.
+// they are handed; a caller that hands none gets the old call.
 const CWD = '/home/u/proj'
 const cwdOf = (args) => args[args.indexOf('--cwd') + 1]
 clause('clause 1ae: tab create and both split shapes carry the cwd they are handed',

@@ -35,7 +35,7 @@ import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPa
 //
 //   node dctr-seat.mjs --codex-tail <job-record.json> <pane-id> <label>
 //
-// Follows the job's log and polls its record; when the status leaves `running` it renames the pane
+// Follows the job's log and polls its record; when the status leaves `queued` or `running` it renames the pane
 // `<label> · <status>` and exits, leaving the output on screen (Scott's ruling, 2026-09-07:
 // relabel and stay). The log is followed here rather than by tail(1) so the last bytes are on
 // screen before the exit, and a job already finished still shows its log. Runs before the payload
@@ -65,7 +65,7 @@ if (process.argv[2] === '--codex-tail') {
   const poll = () => {
     pump()
     const cur = readJob()
-    if (!cur || cur.status === 'running') return
+    if (!cur || cur.status === 'running' || cur.status === 'queued') return
     pump()
     try { herdr(['pane', 'rename', paneId, `${label} · ${cur.status}`]) } catch { /* label only */ }
     console.log(`\x1b[2m── codex job ${cur.status}\x1b[0m`)
@@ -295,11 +295,11 @@ try {
       let notBefore = 0
       try { notBefore = fs.statSync(path.join(seatsDir(sessionId), `${seat.agent}.json`)).mtimeMs - 60000 } catch { /* the epoch, then */ }
       const deadline = Date.now() + 5000
-      let job = codexJobMatch(codexJobRecords(cwd), cwd, notBefore)
-      while (!job && Date.now() < deadline) {
+      let job
+      do {
         sleepMs(500)
         job = codexJobMatch(codexJobRecords(cwd), cwd, notBefore)
-      }
+      } while (!job && Date.now() < deadline)
       if (job) {
         const label = seat.label || seat.agent
         // The renderer still owns the pane's terminal; the watcher line is typed into a shell.
@@ -337,7 +337,7 @@ try {
         // Keep the record rather than act blind. SessionEnd will try again, which is the whole
         // reason a marker survives a close it could not make.
         closeFailed = `could not look up ${seat.paneId} (${lookupFailed})`
-      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }
+      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
       else try { herdr(['pane', 'close', seat.paneId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     }
 
