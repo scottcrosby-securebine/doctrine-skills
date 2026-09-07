@@ -255,6 +255,47 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  *  minutes the issue's probe used, because a single wave can outlast ten minutes between writes. */
 export const TOKEN_TTL_MS = 3600000
 
+/** How often a running gate re-names its pane with elapsed time (user ruling, 2026-09-07: a long
+ *  gate must show where it is). Overridden by DCTR_ELAPSED_MS so a fixture asserts a condition
+ *  instead of sleeping on the production interval. */
+export const ELAPSED_MS = 10000
+
+/** A running gate's pane name: the launcher's label plus elapsed time. Elapsed counts UP rather
+ *  than down because the launcher is generic and cannot know a check's total without imposing an
+ *  output format on every check it runs. */
+export const elapsedLabel = (label, ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return `${label} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`} elapsed`
+}
+
+/** The codex watcher's two intervals: how often it drains the job's log, and how often it re-reads
+ *  the job record to see whether the job has left running. Overridden by DCTR_PUMP_MS/DCTR_POLL_MS
+ *  for the same reason as ELAPSED_MS. */
+export const PUMP_MS = 250
+export const POLL_MS = 2000
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight, results in INPUT order.
+ *
+ * Written for the mutation gate, whose mutations each work on their own copy of the tree and so were
+ * always independent — they were merely run one at a time, for 17 minutes. Order is preserved
+ * because a caller lines results up against the input by index; completion order would silently
+ * mis-attribute a mutation's verdict to its neighbour, which is worse than being slow.
+ *
+ * `next++` is the whole synchronisation: JavaScript is single-threaded between awaits, so no two
+ * workers can read the same index. Pinned by clauses 1aj, 1ak, 1al and 3u in dctr-seat.selftest.mjs.
+ */
+export async function mapPool(items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i], i)
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+  return results
+}
+
+
 /**
  * The report-metadata call that publishes doctrine's round and gate counters as sidebar tokens
  * (issue #19). Invoked by the orchestrator at step 5's per-round record write via dctr-token.mjs,
@@ -335,6 +376,27 @@ export const metaPath = (transcriptPath) => (transcriptPath ? transcriptPath.rep
  *  wrapper returns, about a minute in, while the codex job it started runs on for as long as an
  *  hour; the seat's pane follows the job rather than the wrapper. */
 export const CODEX_ROLE = 'codex:codex-rescue'
+
+/**
+ * Is a codex job's status terminal? A record that cannot be read is NOT terminal, deliberately:
+ * the watcher in dctr-seat.mjs --codex-tail treats an unreadable record as "keep waiting", and a
+ * close-on-next that read a failed read as "finished" would destroy the one pane showing what the
+ * job was doing, at the moment it became hardest to find out.
+ */
+export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'
+
+/**
+ * Which finished codex panes to close when the NEXT codex seat is placed (Scott's ruling,
+ * 2026-09-07: a finished codex pane stays until the next codex seat is placed, then closes; a
+ * focused pane still stays — the same relabel-vs-close courtesy every other seat gets).
+ *
+ * Each candidate is `{ seat, status, focused }`; the hook gathers those, this decides. A seat with
+ * no `codexJob` was never handed to a watcher and is not a candidate at all: an ordinary seat's
+ * pane is closed by its own SubagentStop and must never be swept by somebody else's placement.
+ * Pinned by clauses 1am, 1an and 3v in dctr-seat.selftest.mjs.
+ */
+export const codexPanesToClose = (candidates) =>
+  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)
 
 /**
  * The codex job a stopping seat started: the newest record for this workspace created at or after

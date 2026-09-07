@@ -17,14 +17,20 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { mapPool } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs']
-/** Cheapest first: the pure suite answers in milliseconds, and `some` stops at the first that notices. */
-const SUITES = ['dctr-seat.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.selftest.mjs']
+/** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
+ *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
+ *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
+ *  teardown, gate, was commented "cheapest first", and was not: every mutation only the gate suite
+ *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim. */
+const SUITES = ['dctr-seat.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -201,19 +207,52 @@ const MUTATIONS = [
   { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
     from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
     to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
+    from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
+    to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
+  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'a FINISHED codex pane someone is looking at still stays',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)',
+    to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status)).map((c) => c.seat)' },
+  { name: 'close-on-next only considers seats following a codex job', file: 'dctr-lib.mjs', clause: 'close-on-next closes exactly the terminal, unfocused, codex-job panes',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)',
+    to: '  candidates.filter((c) => codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)' },
+  { name: 'only a CODEX placement sweeps finished codex panes', file: 'dctr-seat.mjs', clause: 'an ordinary seat placement closes nothing',
+    from: '      if (payload.agent_type === CODEX_ROLE) {',
+    to: '      if (true) {' },
+  { name: 'the stop path records which job the pane follows', file: 'dctr-seat.mjs', clause: 'the marker records WHICH job the pane follows',
+    from: "        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat, codexJob: job.file }) }",
+    to: "        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat }) }" },
+  { name: 'the gate names the pane it split', file: 'dctr-gate.mjs', clause: 'the pane path NAMES the pane it split',
+    from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate \"${label}\": rename of ${paneId} failed (${String(e.message).split('\\n')[0]})`) }\n",
+    to: '' },
+  { name: 'a running gate re-names its pane with elapsed time', file: 'dctr-gate.mjs', clause: 'the pane name carries elapsed time',
+    from: '  const ticker = paneId\n',
+    to: '  const ticker = null && paneId\n' },
+  { name: 'a finished pane is relabelled with its exit status', file: 'dctr-gate.mjs', clause: 'the LAST name a finished pane carries is its exit status',
+    from: "      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
+    to: "      if (false) try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
     from: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
     to: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
-/** A mutation is caught if ANY suite notices it. Running both is what lets one harness cover the
- *  launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
-const runSuite = (dir, suite) => {
+const execFileAsync = promisify(execFile)
+
+/** How many mutations run at once. Each works on its own copy of the tree and touches nothing
+ *  shared, so they were always independent; they were merely run one at a time, for 17 minutes.
+ *  Not `availableParallelism()`: the suites make real timing assertions (a watcher that must still
+ *  be alive after N polls), and a box loaded to its core count is where those go flaky. Eight is
+ *  well inside the headroom on the 32-core host this was measured on; DCTR_JOBS overrides it. */
+const JOBS = Math.max(1, Number(process.env.DCTR_JOBS) || Math.min(8, os.availableParallelism?.() ?? 4))
+
+/** A mutation is caught if ANY suite notices it. Running all of them is what lets one harness cover
+ *  the launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
+const runSuite = async (dir, suite) => {
   try {
-    const out = execFileSync('node', [path.join(dir, suite)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' } })
-    return { code: 0, out: String(out || '') }
-  } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+    const { stdout } = await execFileAsync('node', [path.join(dir, suite)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' } })
+    return { code: 0, out: String(stdout || '') }
+  } catch (e) { return { code: e.code ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
 }
 
 /** A mutation is caught when a CLAUSE goes red, which is not the same as the suite exiting non-zero.
@@ -221,43 +260,53 @@ const runSuite = (dir, suite) => {
  *  noticed" certifies a pin the suite does not have — the same defect this harness exists to catch,
  *  one level up. Replacing a mutation's replacement text with `deliberately invalid javascript @@@`
  *  used to yield `all 15 repairs are pinned`. So require the suite to print a FAIL line: an
- *  import-time SyntaxError prints none, and a real clause failure always does.
- *
- *  Running both suites is what lets one harness cover the launcher and the seat hook's teardown
- *  without deciding in advance which suite owns which line. */
+ *  import-time SyntaxError prints none, and a real clause failure always does. */
 const noticed = (r) => r.code !== 0 && /^ *FAIL /m.test(r.out)
-const anySuiteNotices = (dir) => SUITES.some((s) => noticed(runSuite(dir, s)))
+/** Sequential inside one mutation, so the cheapest suite still short-circuits the expensive ones.
+ *  The parallelism is ACROSS mutations, where there is nothing to short-circuit. */
+const anySuiteNotices = async (dir) => {
+  for (const s of SUITES) if (noticed(await runSuite(dir, s))) return true
+  return false
+}
 
 let failures = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
-for (const suite of SUITES) {
-  if (runSuite(baseline, suite).code !== 0) {
-    console.log(`  FAIL baseline ${suite} — every suite must pass before any mutation means anything`)
+for (const r of await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))) {
+  if (r.res.code !== 0) {
+    console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
   }
 }
 
-for (const m of MUTATIONS) {
-  const dir = path.join(work, m.name.replace(/[^a-z]+/gi, '-'))
+// Printed in INPUT order as results settle, never completion order: a run must read the same twice,
+// and a reader lining a FAIL up against the mutation list must not have to sort it first. A slow
+// early mutation holds back the lines behind it, which is honest — it is what is actually happening.
+const results = new Array(MUTATIONS.length)
+let cursor = 0
+const drain = () => { while (cursor < results.length && results[cursor] !== undefined) console.log(results[cursor++]) }
+
+await mapPool(MUTATIONS, JOBS, async (m, idx) => {
+  const dir = path.join(work, String(idx).padStart(3, '0') + '-' + m.name.replace(/[^a-z]+/gi, '-'))
   fs.mkdirSync(dir)
   for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(dir, f))
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
   if (!before.includes(m.from)) {
-    console.log(`  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`)
     failures += 1
-    continue
-  }
-  fs.writeFileSync(target, before.replace(m.from, m.to))
-  if (!anySuiteNotices(dir)) {
-    console.log(`  FAIL ${m.name} — reverted, and the suite stayed green. Nothing pins "${m.clause}"`)
-    failures += 1
+    results[idx] = `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
   } else {
-    console.log(`  ok   ${m.name}`)
+    fs.writeFileSync(target, before.replace(m.from, m.to))
+    if (!await anySuiteNotices(dir)) {
+      failures += 1
+      results[idx] = `  FAIL ${m.name} — reverted, and the suite stayed green. Nothing pins "${m.clause}"`
+    } else {
+      results[idx] = `  ok   ${m.name}`
+    }
   }
-}
+  drain()
+})
 
 fs.rmSync(work, { recursive: true, force: true })
 console.log(failures ? `\n${failures} FAILED` : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)

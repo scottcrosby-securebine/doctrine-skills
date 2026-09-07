@@ -91,6 +91,7 @@ const calls = path.join(tmp, 'calls')
 fs.writeFileSync(path.join(bin2, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{"error":{"code":"transport_error"}}' >&2; exit 1; fi
+if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
 case "$1 $2" in
   "pane layout") echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}' ;;
   "pane split") echo '{"result":{"pane":{"pane_id":"w1:pS"}}}' ;;
@@ -116,6 +117,59 @@ const create = callLine(/^tab create /)
 clause('clause 1e: the tab path creates with the same --cwd',
   create.includes(` --cwd ${HERE}`) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
   `create: ${create}`)
+
+// Item 3 (user-observed, 2026-09-07): the split path never named its pane. The tab path passes
+// tabLabel into `tab create`, so an overflow gate tab is named; the split path calls splitArgs,
+// which takes no label, and nothing renamed afterwards. A side-column gate pane was therefore
+// nameless for its whole run, since the completion rename fires only on a FOCUSED pane. Both
+// sibling launchers rename after a split (dctr-seat.mjs, dctr-pane.mjs); this one did not.
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, 'named gate', path.join(tmp, 'named.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
+clause('clause 1f: the pane path NAMES the pane it split, with the label the launcher was given',
+  /^pane rename w1:pS named gate$/m.test(fs.readFileSync(calls, 'utf8')),
+  `rename calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename')))}`)
+
+// The tab path already carries its name from `tab create`, so it must NOT be renamed at placement.
+// Without this the clause above passes just as well against a launcher that renames unconditionally,
+// which would overwrite the tab's own naming convention.
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, 'tab named', path.join(tmp, 'tabnamed.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
+clause('clause 1f2: the tab path is NOT renamed at placement, keeping the name tab create gave it',
+  !callLine(/^pane rename /) && callLine(/^tab create /).includes('--label'),
+  `rename: ${callLine(/^pane rename /)}; create: ${callLine(/^tab create /)}`)
+
+// The progress name (user ruling, 2026-09-07). The interval is injectable for exactly the reason
+// item 1 makes the watcher intervals injectable: a fixture must not sleep on a production interval.
+// At 50ms against a check that runs ~400ms this asserts a condition, not a duration.
+// Driven through `--run` directly, not through the launcher: on the launcher's pane path the
+// recording herdr only RECORDS the `pane run` call, so the process that owns the ticker never
+// executes there and this clause would pass or fail for reasons having nothing to do with it.
+// `--run` is the mode that actually runs the check and ticks, on the pane and detached paths both.
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 0.4'],
+  { env: paneEnv({ DCTR_ELAPSED_MS: '50' }), encoding: 'utf8' })
+clause('clause 1g: while the check runs, the pane name carries elapsed time, refreshed on the injected interval',
+  /^pane rename w1:pS ticking gate · \d+s elapsed$/m.test(fs.readFileSync(calls, 'utf8')),
+  `rename calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename')))}`)
+
+// A focused pane is relabelled to its exit name on completion. The ticker must be stopped BEFORE
+// that, or a tick still in flight puts the elapsed name back over it and the pane ends up lying
+// about a check that has finished. Asserted on the LAST rename, which is what ordering decides.
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:pS', 'ending gate', '--', 'sleep 0.3'],
+  { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
+const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
+clause('clause 1h: the ticker stops before the exit rename, so the LAST name a finished pane carries is its exit status',
+  renames.length > 1 && renames[renames.length - 1] === `pane rename w1:pS ending gate · ${exitLine(0)}`,
+  `renames: ${JSON.stringify(renames)}`)
+
+// CLAUDE.md's third clause: prove the fixture can carry the defect, without asking the checker.
+// If the recording herdr silently dropped `pane rename`, clauses 1f and 1g would read an empty list
+// and fail for a reason that has nothing to do with the launcher.
+clause('clause 3c: the recording herdr really records a pane rename, so an absent one above is the launcher and not the stub',
+  spawnSync(`${bin2}/herdr`, ['pane', 'rename', 'w1:pS', 'probe'], { encoding: 'utf8' }).status === 0 &&
+  fs.readFileSync(calls, 'utf8').includes('pane rename w1:pS probe'),
+  'the stub must both exit 0 and append the call for clauses 1f and 1g to mean anything')
 
 clause('clause 3b: the recording herdr really answers a split and a tab create with the pane ids the clauses read back',
   spawnSync(`${bin2}/herdr`, ['pane', 'split', 'w1:p1'], { encoding: 'utf8' }).stdout.includes('w1:pS') &&

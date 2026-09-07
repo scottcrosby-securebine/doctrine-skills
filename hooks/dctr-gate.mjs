@@ -27,7 +27,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
-  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine } from './dctr-lib.mjs'
+  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS } from './dctr-lib.mjs'
 import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker } from './dctr-state.mjs'
 
 /** Why the column could not be observed. sideOccupants answers null and throws the reason away, and
@@ -58,6 +58,20 @@ if (argv[0] === '--run') {
   child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })
   child.stdout.on('data', both)
   child.stderr.on('data', both)
+  // The progress name. Only on the pane path: `paneId` is empty when this same mode serves the
+  // detached path, and a rename with no pane is a herdr call that can only fail. The herdr call is
+  // synchronous and bounded at HERDR_TIMEOUT_MS, so a hung server delays this pump rather than
+  // losing bytes — the child's pipe buffers meanwhile. unref'd so it never holds the process open.
+  const started = Date.now()
+  const ticker = paneId
+    ? setInterval(() => { try { herdr(['pane', 'rename', paneId, elapsedLabel(label, Date.now() - started)]) } catch { /* display only, never the gate */ } },
+      Number(process.env.DCTR_ELAPSED_MS) || ELAPSED_MS)
+    : null
+  ticker?.unref()
+  // No clearInterval below on purpose. This handler runs synchronously through to process.exit, so
+  // no timer can fire between the last tick and the exit rename, and the mutation gate reported the
+  // guard as pinned by nothing. A guard whose absence no fixture can show is the class this repo
+  // keeps finding (CLAUDE.md), so it is not here.
   child.on('close', (code) => {
     // A check whose last write has no newline would otherwise fuse with the exit line, and the
     // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
@@ -163,6 +177,11 @@ if (argv[0] === '--run') {
           tabId = tab.result.tab.tab_id
           paneId = tab.result.root_pane.pane_id
         }
+        // The split path had no name at all until 2026-09-07: `splitArgs` takes no label and nothing
+        // renamed afterwards, so a side-column gate pane was nameless for its whole run — the
+        // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
+        // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.
+        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
         writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
         herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, label, command)])
       } catch (e) {

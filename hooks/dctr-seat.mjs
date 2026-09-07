@@ -28,7 +28,7 @@ import path from 'node:path'
 import {
   PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE } from './dctr-lib.mjs'
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose } from './dctr-lib.mjs'
 import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
 
 // Watcher mode, typed into a codex seat's pane by SubagentStop:
@@ -71,8 +71,11 @@ if (process.argv[2] === '--codex-tail') {
     console.log(`\x1b[2m── codex job ${cur.status}\x1b[0m`)
     process.exit(0)
   }
-  setInterval(pump, 250)
-  setInterval(poll, 2000)
+  // Injectable so a fixture asserts a condition instead of sleeping on a production interval: the
+  // teardown suite used to wait 2500ms purely to outlast the 2000ms poll. Production values are the
+  // defaults, so a run with neither variable set behaves exactly as before.
+  setInterval(pump, Number(process.env.DCTR_PUMP_MS) || PUMP_MS)
+  setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)
   poll()
 } else {
 
@@ -171,6 +174,33 @@ try {
         log(`dropped stale marker ${s.agent}: pane ${s.paneId} not in layout`)
       }
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
+
+      // Close-on-next (Scott's ruling, 2026-09-07: a finished codex pane stays until the next codex
+      // seat is placed, then closes; a focused pane still stays). A codex seat's pane outlives its
+      // own SubagentStop because the job it started runs on, so without this a finished one holds a
+      // column slot until SessionEnd. Here, inside the placement lock and BEFORE the occupancy count,
+      // because freeing the slot is the point: the wave arriving after a long codex job needs it.
+      // A close that FAILS keeps its marker, the same rule SubagentStop's teardown follows — a pane
+      // we could not close is one we cannot claim is gone.
+      if (payload.agent_type === CODEX_ROLE) {
+        const candidates = seats.filter((s) => s.codexJob).map((s) => {
+          let status = null
+          try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* unreadable is not terminal */ }
+          let focused
+          try { focused = herdr(['pane', 'get', s.paneId]).result.pane.focused } catch { /* unknown; the close below decides */ }
+          return { seat: s, status, focused }
+        })
+        const closed = new Set()
+        for (const s of codexPanesToClose(candidates)) {
+          try { herdr(s.tabId ? ['tab', 'close', s.tabId] : ['pane', 'close', s.paneId]) }
+          catch (e) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
+          try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
+          closed.add(s.agent)
+          log(`close-on-next: closed finished codex seat ${s.agent}`)
+        }
+        if (closed.size) seats = seats.filter((s) => !closed.has(s.agent))
+      }
+
       const taken = seats.map((s) => s.agent)
       let n = nextIndex(payload.agent_type, taken)
       let marker = null, name = null, fatal = null
@@ -305,6 +335,12 @@ try {
         // The renderer still owns the pane's terminal; the watcher line is typed into a shell.
         try { herdr(['pane', 'send-keys', seat.paneId, 'ctrl+c']) } catch (e) { log(`interrupting the renderer in ${seat.paneId} failed (${String(e.message).split('\n')[0]})`) }
         herdr(['pane', 'run', seat.paneId, `node ${shq(import.meta.filename)} --codex-tail ${shq(job.file)} ${shq(seat.paneId)} ${shq(label)}`])
+        // Record WHICH job this pane is following, so the next codex placement can ask whether it
+        // has finished (close-on-next, Scott's ruling 2026-09-07). Written after `pane run` has
+        // succeeded: a marker claiming a watcher that does not exist would have the next placement
+        // close a pane still showing a live renderer.
+        try { writeMarker(path.join(seatsDir(sessionId), `${seat.agent}.json`), { ...seat, codexJob: job.file }) }
+        catch (e) { log(`stop ${seat.agent}: could not record the job path (${String(e.message).split('\n')[0]}); this pane will stay until SessionEnd`) }
         log(`stop ${seat.agent}: codex job ${job.id || job.file} is ${job.status}; the pane follows it and the marker stays`)
         process.exit(0)
       }

@@ -65,13 +65,23 @@ if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_STEAL_MARKER" ]; then
 fi
 case "$1 $2" in
   "pane get") echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":false}}}'; exit 0 ;;
-  "pane layout") echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}'; exit 0 ;;
+  "pane layout") if [ -n "$DCTR_TEST_LAYOUT_EXTRA" ]; then echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}},{"pane_id":"'"$DCTR_TEST_LAYOUT_EXTRA"'","rect":{"height":20}}]}}}'; else echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}'; fi; exit 0 ;;
   "pane split") echo '{"result":{"pane":{"pane_id":"w1:pS"}}}'; exit 0 ;;
   "tab create") if [ -n "$DCTR_TEST_CREATE_EMPTY" ]; then echo '{"result":{}}'; else echo '{"result":{"tab":{"tab_id":"w1:tT"},"root_pane":{"pane_id":"w1:pT"}}}'; fi; exit 0 ;;
   *) echo '{"result":{}}'; exit 0 ;;
 esac
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
+
+// The watcher's intervals, injected. Production is pump 250ms / poll 2000ms, and the fixtures below
+// used to wait 2500ms purely to outlast one poll — 6 seconds of this suite's wall clock spent
+// sleeping. Every wait that asserts the watcher is STILL ALIVE is a claim about a non-event, so it
+// is necessarily a duration; it is derived from POLL here so it stays several polls long whatever
+// the interval becomes, instead of being a number someone must remember to re-tune.
+const TEST_PUMP_MS = 25
+const TEST_POLL_MS = 50
+const SURVIVES_MS = TEST_POLL_MS * 6
+const watcherEnv = { DCTR_PUMP_MS: String(TEST_PUMP_MS), DCTR_POLL_MS: String(TEST_POLL_MS) }
 
 const SESSION = 'teardown-session'
 const stateDir = path.join(tmp, `dctr-${SESSION}`)
@@ -326,6 +336,9 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     seq.length === 2 && seq[0] === 'pane send-keys w1:s1 ctrl+c' && /^pane run w1:s1 .*--codex-tail /.test(seq[1]), seq.join(' | '))
   check('and exactly one watcher is run in it, on the running job', runs.length === 1 && runs[0].includes('--codex-tail') && runs[0].includes(runningJob) && runs[0].includes(LABEL), runs.join(' | '))
   check('and the marker stays, so the pane still counts against the cap', fs.existsSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')))
+  check('and the marker records WHICH job the pane follows, which is what close-on-next later reads',
+    R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).codexJob === runningJob,
+    JSON.stringify(R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).codexJob))
   check("and a record in another workspace's state directory is not chosen, though newer", runs.length === 1 && !runs[0].includes(foreignJob), runs.join(' | '))
 
   reset(); codexSeat(); stop(path.join(tmp, 'ws', 'nowhere'))
@@ -337,15 +350,50 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   run({ hook_event_name: 'SubagentStop', agent_id: 'agent-1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS }, { HOME: home })
   check('a general-purpose seat in the same session still closes', called(/^pane close w1:s1/m) && !called(/--codex-tail/))
 
+  // Close-on-next (Scott's ruling, 2026-09-07). A finished codex pane holds a column slot until the
+  // NEXT codex seat is placed, and then closes — unless someone is looking at it. Driven through a
+  // real SubagentStart, because the decision is only worth anything where the placement runs it.
+  const MARK = path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')
+  const doneJobRec = job('task-finished', now, WS, 'completed')
+  const followedSeat = (jobPath) => fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: null, paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: jobPath }))
+  // DCTR_TEST_LAYOUT_EXTRA puts the surviving codex pane in the layout, which is what production
+  // looks like: the pane outlived its stop and is live. Without it staleSideSeats drops the marker
+  // before close-on-next runs, and every clause below passes for the wrong reason.
+  const startSeat = (type, env) => run({ hook_event_name: 'SubagentStart', agent_id: 'cx-2', agent_type: type, transcript_path: '/home/u/.claude/projects/-p/s2.jsonl', cwd: WS }, { HOME: home, DCTR_TEST_LAYOUT_EXTRA: 'w1:s1', ...env })
+  // BY IDENTITY, never by name (F3): closing the finished seat frees its name, and the placement
+  // that freed it immediately reserves `dctr-codex-codex-rescue-1` for the NEW seat. The file
+  // existing proves nothing; whose agent_id it carries is the whole question.
+  const stillSeatOne = () => { try { return R(MARK).agent_id === 'cx-1' } catch { return false } }
+
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue')
+  check('a finished codex pane is closed when the next codex seat is placed', called(/^pane close w1:s1/m), callLines(/^pane close/).join(' | '))
+  check('and the finished seat is gone from the markers, so it stops counting against the cap',
+    !stillSeatOne(), `marker now: ${(() => { try { return JSON.stringify(R(MARK)) } catch { return '(absent)' } })()}`)
+
+  reset(); followedSeat(runningJob); startSeat('codex:codex-rescue')
+  check('a codex pane whose job is still RUNNING is left alone', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
+
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_GET_FOCUSED: 'w1:s1' })
+  check('a FINISHED codex pane someone is looking at still stays', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
+
+  reset(); followedSeat(doneJobRec); startSeat('Explore')
+  check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
+
+  // The fixture proof: these four differ only in the job status, the focus flag and the placed type,
+  // so each check above must be reading the thing it names.
+  check('the close-on-next fixtures really differ: one job completed, one running, and the records say so',
+    R(doneJobRec).status === 'completed' && R(runningJob).status === 'running' && doneJobRec !== runningJob,
+    `${R(doneJobRec).status} vs ${R(runningJob).status}`)
+
   // The watcher on a job that is still running: it stays up and leaves the label alone until the
   // record changes, then shows the log's last bytes, relabels and exits. The test replaces the record
   // by temp-write and rename so the watcher never reads a half-written file.
   reset()
-  const live = spawn('node', [hook, '--codex-tail', runningJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  const live = spawn('node', [hook, '--codex-tail', runningJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   let liveOut = ''
   live.stdout.on('data', (d) => { liveOut += d })
   const liveExit = new Promise((resolve) => live.on('exit', (code) => resolve(code)))
-  await new Promise((r) => setTimeout(r, 2500))
+  await new Promise((r) => setTimeout(r, SURVIVES_MS))
   check('the watcher stays alive while the job runs', live.exitCode === null, `exit ${live.exitCode}`)
   check('and does not relabel the pane yet', !called(/^pane rename w1:s1/m), callLines(/^pane rename/).join(' | '))
   const finished = { ...R(runningJob), status: 'completed' }
@@ -364,12 +412,12 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   reset()
   const queuedJob = job('task-queued', now, WS, 'queued')
   const queuedAtStart = R(queuedJob).status
-  const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
   const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
-  await new Promise((r) => setTimeout(r, 1000))
+  await new Promise((r) => setTimeout(r, SURVIVES_MS))
   rewrite('running')
-  await new Promise((r) => setTimeout(r, 2500))
+  await new Promise((r) => setTimeout(r, SURVIVES_MS))
   check('the watcher outlives a record that was queued before it ran', q.exitCode === null, `exit ${q.exitCode}`)
   rewrite('completed')
   const qBound = setTimeout(() => q.kill('SIGKILL'), 8000)
@@ -403,7 +451,7 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     fs.writeSync(fd, JSON.stringify({ id: 'task-fifo', workspaceRoot: WS, createdAt: new Date(now).toISOString(), status, pid: null, logFile: fifoLog }))
     fs.closeSync(fd)
   }
-  const fw = spawn('node', [hook, '--codex-tail', fifo, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  const fw = spawn('node', [hook, '--codex-tail', fifo, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   let fwOut = ''
   fw.stdout.on('data', (d) => { fwOut += d })
   const fwExit = new Promise((resolve) => fw.on('exit', (code) => resolve(code)))
@@ -423,7 +471,7 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const doneJob = job('task-done', now, WS, 'completed')
   let tail
   try {
-    tail = { code: 0, out: execFileSync('node', [hook, '--codex-tail', doneJob, 'w1:s1', LABEL], { timeout: 30000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } }) }
+    tail = { code: 0, out: execFileSync('node', [hook, '--codex-tail', doneJob, 'w1:s1', LABEL], { timeout: 30000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } }) }
   } catch (e) { tail = { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
   check('the watcher exits once the job is no longer running', tail.code === 0, `exit ${tail.code}: ${tail.out}`)
   check('and relabels the pane with the status', called(/^pane rename w1:s1 codex-codex-rescue · Red team the spec · completed$/m), callLines(/^pane rename/).join(' | '))
