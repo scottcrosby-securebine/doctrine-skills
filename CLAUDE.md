@@ -153,6 +153,19 @@ silently stopped reporting a bound system's checkboxes — correct, as it turned
 out, since the label is the real target — but "a finding disappeared" and "a
 blind spot appeared" print exactly the same thing, which is nothing.
 
+**"No fixture reaches it" is a missing fixture, not a dead branch.** Before
+deleting a guard whose absence no check can show, establish whether a fixture
+*could* reach it. Those are two different claims and this repo conflated them
+once, at cost: a reviewer showed the `pane_not_found` branch of the focus
+lookup was unreachable by every fixture, it was deleted, and a second reviewer
+then showed the deletion leaks a finished codex tab's marker for an entire
+session, because `staleSideSeats` never judges a tab seat. Both reviewers were
+right. Unreachable *by the fixtures* and unnecessary *to the code* are separate
+findings, and only the second one licenses a deletion. Where the first holds
+and the second does not, write the fixture. This rule had no written statement
+until 2026-09-08 and was carried instead by five code comments asserting it as
+repo law, which is why the deletion looked correct to the reviewer who made it.
+
 **Target size is split across the gate and `[JUDGE]` on purpose.** WCAG 2.5.8's
 exceptions are real — an isolated undersized target and an inline-in-a-sentence
 link are both spec-compliant — so only a *crowded* undersized target gates, and
