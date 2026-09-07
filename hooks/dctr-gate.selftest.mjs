@@ -76,11 +76,28 @@ clause('clause 3 — the broken fixture really exits 3 under bash alone, without
 
 // The pane line is the one piece of pure shell assembly: a command with a single quote must reach
 // bash as one argument, or the quote ends the string and the rest runs as a second command.
-const line = gateRunCommand('/p/dctr-gate.mjs', '/o', '/m', 'w1:p2', 'lbl', ['bash', '-c', GOOD])
+const line = gateRunCommand('/p/dctr-gate.mjs', '/o', '/m', 'w1:p2', '', '', 'lbl', ['bash', '-c', GOOD])
 const roundTrip = spawnSync('bash', ['-c', `printf '%s\\n' ${line.slice(line.indexOf('-- ') + 3)}`], { encoding: 'utf8' })
 clause('clause 1b — the pane line carries an argv command through bash as the same three words, quotes intact',
   roundTrip.stdout === `bash\n-c\n${GOOD}\n` && line.startsWith(`node ${shq('/p/dctr-gate.mjs')} --run `),
   JSON.stringify(roundTrip.stdout))
+
+// THE POSITIONAL CONTRACT, which nothing pinned before F5. `--run` reads its arguments by position,
+// so a tab gate's ids must arrive in the right slots and a side-column gate must still emit the two
+// empty placeholders — without them `label` lands in the tabId slot and the completion path tries to
+// close a tab named "lbl". Asserted by parsing the line the way dctr-gate.mjs itself does.
+{
+  const argvOf = (l) => l.slice(`node ${shq('/p/dctr-gate.mjs')} --run `.length, l.indexOf(' -- ')).split(' ')
+  const tabLine = gateRunCommand('/p/dctr-gate.mjs', '/o', '/m', 'w1:pR', 'w1:t8', 'w1', 'lbl', ['true'])
+  const [o1, m1, p1, t1, w1, l1] = argvOf(tabLine)
+  clause('clause 1q — a TAB gate carries its tab id and workspace into --run, in the slots the parse reads',
+    t1 === shq('w1:t8') && w1 === shq('w1') && p1 === shq('w1:pR') && l1 === shq('lbl') && o1 === shq('/o') && m1 === shq('/m'),
+    argvOf(tabLine).join(' | '))
+  const [, , p2, t2, w2, l2] = argvOf(line)
+  clause('clause 1r — and a side-column gate emits BOTH empty placeholders, so the label cannot slide into the tab slot',
+    p2 === shq('w1:p2') && t2 === shq('') && w2 === shq('') && l2 === shq('lbl'),
+    argvOf(line).join(' | '))
+}
 
 // F1 (field audit 2026-09-07): the pane path inherited the herdr server's cwd, so a relative check
 // path ran in a different directory from the detached path's. A recording herdr answers the layout
@@ -101,6 +118,13 @@ if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_GONE" ]; then echo '{"error"
 if [ "$1 $2" = "pane rename" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 500 "$TMPDIR/dctr-gate-selftest/seats"; fi
 if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 700 "$TMPDIR/dctr-gate-selftest/seats"; fi
 if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_CLOSE_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
+# A TAB gate's completion asks the TAB. Three answers, the same three the pane side makes: a list
+# that FAILED, a list that succeeded and does not carry this tab (an observed absence), and a tab
+# with a readable focus.
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TAB_ABSENT" ]; then echo '{"result":{"tabs":[{"tab_id":"w9:other","focused":false}]}}'; exit 0; fi
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TAB_FOCUSED" ]; then echo '{"result":{"tabs":[{"tab_id":"w1:tG","focused":true,"label":"g"}]}}'; exit 0; fi
+if [ "$1 $2" = "tab list" ]; then echo '{"result":{"tabs":[{"tab_id":"w1:tG","focused":false,"label":"g"}]}}'; exit 0; fi
 if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_RUN_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
 case "$1 $2" in
   # A REAL unfocused pane. This used to fall through to the default empty result, so the ordinary
@@ -164,7 +188,7 @@ fs.writeFileSync(calls, '')
 // ticks accrued inside it, which is a duration wearing a condition's clothes and the one clause
 // shape that reddens without a defect under N-way load. This waits for the labels to appear and
 // stops as soon as they do, so a slow machine takes longer instead of failing.
-const tickProc = spawn('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', 'ticking gate', '--', 'sleep 6'],
+const tickProc = spawn('node', [script, '--run', path.join(tmp, 'tick.out'), '', 'w1:pS', '', '', 'ticking gate', '--', 'sleep 6'],
   { env: paneEnv({ DCTR_ELAPSED_MS: '50' }), stdio: 'ignore' })
 // TWO DISTINCT INCREASING values, not the literal 0s and 1s. Requiring `0s` made a correct ticker
 // fail for a reason that has nothing to do with it: a runner descheduled past one second reports 1s
@@ -201,7 +225,7 @@ clause('clause 1g: while the check runs, the pane name carries elapsed time that
 // process.exit, so no timer can interleave — and this asserts the outcome that ordering gives,
 // which is the thing worth pinning either way.
 fs.writeFileSync(calls, '')
-execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:pS', 'ending gate', '--', 'sleep 0.3'],
+execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:pS', '', '', 'ending gate', '--', 'sleep 0.3'],
   { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
 const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
 // The completion path's FOUR answers and the record's fate under each. Only `pane close` kills the
@@ -211,10 +235,47 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   const mk = (n) => { const f = path.join(tmp, `gm${n}.json`); fs.writeFileSync(f, JSON.stringify({ agent: `dctr-gate-${n}`, role: 'gate', paneId: 'w1:pS' })); return f }
   const run = (n, env, label) => {
     const m = mk(n); fs.writeFileSync(calls, '')
-    execFileSync('node', [script, '--run', path.join(tmp, `g${n}.out`), m, 'w1:pS', label, '--', 'true'],
+    execFileSync('node', [script, '--run', path.join(tmp, `g${n}.out`), m, 'w1:pS', '', '', label, '--', 'true'],
       { env: paneEnv(env), encoding: 'utf8' })
     return { m, calls: fs.readFileSync(calls, 'utf8') }
   }
+
+  // THE SAME FOUR ANSWERS FOR A TAB GATE (F5). The launcher placed to a tab whenever the side column
+  // was full, recorded the tabId, and then asked `pane get` about the tab's ROOT pane and closed that
+  // pane — a different question from the one it acted on, against the ruling that a tab seat's focus
+  // is read from the TAB. `tabGate` passes the tab id and workspace the way the placement now does.
+  const tabGate = (n, env, label) => {
+    const f = path.join(tmp, `tm${n}.json`)
+    fs.writeFileSync(f, JSON.stringify({ agent: `dctr-gate-${n}`, role: 'gate', paneId: 'w1:pR', tabId: 'w1:tG' }))
+    fs.writeFileSync(calls, '')
+    execFileSync('node', [script, '--run', path.join(tmp, `t${n}.out`), f, 'w1:pR', 'w1:tG', 'w1', label, '--', 'true'],
+      { env: paneEnv(env), encoding: 'utf8' })
+    return { m: f, calls: fs.readFileSync(calls, 'utf8') }
+  }
+
+  const ta = tabGate(11, { DCTR_TEST_TABLIST_FAILS: '1' }, 'tab list fails')
+  clause('clause 1s — a TAB gate whose list FAILED closes nothing and keeps its record: unobservable is not unfocused',
+    !ta.calls.includes('tab close') && !ta.calls.includes('pane close') && fs.existsSync(ta.m),
+    ta.calls.trim().split('\n').join(' | '))
+
+  const tb = tabGate(12, { DCTR_TEST_TAB_FOCUSED: '1' }, 'tab focused')
+  clause('clause 1t — a FOCUSED tab is RENAMED, not closed, and never has its root pane closed instead',
+    tb.calls.includes('tab rename w1:tG') && !tb.calls.includes('tab close') && !tb.calls.includes('pane close') && fs.existsSync(tb.m),
+    tb.calls.trim().split('\n').join(' | '))
+
+  const tc = tabGate(13, {}, 'tab ordinary')
+  clause('clause 1u — an unfocused TAB is closed BY TAB ID, and its root pane is never the thing closed',
+    tc.calls.includes('tab close w1:tG') && !tc.calls.includes('pane close w1:pR'),
+    tc.calls.trim().split('\n').join(' | '))
+
+  const td = tabGate(14, { DCTR_TEST_TAB_ABSENT: '1' }, 'tab absent')
+  clause('clause 1v — a tab the list SUCCEEDED and did not carry is an observed absence, closed by id (issue #20)',
+    td.calls.includes('tab close w1:tG') && !td.calls.includes('pane close w1:pR'),
+    td.calls.trim().split('\n').join(' | '))
+
+  clause('clause 1w — and every one of the four asked the TAB, never the root pane: `tab list` in all, `pane get` in none',
+    [ta, tb, tc, td].every((r) => r.calls.includes('tab list') && !r.calls.includes('pane get w1:pR')),
+    [ta, tb, tc, td].map((r) => (r.calls.includes('pane get w1:pR') ? 'asked the pane' : 'asked the tab')).join(' | '))
 
   const a = run(1, { DCTR_TEST_GET_FAILS: '1' }, 'lookup fails')
   clause('clause 1i: a focus lookup that FAILED closes nothing and KEEPS the record, which was never removed',
@@ -272,7 +333,7 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // execFileSync THROWS on a non-zero exit, and 127 is exactly what this fixture is arranging for.
   let spawnExit = 0
   try {
-    execFileSync('node', [script, '--run', out, m, 'w1:pS', 'unspawnable', '--', 'definitely-not-a-real-binary-xyz', 'arg'],
+    execFileSync('node', [script, '--run', out, m, 'w1:pS', '', '', 'unspawnable', '--', 'definitely-not-a-real-binary-xyz', 'arg'],
       { env: paneEnv({}), encoding: 'utf8', stdio: 'pipe' })
   } catch (e) { spawnExit = e.status }
   clause('clause 1n: a check that could not be spawned keeps its record, because the pane it was to run in is still there',
