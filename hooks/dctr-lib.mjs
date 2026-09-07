@@ -253,7 +253,70 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  *  republishes them, so a live run never blinks out; a run that dies stops writing and its row
  *  clears itself within the hour instead of sitting stale forever. An hour rather than the ten
  *  minutes the issue's probe used, because a single wave can outlast ten minutes between writes. */
+/**
+ * How many of `expected` results a pool never produced. The mutation gate's own guard against the
+ * defect it exists to catch, one level up: a pool that silently runs nothing leaves every slot
+ * undefined and the gate would otherwise print "all N repairs are pinned" having executed no suite
+ * at all. A red team demonstrated exactly that by substituting a pool that returned [] without
+ * invoking its callback, and got `exit=0` with zero suites run.
+ *
+ * Pure, so a clause and a mutation can pin it; the gate's wiring of it cannot be pinned by the gate
+ * itself, which is the honest limit of a harness that tests with the machinery it is testing.
+ */
+/**
+ * How many times a mutation's anchor text occurs in its file. The gate requires exactly one: it
+ * tested only PRESENCE and then replaced the FIRST hit, so an anchor that came to appear twice would
+ * mutate one site, leave the other intact, and pass — a mutation that guards half of what it names
+ * reports the same "ok" as one that guards all of it.
+ */
+export const anchorCount = (text, from) => text.split(from).length - 1
+
+export const poolShortfall = (results, expected) =>
+  Math.max(0, expected - results.filter((r) => r !== undefined).length)
+
 export const TOKEN_TTL_MS = 3600000
+
+/** How often a running gate re-names its pane with elapsed time (user ruling, 2026-09-07: a long
+ *  gate must show where it is). Overridden by DCTR_ELAPSED_MS so a fixture asserts a condition
+ *  instead of sleeping on the production interval. */
+export const ELAPSED_MS = 10000
+
+/** A running gate's pane name: the launcher's label plus elapsed time. Elapsed counts UP rather
+ *  than down because the launcher is generic and cannot know a check's total without imposing an
+ *  output format on every check it runs. */
+export const elapsedLabel = (label, ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return `${label} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`} elapsed`
+}
+
+/** The codex watcher's two intervals: how often it drains the job's log, and how often it re-reads
+ *  the job record to see whether the job has left running. POLL_MS alone is overridable, by
+ *  DCTR_POLL_MS, for the same reason as ELAPSED_MS. PUMP_MS is NOT: an override existed briefly,
+ *  nothing needed it, and no clause could show whether it was honoured. */
+export const PUMP_MS = 250
+export const POLL_MS = 2000
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight, results in INPUT order.
+ *
+ * Written for the mutation gate, whose mutations each work on their own copy of the tree and so were
+ * always independent — they were merely run one at a time, for 17 minutes. Order is preserved
+ * because a caller lines results up against the input by index; completion order would silently
+ * mis-attribute a mutation's verdict to its neighbour, which is worse than being slow.
+ *
+ * `next++` is the whole synchronisation: JavaScript is single-threaded between awaits, so no two
+ * workers can read the same index. Pinned by clauses 1aj, 1ak, 1al and 3u in dctr-seat.selftest.mjs.
+ */
+export async function mapPool(items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i], i)
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(Number.isFinite(limit) ? limit : 1, items.length)) }, worker))
+  return results
+}
+
 
 /**
  * The report-metadata call that publishes doctrine's round and gate counters as sidebar tokens
@@ -335,6 +398,32 @@ export const metaPath = (transcriptPath) => (transcriptPath ? transcriptPath.rep
  *  wrapper returns, about a minute in, while the codex job it started runs on for as long as an
  *  hour; the seat's pane follows the job rather than the wrapper. */
 export const CODEX_ROLE = 'codex:codex-rescue'
+
+/**
+ * Is a codex job's status terminal? A record that cannot be read is NOT terminal, deliberately:
+ * the watcher in dctr-seat.mjs --codex-tail treats an unreadable record as "keep waiting", and a
+ * close-on-next that read a failed read as "finished" would destroy the one pane showing what the
+ * job was doing, at the moment it became hardest to find out.
+ */
+export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'
+
+/**
+ * Which finished codex panes to close when the NEXT codex seat is placed (Scott's ruling,
+ * 2026-09-07: a finished codex pane stays until the next codex seat is placed, then closes; a
+ * focused pane still stays — the same relabel-vs-close courtesy every other seat gets).
+ *
+ * Each candidate is `{ seat, status, focused }`; the hook gathers those, this decides. A seat with
+ * no `codexJob` was never handed to a watcher and is not a candidate at all: an ordinary seat's
+ * pane is closed by its own SubagentStop and must never be swept by somebody else's placement.
+ *
+ * `focused === false`, never `focused !== true`. The caller cannot always answer: a `pane get` that
+ * FAILED leaves focus unknown, and unknown must not read as unfocused. The one pane that costs is
+ * the focused one, the pane the user is watching — which is the same trap the ordinary stop path
+ * fell into and documents at length. Only a definite "not focused" closes anything.
+ * Pinned by clauses 1am, 1an and 3v in dctr-seat.selftest.mjs.
+ */
+export const codexPanesToClose = (candidates) =>
+  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)
 
 /**
  * The codex job a stopping seat started: the newest record for this workspace created at or after

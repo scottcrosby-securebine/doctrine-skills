@@ -17,14 +17,20 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { mapPool, poolShortfall, anchorCount } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs']
-/** Cheapest first: the pure suite answers in milliseconds, and `some` stops at the first that notices. */
-const SUITES = ['dctr-seat.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.selftest.mjs']
+/** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
+ *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
+ *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
+ *  teardown, gate, was commented "cheapest first", and was not: every mutation only the gate suite
+ *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim. */
+const SUITES = ['dctr-seat.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -201,19 +207,106 @@ const MUTATIONS = [
   { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
     from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
     to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'a pane_not_found lookup is an observation of unfocused', file: 'dctr-seat.mjs', clause: 'a finished codex tab whose PANE has gone is still swept',
+    from: '            if (isPaneNotFound(e)) focused = false',
+    to: '            if (false) focused = false' },
+  { name: 'the gate requires an anchor to occur exactly once', file: 'dctr-lib.mjs', clause: 'anchorCount counts occurrences',
+    from: 'export const anchorCount = (text, from) => text.split(from).length - 1',
+    to: 'export const anchorCount = (text, from) => (text.includes(from) ? 1 : 0)' },
+  { name: 'the tab close reads the TAB not-found code', file: 'dctr-seat.mjs', clause: 'a finished codex TAB herdr says is not there has its marker removed too',
+    from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)',
+    to: '            const gone = isPaneNotFound(e)' },
+  { name: 'a reply carrying no pane is not an observation of focus', file: 'dctr-seat.mjs', clause: 'a lookup that SUCCEEDS but carries no pane is still not an observation',
+    from: "            if (typeof pane?.focused === 'boolean') focused = pane.focused",
+    to: '            focused = pane?.focused === true' },
+  { name: 'an absent marker is not this seat\'s', file: 'dctr-seat.mjs', clause: 'a marker removed while the stop worked is NOT recreated',
+    from: '          if (!current || current.agent_id !== seat.agent_id) { log(',
+    to: '          if (current && current.agent_id !== seat.agent_id) { log(' },
+  { name: 'focus that could not be read never closes a pane', file: 'dctr-lib.mjs', clause: 'focus that could not be READ never closes a pane',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
+    to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)' },
+  { name: 'a non-finite pool limit still runs every item', file: 'dctr-lib.mjs', clause: 'a non-finite limit still runs every item',
+    from: 'Math.min(Number.isFinite(limit) ? limit : 1, items.length)',
+    to: 'Math.min(limit, items.length)' },
+  { name: 'poolShortfall counts the results a pool never produced', file: 'dctr-lib.mjs', clause: 'poolShortfall counts the results a pool never produced',
+    from: '  Math.max(0, expected - results.filter((r) => r !== undefined).length)',
+    to: '  Math.max(0, expected - results.length)' },
+  { name: 'the watcher honours an injected poll interval', file: 'dctr-seat.mjs', clause: 'the injected poll interval is HONOURED',
+    from: '  setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)',
+    to: '  setInterval(poll, POLL_MS)' },
+  { name: 'close-on-next reads the not-found code as an answer', file: 'dctr-seat.mjs', clause: 'a pane herdr says is NOT THERE has its marker removed',
+    from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)\n            if (!gone) {',
+    to: '            const gone = false\n            if (!gone) {' },
+  { name: 'the stop write checks the marker is still this seat', file: 'dctr-seat.mjs', clause: 'the stop does not overwrite a marker that now belongs to a replacement seat',
+    from: "          if (!current || current.agent_id !== seat.agent_id) {",
+    to: "          if (current && false) {" },
+  { name: 'the gate ticker reports real elapsed time', file: 'dctr-gate.mjs', clause: 'elapsed time that INCREASES',
+    from: 'elapsedLabel(label, Date.now() - started)',
+    to: 'elapsedLabel(label, 0)' },
+  { name: 'mapPool keeps at most `limit` in flight', file: 'dctr-lib.mjs', clause: 'mapPool never runs more than `limit` at once',
+    from: '  await Promise.all(Array.from({ length: Math.max(1, Math.min(Number.isFinite(limit) ? limit : 1, items.length)) }, worker))',
+    to: '  await Promise.all(Array.from({ length: Math.max(1, items.length) }, worker))' },
+  { name: 'mapPool returns results in INPUT order', file: 'dctr-lib.mjs', clause: 'mapPool visits every item exactly once and returns results in INPUT order',
+    from: '    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i], i)',
+    to: '    for (let i = next++; i < items.length; i = next++) results.push(await fn(items[i], i))' },
+  { name: 'elapsedLabel switches to m/s at one minute', file: 'dctr-lib.mjs', clause: 'elapsedLabel prints seconds under a minute and zero-padded m/s at or above one',
+    from: '  return `${label} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, \'0\')}s`} elapsed`',
+    to: '  return `${label} · ${s < 3600 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, \'0\')}s`} elapsed`' },
+  { name: 'elapsedLabel zero-pads the seconds half', file: 'dctr-lib.mjs', clause: 'zero-padded m/s',
+    from: "String(s % 60).padStart(2, '0')",
+    to: 'String(s % 60)' },
+  { name: 'elapsedLabel floors a negative age at zero', file: 'dctr-lib.mjs', clause: 'elapsedLabel never prints a negative age',
+    from: '  const s = Math.max(0, Math.floor(ms / 1000))',
+    to: '  const s = Math.floor(ms / 1000)' },
+  { name: 'only the SPLIT path is renamed at placement', file: 'dctr-gate.mjs', clause: 'the tab path is NOT renamed at placement',
+    from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) }",
+    to: "        if (true) try { herdr(['pane', 'rename', paneId, label]) }" },
+  { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
+    from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
+    to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
+  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'a FINISHED codex pane someone is looking at still stays',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
+    to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status)).map((c) => c.seat)' },
+  { name: 'close-on-next only considers seats following a codex job', file: 'dctr-lib.mjs', clause: 'close-on-next closes exactly the terminal, unfocused, codex-job panes',
+    from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
+    to: '  candidates.filter((c) => codexTerminal(c.status) && c.focused === false).map((c) => c.seat)' },
+  { name: 'only a CODEX placement sweeps finished codex panes', file: 'dctr-seat.mjs', clause: 'an ordinary seat placement closes nothing',
+    from: '      if (payload.agent_type === CODEX_ROLE) {',
+    to: '      if (true) {' },
+  { name: 'the stop path records which job the pane follows', file: 'dctr-seat.mjs', clause: 'the marker records WHICH job the pane follows',
+    from: "          writeMarker(file, { ...seat, codexJob: job.file })",
+    to: "          writeMarker(file, { ...seat })" },
+  { name: 'the gate names the pane it split', file: 'dctr-gate.mjs', clause: 'the pane path NAMES the pane it split',
+    from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate \"${label}\": rename of ${paneId} failed (${String(e.message).split('\\n')[0]})`) }\n",
+    to: '' },
+  { name: 'a running gate re-names its pane with elapsed time', file: 'dctr-gate.mjs', clause: 'the pane name carries elapsed time',
+    from: '  const ticker = paneId\n',
+    to: '  const ticker = null && paneId\n' },
+  { name: 'a finished pane is relabelled with its exit status', file: 'dctr-gate.mjs', clause: 'the LAST name a finished pane carries is its exit status',
+    from: "      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
+    to: "      if (false) try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
     from: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
     to: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
-/** A mutation is caught if ANY suite notices it. Running both is what lets one harness cover the
- *  launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
-const runSuite = (dir, suite) => {
+const execFileAsync = promisify(execFile)
+
+/** How many mutations run at once. Each works on its own copy of the tree and touches nothing
+ *  shared, so they were always independent; they were merely run one at a time, for 17 minutes.
+ *  Not `availableParallelism()`: the suites make real timing assertions (a watcher that must still
+ *  be alive after N polls), and a box loaded to its core count is where those go flaky. Eight is
+ *  well inside the headroom on the 32-core host this was measured on; DCTR_JOBS overrides it. */
+const JOBS = Math.max(1, Number(process.env.DCTR_JOBS) || Math.min(8, os.availableParallelism?.() ?? 4))
+
+/** A mutation is caught if ANY suite notices it. Running all of them is what lets one harness cover
+ *  the launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
+const runSuite = async (dir, suite) => {
   try {
-    const out = execFileSync('node', [path.join(dir, suite)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' } })
-    return { code: 0, out: String(out || '') }
-  } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+    const { stdout } = await execFileAsync('node', [path.join(dir, suite)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' } })
+    return { code: 0, out: String(stdout || '') }
+  } catch (e) { return { code: e.code ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
 }
 
 /** A mutation is caught when a CLAUSE goes red, which is not the same as the suite exiting non-zero.
@@ -221,42 +314,73 @@ const runSuite = (dir, suite) => {
  *  noticed" certifies a pin the suite does not have — the same defect this harness exists to catch,
  *  one level up. Replacing a mutation's replacement text with `deliberately invalid javascript @@@`
  *  used to yield `all 15 repairs are pinned`. So require the suite to print a FAIL line: an
- *  import-time SyntaxError prints none, and a real clause failure always does.
- *
- *  Running both suites is what lets one harness cover the launcher and the seat hook's teardown
- *  without deciding in advance which suite owns which line. */
+ *  import-time SyntaxError prints none, and a real clause failure always does. */
 const noticed = (r) => r.code !== 0 && /^ *FAIL /m.test(r.out)
-const anySuiteNotices = (dir) => SUITES.some((s) => noticed(runSuite(dir, s)))
+/** Sequential inside one mutation, so the cheapest suite still short-circuits the expensive ones.
+ *  The parallelism is ACROSS mutations, where there is nothing to short-circuit. */
+const anySuiteNotices = async (dir) => {
+  for (const s of SUITES) if (noticed(await runSuite(dir, s))) return true
+  return false
+}
 
 let failures = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
-for (const suite of SUITES) {
-  if (runSuite(baseline, suite).code !== 0) {
-    console.log(`  FAIL baseline ${suite} — every suite must pass before any mutation means anything`)
+const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))
+const baselineShort = poolShortfall(baselineResults, SUITES.length)
+if (baselineShort) {
+  console.log(`  FAIL the baseline pool produced ${SUITES.length - baselineShort} of ${SUITES.length} results`)
+  failures += 1
+}
+for (const r of baselineResults) {
+  // `r` can be undefined when the pool short-changed us, and the shortfall above has already been
+  // counted; dereferencing it here died with a TypeError instead of printing the footer.
+  if (r && r.res.code !== 0) {
+    console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
   }
 }
 
-for (const m of MUTATIONS) {
-  const dir = path.join(work, m.name.replace(/[^a-z]+/gi, '-'))
+// Printed in INPUT order as results settle, never completion order: a run must read the same twice,
+// and a reader lining a FAIL up against the mutation list must not have to sort it first. A slow
+// early mutation holds back the lines behind it, which is honest — it is what is actually happening.
+const results = new Array(MUTATIONS.length)
+let cursor = 0
+const drain = () => { while (cursor < results.length && results[cursor] !== undefined) console.log(results[cursor++]) }
+
+await mapPool(MUTATIONS, JOBS, async (m, idx) => {
+  const dir = path.join(work, String(idx).padStart(3, '0') + '-' + m.name.replace(/[^a-z]+/gi, '-'))
   fs.mkdirSync(dir)
   for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(dir, f))
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
-  if (!before.includes(m.from)) {
-    console.log(`  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`)
+  const hits = anchorCount(before, m.from)
+  if (hits !== 1) {
     failures += 1
-    continue
-  }
-  fs.writeFileSync(target, before.replace(m.from, m.to))
-  if (!anySuiteNotices(dir)) {
-    console.log(`  FAIL ${m.name} — reverted, and the suite stayed green. Nothing pins "${m.clause}"`)
-    failures += 1
+    results[idx] = hits === 0
+      ? `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
+      : `  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}; replace() takes the first and the rest go unguarded`
   } else {
-    console.log(`  ok   ${m.name}`)
+    fs.writeFileSync(target, before.replace(m.from, m.to))
+    if (!await anySuiteNotices(dir)) {
+      failures += 1
+      results[idx] = `  FAIL ${m.name} — reverted, and the suite stayed green. Nothing pins "${m.clause}"`
+    } else {
+      results[idx] = `  ok   ${m.name}`
+    }
   }
+  drain()
+})
+
+// The gate's guard against its own machinery. A pool that silently ran nothing would leave every
+// slot undefined and this file would still print "all N repairs are pinned" and exit 0 — a red team
+// produced exactly that footer, with zero suites executed, by substituting a pool that returned []
+// without invoking its callback. Counting the results is what makes that impossible to miss.
+const shortfall = poolShortfall(results, MUTATIONS.length)
+if (shortfall) {
+  console.log(`  FAIL the pool produced ${MUTATIONS.length - shortfall} of ${MUTATIONS.length} results; this run certifies nothing`)
+  failures += shortfall
 }
 
 fs.rmSync(work, { recursive: true, force: true })

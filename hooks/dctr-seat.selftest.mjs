@@ -18,7 +18,7 @@ import {
   seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE,
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -402,5 +402,114 @@ clause('clause 3n — the mountinfo fixture really carries a 64-hex id under /co
 clause('clause 3o — the hostile pane fixture really carries live traversal, and the id fixture really does not',
   HOSTILE_PANE.includes('../') && !'w66:p18'.includes('.') && !'w66:p18'.includes('/'),
   'if the hostile fixture were already clean, 1aa would prove sanitizing changes nothing')
+
+// The mutation gate's worker pool (item 1, 2026-09-07). Pinned HERE, in the pure suite, because the
+// pool is the gate: a pool that silently runs nothing, or loses a result, prints exactly what a
+// working one prints — "all 58 repairs are pinned" — which is the defect class this whole harness
+// exists to catch, one level up.
+{
+  const seen = []
+  const order = await mapPool([1, 2, 3, 4, 5, 6, 7], 3, async (v, i) => { seen.push(i); await new Promise((r) => setTimeout(r, (7 - v) * 2)); return v * 10 })
+  clause('clause 1aj — mapPool visits every item exactly once and returns results in INPUT order, not completion order',
+    order.join(',') === '10,20,30,40,50,60,70' && seen.slice().sort((a, b) => a - b).join(',') === '0,1,2,3,4,5,6' && seen.length === 7,
+    `results ${order.join(',')}; visited ${seen.join(',')}`)
+
+  let active = 0, peak = 0
+  await mapPool(Array.from({ length: 12 }, (_, i) => i), 4, async () => {
+    active += 1; peak = Math.max(peak, active)
+    await new Promise((r) => setTimeout(r, 5))
+    active -= 1
+  })
+  clause('clause 1ak — mapPool never runs more than `limit` at once', peak <= 4 && peak > 1, `peak ${peak}`)
+
+  let serialPeak = 0, serialActive = 0
+  await mapPool(Array.from({ length: 6 }, (_, i) => i), 1, async () => {
+    serialActive += 1; serialPeak = Math.max(serialPeak, serialActive)
+    await new Promise((r) => setTimeout(r, 2))
+    serialActive -= 1
+  })
+  // CLAUDE.md's third clause, and the one that matters most here: 1ad's "never more than 4" is
+  // satisfied just as well by a pool that never parallelises at all. This shows the SAME probe reads
+  // 1 at limit 1 and more than 1 at limit 4, so the probe can tell the two apart.
+  clause('clause 3u — the concurrency probe really discriminates: 1 at limit 1, more than 1 at limit 4',
+    serialPeak === 1 && peak > 1,
+    `serial peak ${serialPeak}, parallel peak ${peak}`)
+
+  const empty = await mapPool([], 4, async () => { throw new Error('must not run') })
+  clause('clause 1al — mapPool on an empty list returns an empty list and runs nothing', Array.isArray(empty) && empty.length === 0, JSON.stringify(empty))
+}
+
+// elapsedLabel, both branches. Gate clause 1g only ever sees the seconds branch — a selftest check
+// finishes in well under a minute — so the minutes branch shipped executed by nothing at all.
+clause('clause 1ao — elapsedLabel prints seconds under a minute and zero-padded m/s at or above one',
+  elapsedLabel('gate', 5000) === 'gate · 5s elapsed' &&
+  elapsedLabel('gate', 59999) === 'gate · 59s elapsed' &&
+  elapsedLabel('gate', 60000) === 'gate · 1m00s elapsed' &&
+  elapsedLabel('gate', 65000) === 'gate · 1m05s elapsed' &&
+  elapsedLabel('gate', 3671000) === 'gate · 61m11s elapsed',
+  `${elapsedLabel('gate', 65000)} / ${elapsedLabel('gate', 60000)}`)
+
+clause('clause 1ap — elapsedLabel never prints a negative age, so a clock that moves backwards reads 0s',
+  elapsedLabel('gate', -1) === 'gate · 0s elapsed' && elapsedLabel('gate', 0) === 'gate · 0s elapsed',
+  elapsedLabel('gate', -1))
+
+clause('clause 1as — anchorCount counts occurrences, so the gate can require exactly one and not merely presence',
+  anchorCount('a b a', 'a') === 2 && anchorCount('a b a', 'b') === 1 && anchorCount('a b a', 'z') === 0 &&
+  anchorCount('aaa', 'aa') === 1,
+  `${anchorCount('a b a', 'a')}/${anchorCount('a b a', 'z')}`)
+
+clause('clause 1aq — poolShortfall counts the results a pool never produced, which is how the gate refuses to certify an empty run',
+  poolShortfall([], 3) === 3 && poolShortfall([1, undefined, 3], 3) === 1 && poolShortfall([1, 2, 3], 3) === 0 &&
+  poolShortfall(new Array(5), 5) === 5 && poolShortfall([0, false, ''], 3) === 0,
+  `${poolShortfall([], 3)}/${poolShortfall([1, undefined, 3], 3)}/${poolShortfall([0, false, ''], 3)}`)
+
+{
+  // A non-finite limit made Array.from({length: NaN}) produce ZERO workers, so the pool ran nothing
+  // and returned a sparse array — the gate's silent-success mode, reachable from a bad env value.
+  let ran = 0
+  const out = await mapPool([1, 2, 3], NaN, async (v) => { ran += 1; return v })
+  clause('clause 1ar — a non-finite limit still runs every item rather than silently running none',
+    ran === 3 && out.join(',') === '1,2,3', `ran ${ran}, out ${out.join(',')}`)
+}
+
+// Item 2 (Scott's ruling, 2026-09-07): a finished codex pane stays until the next codex seat is
+// placed, then closes; a focused pane still stays. The decision is pure so the five cases can be
+// stated at once; the hook only gathers the inputs.
+{
+  const S = (agent, codexJob) => ({ agent, codexJob, paneId: `w1:${agent}` })
+  const CANDIDATES = [
+    { seat: S('done', '/j/done.json'), status: 'completed', focused: false },   // closes
+    { seat: S('failed', '/j/failed.json'), status: 'failed', focused: false },  // closes: terminal is not "succeeded"
+    { seat: S('busy', '/j/busy.json'), status: 'running', focused: false },     // stays: still working
+    { seat: S('waiting', '/j/wait.json'), status: 'queued', focused: false },   // stays: not started yet
+    { seat: S('watched', '/j/watched.json'), status: 'completed', focused: true }, // stays: someone is looking
+    { seat: S('unreadable', '/j/gone.json'), status: null, focused: false },    // stays: a read failure is not an answer
+    { seat: S('unreachable', '/j/unreach.json'), status: 'completed', focused: undefined }, // stays: focus UNKNOWN is not "unfocused"
+    { seat: S('ordinary'), status: 'completed', focused: false },               // never a candidate: no codex job
+  ]
+  const closing = codexPanesToClose(CANDIDATES).map((s) => s.agent)
+  clause('clause 1am — close-on-next closes exactly the terminal, unfocused, codex-job panes',
+    closing.join(',') === 'done,failed', `closing ${closing.join(',') || '(none)'}`)
+
+  clause('clause 1ba — focus that could not be READ never closes a pane: unknown is not unfocused',
+    !codexPanesToClose(CANDIDATES).some((x) => x.agent === 'unreachable'),
+    'a pane get that FAILED leaves focus undefined, and the pane that costs is the focused one')
+
+  clause('clause 1an — an unreadable job record is NOT terminal, matching the watcher, which keeps waiting on one',
+    codexTerminal('completed') && codexTerminal('failed') && !codexTerminal('running') && !codexTerminal('queued') &&
+    !codexTerminal(null) && !codexTerminal(undefined) && !codexTerminal(''),
+    'a read failure must never be read as "the job is done"')
+
+  // CLAUDE.md's third clause: the fixture must really carry every distinction 1am rests on, or the
+  // clause passes by having nothing to discriminate.
+  clause('clause 3v — the candidate fixture really carries all five reasons to stay and both reasons to close',
+    CANDIDATES.filter((c) => c.status === 'running' || c.status === 'queued').length === 2 &&
+    CANDIDATES.some((c) => c.focused === true && codexTerminal(c.status)) &&
+    CANDIDATES.some((c) => c.status === null) &&
+    CANDIDATES.some((c) => c.focused === undefined && codexTerminal(c.status)) &&
+    CANDIDATES.some((c) => !c.seat.codexJob) &&
+    CANDIDATES.filter((c) => c.seat.codexJob && codexTerminal(c.status) && c.focused === false).length === 2,
+    'if the fixture lacked the focused-and-finished case, 1am would prove nothing about focus; without the focus-unknown case, 1ba would be vacuous')
+}
 
 process.exit(bad ? 1 : 0)
