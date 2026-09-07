@@ -574,18 +574,24 @@ console.log('the overflow ruling, driven through open rather than asserted aroun
   fs.rmSync(md, { recursive: true, force: true }); fs.mkdirSync(md, { recursive: true })
 
   // Under the cap: a pane.
+  const CWD_RE = process.cwd().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const t1 = path.join(tmp, 'underCap.log')
   fs.rmSync(`${t1}.state.json`, { force: true }); fs.rmSync(t1, { force: true })
+  fs.writeFileSync(calls, '')
   const pane = run(['open', 'underCap', t1, 'true'])
   check('under the cap, open splits a pane', pane.code === 0 && /pane=w1:pNEW/.test(pane.out) && !/overflow=tab/.test(pane.out), pane.out.trim() || pane.err.trim())
+  // The pane shell starts where herdr is told to, and the launcher runs in the session's cwd.
+  check('and the split carries the launcher cwd', herdrSaw(new RegExp(`^pane split .* --cwd ${CWD_RE}( |$)`, 'm')), fs.readFileSync(calls, 'utf8').trim())
 
   // Fill the column: six markers for panes the layout carries.
   fs.rmSync(md, { recursive: true, force: true }); fs.mkdirSync(md, { recursive: true })
   for (let i = 0; i < SIDE_CAP; i += 1) fs.writeFileSync(path.join(md, `w1_i${i}.json`), JSON.stringify({ paneId: `w1:i${i}`, tee: `/t/i${i}.log`, label: `i${i}` }))
   const t2 = path.join(tmp, 'overflow.log')
   fs.rmSync(`${t2}.state.json`, { force: true }); fs.rmSync(t2, { force: true })
+  fs.writeFileSync(calls, '')
   const tab = run(['open', 'router7', t2, 'true'])
   check('past the cap, open creates a tab instead of refusing', tab.code === 0 && /overflow=tab w1:t7/.test(tab.out), tab.out.trim() || tab.err.trim())
+  check('and the tab create carries the launcher cwd', herdrSaw(new RegExp(`^tab create .* --cwd ${CWD_RE}( |$)`, 'm')), fs.readFileSync(calls, 'utf8').trim())
 
   // The property that keeps the ruling honest: a tab session takes no column slot. Read from the
   // marker open actually wrote, not from a literal.

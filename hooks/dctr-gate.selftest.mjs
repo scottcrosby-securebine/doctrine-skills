@@ -82,5 +82,46 @@ clause('clause 1b — the pane line carries an argv command through bash as the 
   roundTrip.stdout === `bash\n-c\n${GOOD}\n` && line.startsWith(`node ${shq('/p/dctr-gate.mjs')} --run `),
   JSON.stringify(roundTrip.stdout))
 
+// F1 (field audit 2026-09-07): the pane path inherited the herdr server's cwd, so a relative check
+// path ran in a different directory from the detached path's. A recording herdr answers the layout
+// and split calls so the pane path runs to its `pane run`, and both creation calls are read back
+// with the cwd this launcher was started in. The tab path is reached by failing the layout read.
+const bin2 = path.join(tmp, 'bin2'); fs.mkdirSync(bin2)
+const calls = path.join(tmp, 'calls')
+fs.writeFileSync(path.join(bin2, 'herdr'), `#!/usr/bin/env bash
+echo "$@" >> ${JSON.stringify(calls)}
+if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{"error":{"code":"transport_error"}}' >&2; exit 1; fi
+case "$1 $2" in
+  "pane layout") echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}' ;;
+  "pane split") echo '{"result":{"pane":{"pane_id":"w1:pS"}}}' ;;
+  "tab create") echo '{"result":{"tab":{"tab_id":"w1:tT"},"root_pane":{"pane_id":"w1:pT"}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+`)
+fs.chmodSync(path.join(bin2, 'herdr'), 0o755)
+const paneEnv = (extra) => ({ ...process.env, PATH: `${bin2}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', CLAUDE_CODE_SESSION_ID: 'gate-selftest', DCTR_VIEW_REQUEST_DIR: '', ...extra })
+const HERE = process.cwd()
+const callLine = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').find((l) => re.test(l)) || '' } catch { return '' } }
+
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, 'pane gate', path.join(tmp, 'pane.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
+const split = callLine(/^pane split /)
+clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher was started in',
+  split.includes(` --cwd ${HERE}`) && callLine(/^pane run w1:pS /).includes('--run'),
+  `split: ${split}; run: ${callLine(/^pane run /)}`)
+
+fs.writeFileSync(calls, '')
+execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
+const create = callLine(/^tab create /)
+clause('clause 1e: the tab path creates with the same --cwd',
+  create.includes(` --cwd ${HERE}`) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
+  `create: ${create}`)
+
+clause('clause 3b: the recording herdr really answers a split and a tab create with the pane ids the clauses read back',
+  spawnSync(`${bin2}/herdr`, ['pane', 'split', 'w1:p1'], { encoding: 'utf8' }).stdout.includes('w1:pS') &&
+  spawnSync(`${bin2}/herdr`, ['tab', 'create'], { encoding: 'utf8' }).stdout.includes('w1:pT') &&
+  spawnSync(`${bin2}/herdr`, ['pane', 'layout'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_LAYOUT_FAILS: '1' } }).status === 1,
+  'if the fake answered nothing, both paths would fall to detached and the clauses above would read an empty call list')
+
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

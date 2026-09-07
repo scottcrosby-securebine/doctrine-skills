@@ -7,7 +7,9 @@
 //                  SIDE_CAP), in its own tab past that — and run the renderer in it. Only tab
 //                  seats are reported to the sidebar's agent list; a side pane is already on screen
 //   SubagentStop   report a tab seat idle, then close the seat's pane or tab unless someone is
-//                  looking at it
+//                  looking at it. A codex rescue seat is the exception: its wrapper returns in about
+//                  a minute while the job it started runs on, so its pane is handed a watcher on the
+//                  job record instead (`--codex-tail`, below) and its marker stays until SessionEnd
 //   SessionEnd     sweep any pane or tab whose seat never stopped
 //
 // It always exits 0. A hook that fails must never fail the run it is watching: this is not a gate,
@@ -24,9 +26,55 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  PREFIX, agentName, tabLabel, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
-  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo } from './dctr-lib.mjs'
-import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
+  PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
+  seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE } from './dctr-lib.mjs'
+import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+
+// Watcher mode, typed into a codex seat's pane by SubagentStop:
+//
+//   node dctr-seat.mjs --codex-tail <job-record.json> <pane-id> <label>
+//
+// Follows the job's log and polls its record; when the status leaves `queued` or `running` it renames the pane
+// `<label> · <status>` and exits, leaving the output on screen (Scott's ruling, 2026-09-07:
+// relabel and stay). The log is followed here rather than by tail(1) so the last bytes are on
+// screen before the exit, and a job already finished still shows its log. Runs before the payload
+// read because its stdin is the pane, not a hook.
+if (process.argv[2] === '--codex-tail') {
+  const [, , , jobFile, paneId, label] = process.argv
+  if (!jobFile || !paneId || !label) { console.error('usage: node dctr-seat.mjs --codex-tail <job-record.json> <pane-id> <label>'); process.exit(1) }
+  const readJob = () => { try { return JSON.parse(fs.readFileSync(jobFile, 'utf8')) } catch { return null } }
+  const job = readJob()
+  if (!job) { console.error(`${PREFIX}: could not read ${jobFile}`); process.exit(1) }
+  console.log(`\x1b[2m── doctrine codex · ${label} · ${jobFile}\x1b[0m`)
+  let offset = 0
+  const pump = () => {
+    if (!job.logFile) return
+    let size
+    try { size = fs.statSync(job.logFile).size } catch { return }
+    if (size < offset) offset = 0
+    if (size === offset) return
+    const fd = fs.openSync(job.logFile, 'r')
+    try {
+      const buf = Buffer.alloc(size - offset)
+      fs.readSync(fd, buf, 0, buf.length, offset)
+      offset = size
+      process.stdout.write(buf)
+    } finally { fs.closeSync(fd) }
+  }
+  const poll = () => {
+    pump()
+    const cur = readJob()
+    if (!cur || cur.status === 'running' || cur.status === 'queued') return
+    pump()
+    try { herdr(['pane', 'rename', paneId, `${label} · ${cur.status}`]) } catch { /* label only */ }
+    console.log(`\x1b[2m── codex job ${cur.status}\x1b[0m`)
+    process.exit(0)
+  }
+  setInterval(pump, 250)
+  setInterval(poll, 2000)
+  poll()
+} else {
 
 let logSession = null
 const log = (msg) => hookLog(logSession, msg)
@@ -86,6 +134,9 @@ if (why) stand_down(why)
 
 const liveSeats = () => readSeats(sessionId)
 const withPlacementLock = (fn) => placementLock(sessionId, fn)
+// The session cwd: where a seat's pane shell starts, and the workspace a codex job record names.
+// It is in the payload; process.cwd() stands in when it is not.
+const cwd = payload.cwd || process.cwd()
 
 try {
   if (event === 'SubagentStart') {
@@ -94,6 +145,11 @@ try {
 
     const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
     if (!file) stand_down('could not resolve the seat transcript path')
+    // The harness writes the seat's spawn metadata beside its transcript in the same second this
+    // hook fires; its `description` is the Agent tool's description, the title the status line
+    // shows. Read outside the lock, since the retry inside it would hold every seat behind this one.
+    const meta = readMeta(metaPath(file))
+    const description = meta && typeof meta.description === 'string' ? meta.description : ''
 
     const why = withPlacementLock(() => {
       // Allocate the counter by creating the marker with O_EXCL and retrying on collision. The
@@ -162,15 +218,16 @@ try {
         log(`could not observe the side column (${why}); taking the tab path rather than splitting blind`)
       }
       if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
-        try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
+        try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, cwd)).result.pane.pane_id }
         catch (e) {
           log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
-          try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID)).result.pane.pane_id }
+          try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID, null, cwd)).result.pane.pane_id }
           catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
         }
       }
+      const label = paneLabel(payload.agent_type, description, n)
       if (!paneId) {
-        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(payload.agent_type, n)))
+        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label, cwd))
         tabId = tab.result.tab.tab_id
         paneId = tab.result.root_pane.pane_id
       }
@@ -188,14 +245,16 @@ try {
       // filesystem, node is present, so the renderer runs directly in the pane. A CONTAINED agent
       // never reaches here — DCTR_VIEW_REQUEST_DIR routes it to the bridge-write path above, which
       // makes no herdr call at all.
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file }
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label }
       writeMarker(marker, record)
       reserved = null   // complete: the marker is now a record rather than a reservation
 
       herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
+      // A tab was created under the label; a side pane is named after the fact. Display only.
+      if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { log(`rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
       if (reportsSidebarRow(record)) {
         herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name,
-          '--state', 'working', '--message', `doctrine seat ${payload.agent_type}`])
+          '--state', 'working', '--message', label])
       }
       return null
     })
@@ -228,6 +287,30 @@ try {
     // such session. Tabs answer a different code, hence two predicates rather than one widened one.
     const alreadyGone = (e) => (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e))
 
+    if (seat.role === CODEX_ROLE) {
+      // The wrapper has returned; the job has not. Its record is the newest one for this workspace
+      // written since the seat started, allowing a minute for the plugin's own clock. The plugin
+      // writes it after the wrapper is dispatched, so the record is polled for up to five seconds
+      // inside the hook's ten. No record means the job never started, and the seat closes as any.
+      let notBefore = 0
+      try { notBefore = fs.statSync(path.join(seatsDir(sessionId), `${seat.agent}.json`)).mtimeMs - 60000 } catch { /* the epoch, then */ }
+      const deadline = Date.now() + 5000
+      let job
+      do {
+        sleepMs(500)
+        job = codexJobMatch(codexJobRecords(cwd), cwd, notBefore)
+      } while (!job && Date.now() < deadline)
+      if (job) {
+        const label = seat.label || seat.agent
+        // The renderer still owns the pane's terminal; the watcher line is typed into a shell.
+        try { herdr(['pane', 'send-keys', seat.paneId, 'ctrl+c']) } catch (e) { log(`interrupting the renderer in ${seat.paneId} failed (${String(e.message).split('\n')[0]})`) }
+        herdr(['pane', 'run', seat.paneId, `node ${shq(import.meta.filename)} --codex-tail ${shq(job.file)} ${shq(seat.paneId)} ${shq(label)}`])
+        log(`stop ${seat.agent}: codex job ${job.id || job.file} is ${job.status}; the pane follows it and the marker stays`)
+        process.exit(0)
+      }
+      log(`stop ${seat.agent}: no codex job record for ${cwd} since the seat started; closing as any seat`)
+    }
+
     if (seat.tabId) {
       // The list is advisory: it decides relabel-vs-close and supplies the label, nothing more. A tab
       // the list does not carry — mislocated by a pre-#20 hook, or the list call itself failing — is
@@ -254,7 +337,7 @@ try {
         // Keep the record rather than act blind. SessionEnd will try again, which is the whole
         // reason a marker survives a close it could not make.
         closeFailed = `could not look up ${seat.paneId} (${lookupFailed})`
-      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }
+      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
       else try { herdr(['pane', 'close', seat.paneId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     }
 
@@ -344,7 +427,9 @@ try {
   }
 } catch (e) {
   // herdr is pre-1.0 and its own notes say upgrades can require restarting the server. Every
-  // non-zero exit from it is a skip with a reason, never something to diagnose from in here.
-  stand_down(`herdr refused an action — ${String(e.message).split('\n')[0]}`)
+  // non-zero exit from it is a skip with a reason, never something to diagnose from in here. A
+  // throw that did not come from a spawn is this file's own defect, and is labelled as one.
+  stand_down(`${errorLabel(e)}: ${String(e.message).split('\n')[0]}`)
 }
 process.exit(0)
+}

@@ -22,8 +22,9 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
-  'dctr-seat.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs']
-const SUITES = ['dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
+  'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs']
+/** Cheapest first: the pure suite answers in milliseconds, and `some` stops at the first that notices. */
+const SUITES = ['dctr-seat.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -117,6 +118,92 @@ const MUTATIONS = [
   { name: 'only EEXIST means try the next seat name', file: 'dctr-seat.mjs', clause: 'a reservation that cannot be made must stand down, not spin',
     from: "          if (e.code !== 'EEXIST') { fatal = e; marker = null; break }",
     to: '          if (false) { fatal = e; marker = null; break }' },
+
+  // The field audit of 2026-09-07 (F1, N3, N17, N18).
+  { name: 'the gate pane splits in the launcher cwd', file: 'dctr-gate.mjs', clause: 'the pane path splits with --cwd',
+    from: '          try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, process.cwd())).result.pane.pane_id }',
+    to: '          try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }' },
+  { name: 'the gate tab is created in the launcher cwd', file: 'dctr-gate.mjs', clause: 'the tab path creates with the same --cwd',
+    from: '          const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(GATE_ROLE, n), process.cwd()))',
+    to: '          const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(GATE_ROLE, n)))' },
+  { name: 'the seat pane splits in the session cwd', file: 'dctr-seat.mjs', clause: 'the split carries the session cwd',
+    from: '        try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, cwd)).result.pane.pane_id }',
+    to: '        try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }' },
+  { name: 'the seat tab is created in the session cwd', file: 'dctr-seat.mjs', clause: 'the tab create carries the session cwd',
+    from: '        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label, cwd))',
+    to: '        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label))' },
+  { name: 'the interactive pane splits in the launcher cwd', file: 'dctr-pane.mjs', clause: 'the split carries the launcher cwd',
+    from: '        id = herdr(splitArgs(occupants, sessionPane, layout, process.cwd())).result.pane.pane_id',
+    to: '        id = herdr(splitArgs(occupants, sessionPane, layout)).result.pane.pane_id' },
+  { name: 'the interactive tab is created in the launcher cwd', file: 'dctr-pane.mjs', clause: 'the tab create carries the launcher cwd',
+    from: '        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label, process.cwd()))',
+    to: '        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label))' },
+  { name: 'cwdArgs really adds the flag', file: 'dctr-lib.mjs', clause: 'tab create and both split shapes carry the cwd they are handed',
+    from: "export const cwdArgs = (cwd) => (cwd ? ['--cwd', cwd] : [])",
+    to: 'export const cwdArgs = () => []' },
+  { name: 'a hook error is not a herdr refusal', file: 'dctr-seat.mjs', clause: 'the stand-down names a hook error, not a refusal',
+    from: "  stand_down(`${errorLabel(e)}: ${String(e.message).split('\\n')[0]}`)",
+    to: "  stand_down(`herdr refused an action: ${String(e.message).split('\\n')[0]}`)" },
+  { name: 'errorLabel reads spawnargs', file: 'dctr-lib.mjs', clause: 'a spawn-shaped error is herdr refusing, and anything else is a hook error',
+    from: "export const errorLabel = (e) => (e && e.spawnargs ? 'herdr refused an action' : 'hook error')",
+    to: "export const errorLabel = () => 'herdr refused an action'" },
+  { name: 'the seat meta file is read', file: 'dctr-seat.mjs', clause: 'the side pane is renamed to type plus description',
+    from: '    const meta = readMeta(metaPath(file))',
+    to: '    const meta = null' },
+  { name: 'the side pane is renamed', file: 'dctr-seat.mjs', clause: 'the side pane is renamed to type plus description',
+    from: "      if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { log(`rename of ${paneId} failed (${String(e.message).split('\\n')[0]})`) }",
+    to: '      if (false) { }' },
+  { name: 'the marker carries the label', file: 'dctr-seat.mjs', clause: 'the marker records the label for the stop path',
+    from: '      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label }',
+    to: '      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file }' },
+  { name: 'a codex seat takes the job path', file: 'dctr-seat.mjs', clause: 'the pane is not closed',
+    from: '    if (seat.role === CODEX_ROLE) {',
+    to: '    if (false) {' },
+  { name: 'a codex seat with a job stops there', file: 'dctr-seat.mjs', clause: 'the pane is not closed',
+    from: '        log(`stop ${seat.agent}: codex job ${job.id || job.file} is ${job.status}; the pane follows it and the marker stays`)\n        process.exit(0)',
+    to: '        log(`stop ${seat.agent}: codex job ${job.id || job.file} is ${job.status}; the pane follows it and the marker stays`)' },
+  { name: 'the renderer is interrupted first', file: 'dctr-seat.mjs', clause: 'the renderer is interrupted before the watcher is typed in',
+    from: "        try { herdr(['pane', 'send-keys', seat.paneId, 'ctrl+c']) }",
+    to: "        try { }" },
+  { name: 'the interrupt lands before the watcher, not after', file: 'dctr-seat.mjs', clause: 'the renderer is interrupted before the watcher is typed in',
+    from: "        try { herdr(['pane', 'send-keys', seat.paneId, 'ctrl+c']) } catch (e) { log(`interrupting the renderer in ${seat.paneId} failed (${String(e.message).split('\\n')[0]})`) }\n        herdr(['pane', 'run', seat.paneId, `node ${shq(import.meta.filename)} --codex-tail ${shq(job.file)} ${shq(seat.paneId)} ${shq(label)}`])",
+    to: "        herdr(['pane', 'run', seat.paneId, `node ${shq(import.meta.filename)} --codex-tail ${shq(job.file)} ${shq(seat.paneId)} ${shq(label)}`])\n        try { herdr(['pane', 'send-keys', seat.paneId, 'ctrl+c']) } catch (e) { log(`interrupting the renderer in ${seat.paneId} failed (${String(e.message).split('\\n')[0]})`) }" },
+  { name: 'the job match is by workspace', file: 'dctr-lib.mjs', clause: 'exactly one watcher is run in it, on the running job',
+    from: '  const mine = records.filter((r) => r && r.workspaceRoot === cwd && Date.parse(r.createdAt) >= notBefore)',
+    to: '  const mine = records.filter((r) => r && Date.parse(r.createdAt) >= notBefore)' },
+  { name: 'the job match is by time', file: 'dctr-lib.mjs', clause: 'the newest record for this workspace since the seat started is the match',
+    from: '  const mine = records.filter((r) => r && r.workspaceRoot === cwd && Date.parse(r.createdAt) >= notBefore)',
+    to: '  const mine = records.filter((r) => r && r.workspaceRoot === cwd)' },
+  { name: 'the watcher relabels with the status', file: 'dctr-seat.mjs', clause: 'relabels the pane with the status',
+    from: "    try { herdr(['pane', 'rename', paneId, `${label} · ${cur.status}`]) } catch { /* label only */ }",
+    to: '' },
+  { name: 'the watcher exits when the job finishes', file: 'dctr-seat.mjs', clause: 'the watcher exits once the job is no longer running',
+    from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return",
+    to: '    return' },
+  { name: 'the watcher waits while the job runs', file: 'dctr-seat.mjs', clause: 'the watcher stays alive while the job runs',
+    from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return",
+    to: '' },
+  { name: 'the watcher waits through queued', file: 'dctr-seat.mjs', clause: 'the watcher outlives a record that was queued before it ran',
+    from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return",
+    to: "    if (!cur || cur.status === 'running') return" },
+  { name: 'only this workspace\'s state directories are read', file: 'dctr-state.mjs', clause: "a record in another workspace's state directory is not chosen, though newer",
+    from: '  try { dirs = fs.readdirSync(codexStateDir()).filter((d) => d.startsWith(prefix)) } catch { return [] }',
+    to: '  try { dirs = fs.readdirSync(codexStateDir()) } catch { return [] }' },
+  { name: 'the meta read is retried on any failure', file: 'dctr-state.mjs', clause: 'a meta file that is invalid JSON at first read and valid shortly after yields the description',
+    from: '    catch { if (attempt) return null }',
+    to: '    catch { return null }' },
+  { name: 'the counter stands in for a missing description', file: 'dctr-lib.mjs', clause: 'the pane label is type plus description, or type plus counter without one',
+    from: 'export const paneLabel = (type, description, n) => `${slug(type)} · ${description || n}`',
+    to: 'export const paneLabel = (type, description) => `${slug(type)} · ${description}`' },
+  { name: 'the meta path swaps the transcript extension', file: 'dctr-lib.mjs', clause: 'the meta path sits beside the seat transcript with .meta.json in place of .jsonl',
+    from: "export const metaPath = (transcriptPath) => (transcriptPath ? transcriptPath.replace(/\\.jsonl$/, '.meta.json') : null)",
+    to: "export const metaPath = (transcriptPath) => (transcriptPath ? transcriptPath.replace(/\\.jsonl$/, '.meta.jsonl') : null)" },
+  { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
+    from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
+    to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
+    from: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
+    to: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
@@ -138,7 +225,7 @@ const runSuite = (dir, suite) => {
  *
  *  Running both suites is what lets one harness cover the launcher and the seat hook's teardown
  *  without deciding in advance which suite owns which line. */
-const noticed = (r) => r.code !== 0 && /^ {2}FAIL /m.test(r.out)
+const noticed = (r) => r.code !== 0 && /^ *FAIL /m.test(r.out)
 const anySuiteNotices = (dir) => SUITES.some((s) => noticed(runSuite(dir, s)))
 
 let failures = 0
