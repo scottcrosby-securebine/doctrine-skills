@@ -67,11 +67,34 @@ fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FOCUSED" ]; then
   echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0
 fi
+# The PANE snapshot and the PANE re-ask must be able to DISAGREE, the same way DCTR_TEST_TABS2 lets
+# the tab pair disagree. This file is a JS template literal, so no backticks below. First pane-get
+# call on this id answers unfocused, every later one answers focused: the user focusing a side pane
+# between the hoisted read and the close.
+if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FOCUSED2" ]; then
+  if [ -f "$TMPDIR/paneget-seen" ]; then
+    echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0
+  fi
+  : > "$TMPDIR/paneget-seen"
+  echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":false}}}'; exit 0
+fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
 if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
+fi
+# A LIST that fails with a not-found code ON THE RE-ASK ONLY. The re-ask read that code as "this tab
+# is gone, close it", but the call is workspace-wide and names no tab, so it cannot be an answer about
+# this one. Two phases, because failing the SNAPSHOT too makes the seat unobservable and it never
+# becomes a candidate at all: the clause then passes without the re-ask ever running, which is the
+# very shape of blind clause this suite exists to stop. The mutation gate caught exactly that here.
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_NOTFOUND" ]; then
+  if [ -f "$TMPDIR/tablist-nf-seen" ]; then
+    echo '{"error":{"code":"tab_not_found","message":"tab not found"},"id":"cli:tab:list"}' >&2; exit 1
+  fi
+  : > "$TMPDIR/tablist-nf-seen"
+  echo '{"result":{"tabs":'"$DCTR_TEST_TABS"'}}'; exit 0
 fi
 # The snapshot and the re-ask must be able to DISAGREE, or nothing can show that re-asking matters.
 # First call answers DCTR_TEST_TABS, every later call answers DCTR_TEST_TABS2: the user focusing a
@@ -533,6 +556,40 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     `${callLines(/^tab (list|close)/).join(' | ') || '(no tab calls)'}`)
   check('and the fixture really did answer twice and differently, proved without the hook',
     fs.existsSync(path.join(tmp, 'tablist-seen')) && callLines(/^tab list/).length >= 2,
+    `tab list calls: ${callLines(/^tab list/).length}`)
+
+  // THE SAME WINDOW, ON A SIDE PANE. The re-ask was added for tabs only, so a pane candidate was
+  // still destroyed on the answer read during candidate collection — and the tab re-asks the repair
+  // added now sit BETWEEN that read and this close, so the repair lengthened the window it left
+  // open. First `pane get` answers unfocused, every later one answers focused.
+  reset()
+  try { fs.rmSync(path.join(tmp, 'paneget-seen'), { force: true }) } catch { /* first run */ }
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: null, paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_GET_FOCUSED2: 'w1:s1' })
+  check('a side PANE focused BETWEEN the hoisted snapshot and the close is spared, exactly as a tab is',
+    called(/^pane get w1:s1/m) && !called(/^pane close w1:s1/m) && stillSeatOne(),
+    `${callLines(/^pane (get|close)/).join(' | ') || '(no pane calls)'}`)
+  check('and that fixture really did answer twice and differently, proved without the hook',
+    fs.existsSync(path.join(tmp, 'paneget-seen')) && callLines(/^pane get w1:s1/).length >= 2,
+    `pane get calls: ${callLines(/^pane get w1:s1/).length}`)
+
+  // A not-found code on a WORKSPACE-WIDE list is not an answer about this tab. The re-ask read it as
+  // one and closed on it, which is the destructive direction; the snapshot read of the same command
+  // treats every failure as do-not-close. A transport error cannot tell the two apart, so the
+  // TABLIST_FAILS clause above passes either way and this is the fixture that discriminates.
+  reset()
+  try { fs.rmSync(path.join(tmp, 'tablist-nf-seen'), { force: true }) } catch { /* first run */ }
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', {
+    DCTR_TEST_TABS: '[{"tab_id":"w1:t8","focused":false}]',
+    DCTR_TEST_TABLIST_NOTFOUND: '1' })
+  check('a tab whose RE-ASK list answered tab_not_found is spared: a not-found on a workspace list names no tab',
+    !called(/^tab close w1:t8/m) && stillSeatOne(),
+    `${callLines(/^tab (list|close)/).join(' | ') || '(no tab calls)'}`)
+  // Without this the clause above passes on a run where the snapshot alone answered and the seat was
+  // never a candidate — which is how it first passed with the repair reverted.
+  check('and the re-ask really ran: the snapshot answered, then a SECOND list call was made',
+    callLines(/^tab list/).length >= 2 && fs.existsSync(path.join(tmp, 'tablist-nf-seen')),
     `tab list calls: ${callLines(/^tab list/).length}`)
 
   // And a list call that failed closes nothing at all: unobservable is not unfocused, for a tab

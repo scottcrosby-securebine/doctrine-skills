@@ -73,8 +73,10 @@ if (argv[0] === '--run') {
   ticker?.unref()
   // No clearInterval below on purpose. This handler runs synchronously through to process.exit, so
   // no timer can fire between the last tick and the exit rename, and the mutation gate reported the
-  // guard as pinned by nothing. A guard whose absence no fixture can show is the class this repo
-  // keeps finding (CLAUDE.md), so it is not here.
+  // guard as pinned by nothing. That is not on its own a reason to leave it out — CLAUDE.md's rule
+  // is that no fixture reaching a guard means a MISSING FIXTURE, not a dead branch. It is out because
+  // the two paths are behaviourally identical: with the handler running synchronously through to
+  // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
     // A check whose last write has no newline would otherwise fuse with the exit line, and the
     // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
@@ -113,11 +115,15 @@ if (argv[0] === '--run') {
         // left a focused gate pane that SessionEnd could no longer find.
         try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
       } else {
-        // The record goes FIRST here and only here, because this call kills the shell and nothing
-        // after it is guaranteed to run (the first live run left a marker behind). A close that then
-        // fails for any reason other than not-found has cost us the record, which is the price of
-        // the one ordering the shell forces; every other branch above avoids paying it.
-        dropMarker()
+        // DO NOT drop the record here (Scott's ruling, 2026-09-08). The ordering is forced — this
+        // call kills the shell, so nothing after it is guaranteed to run — but the price is not.
+        // Dropping first paid a PERMANENT live-pane-with-no-record whenever the close failed for a
+        // transport reason: SessionEnd reaches panes only through surviving records, and
+        // `sideOccupants` counts markers rather than layout panes, so the column then under-counts
+        // and a seventh pane can be split onto six. The marker a SUCCESSFUL close leaves behind
+        // costs one gate name until the next placement and is self-correcting: its pane is gone from
+        // the layout, so `staleSideSeats` drops it there, and SessionEnd's own close answers
+        // `pane_not_found`, which it already reads as "already gone".
         try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }
       }
     } else dropMarker()
@@ -179,8 +185,9 @@ if (argv[0] === '--run') {
       // No index bound here on purpose. One was added and removed in the same round: with the errno
       // split above, a real failure leaves through `fatal`, and unbounded EEXIST would need another
       // process to steal each freshly-chosen name in turn, which a six-pane cap does not produce.
-      // The mutation gate reported it as pinned by nothing, and a guard whose absence no fixture can
-      // show is the class this repo keeps finding. `nextIndex` carries the only bound that fires.
+      // The mutation gate reported it as pinned by nothing, which under CLAUDE.md's narrowed rule
+      // asks for a fixture rather than licensing a deletion. It stays out because the bound would be
+      // unreachable, not merely unpinned: `nextIndex` carries the only bound that fires.
       while (n && !marker && !fatal) {
         name = agentName(GATE_ROLE, n)
         try {
@@ -238,9 +245,17 @@ if (argv[0] === '--run') {
           // its ids. This branch is for the narrow case where THAT write is what failed, leaving
           // reserveMarker's `{}` — which SessionEnd cannot act on. Reaching it needs the seats
           // directory to become unwritable between reserve and write. Missing fixture, not dead code.
-          try { writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label }) }
-          catch (we) { hookLog(sessionId, `gate "${label}": could not publish a record for the pane it could not close (${String(we.message).split('\n')[0]})`) }
-          hookLog(sessionId, `gate "${label}": rollback could not close ${tabId || paneId}; its record is published for SessionEnd`)
+          // The success line is GATED on the publish, and it was not: both lines printed, the second
+          // contradicting the first, and an operator reading "its record is published" then believed
+          // SessionEnd could reach a pane whose record was still reserveMarker's `{}`.
+          let published = false
+          try {
+            writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
+            published = true
+          } catch (we) { hookLog(sessionId, `gate "${label}": could not publish a record for the pane it could not close (${String(we.message).split('\n')[0]})`) }
+          hookLog(sessionId, published
+            ? `gate "${label}": rollback could not close ${tabId || paneId}; its record is published for SessionEnd`
+            : `gate "${label}": rollback could not close ${tabId || paneId} AND could not record it; the pane is live and SessionEnd cannot reach it`)
         }
         throw e
       }

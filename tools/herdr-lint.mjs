@@ -20,10 +20,14 @@
 //      nothing to distinguish them with.
 //
 //   E2 unseparated emptiness — a herdr reply's `.result...` navigated straight into a truthiness
-//      test (a ternary, a `!`, an `&&`/`||`, an `if`). A reply carrying `result` but not the field
-//      is not the same as a field that is absent, and truthiness cannot tell them apart. This is
-//      the half that stayed broken at dctr-pane.mjs:243 through three rounds of sweeping the other
-//      half, because every reviewer was looking at catch blocks.
+//      test, and the two forms it matches are exactly a ONE-LINE ternary and a direct `!`. A reply
+//      carrying `result` but not the field is not the same as a field that is absent, and truthiness
+//      cannot tell them apart. This is the half that stayed broken at dctr-pane.mjs:243 through
+//      three rounds of sweeping the other half, because every reviewer was looking at catch blocks.
+//      It does NOT match `&&`, `||`, or an `if (...)` test, and this header said it did through two
+//      revisions: `if (herdr([...]).result.pane) keep(); else destroy(id)` returns no finding today.
+//      Widening it is a change that must be measured against the whole corpus first, the way the
+//      first draft was — that run reported 32 findings, of which 17 were mutation payloads.
 //
 // WHAT IT DOES NOT CHECK, and this list is the honest part:
 //
@@ -74,7 +78,12 @@ export const isSuppressed = (line, prev) => /herdr-lint:\s*\S/.test(line) || /he
 export const emptinessFinding = (line) => {
   const stripped = line.replace(/\/\/.*$/, '')
   if (!/herdr\s*\(/.test(stripped)) return null
-  // `?.` is the separated form and must not match; a bare `.result.x ?` or `!herdr(...)...` is not.
+  // `?.` does NOT match, and calling it "the separated form" was wrong: `result?.pane ? 'live' :
+  // 'gone'` still maps a missing field to a definite answer. Optional chaining guards a missing
+  // INTERMEDIATE; it separates nothing about the field itself. It is excluded because every `?.`
+  // read in this repo is followed by an `Array.isArray` or a `typeof === 'boolean'` that does the
+  // separating, so matching it here would have cried wolf on all of them — a corpus fact, not a
+  // property of the syntax, and it stops being true the moment someone writes one without the guard.
   const ternary = /herdr\s*\([^)]*\)[^?\n]*\.result[^?\n]*\?[^.]/.test(stripped)
   const negated = /!\s*herdr\s*\(/.test(stripped)
   if (!ternary && !negated) return null
@@ -93,16 +102,35 @@ export const failureFindings = (src) => {
   const out = []
   for (let i = 0; i < lines.length; i++) {
     if (!/\btry\s*\{/.test(lines[i])) continue
+    // Stop at the BRACE that closes the try, not at the end of the line carrying it. Testing the
+    // depth only after the whole line meant `} catch (e) {` netted back to 1 — closing the try and
+    // opening the catch on one line — so the walk ran straight past the catch and on to the catch's
+    // own closing brace, where the `tail` test below then found no `catch` and dropped the block.
+    // E1 therefore judged only a try whose catch body fitted on ONE physical line, which silently
+    // excluded five real blocks in `hooks/`, and one walk ran from line 148 to line 605, attributing
+    // unrelated herdr calls to the wrong try.
+    // A read belongs to the INNERMOST try that holds it. Without this, an outer try is judged on a
+    // read that a nested, correctly-separated try already handles — `dctr-gate.mjs`'s placement block
+    // and `dctr-pane.mjs`'s open block are both that shape — and the outer catch, which never sees
+    // that reply at all, is blamed for not separating it. Each nested try is judged on its own pass,
+    // since the outer loop visits every `try {` line, so nothing goes unjudged by skipping it here.
     let depth = 0, j = i, sawHerdr = false, sawRead = false, started = false
+    const nested = []
     for (; j < lines.length; j++) {
       const code = lines[j].replace(/\/\/.*$/, '')
-      if (/herdr\s*\(/.test(code)) sawHerdr = true
-      if (/herdr\s*\([^)]*\)[^\n]*\.result/.test(code)) sawRead = true
+      const opensNested = j > i && /\btry\s*\{/.test(code)
+      if (!nested.length && !opensNested) {
+        if (/herdr\s*\(/.test(code)) sawHerdr = true
+        if (/herdr\s*\([^)]*\)[^\n]*\.result/.test(code)) sawRead = true
+      }
+      if (opensNested) nested.push(depth)
+      let closed = false
       for (const ch of code) {
         if (ch === '{') { depth++; started = true }
-        else if (ch === '}') depth--
+        else if (ch === '}') { depth--; if (started && depth <= 0) { closed = true; break } }
       }
-      if (started && depth <= 0) break
+      while (nested.length && depth <= nested[nested.length - 1]) nested.pop()
+      if (closed) break
     }
     // A READ decides; a COMMAND does not. `herdr(['pane','rename',...])` failing loses a label, and
     // that is not a decision anyone acts on. `pane = herdr(['pane','get',...]).result.pane` is the

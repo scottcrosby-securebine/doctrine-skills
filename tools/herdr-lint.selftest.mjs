@@ -45,14 +45,36 @@ function sweep(id) {
   if (!rec) destroy(id)
 }
 `
+// THE SAME DEFECT WITH THE CATCH ON MORE THAN ONE LINE, which is the ordinary way it is written.
+// BROKEN_E1 above puts the catch on one physical line, and that was the only shape E1 could see: the
+// walk tested its brace depth after the whole line, so `} catch (e) {` netted back up and the walk
+// ran past the catch to the catch's own closing brace, where the tail test found no `catch` and
+// dropped the block. Five real blocks in `hooks/` were discarded that way. A fixture that differs
+// from the one above ONLY in line breaks is what makes that visible.
+const BROKEN_E1_MULTILINE = `
+import { herdr } from './dctr-state.mjs'
+function sweepAgain(id) {
+  let rec
+  try {
+    rec = herdr(['pane', 'get', id]).result.pane
+  } catch (e) {
+    rec = null
+  }
+  if (!rec) destroy(id)
+}
+`
 fs.writeFileSync(path.join(tmp, 'dctr-broken2.mjs'), BROKEN_E2)
 fs.writeFileSync(path.join(tmp, 'dctr-broken1.mjs'), BROKEN_E1)
+fs.writeFileSync(path.join(tmp, 'dctr-broken3.mjs'), BROKEN_E1_MULTILINE)
 const tripped = scan(tmp)
 clause('clause 1a: an unseparated SUCCESS half (the ternary) is reported',
   tripped.some((f) => f.rule === 'E2' && f.file === 'dctr-broken2.mjs'),
   JSON.stringify(tripped))
 clause('clause 1b: an unseparated FAILURE half (a catch naming no predicate) is reported',
   tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-broken1.mjs'),
+  JSON.stringify(tripped))
+clause('clause 1c: and the same defect with the catch spread over several lines is reported too, which is how it is normally written',
+  tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-broken3.mjs'),
   JSON.stringify(tripped))
 
 // ---------------------------------------------------------------- clause 2: it stays quiet
@@ -112,6 +134,32 @@ clause('clause 3c: both still agree on a reply that DOES carry a pane, so 3a is 
   brokenAsk({ result: { pane: { id: 'p1' } } }) === 'live' && fixedAsk({ result: { pane: { id: 'p1' } } }) === 'live' &&
   brokenAsk({ result: { pane: null } }) === 'gone' && fixedAsk({ result: { pane: null } }) === 'gone',
   'without this, clause 3a could pass because the repaired form is simply broken differently')
+
+// The same third clause for E1, which had none: clauses 1b and 1c prove the CHECKER reports those
+// fixtures, and 3f proves it stays quiet without a herdr call, but nothing showed the E1 fixtures
+// carry a real defect. No linter is called below. Both forms run against a stub herdr that throws
+// the way a real one does when the server is unreachable, which is not a not-found answer.
+const throwsTransport = () => { throw new Error('no route to server') }
+const answersPane = () => ({ result: { pane: { pane_id: 'p1' } } })
+const isNotFoundStub = () => false   // a transport error carries no not-found code
+const brokenSweep = (call) => { let rec; try { rec = call().result.pane } catch { rec = null } ; return rec ? 'kept' : 'destroyed' }
+const fixedSweep = (call) => {
+  let rec, gone = false
+  try { rec = call().result.pane } catch (e) { gone = isNotFoundStub(e) }
+  return gone ? 'destroyed' : 'kept'
+}
+clause('clause 3g: the E1 fixture shape really destroys a live pane when the lookup merely FAILED — proved without the checker',
+  brokenSweep(throwsTransport) === 'destroyed',
+  `got ${brokenSweep(throwsTransport)}`)
+clause('clause 3h: and the separated form really keeps it for the same failure',
+  fixedSweep(throwsTransport) === 'kept',
+  `got ${fixedSweep(throwsTransport)}`)
+clause('clause 3i: both still agree on a reply that DOES carry a pane, so 3g is about the failure and not about breaking the read',
+  brokenSweep(answersPane) === 'kept' && fixedSweep(answersPane) === 'kept',
+  'without this, 3g could pass because the broken form never keeps anything')
+clause('clause 3j: the two E1 fixtures really differ ONLY in line breaks, so clause 1c isolates the multi-line catch',
+  BROKEN_E1.replace(/\s+/g, ' ').replace('sweep(', 'X(') === BROKEN_E1_MULTILINE.replace(/\s+/g, ' ').replace('sweepAgain(', 'X(').replace('catch (e)', 'catch'),
+  'if they differed in substance, 1c would be measuring something other than the line breaks')
 
 // The two pure helpers, so a rule change that stops matching anything is visible.
 clause('clause 3d: emptinessFinding really discriminates, on strings alone',

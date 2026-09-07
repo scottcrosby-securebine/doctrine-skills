@@ -268,6 +268,16 @@ clause('clause 1y — a side seat whose pane the layout lacks is stale; tab seat
   staleSideSeats([TAB_SEAT(1)], LAYOUT).length === 0,
   JSON.stringify(STALE))
 
+// A layout with an entry carrying no `pane_id` is a PARTIAL observation, and it was read as a
+// complete one: `undefined` went into the live set, every real pane then failed the `has`, and EVERY
+// live side seat came back stale — with both callers unlinking those markers without an existence
+// lookup. Emptiness already meant "I could not look"; partiality has to mean the same thing.
+const PARTIAL_LAYOUT = [{ pane_id: SIDE_SEAT(1).paneId }, {}]
+clause('clause 1bb — a layout carrying an entry with no pane_id is not an observed layout, so nothing is judged stale',
+  staleSideSeats([SIDE_SEAT(2)], PARTIAL_LAYOUT).length === 0 &&
+  staleSideSeats([SIDE_SEAT(1), SIDE_SEAT(2), SIDE_SEAT(3)], PARTIAL_LAYOUT).length === 0,
+  JSON.stringify(staleSideSeats([SIDE_SEAT(1), SIDE_SEAT(2), SIDE_SEAT(3)], PARTIAL_LAYOUT)))
+
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
@@ -432,6 +442,16 @@ clause('clause 3m — the layout fixture really carries seats 1 and 2 and really
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
   !LAYOUT.some((p) => p.pane_id === SIDE_SEAT(3).paneId) && !LAYOUT.some((p) => p.pane_id === TAB_SEAT(1).paneId),
   'if the layout carried seat 3, 1y would prove staleSideSeats never fires; if it carried the tab pane, the tab clause would be vacuous')
+
+// Third clause for 1bb, and it never calls staleSideSeats: it runs the OLD body's own expression
+// (`new Set(layoutPanes.map(p => p.pane_id))`) over the fixture and shows a live seat is absent from
+// it, which is exactly how a live pane got condemned. Without this, 1bb would pass just as well
+// against a fixture that could never have broken anything.
+clause('clause 3w — the partial-layout fixture really carries the defect: the naive live-set built from it lacks a LIVE seat, shown without staleSideSeats',
+  PARTIAL_LAYOUT.length === 2 && PARTIAL_LAYOUT[0].pane_id === SIDE_SEAT(1).paneId &&
+  PARTIAL_LAYOUT[1].pane_id === undefined &&
+  !new Set(PARTIAL_LAYOUT.map((p) => p.pane_id)).has(SIDE_SEAT(2).paneId),
+  `naive set: ${JSON.stringify([...new Set(PARTIAL_LAYOUT.map((p) => p.pane_id))])} — SIDE_SEAT(2) is live and absent from it`)
 
 clause('clause 3n — the mountinfo fixture really carries a 64-hex id under /containers/, shown without the parser',
   MOUNTINFO.includes('/containers/') && CID.length === 64 && [...CID].every((c) => '0123456789abcdef'.includes(c)) &&

@@ -77,7 +77,8 @@ if (process.argv[2] === '--codex-tail') {
   // production interval: the teardown suite used to wait 2500ms purely to outlast this. Production
   // is the default, so a run without the variable behaves exactly as before. The PUMP interval is
   // NOT injectable: it was, briefly, and nothing needed it and no clause could tell whether it was
-  // honoured — an override no fixture can show the absence of is the class this repo removes.
+  // honoured. Not because no fixture could show it — one plainly could, and CLAUDE.md calls that a
+  // missing fixture — but because nothing needed the override in the first place.
   setInterval(pump, PUMP_MS)
   setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)
   poll()
@@ -229,6 +230,12 @@ try {
           } else {
             try {
               const pane = herdr(['pane', 'get', s.paneId]).result?.pane
+              // NOT pinned by a mutation any more, and deliberately kept — the same position round 2
+              // reached for the tab half. Since the close loop now re-asks a PANE before destroying
+              // it, forcing this to a bare `=== true` only makes a seat a candidate the re-ask then
+              // spares: the cost is a wasted round trip, never a wrong close, so no clause can
+              // redden. Behaviourally identical is the dead-branch case; this is the guard that stays
+              // because the re-ask below is what makes it so, and it stops being so if that changes.
               if (typeof pane?.focused === 'boolean') focused = pane.focused
             } catch (e) {
               // `pane_not_found` IS an observation: that pane is gone, so it is not focused, and the
@@ -241,21 +248,32 @@ try {
         })
         const closed = new Set()
         for (const s of codexPanesToClose(candidates)) {
-          // RE-ASK IMMEDIATELY BEFORE DESTROYING. The snapshot above is taken once, and candidate
-          // collection then makes a herdr round trip for every PANE seat after it. The user can focus
-          // a tab inside that window, and the placement lock serializes placements, not the user's
-          // attention. Hoisting the read fixed a wrong question and introduced a stale answer.
+          // RE-ASK IMMEDIATELY BEFORE DESTROYING, for a PANE seat exactly as for a tab one. The
+          // snapshot above is taken once, and candidate collection then makes a herdr round trip for
+          // every pane seat after it, plus a re-ask for every tab and a close for every candidate
+          // already handled — on the order of ten calls, each bounded at HERDR_TIMEOUT_MS. The user
+          // can focus a pane or a tab anywhere inside that window, and the placement lock serializes
+          // placements, not the user's attention. Hoisting the read fixed a wrong question and
+          // introduced a stale answer; re-asking only for tabs fixed the stale answer for half the
+          // candidates and left the other half reading a snapshot that is older still, because the
+          // tab re-asks now sit between that read and this close.
+          let stillUnfocused = false
           if (s.tabId) {
-            let stillUnfocused = false
+            // herdr-lint: separated by the stillUnfocused FLAG, which starts false. Every failure of the list leaves it false and the candidate is spared, so no answer this try can fail to get authorizes the close below.
             try {
               const now = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result?.tabs
               if (Array.isArray(now)) {
                 const t = now.find((x) => x.tab_id === s.tabId)
                 stillUnfocused = !t || t.focused === false   // absent is an observed absence; unknown focus is not
               }
-            } catch (e) { stillUnfocused = isTabNotFound(e) }
-            if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }
+            } catch { stillUnfocused = false }   // a LIST that failed is "I could not look", about no tab in particular
+          } else {
+            try {
+              const pane = herdr(['pane', 'get', s.paneId]).result?.pane
+              if (typeof pane?.focused === 'boolean') stillUnfocused = pane.focused === false
+            } catch (e) { stillUnfocused = isPaneNotFound(e) }   // gone IS an answer; anything else is not
           }
+          if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }
           try { herdr(s.tabId ? ['tab', 'close', s.tabId] : ['pane', 'close', s.paneId]) }
           catch (e) {
             // A not-found code is an ANSWER: that pane or tab is already gone, so its marker should
@@ -277,8 +295,8 @@ try {
           // removes its own gate
           // marker outside the lock, in another process; close-on-next never considers one, since a
           // gate marker carries no codexJob and only codexJob seats are candidates.) No identity
-          // check, because no interleaving can change the name under it, and a guard whose absence
-          // no fixture can show is the class this repo removes.
+          // check, because no interleaving can change the name under it. That argument is the whole
+          // reason; "no fixture reaches it" would not be one, per CLAUDE.md's narrowed rule.
           // Logged, not silent: every other branch of this file's marker logic says what it did,
           // and an unlink that fails here drops the seat from the in-memory roster while its record
           // survives on disk. Self-correcting (the next placement sees the pane gone and retries,
@@ -303,8 +321,9 @@ try {
       // No index bound here on purpose. One was added and removed in the same round: with the errno
       // split above, a real failure leaves through `fatal`, and unbounded EEXIST would need another
       // process to steal each freshly-chosen name in turn, which a six-pane cap does not produce.
-      // The mutation gate reported it as pinned by nothing, and a guard whose absence no fixture can
-      // show is the class this repo keeps finding. `nextIndex` carries the only bound that fires.
+      // The mutation gate reported it as pinned by nothing, which under CLAUDE.md's narrowed rule
+      // asks for a fixture rather than licensing a deletion. It stays out because the bound would be
+      // unreachable, not merely unpinned: `nextIndex` carries the only bound that fires.
       while (n && !marker && !fatal) {
         name = agentName(payload.agent_type, n)
         try {
@@ -558,6 +577,16 @@ try {
         // the records that say how to tear it down.
         let failed = 0
         for (const seat of seats) {
+          // A record that NAMES nothing cannot be closed. `reserveMarker` publishes `{}` and it
+          // survives whenever a rollback's republish also failed, so this shape reaches disk; asking
+          // herdr to close `undefined` turned a useless record into a failed close, which is a
+          // different thing from a pane that would not die. Counted rather than ignored, so the
+          // directory is kept with the evidence still in it.
+          if (!seat || (!seat.tabId && !seat.paneId)) {
+            failed += 1
+            log('SessionEnd: a seat record names neither a pane nor a tab; there is nothing to close, keeping it')
+            continue
+          }
           try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) }
           catch (e) {
             // Same rule as SubagentStop above: "not found" is an answer, and the thing we were

@@ -253,9 +253,17 @@ export const seatPlacement = (liveSeats, sessionPaneId, cap = SIDE_CAP) =>
  * 2026-08-31: two markers from 08:56 sent the 15:25 seat to a tab). With no layout observed
  * nothing is known stale, so nothing is dropped; a tab seat is never judged here because its pane
  * lives in another tab the session-pane layout does not show.
+ *
+ * A PARTIALLY observed layout is not an observed one. An entry carrying no `pane_id` puts
+ * `undefined` in the live set and every real pane then fails the `has`, so a reply with one
+ * incomplete entry declares EVERY live side seat stale — and both callers unlink those markers with
+ * no existence lookup, so the panes leak and the cap goes wrong. Emptiness was already read as "I
+ * could not look"; this reads partiality the same way, which is the same distinction the herdr
+ * readers make everywhere else in these files.
  */
 export function staleSideSeats(liveSeats, layoutPanes) {
   if (!layoutPanes?.length) return []
+  if (!layoutPanes.every((p) => p && typeof p.pane_id === 'string' && p.pane_id)) return []
   const live = new Set(layoutPanes.map((p) => p.pane_id))
   return liveSeats.filter((s) => isSideSeat(s) && !live.has(s.paneId))
 }

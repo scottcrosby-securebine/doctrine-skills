@@ -94,6 +94,12 @@ if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_GONE" ]; then echo '{"error":{"code":"pane_not_found","message":"no such pane"}}' >&2; exit 1; fi
+# Make the seats directory unwritable at the moment the PLACEMENT write happens, and writable again
+# by the time the rollback's republish runs. Without this the placement's own writeMarker has already
+# put the pane id on disk before anything fails, so clause 1o reads a value the republish never wrote
+# and passes with the republish deleted. The close is the reset point because it runs between them.
+if [ "$1 $2" = "pane rename" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 500 "$TMPDIR/dctr-gate-selftest/seats"; fi
+if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 700 "$TMPDIR/dctr-gate-selftest/seats"; fi
 if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_CLOSE_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
 if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_RUN_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
 case "$1 $2" in
@@ -220,18 +226,32 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
     b.calls.includes('pane rename') && !b.calls.includes('pane close') && fs.existsSync(b.m),
     `rename: ${b.calls.includes('pane rename')}; marker: ${fs.existsSync(b.m)}`)
 
+  // The record is LEFT here, and that is the repair rather than an oversight. Dropping it first paid
+  // a permanent live-pane-with-no-record on every failed close; the leftover is swept by the next
+  // placement (its pane is gone from the layout, so staleSideSeats drops it) or by SessionEnd, whose
+  // close answers pane_not_found and reads that as already gone. Clause 1p below drives the failed
+  // close and is the half that shows why the ordering changed.
   const c = run(3, {}, 'ordinary')
-  clause('clause 1k: an ordinary unfocused pane is closed and its record dropped, the one branch that must drop it first',
-    c.calls.includes('pane close w1:pS') && !fs.existsSync(c.m),
-    `close: ${c.calls.includes('pane close w1:pS')}; marker still there: ${fs.existsSync(c.m)}`)
+  clause('clause 1k: an ordinary unfocused pane is CLOSED, and its record is left for the sweep rather than dropped ahead of a close that may fail',
+    c.calls.includes('pane close w1:pS') && fs.existsSync(c.m),
+    `close: ${c.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
 
   const d = run(4, { DCTR_TEST_GET_GONE: '1' }, 'pane gone')
   clause('clause 1l: a pane the lookup says is GONE has its record dropped and is not closed — not-found is an answer',
     !d.calls.includes('pane close') && !fs.existsSync(d.m),
     `closes: ${d.calls.includes('pane close')}; marker: ${fs.existsSync(d.m)}`)
 
-  clause('clause 1m: the four differ ONLY in the herdr reply, so the record\'s fate is what the reply decides and nothing else',
-    [a, b, c, d].every((r) => r.calls.includes('pane get w1:pS')),
+  // THE BRANCH THE ORDERING EXISTS FOR, and it had no clause at all: the old one (1j) was deleted
+  // along with the marker-restore machinery and nothing replaced it, so the sentence the whole
+  // rewrite rests on was pinned by nothing. An unfocused pane whose close FAILS is exactly the case
+  // that used to end with a live pane and no record.
+  const e = run(5, { DCTR_TEST_CLOSE_FAILS: '1' }, 'close fails')
+  clause('clause 1p: a close that FAILED leaves the pane alive AND its record intact, so SessionEnd can still reach it',
+    e.calls.includes('pane close w1:pS') && fs.existsSync(e.m),
+    `close attempted: ${e.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
+
+  clause('clause 1m: the five differ ONLY in the herdr reply, so the record\'s fate is what the reply decides and nothing else',
+    [a, b, c, d, e].every((r) => r.calls.includes('pane get w1:pS')),
     'if any of them never called pane get, its clause is measuring the launcher standing down')
 
   clause('clause 3d: the fixtures really answer differently, proved without the launcher',
@@ -271,7 +291,7 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // showing — so its exit status says nothing here. What the record says is the whole finding.
   try {
     execFileSync('node', [script, 'rollback gate', path.join(tmp, 'roll.out'), '--', 'true'],
-      { env: paneEnv({ DCTR_TEST_RUN_FAILS: '1', DCTR_TEST_CLOSE_FAILS: '1' }), encoding: 'utf8', stdio: 'pipe' })
+      { env: paneEnv({ DCTR_TEST_RUN_FAILS: '1', DCTR_TEST_CLOSE_FAILS: '1', DCTR_TEST_SEATS_RO: '1' }), encoding: 'utf8', stdio: 'pipe' })
   } catch { /* status is not the assertion */ }
   // Same layout dctr-state.mjs writes: TMPDIR/dctr-<session>/seats, and paneEnv pins both.
   const seats = path.join(tmp, 'dctr-gate-selftest', 'seats')

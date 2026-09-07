@@ -320,6 +320,7 @@ async function open(label, tee, connect) {
   // as "not in the layout" and split a seventh. A snapshot taken before the lock is not evidence of
   // anything by the time the lock is held.
   let paneId, opened = null
+  // herdr-lint: creation, not destruction. The split and the tab create are the only reads this try owns; a failure leaves through the catch below, which dies and closes nothing.
   try {
     paneId = withPlacementLock(sessionId, () => {
       let layout
