@@ -170,12 +170,23 @@ export function parseHerdr(stdout) {
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 
 /**
- * What to do with a seat's tab once the seat has stopped, given the tab's record from this
- * session's workspace list — or `undefined` where the list does not carry it. An unlisted tab is
- * closed by id (herdr tab ids are global), never skipped: a skipped tab outlives its marker, and
- * once the marker is gone nothing — not even the SessionEnd sweep — can ever reach it (issue #20).
+ * What to do with a seat's pane or tab once the seat has stopped, given that pane or tab's own
+ * record. THREE answers, not two: `relabel` for a definite focused, `close` for a definite
+ * unfocused, and `unknown` for everything else — a lookup that failed, a reply carrying no record,
+ * a record with no boolean `focused`.
+ *
+ * It returns `unknown` rather than collapsing to `close` because the pane a blind close destroys is
+ * the focused one the user is watching, and because a pure function cannot see its caller's guard:
+ * three separate call sites each believed the caller above it had already separated the unknown
+ * case, and two of them had not. What `unknown` MEANS is the caller's to decide and differs by
+ * site, which is exactly why this function must not decide it. An unlisted tab is still closed by
+ * id where the list itself SUCCEEDED (herdr tab ids are global, and a skipped tab outlives its
+ * marker — issue #20), but that is an absence the caller observed, not this function's guess.
  */
-export const stopAction = (tab) => (tab && tab.focused ? 'relabel' : 'close')
+export const stopAction = (rec) => {
+  if (typeof rec?.focused !== 'boolean') return 'unknown'
+  return rec.focused ? 'relabel' : 'close'
+}
 
 /**
  * The full argument list for creating a seat's tab. `--workspace` is not optional: without it the
@@ -263,6 +274,9 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  * Pure, so a clause and a mutation can pin it; the gate's wiring of it cannot be pinned by the gate
  * itself, which is the honest limit of a harness that tests with the machinery it is testing.
  */
+export const poolShortfall = (results, expected) =>
+  Math.max(0, expected - results.filter((r) => r !== undefined).length)
+
 /**
  * How many times a mutation's anchor text occurs in its file. The gate requires exactly one: it
  * tested only PRESENCE and then replaced the FIRST hit, so an anchor that came to appear twice would
@@ -271,8 +285,15 @@ export function staleSideSeats(liveSeats, layoutPanes) {
  */
 export const anchorCount = (text, from) => text.split(from).length - 1
 
-export const poolShortfall = (results, expected) =>
-  Math.max(0, expected - results.filter((r) => r !== undefined).length)
+/**
+ * What the gate does with an anchor that occurred `hits` times. Pure so that a clause and a mutation
+ * can reach the DECISION: `anchorCount` alone only counts, and a runner that kept counting correctly
+ * while comparing wrongly — `hits === 0` in place of `hits !== 1` — accepted duplicate anchors again
+ * with the counter's own clause and mutation still green. That regression is now one mutation away
+ * from red. What remains unpinnable is the single `if` in dctr-mutations.mjs that consumes this, for
+ * the reason poolShortfall's block gives: the gate cannot mutate the file it runs from.
+ */
+export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')
 
 export const TOKEN_TTL_MS = 3600000
 

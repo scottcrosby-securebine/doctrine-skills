@@ -38,6 +38,12 @@ const calls = path.join(tmp, 'calls')
 //   herdr pane close w7W:pNOPE -> {"error":{"code":"pane_not_found",...},"id":"cli:pane:close"}  rc=1
 //   herdr tab close  <gone>    -> {"error":{"code":"tab_not_found",...}}                          rc=1
 // The tab code is DIFFERENT, so a predicate widened to cover panes does not cover tabs.
+// DCTR_TEST_TABS is the workspace tab list; absent, the list SUCCEEDS and carries no tab, which is
+// an OBSERVED absence (issue #20: close by recorded id). DCTR_TEST_TABLIST_FAILS makes the call
+// itself throw, which is a different answer entirely and must never close anything. Before these
+// existed there was no `tab list` handler at all: every tab fixture drove the call into the default
+// `{"result":{}}`, the caller's bare catch swallowed the TypeError, and `stopAction(undefined)`
+// closed the tab — so the suite was green over a transport blip destroying a focused tab.
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
 if [ "$1 $2" = "pane close" ] && [ "$3" = "$DCTR_TEST_CLOSE_FAILS" ]; then
@@ -64,6 +70,9 @@ fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
+if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_FAILS" ]; then
+  echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
+fi
 if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_REMOVE_ON_RUN" ]; then
   rm -f "$DCTR_TEST_REMOVE_ON_RUN"
 fi
@@ -82,6 +91,7 @@ case "$1 $2" in
   "pane layout") if [ -n "$DCTR_TEST_LAYOUT_EXTRA" ]; then echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}},{"pane_id":"'"$DCTR_TEST_LAYOUT_EXTRA"'","rect":{"height":20}}]}}}'; else echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}'; fi; exit 0 ;;
   "pane split") echo '{"result":{"pane":{"pane_id":"w1:pS"}}}'; exit 0 ;;
   "tab create") if [ -n "$DCTR_TEST_CREATE_EMPTY" ]; then echo '{"result":{}}'; else echo '{"result":{"tab":{"tab_id":"w1:tT"},"root_pane":{"pane_id":"w1:pT"}}}'; fi; exit 0 ;;
+  "tab list") if [ -n "$DCTR_TEST_TABS" ]; then echo '{"result":{"tabs":'"$DCTR_TEST_TABS"'}}'; else echo '{"result":{"tabs":[]}}'; fi; exit 0 ;;
   *) echo '{"result":{}}'; exit 0 ;;
 esac
 `)
@@ -171,6 +181,16 @@ console.log('clause 1 — a pane that is already GONE is an answer, not a failed
     !fs.existsSync(path.join(seatsDir, 'dctr-explore-1.json')),
     'the pane is gone, so there is no pane left to keep a record of')
 
+  // The clause above drives the CLOSE answering pane_not_found. The LOOKUP answering it was driven
+  // by nothing, and with a tri-state stopAction that is the difference between removing the record
+  // of a pane that is gone and keeping it forever: an unseparated catch reads not-found as merely
+  // unobservable, and the marker survives every sweep for a pane that does not exist.
+  reset(); seat('dctr-explore-11', 'w1:s11', 'agent-11')
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-11', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_GET_GONE: 'w1:s11' })
+  check('and removes it when the LOOKUP is what answered pane_not_found, not the close',
+    !fs.existsSync(path.join(seatsDir, 'dctr-explore-11.json')),
+    `marker still there: ${fs.existsSync(path.join(seatsDir, 'dctr-explore-11.json'))}; calls: ${callLines(/^pane (get|close)/).join(' | ')}`)
+
   reset(); seat('dctr-explore-1', 'w1:s1'); seat('dctr-explore-2', 'w1:s2')
   run({ hook_event_name: 'SessionEnd' }, { DCTR_TEST_CLOSE_GONE: 'w1:s2' })
   check('SessionEnd sweeps the state directory when the only close that threw was pane_not_found',
@@ -186,6 +206,26 @@ console.log('clause 1 — a pane that is already GONE is an answer, not a failed
   check('SubagentStop removes the marker of a TAB herdr says is not there',
     !fs.existsSync(path.join(seatsDir, 'dctr-explore-8.json')),
     'tab_not_found is an answer too, and it is a different code from the pane one')
+
+  // The inverse, and the one that was missing: the list call itself FAILING. There was no `tab list`
+  // handler in this fixture at all, so every tab clause above drove that call into the default reply,
+  // the caller's bare catch swallowed the TypeError, and `stopAction(undefined)` closed the tab by id
+  // — a transport blip destroying the tab the user was watching, with the whole suite green.
+  reset()
+  fs.writeFileSync(path.join(seatsDir, 'dctr-explore-9.json'), JSON.stringify({ agent: 'dctr-explore-9', agent_id: 'agent-9', role: 'Explore', n: 9, tabId: 'w1:t9', paneId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-9', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_TABLIST_FAILS: '1' })
+  check('but a tab whose LIST CALL FAILED is not closed, and keeps its marker for SessionEnd',
+    !called(/^tab close w1:t9/m) && fs.existsSync(path.join(seatsDir, 'dctr-explore-9.json')),
+    callLines(/^tab (close|list)/).join(' | ') || '(no tab calls)')
+
+  // A tab the list DID carry but with no boolean focus: a reply can be shaped like that, and reading
+  // it as unfocused is the same blind close by another road.
+  reset()
+  fs.writeFileSync(path.join(seatsDir, 'dctr-explore-10.json'), JSON.stringify({ agent: 'dctr-explore-10', agent_id: 'agent-10', role: 'Explore', n: 10, tabId: 'w1:t10', paneId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-10', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_TABS: '[{"tab_id":"w1:t10"}]' })
+  check('and a listed tab carrying no boolean focus is not closed either',
+    !called(/^tab close w1:t10/m) && fs.existsSync(path.join(seatsDir, 'dctr-explore-10.json')),
+    callLines(/^tab close/).join(' | ') || '(no tab close)')
 
   // The tab branch answers a DIFFERENT code, so it needs its own predicate rather than a widened one.
   reset()
@@ -434,15 +474,47 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('a finished codex TAB herdr says is not there has its marker removed too, on the tab code',
     called(/^tab close w1:t8/m) && !stillSeatOne(), callLines(/^tab close/).join(' | '))
 
-  // The lifecycle a deleted branch leaked for a whole session: a finished codex TAB whose pane has
-  // gone. `pane get` answers pane_not_found, which IS an observation (it is not focused), so the tab
-  // is closed and its marker removed. staleSideSeats cannot rescue this one — it never judges a tab
-  // seat — so without the not-found branch the marker survives every later placement.
+  // The lifecycle a deleted branch leaked for a whole session: a finished codex TAB that is gone.
+  // A tab list that SUCCEEDS and does not carry it has observed its absence, so the tab is closed and
+  // its marker removed. staleSideSeats cannot rescue this one — it never judges a tab seat — so
+  // without an observed absence the marker survives every later placement. The pane's own state is
+  // deliberately irrelevant here: this fixture's pane is gone too, and it is not what decides.
   reset()
   fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
   startSeat('codex:codex-rescue', { DCTR_TEST_GET_GONE: 'w1:s1' })
-  check('a finished codex tab whose PANE has gone is still swept: pane_not_found is an observation, not a blind spot',
+  check('a finished codex tab the list does not carry is swept: an observed absence is an answer',
     called(/^tab close w1:t8/m) && !stillSeatOne(), callLines(/^(pane get|tab close)/).join(' | '))
+
+  // ASK WHAT YOU ARE ABOUT TO CLOSE (Scott's ruling, 2026-09-08). Reading focus from the recorded
+  // ROOT PANE and then closing the whole TAB asks a different question than the one being acted on.
+  // The user splits the tab, closes the root pane and watches the sibling: herdr answers
+  // pane_not_found for the pane that went, the old code read that as "not focused", and the close
+  // destroyed the focused tab. Same fixture as above but for the tab's own focus, and it must NOT close.
+  reset()
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_GET_GONE: 'w1:s1', DCTR_TEST_TABS: '[{"tab_id":"w1:t8","focused":true}]' })
+  check('but a finished codex tab that is FOCUSED is spared even when its recorded root pane has gone',
+    !called(/^tab close w1:t8/m) && stillSeatOne(), callLines(/^(pane get|tab close|tab list)/).join(' | ') || '(no calls)')
+
+  // The PANE half of the not-found branch, which lost its only fixture when tab focus moved to the
+  // tab list: every clause that used to drive `pane get` -> pane_not_found was a TAB seat. A fixture
+  // CAN still reach it — the layout must carry the pane, so staleSideSeats does not filter the seat
+  // out first, while `pane get` answers pane_not_found — so this is a missing fixture and not a dead
+  // branch, and the branch stays. Without it a finished side pane that herdr says is gone would be
+  // spared as "unobservable" and hold its column slot for the rest of the session.
+  reset()
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: null, paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_GET_GONE: 'w1:s1', DCTR_TEST_LAYOUT_EXTRA: 'w1:s1' })
+  check('a finished codex SIDE PANE that pane_not_found reports gone is swept, though the layout still lists it',
+    called(/^pane close w1:s1/m) && !stillSeatOne(), callLines(/^(pane get|pane close)/).join(' | ') || '(no calls)')
+
+  // And a list call that failed closes nothing at all: unobservable is not unfocused, for a tab
+  // exactly as for a pane.
+  reset()
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_TABLIST_FAILS: '1' })
+  check('and a finished codex tab whose LIST CALL FAILED is spared, marker intact',
+    !called(/^tab close w1:t8/m) && stillSeatOne(), callLines(/^tab close/).join(' | ') || '(no tab close)')
 
   reset(); followedSeat(doneJobRec); startSeat('Explore')
   check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
@@ -483,10 +555,20 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
   const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
-  await new Promise((r) => setTimeout(r, SURVIVES_MS))
+  // A CONDITION, not a duration — the same repair the latency block below carries, which this block
+  // did not get. The watcher drains the log only inside a poll, so its output proves a poll ran and
+  // therefore that the record was READ while it still said `queued`. A fixed sleep proved nothing:
+  // a watcher that started after the flip never saw `queued` at all and the clause passed green
+  // having tested none of what it names, which 8-way spawn contention is exactly what makes reachable.
+  let qOut = ''
+  q.stdout.on('data', (d) => { qOut += d })
+  const qSeen = Date.now() + 8000
+  while (!qOut.includes('codex output for task-queued') && Date.now() < qSeen) await new Promise((r) => setTimeout(r, 5))
+  const qReady = qOut.includes('codex output for task-queued')
   rewrite('running')
   await new Promise((r) => setTimeout(r, SURVIVES_MS))
-  check('the watcher outlives a record that was queued before it ran', q.exitCode === null, `exit ${q.exitCode}`)
+  check('the watcher outlives a record that was queued before it ran, having been SHOWN to read it as queued',
+    qReady && q.exitCode === null, `ready ${qReady}, exit ${q.exitCode}`)
   rewrite('completed')
   const qBound = setTimeout(() => q.kill('SIGKILL'), 8000)
   const qCode = await qExit
@@ -510,14 +592,27 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   // A CONDITION, not a duration: wait until the watcher has drained the log, which only happens
   // inside a poll, so we know it has read the record as `running` before we flip it. A fixed sleep
   // let the very first poll land AFTER the flip, and the clause then passed at any interval.
-  const seen = Date.now() + 8000
-  while (!lwOut.includes('codex output for task-latency') && Date.now() < seen) await new Promise((r) => setTimeout(r, 5))
-  const ready = lwOut.includes('codex output for task-latency')
+  const drained = async (marker) => {
+    const until = Date.now() + 8000
+    while (!lwOut.includes(marker) && Date.now() < until) await new Promise((r) => setTimeout(r, 5))
+    return lwOut.includes(marker)
+  }
   // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
-  // watcher start AFTER the flip and exit on its own first poll, passing at any interval. And the
-  // poll emits its log BEFORE it reads the record, so the output alone does not prove the record was
-  // read as running — one full injected interval after readiness does.
-  if (ready) await new Promise((r) => setTimeout(r, TEST_POLL_MS * 2))
+  // watcher start AFTER the flip and exit on its own first poll, passing at any interval.
+  //
+  // TWO MARKERS, not a timed wait. The poll emits its log BEFORE it reads the record, so one drain
+  // proves only that a poll STARTED. Waiting one injected interval after that assumed the watcher
+  // was scheduled during it, and a watcher descheduled between its log emit and its record read
+  // resumed after the flip, read `completed` on its FIRST poll, and finished inside the 500ms bound
+  // even at the production 2000ms interval — the clause passing while measuring nothing, which is
+  // the very shape this repair was written to remove.
+  //
+  // Seeing marker B means drain(A) -> read record -> drain(B): a record read COMPLETED between the
+  // two, and at that moment the record still said running. That is the thing the clause needs.
+  const latencyLog = path.join(jobs, 'task-latency.log')
+  let ready = await drained('codex output for task-latency')
+  if (ready) { fs.appendFileSync(latencyLog, 'poll marker A\n'); ready = await drained('poll marker A') }
+  if (ready) { fs.appendFileSync(latencyLog, 'poll marker B\n'); ready = await drained('poll marker B') }
   const flipped = Date.now()
   fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
   const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)

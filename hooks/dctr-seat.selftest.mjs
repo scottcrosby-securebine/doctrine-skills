@@ -12,7 +12,7 @@
 // catches a check which silently measures nothing.
 
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
@@ -89,11 +89,31 @@ clause('clause 1h — a focused tab is relabelled and an unfocused one is closed
 // Issue #20 defect 2: a tab the workspace list does not carry was skipped, its marker deleted, and
 // nothing could ever reach it again. The seat's tab, mislocated into w4X by defect 1, is absent
 // from this session's own w4Z list — the stop decision must still be a close, by recorded id.
+// That decision is the CALLER's now. `stopAction` cannot make it: an absent record and an
+// unreachable herdr arrive here as the same `undefined`, only one of them may close anything, and a
+// pure function cannot see which its caller observed. Three call sites each assumed the caller above
+// had already separated them and two had not, so the collapse moved out of this function entirely.
+// The close-by-id behaviour is pinned where the distinction exists, in dctr-seat.teardown.selftest.mjs.
 const FOREIGN_LIST = [{ tab_id: 'w4X:t2', focused: false }, { tab_id: 'w4X:t3', focused: true }]
 const SEAT_TAB_ID = 'w4Z:t9'
-clause('clause 1p — a tab absent from the workspace list is closed by id, never skipped',
-  stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'close',
-  'a skipped tab outlives its marker and the SessionEnd sweep can never reach it')
+clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
+  anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
+  `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
+clause('clause 1ax — and the two refusals are DISTINCT, so a runner cannot collapse "occurs twice" into "not there"',
+  anchorVerdict(0) !== anchorVerdict(2),
+  'a comparison of hits === 0 in place of hits !== 1 accepts duplicate anchors again, silently')
+
+clause('clause 1p — stopAction answers `unknown` for a record it has not seen, never `close`',
+  stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'unknown',
+  'collapsing unseen into close is how a transport blip destroys the tab the user is watching')
+clause('clause 1p2 — and `unknown` for a record carrying no boolean focus, which a reply can do',
+  stopAction({ tab_id: SEAT_TAB_ID }) === 'unknown' &&
+  stopAction({ tab_id: SEAT_TAB_ID, focused: 'yes' }) === 'unknown' &&
+  stopAction(null) === 'unknown',
+  `${stopAction({ tab_id: SEAT_TAB_ID })} / ${stopAction({ tab_id: SEAT_TAB_ID, focused: 'yes' })} / ${stopAction(null)}`)
+clause('clause 1p3 — the fixtures really are what those clauses lean on: one carries no focus key, one a non-boolean, and the list really lacks the seat tab',
+  !('focused' in { tab_id: SEAT_TAB_ID }) && typeof 'yes' !== 'boolean' && !FOREIGN_LIST.some((t) => t.tab_id === SEAT_TAB_ID),
+  'without this the two clauses above could pass against inputs that never carried the defect')
 
 // Issue #20 defect 1: without --workspace the tab lands in whatever workspace the user focused.
 const CREATE_ARGS = tabCreateArgs('w4Z', 'dctr · explore · 1')

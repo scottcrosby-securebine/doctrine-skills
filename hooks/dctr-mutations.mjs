@@ -20,7 +20,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
@@ -115,8 +115,8 @@ const MUTATIONS = [
   { name: 'tabs get their own not-found code', file: 'dctr-seat.mjs', clause: 'SessionEnd sweeps the state directory when a TAB answers tab_not_found',
     from: '    const alreadyGone = (e) => (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e))',
     to: '    const alreadyGone = (e) => isPaneNotFound(e)' },
-  { name: 'a lookup that failed does not become a close', file: 'dctr-seat.mjs', clause: 'a pane whose lookup failed is NOT closed',
-    from: '      catch (e) { if (!isPaneNotFound(e)) lookupFailed = String(e.message).split(\'\\n\')[0] }',
+  { name: 'a lookup that failed does not become a close', file: 'dctr-seat.mjs', clause: 'removes it when the LOOKUP is what answered pane_not_found',
+    from: '      catch (e) { if (isPaneNotFound(e)) gone = true; else lookupFailed = String(e.message).split(\'\\n\')[0] }',
     to: '      catch { /* gone */ }' },
   { name: 'the marker is removed by identity, not by name', file: 'dctr-seat.mjs', clause: 'a marker whose agent_id has changed hands is left alone',
     from: '        } else if (current && current.agent_id !== seat.agent_id) {',
@@ -213,6 +213,30 @@ const MUTATIONS = [
   { name: 'the gate requires an anchor to occur exactly once', file: 'dctr-lib.mjs', clause: 'anchorCount counts occurrences',
     from: 'export const anchorCount = (text, from) => text.split(from).length - 1',
     to: 'export const anchorCount = (text, from) => (text.includes(from) ? 1 : 0)' },
+  { name: 'the gate REFUSES a duplicated anchor rather than applying it', file: 'dctr-lib.mjs', clause: 'the gate applies an anchor that occurs exactly once',
+    from: "export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')",
+    to: "export const anchorVerdict = (hits) => (hits === 0 ? 'missing' : 'apply')" },
+  { name: 'stopAction collapses an unobserved record into close', file: 'dctr-lib.mjs', clause: 'stopAction answers `unknown` for a record it has not seen',
+    from: "  if (typeof rec?.focused !== 'boolean') return 'unknown'",
+    to: "  if (typeof rec?.focused !== 'boolean') return 'close'" },
+  { name: 'a failed tab list becomes a close by id', file: 'dctr-seat.mjs', clause: 'a tab whose LIST CALL FAILED is not closed',
+    from: "      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'",
+    to: "      const act = mine ? stopAction(mine) : 'close'" },
+  { name: 'a successful pane lookup carrying no pane becomes a close', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
+    from: "      const act = lookupFailed ? 'unknown' : gone ? 'close' : stopAction(pane)",
+    to: "      const act = lookupFailed ? 'unknown' : 'close'" },
+  { name: 'close-on-next reads a TAB seat\'s focus from its root pane again', file: 'dctr-seat.mjs', clause: 'a finished codex tab that is FOCUSED is spared',
+    from: '          if (s.tabId) {',
+    to: '          if (false) {' },
+  { name: 'the gate launcher treats a pane that is GONE as unobservable', file: 'dctr-gate.mjs', clause: 'a pane the lookup says is GONE keeps no marker',
+    from: "      catch (e) { if (isPaneNotFound(e)) gone = true }",
+    to: '      catch { /* gone */ }' },
+  { name: 'the gate launcher does not put a marker back', file: 'dctr-gate.mjs', clause: 'a close that FAILED puts the marker back',
+    from: "      catch (e) { if (!isPaneNotFound(e)) keepMarker('the close failed') }",
+    to: '      catch { /* already gone */ }' },
+  { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
+    from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
+    to: '    ? `script -q -F ${shq(tee)} `' },
   { name: 'the tab close reads the TAB not-found code', file: 'dctr-seat.mjs', clause: 'a finished codex TAB herdr says is not there has its marker removed too',
     from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)',
     to: '            const gone = isPaneNotFound(e)' },
@@ -283,11 +307,11 @@ const MUTATIONS = [
     from: '  const ticker = paneId\n',
     to: '  const ticker = null && paneId\n' },
   { name: 'a finished pane is relabelled with its exit status', file: 'dctr-gate.mjs', clause: 'the LAST name a finished pane carries is its exit status',
-    from: "      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
+    from: "      else if (act === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
     to: "      if (false) try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
-    from: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
-    to: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
+    from: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
+    to: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
@@ -298,7 +322,13 @@ const execFileAsync = promisify(execFile)
  *  Not `availableParallelism()`: the suites make real timing assertions (a watcher that must still
  *  be alive after N polls), and a box loaded to its core count is where those go flaky. Eight is
  *  well inside the headroom on the 32-core host this was measured on; DCTR_JOBS overrides it. */
-const JOBS = Math.max(1, Number(process.env.DCTR_JOBS) || Math.min(8, os.availableParallelism?.() ?? 4))
+// `|| default` read 0 as absent, so DCTR_JOBS=0 silently ran the full parallel default — the
+// OPPOSITE of what the operator asked for, and silently, which is how a measurement run reports a
+// number that means the other thing. Any finite value is honoured and clamped to at least 1.
+const ENV_JOBS = Number(process.env.DCTR_JOBS)
+const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
+  ? Math.max(1, Math.floor(ENV_JOBS))
+  : Math.min(8, os.availableParallelism?.() ?? 4)
 
 /** A mutation is caught if ANY suite notices it. Running all of them is what lets one harness cover
  *  the launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
@@ -356,9 +386,10 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
   const hits = anchorCount(before, m.from)
-  if (hits !== 1) {
+  const verdict = anchorVerdict(hits)
+  if (verdict !== 'apply') {
     failures += 1
-    results[idx] = hits === 0
+    results[idx] = verdict === 'missing'
       ? `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
       : `  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}; replace() takes the first and the rest go unguarded`
   } else {

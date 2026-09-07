@@ -310,13 +310,21 @@ export function breakStaleLock(lock, condemnedPid = null) {
  *  a lock or poll a file, so the wait blocks the thread. */
 export const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
-export function withPlacementLock(sessionId, fn) {
+/** How long a caller waits for the placement lock. A placement gives up quickly because another
+ *  wave is behind it; SessionEnd waits far longer because it is the LAST chance — nothing races it
+ *  for long, and a sweep that gives up leaves a live pane with nobody left to reclaim it. The claim
+ *  that losing close-on-next is "bounded by SessionEnd" is only true if SessionEnd actually gets
+ *  the lock, and at one shared 5s deadline it did not have to. */
+const PLACEMENT_WAIT_MS = 5000
+export const SESSION_END_WAIT_MS = 30000
+
+export function withPlacementLock(sessionId, fn, waitMs = PLACEMENT_WAIT_MS) {
   const lock = path.join(stateDir(sessionId), 'placement.lock')
   // The parent has to exist first. mkdir of a lock inside a directory that is not there yet fails
   // with ENOENT on every pass, so the wait runs to its deadline and blames a holder that never
   // existed. The tee lock carried this same defect and was repaired; this one was not.
   try { fs.mkdirSync(path.dirname(lock), { recursive: true }) } catch { /* acquireLock reports it */ }
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + waitMs
   for (;;) {
     if (acquireLock(lock)) break
     // Age alone never breaks a lock. A holder waiting on a herdr call bounded at HERDR_TIMEOUT_MS
@@ -325,7 +333,7 @@ export function withPlacementLock(sessionId, fn) {
     breakIfOrphaned(lock, PLACEMENT_STALE_MS)
     // Checked on every path through the loop: a `continue` used to skip it, which is the recorded
     // spin-forever defect here.
-    if (Date.now() > deadline) throw new Error('placement lock timed out')
+    if (Date.now() > deadline) throw new Error(`placement lock timed out after ${waitMs}ms`)
     sleepMs(50)
   }
   // fn stands down by returning a reason, never by exiting: process.exit skips finally and the

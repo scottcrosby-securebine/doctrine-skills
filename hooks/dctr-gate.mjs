@@ -28,7 +28,7 @@ import { spawn } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS } from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
 
 /** Why the column could not be observed. sideOccupants answers null and throws the reason away, and
  *  a log line naming no file is one the operator cannot act on. Read again only on the failure. */
@@ -79,14 +79,41 @@ if (argv[0] === '--run') {
     both(`${exitLine(code)}\n`)
     fs.closeSync(file)
     // The marker goes before the pane: closing the pane kills the shell this process runs in, so
-    // nothing after that call is guaranteed to run (the first live run left a marker behind).
-    if (marker) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
+    // nothing after that call is guaranteed to run (the first live run left a marker behind). Its
+    // CONTENT is kept in hand, because the ordering that is right for the success path leaves the
+    // FAILURE path holding a live pane whose record is already gone, and SessionEnd finds panes by
+    // record. A close that failed is not a pane that closed.
+    let markerBody = null
+    if (marker) {
+      try { markerBody = fs.readFileSync(marker, 'utf8') } catch { /* nothing to put back */ }
+      try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
+    }
+    const keepMarker = (why) => {
+      if (!marker || markerBody === null) return
+      try {
+        fs.writeFileSync(marker, markerBody)
+        process.stderr.write(`${PREFIX}: ${why}; marker kept so SessionEnd can reach ${paneId}\n`)
+      } catch { /* the pane is orphaned and there is nothing left to try */ }
+    }
     if (paneId) {
-      // Same rule as a seat's stop: leave the pane if someone is looking at it, close it otherwise.
-      let pane
-      try { pane = herdr(['pane', 'get', paneId]).result.pane } catch { /* gone */ }
-      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
-      else try { herdr(['pane', 'close', paneId]) } catch { /* already gone */ }
+      // Same rule as a seat's stop, and the same THREE answers. A lookup that FAILED is not a pane
+      // that is unfocused: this bare catch fed `stopAction` an undefined it could not distinguish
+      // from an observed absence, so a transport blip closed the gate pane the user was watching.
+      let pane, gone = false
+      try { pane = herdr(['pane', 'get', paneId]).result.pane }
+      catch (e) { if (isPaneNotFound(e)) gone = true }
+      // No `lookupFailed` branch: a throw leaves `pane` unassigned and stopAction already answers
+      // `unknown` for that, so a branch testing it separately could not change any outcome and no
+      // fixture could reach it. Established, not assumed — the mutation gate reverted it and every
+      // clause stayed green, which for a guard whose two paths are behaviourally identical is the
+      // dead-branch case and not the missing-fixture one.
+      const act = gone ? 'gone' : stopAction(pane)
+      // `gone` keeps NO marker: the removal above was the right answer for a pane that is not there.
+      if (act === 'unknown') keepMarker('focus could not be observed')
+      else if (act === 'gone') { /* already closed by someone; nothing to do and nothing to keep */ }
+      else if (act === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
+      else try { herdr(['pane', 'close', paneId]) }
+      catch (e) { if (!isPaneNotFound(e)) keepMarker('the close failed') }
     }
     process.exit(code ?? 1)
   })
@@ -185,8 +212,15 @@ if (argv[0] === '--run') {
         writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
         herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, label, command)])
       } catch (e) {
-        try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
-        if (paneId) try { herdr(tabId ? ['tab', 'close', tabId] : ['pane', 'close', paneId]) } catch { /* already gone */ }
+        // Close FIRST, then drop the record, and only if the close was answered. This runs in the
+        // launcher process rather than inside the pane's own shell, so the ordering the completion
+        // path is forced into does not apply here — and removing the record first left a failed
+        // rollback holding a live pane that nothing could ever find.
+        let orphaned = false
+        if (paneId) try { herdr(tabId ? ['tab', 'close', tabId] : ['pane', 'close', paneId]) }
+        catch (ce) { orphaned = !(tabId ? isTabNotFound(ce) : isPaneNotFound(ce)) }
+        if (!orphaned) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
+        else hookLog(sessionId, `gate "${label}": rollback could not close ${tabId || paneId}; keeping its marker for SessionEnd`)
         throw e
       }
       return { name, paneId, tabId }

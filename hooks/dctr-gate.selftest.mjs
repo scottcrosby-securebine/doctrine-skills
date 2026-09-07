@@ -92,7 +92,13 @@ fs.writeFileSync(path.join(bin2, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{"error":{"code":"transport_error"}}' >&2; exit 1; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
+if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
+if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_GONE" ]; then echo '{"error":{"code":"pane_not_found","message":"no such pane"}}' >&2; exit 1; fi
+if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_CLOSE_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
 case "$1 $2" in
+  # A REAL unfocused pane. This used to fall through to the default empty result, so the ordinary
+  # close path was driven by a reply carrying no pane at all: the degenerate input, not the real one.
+  "pane get") echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":false}}}' ;;
   "pane layout") echo '{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"height":56}}]}}}' ;;
   "pane split") echo '{"result":{"pane":{"pane_id":"w1:pS"}}}' ;;
   "tab create") echo '{"result":{"tab":{"tab_id":"w1:tT"},"root_pane":{"pane_id":"w1:pT"}}}' ;;
@@ -140,7 +146,8 @@ clause('clause 1f2: the tab path is NOT renamed at placement, keeping the name t
 
 // The progress name (user ruling, 2026-09-07). The interval is injectable for exactly the reason
 // item 1 makes the watcher intervals injectable: a fixture must not sleep on a production interval.
-// At 50ms against a check that runs ~400ms this asserts a condition, not a duration.
+// At 50ms, against a check long enough that the labels appear before it ends, this asserts a
+// condition and not a duration: the wait below is what makes that true, not the check's length.
 // Driven through `--run` directly, not through the launcher: on the launcher's pane path the
 // recording herdr only RECORDS the `pane run` call, so the process that owns the ticker never
 // executes there and this clause would pass or fail for reasons having nothing to do with it.
@@ -161,9 +168,11 @@ const wantTick = (re) => { try { return re.test(fs.readFileSync(calls, 'utf8')) 
   tickProc.kill('SIGKILL')
 }
 // It must be shown to READ A CLOCK, not to print a constant: `\d+s` matches "0s", so a ticker
-// passing a hardcoded 0 satisfied the old assertion exactly as a working one did. Over 1.15s at a
-// 50ms interval both a 0s and a 1s label must appear. ~23 ticks are expected where 2 distinct ones
-// are required, and that margin is the answer to running this under N-way parallel load.
+// passing a hardcoded 0 satisfied the old assertion exactly as a working one did. TWO DISTINCT
+// labels are required, 0s and 1s, which takes a little over a second at a 50ms interval. What makes
+// that safe under N-way load is the POLL above, not a margin: the loop waits for both labels and
+// stops as soon as they arrive, so a slow machine takes longer rather than failing. An earlier
+// comment here credited the safety to a fixed 1.15s run, which is the form this fixture replaced.
 clause('clause 1g: while the check runs, the pane name carries elapsed time that INCREASES, on the injected interval',
   wantTick(/^pane rename w1:pS ticking gate · 0s elapsed$/m) && wantTick(/^pane rename w1:pS ticking gate · 1s elapsed$/m),
   `rename calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename')))}`)
@@ -177,6 +186,49 @@ fs.writeFileSync(calls, '')
 execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:pS', 'ending gate', '--', 'sleep 0.3'],
   { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
 const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
+// B4/B5: the completion path's THREE answers, and the marker's fate under each. The marker is
+// removed before the close because closing the pane kills the shell this process runs in — an
+// ordering that is right for the success path and abandons a live pane on every other one, since
+// SessionEnd finds panes by record. So its content is kept in hand and written back.
+{
+  const mk = (n) => { const f = path.join(tmp, `gm${n}.json`); fs.writeFileSync(f, JSON.stringify({ agent: `dctr-gate-${n}`, role: 'gate', paneId: 'w1:pS' })); return f }
+
+  const m1 = mk(1); fs.writeFileSync(calls, '')
+  execFileSync('node', [script, '--run', path.join(tmp, 'g1.out'), m1, 'w1:pS', 'lookup fails', '--', 'true'],
+    { env: paneEnv({ DCTR_TEST_GET_FAILS: '1' }), encoding: 'utf8' })
+  clause('clause 1i: a focus lookup that FAILED closes nothing and puts the marker back',
+    !fs.readFileSync(calls, 'utf8').includes('pane close') && fs.existsSync(m1),
+    `close calls: ${JSON.stringify(fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane close')))}; marker: ${fs.existsSync(m1)}`)
+
+  const m2 = mk(2); fs.writeFileSync(calls, '')
+  execFileSync('node', [script, '--run', path.join(tmp, 'g2.out'), m2, 'w1:pS', 'close fails', '--', 'true'],
+    { env: paneEnv({ DCTR_TEST_CLOSE_FAILS: '1' }), encoding: 'utf8' })
+  clause('clause 1j: a close that FAILED puts the marker back, so SessionEnd can still reach the pane',
+    fs.readFileSync(calls, 'utf8').includes('pane close') && fs.existsSync(m2),
+    `marker: ${fs.existsSync(m2)}`)
+
+  const m3 = mk(3); fs.writeFileSync(calls, '')
+  execFileSync('node', [script, '--run', path.join(tmp, 'g3.out'), m3, 'w1:pS', 'ordinary', '--', 'true'],
+    { env: paneEnv({}), encoding: 'utf8' })
+  clause('clause 1k: and an ordinary unfocused close still removes it — the marker comes back only on a failure',
+    fs.readFileSync(calls, 'utf8').includes('pane close w1:pS') && !fs.existsSync(m3),
+    `close: ${fs.readFileSync(calls, 'utf8').includes('pane close w1:pS')}; marker still there: ${fs.existsSync(m3)}`)
+
+  const m4 = mk(4); fs.writeFileSync(calls, '')
+  execFileSync('node', [script, '--run', path.join(tmp, 'g4.out'), m4, 'w1:pS', 'pane gone', '--', 'true'],
+    { env: paneEnv({ DCTR_TEST_GET_GONE: '1' }), encoding: 'utf8' })
+  clause('clause 1l: a pane the lookup says is GONE keeps no marker — not-found is an answer, and the removal was right',
+    !fs.existsSync(m4),
+    `marker restored for a pane that does not exist: ${fs.existsSync(m4)}`)
+
+  clause('clause 3d: the two failure fixtures really fail, and the ordinary one really does not, proved without the launcher',
+    spawnSync(`${bin2}/herdr`, ['pane', 'get', 'w1:pS'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_GET_FAILS: '1' } }).status === 1 &&
+    spawnSync(`${bin2}/herdr`, ['pane', 'close', 'w1:pS'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_CLOSE_FAILS: '1' } }).status === 1 &&
+    spawnSync(`${bin2}/herdr`, ['pane', 'get', 'w1:pS'], { encoding: 'utf8', env: process.env }).status === 0 &&
+    /pane_not_found/.test(spawnSync(`${bin2}/herdr`, ['pane', 'get', 'w1:pS'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_GET_GONE: '1' } }).stderr),
+    'without this the clauses above could pass because the launcher never called herdr at all')
+}
+
 clause('clause 1h: the LAST name a finished pane carries is its exit status, not a leftover elapsed tick',
   renames.length > 1 && renames[renames.length - 1] === `pane rename w1:pS ending gate · ${exitLine(0)}`,
   `renames: ${JSON.stringify(renames)}`)
