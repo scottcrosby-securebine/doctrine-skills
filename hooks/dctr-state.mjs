@@ -328,3 +328,38 @@ export function withPlacementLock(sessionId, fn) {
   // leaked lock would cost every seat behind it the full staleness window.
   try { return fn() } finally { releaseLock(lock) }
 }
+
+/** Where the codex plugin keeps its job records: one directory per workspace, named by the
+ *  workspace basename and a hash this reader does not compute, so every directory with the
+ *  basename is read. A record another process is mid-write is skipped, not fatal: this is read for
+ *  display and the plugin owns the file. Each record carries its own path as `file`. */
+export const codexStateDir = () => path.join(os.homedir(), '.claude', 'plugins', 'data', 'codex-openai-codex', 'state')
+
+export function codexJobRecords(cwd) {
+  const prefix = `${path.basename(cwd)}-`
+  let dirs
+  try { dirs = fs.readdirSync(codexStateDir()).filter((d) => d.startsWith(prefix)) } catch { return [] }
+  const records = []
+  for (const d of dirs) {
+    const jobs = path.join(codexStateDir(), d, 'jobs')
+    let names
+    try { names = fs.readdirSync(jobs).filter((f) => f.endsWith('.json')) } catch { continue }
+    for (const f of names) {
+      const file = path.join(jobs, f)
+      try { records.push({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file }) } catch { /* mid-write or not a record */ }
+    }
+  }
+  return records
+}
+
+/** A seat's spawn metadata, read once more after `retryMs` when absent: the harness writes it in
+ *  the same second the hook fires and the order is not promised. Null stays null. */
+export function readMeta(file, retryMs = 200) {
+  if (!file) return null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')) }
+    catch (e) { if (e.code !== 'ENOENT' || attempt) return null }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryMs)
+  }
+  return null
+}

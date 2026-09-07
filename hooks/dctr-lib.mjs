@@ -183,8 +183,14 @@ export const stopAction = (tab) => (tab && tab.focused ? 'relabel' : 'close')
  * is usually somebody else's — four seats from two sessions landed in a third session's workspace
  * the first multi-session evening (issue #20). The id is the one `skipReason` already validated.
  */
-export const tabCreateArgs = (workspaceId, label) =>
-  ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus', ...seatEnvArgs()]
+export const tabCreateArgs = (workspaceId, label, cwd) =>
+  ['tab', 'create', '--workspace', workspaceId, '--label', label, '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
+
+/** The pane shell starts in the herdr server's cwd, not the caller's, and with a fresh environment.
+ *  A relative check path handed to the gate launcher therefore ran in one directory on the pane
+ *  path and another on the detached path (field audit, 2026-09-07). Every creation call passes the
+ *  cwd it was given; a caller that gives none gets the old call. */
+export const cwdArgs = (cwd) => (cwd ? ['--cwd', cwd] : [])
 
 /**
  * Every seat pane runs an interactive shell, and `pane run` types the renderer command into it, so
@@ -299,17 +305,47 @@ export function containerIdFromMountinfo(text) {
  * `layoutPanes` is the observed layout (pane_id + rect); without it the newest side pane stands in.
  * `--no-focus` for the same reason as the tab path: a seat must never steal the user's cursor.
  */
-export function splitArgs(liveSeats, sessionPaneId, layoutPanes) {
+export function splitArgs(liveSeats, sessionPaneId, layoutPanes, cwd) {
   const side = liveSeats.filter(isSideSeat)
   if (!side.length) {
-    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs()]
+    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
   }
   let target = side[side.length - 1]
   if (layoutPanes?.length) {
     const height = new Map(layoutPanes.map((p) => [p.pane_id, p.rect?.height ?? 0]))
     target = side.reduce((a, b) => ((height.get(b.paneId) ?? 0) > (height.get(a.paneId) ?? 0) ? b : a))
   }
-  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus', ...seatEnvArgs()]
+  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
+}
+
+/** What the stand-down line calls a throw. execFileSync errors carry `spawnargs`; a ReferenceError
+ *  or TypeError from this code does not, and calling one "herdr refused an action" sent a reader
+ *  to the herdr log for a defect in the hook. */
+export const errorLabel = (e) => (e && e.spawnargs ? 'herdr refused an action' : 'hook error')
+
+/** The seat's pane name: type plus the Agent tool's description, which is the status-line title
+ *  (Scott's ruling, 2026-09-07). The counter stands in when the harness wrote no description. */
+export const paneLabel = (type, description, n) => `${slug(type)} · ${description || n}`
+
+/** Where the harness writes a seat's spawn metadata (`{agentType, description, toolUseId,
+ *  spawnDepth}`): beside the seat transcript, `.meta.json` in place of `.jsonl`. */
+export const metaPath = (transcriptPath) => (transcriptPath ? transcriptPath.replace(/\.jsonl$/, '.meta.json') : null)
+
+/** The role the codex plugin's rescue subagent dispatches under. Its SubagentStop fires when the
+ *  wrapper returns, about a minute in, while the codex job it started runs on for as long as an
+ *  hour; the seat's pane follows the job rather than the wrapper. */
+export const CODEX_ROLE = 'codex:codex-rescue'
+
+/**
+ * The codex job a stopping seat started: the newest record for this workspace created at or after
+ * `notBefore` (epoch ms), or null. Newest, because the plugin writes an acknowledgement record and
+ * then the real one for a single dispatch; by workspace, because every session on the host writes
+ * into one state directory; by time, because the directory keeps every job ever run there.
+ */
+export function codexJobMatch(records, cwd, notBefore) {
+  const mine = records.filter((r) => r && r.workspaceRoot === cwd && Date.parse(r.createdAt) >= notBefore)
+  if (!mine.length) return null
+  return mine.reduce((a, b) => (Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a))
 }
 
 /** The role a long native check is registered under. It shares the seat markers, the cap and the

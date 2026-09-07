@@ -18,6 +18,7 @@ import {
   seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE,
 } from './dctr-lib.mjs'
 
 let bad = 0
@@ -64,10 +65,10 @@ clause('clause 3p — the fork fixture really carries an agent_id and an empty a
 clause('clause 1c — no HERDR_ENV stands the hook down',
   typeof skipReason({ HERDR_WORKSPACE_ID: 'w4W' }) === 'string', String(skipReason({ HERDR_WORKSPACE_ID: 'w4W' })))
 
-clause('clause 1d — no workspace id stands the hook down',
+clause('clause 1d: no workspace id stands the hook down',
   typeof skipReason({ HERDR_ENV: '1' }) === 'string', String(skipReason({ HERDR_ENV: '1' })))
 
-clause('clause 1e — generated names satisfy herdr\'s own constraint',
+clause('clause 1e: generated names satisfy herdr\'s own constraint',
   ['Explore', 'general-purpose', 'Red Team!!', '', LONG_ROLE].every((r) => AGENT_NAME_RE.test(agentName(r, 7))),
   ['Explore', 'general-purpose', 'Red Team!!', '', LONG_ROLE].map((r) => agentName(r, 7)).join(','))
 
@@ -233,7 +234,7 @@ clause('clause 3a — the long-role fixture really would overflow herdr\'s limit
   `${PREFIX}-${LONG_ROLE}-12`.length > 32 && LONG_ROLE.length > 32 - PREFIX.length - 4,
   `untruncated length ${`${PREFIX}-${LONG_ROLE}-12`.length}`)
 
-clause('clause 3b — the parent and seat fixtures really differ only in the agent fields',
+clause('clause 3b: the parent and seat fixtures really differ only in the agent fields',
   parentEvent.agent_id === undefined && seatEvent.agent_id !== undefined &&
   parentEvent.transcript_path === seatEvent.transcript_path && parentEvent.session_id === seatEvent.session_id,
   'if they differed elsewhere, 1b would be testing something other than the agent_id test')
@@ -331,6 +332,62 @@ clause('clause 1ac — a view request carries exactly the four claims, each to i
   REQ.container_id === CID && REQ.renderer_path === '/p/dctr-render.mjs' &&
   REQ.transcript_path === '/t/a.jsonl' && REQ.role === 'Explore',
   JSON.stringify(REQ))
+
+// F1 (field audit 2026-09-07): a gate pane started in the herdr server's cwd, so a relative check
+// path ran somewhere else while the detached path ran it here. Both creation calls carry the cwd
+// they are handed; a caller that hands none gets the old call, which is what the pane launcher does.
+const CWD = '/home/u/proj'
+const cwdOf = (args) => args[args.indexOf('--cwd') + 1]
+clause('clause 1ae: tab create and both split shapes carry the cwd they are handed',
+  [tabCreateArgs('w4Z', 'lbl', CWD), splitArgs([], 'w4Z:p1', null, CWD), splitArgs([SIDE_SEAT(1)], 'w4Z:p1', LAYOUT, CWD)].every((a) => cwdOf(a) === CWD) &&
+  !tabCreateArgs('w4Z', 'lbl').includes('--cwd') && !splitArgs([], 'w4Z:p1').includes('--cwd'),
+  `${tabCreateArgs('w4Z', 'lbl', CWD).join(' ')} | ${splitArgs([], 'w4Z:p1', null, CWD).join(' ')}`)
+
+// N3: every throw in the hook was logged as herdr refusing an action, including a TypeError from the
+// hook's own code. execFileSync errors carry spawnargs and nothing else does.
+const spawnShaped = Object.assign(new Error('Command failed: herdr pane get'), { spawnargs: ['pane', 'get', 'w4Z:p9'], status: 1 })
+const bug = (() => { try { return undefinedVariableInTheHook } catch (e) { return e } })()
+clause('clause 1af: a spawn-shaped error is herdr refusing, and anything else is a hook error',
+  errorLabel(spawnShaped) === 'herdr refused an action' && errorLabel(bug) === 'hook error' && errorLabel(new TypeError('x')) === 'hook error',
+  `${errorLabel(spawnShaped)} / ${errorLabel(bug)}`)
+
+// N17: the pane carries the seat's status-line title, type plus description (Scott's ruling), and
+// the counter stands in when the harness wrote no description.
+const META = '/home/u/.claude/projects/-proj/4a9392da-bd72-4f3f-9e18-76a56c437909/subagents/agent-ad1a7dbb0d453a08d.meta.json'
+clause('clause 1ag: the pane label is type plus description, or type plus counter without one',
+  paneLabel('general-purpose', 'Fresh refuter of N1-N16', 3) === 'general-purpose · Fresh refuter of N1-N16' &&
+  paneLabel('Explore', undefined, 3) === 'explore · 3' && paneLabel('Explore', '', 3) === 'explore · 3',
+  `${paneLabel('general-purpose', 'Fresh refuter of N1-N16', 3)} / ${paneLabel('Explore', undefined, 3)}`)
+
+clause('clause 1ah: the meta path sits beside the seat transcript with .meta.json in place of .jsonl',
+  metaPath(AUTHORITATIVE) === META && metaPath(null) === null,
+  String(metaPath(AUTHORITATIVE)))
+
+// N18: the codex plugin writes two records per dispatch, and other sessions write into the same
+// state directory. The match is by workspace and by time, newest last.
+const NOW = Date.parse('2026-09-07T04:35:31.369Z')
+const JOB = (file, createdAt, workspaceRoot, status) => ({ file, createdAt, workspaceRoot, status })
+const JOBS = [
+  JOB('/j/old.json', '2026-09-07T03:00:00.000Z', CWD, 'completed'),
+  JOB('/j/ack.json', '2026-09-07T04:35:30.000Z', CWD, 'completed'),
+  JOB('/j/other.json', '2026-09-07T04:35:32.000Z', '/home/u/elsewhere', 'running'),
+  JOB('/j/run.json', '2026-09-07T04:35:31.369Z', CWD, 'running'),
+]
+const MATCH = codexJobMatch(JOBS, CWD, NOW - 60000)
+clause('clause 1ai: the newest record for this workspace since the seat started is the match, and no record is null',
+  MATCH && MATCH.file === '/j/run.json' && codexJobMatch(JOBS, '/home/u/nowhere', NOW - 60000) === null &&
+  codexJobMatch([], CWD, 0) === null && codexJobMatch(JOBS, CWD, NOW + 1) === null && CODEX_ROLE === 'codex:codex-rescue',
+  JSON.stringify(MATCH))
+
+clause('clause 3r: the job fixtures really differ as their clause needs: one older, one elsewhere, and the match newest of the rest',
+  Date.parse(JOBS[0].createdAt) < NOW - 60000 && JOBS[2].workspaceRoot !== CWD && Date.parse(JOBS[2].createdAt) > Date.parse(JOBS[3].createdAt) &&
+  JOBS.filter((j) => j.workspaceRoot === CWD && Date.parse(j.createdAt) >= NOW - 60000).length === 2 &&
+  Date.parse(JOBS[3].createdAt) > Date.parse(JOBS[1].createdAt),
+  'if the other-workspace job were not newer than the match, 1ai would not show the workspace filter firing')
+
+clause('clause 3s: the spawn-shaped fixture really carries spawnargs and the ReferenceError really does not',
+  Array.isArray(spawnShaped.spawnargs) && bug instanceof ReferenceError && !('spawnargs' in bug),
+  `${bug && bug.constructor.name}`)
 
 clause('clause 3m — the layout fixture really carries seats 1 and 2 and really lacks seat 3',
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&

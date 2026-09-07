@@ -15,6 +15,9 @@
 // record. It exits 0 once the check is launched, 1 only on malformed arguments, and the check's
 // own status is in the file — a display failure must never fail the gate it is showing.
 //
+// The pane shell starts in the launcher's cwd and with a fresh environment, so an env prefix goes
+// after `--` (`-- env K=V <command>`), never on the launcher.
+//
 // The pane runs this same script in `--run` mode, which is also what the detached path runs:
 //
 //   node hooks/dctr-gate.mjs --run <out> <marker> <pane-id|''> <label> -- <command>
@@ -152,11 +155,11 @@ if (argv[0] === '--run') {
         const occupants = sideOccupants(seats, layout)
         if (!occupants) hookLog(sessionId, `gate "${label}": could not observe the side column (${sideColumnReason()}); taking the tab path`)
         if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
-          try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout)).result.pane.pane_id }
-          catch { try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID)).result.pane.pane_id } catch { paneId = null } }
+          try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, process.cwd())).result.pane.pane_id }
+          catch { try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID, null, process.cwd())).result.pane.pane_id } catch { paneId = null } }
         }
         if (!paneId) {
-          const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(GATE_ROLE, n)))
+          const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, tabLabel(GATE_ROLE, n), process.cwd()))
           tabId = tab.result.tab.tab_id
           paneId = tab.result.root_pane.pane_id
         }
