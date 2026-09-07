@@ -52,11 +52,17 @@ fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
+if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_EMPTY" ]; then
+  echo '{"result":{}}'; exit 0
+fi
 if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FOCUSED" ]; then
   echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0
 fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
+fi
+if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_REMOVE_ON_RUN" ]; then
+  rm -f "$DCTR_TEST_REMOVE_ON_RUN"
 fi
 if [ "$1 $2" = "pane run" ] && [ -n "$DCTR_TEST_STEAL_ON_RUN" ]; then
   # A replacement seat takes this name while the codex stop sits between its pane-run call and its
@@ -83,10 +89,9 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 // sleeping. Every wait that asserts the watcher is STILL ALIVE is a claim about a non-event, so it
 // is necessarily a duration; it is derived from POLL here so it stays several polls long whatever
 // the interval becomes, instead of being a number someone must remember to re-tune.
-const TEST_PUMP_MS = 25
 const TEST_POLL_MS = 50
 const SURVIVES_MS = TEST_POLL_MS * 6
-const watcherEnv = { DCTR_PUMP_MS: String(TEST_PUMP_MS), DCTR_POLL_MS: String(TEST_POLL_MS) }
+const watcherEnv = { DCTR_POLL_MS: String(TEST_POLL_MS) }
 
 const SESSION = 'teardown-session'
 const stateDir = path.join(tmp, `dctr-${SESSION}`)
@@ -357,6 +362,15 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).agent_id === 'cx-NEW',
     JSON.stringify(R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json'))))
 
+  // Absent must count as "not mine": if placement removed this marker while the stop was working,
+  // recreating it publishes a record for a pane that is already gone, which nothing then closes.
+  reset(); codexSeat()
+  run({ hook_event_name: 'SubagentStop', agent_id: 'cx-1', agent_type: 'codex:codex-rescue', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS },
+    { HOME: home, DCTR_TEST_REMOVE_ON_RUN: path.join(seatsDir, 'dctr-codex-codex-rescue-1.json') })
+  check('a marker removed while the stop worked is NOT recreated by its job-path write',
+    !fs.existsSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')),
+    'the seat is gone; publishing a record for its pane would leave one nothing closes')
+
   reset(); codexSeat(); stop(path.join(tmp, 'ws', 'nowhere'))
   const logged = (() => { try { return fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { return '' } })()
   check('a codex seat whose job cannot be found closes as any other seat', called(/^pane close w1:s1/m) && !called(/--codex-tail/) && !fs.existsSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')))
@@ -396,6 +410,10 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('a finished codex pane whose focus lookup FAILED is spared: unknown is not unfocused',
     !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane (get|close)/).join(' | '))
 
+  reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_GET_EMPTY: 'w1:s1' })
+  check('a lookup that SUCCEEDS but carries no pane is still not an observation, so the pane stays',
+    !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane (get|close)/).join(' | '))
+
   reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_CLOSE_GONE: 'w1:s1' })
   check('a pane herdr says is NOT THERE has its marker removed, since already-gone is an answer',
     !stillSeatOne(), `marker: ${(() => { try { return JSON.stringify(R(MARK)) } catch { return '(absent)' } })()}`)
@@ -403,6 +421,15 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   reset(); followedSeat(doneJobRec); startSeat('codex:codex-rescue', { DCTR_TEST_CLOSE_FAILS: 'w1:s1' })
   check('but a close that merely FAILED keeps its marker, so SessionEnd can try again', stillSeatOne(),
     callLines(/^pane close/).join(' | '))
+
+  // The TAB half of the not-found branch. Every other close-on-next fixture is a side pane, so
+  // `isTabNotFound` was asserted by nothing and a predicate widened to cover panes would not cover
+  // tabs — the two codes genuinely differ, which is why this file carries two predicates.
+  reset()
+  fs.writeFileSync(MARK, JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: 'w1:t8', paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL, codexJob: doneJobRec }))
+  startSeat('codex:codex-rescue', { DCTR_TEST_CLOSE_GONE: 'w1:t8' })
+  check('a finished codex TAB herdr says is not there has its marker removed too, on the tab code',
+    called(/^tab close w1:t8/m) && !stillSeatOne(), callLines(/^tab close/).join(' | '))
 
   reset(); followedSeat(doneJobRec); startSeat('Explore')
   check('and an ordinary seat placement closes nothing: only a codex placement sweeps', !called(/^pane close w1:s1/m) && stillSeatOne(), callLines(/^pane close/).join(' | '))
@@ -463,17 +490,28 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   // 2000ms it cannot come in under the bound, which is what makes this clause discriminate.
   reset()
   const latencyJob = job('task-latency', now, WS, 'running')
-  const lw = spawn('node', [hook, '--codex-tail', latencyJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_PUMP_MS: '10', DCTR_POLL_MS: '25' } })
+  const lw = spawn('node', [hook, '--codex-tail', latencyJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_POLL_MS: '25' } })
+  let lwOut = ''
+  lw.stdout.on('data', (d) => { lwOut += d })
   const lwExit = new Promise((resolve) => lw.on('exit', (code) => resolve(code)))
-  await new Promise((r) => setTimeout(r, 150))
+  // A CONDITION, not a duration: wait until the watcher has drained the log, which only happens
+  // inside a poll, so we know it has read the record as `running` before we flip it. A fixed sleep
+  // let the very first poll land AFTER the flip, and the clause then passed at any interval.
+  const seen = Date.now() + 8000
+  while (!lwOut.includes('codex output for task-latency') && Date.now() < seen) await new Promise((r) => setTimeout(r, 5))
   const flipped = Date.now()
   fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
   const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)
   const lwCode = await lwExit
   clearTimeout(lwBound)
   const latency = Date.now() - flipped
-  check('the injected poll interval is HONOURED: a job turning terminal is noticed far inside the production interval',
-    lwCode === 0 && latency < 800, `exit ${lwCode} after ${latency}ms; at the production 2000ms poll this cannot pass`)
+  // Deterministic in BOTH directions, which a bare latency bound is not. The flip lands immediately
+  // after the watcher's first poll, so the next poll is a full interval away: ~25ms as injected,
+  // ~2000ms if the injection is ignored. 500ms sits an order of magnitude above the first and a
+  // factor of four below the second, which is the margin that survives 8-way parallel load.
+  check('the injected poll interval is HONOURED: a job turning terminal right after a poll is noticed within one INJECTED interval, not one production interval',
+    lwCode === 0 && lwOut.includes('codex output for task-latency') && latency < 500,
+    `exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 2000ms`)
 
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs

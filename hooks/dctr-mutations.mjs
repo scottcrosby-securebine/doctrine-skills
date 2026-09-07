@@ -207,6 +207,15 @@ const MUTATIONS = [
   { name: 'the watcher reads the log once more after the record', file: 'dctr-seat.mjs', clause: 'having shown the log written after it started',
     from: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return\n    pump()",
     to: "    if (!cur || cur.status === 'running' || cur.status === 'queued') return" },
+  { name: 'the tab close reads the TAB not-found code', file: 'dctr-seat.mjs', clause: 'a finished codex TAB herdr says is not there has its marker removed too',
+    from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)',
+    to: '            const gone = isPaneNotFound(e)' },
+  { name: 'a reply carrying no pane is not an observation of focus', file: 'dctr-seat.mjs', clause: 'a lookup that SUCCEEDS but carries no pane is still not an observation',
+    from: "            if (typeof pane?.focused === 'boolean') focused = pane.focused",
+    to: '            focused = pane?.focused === true' },
+  { name: 'an absent marker is not this seat\'s', file: 'dctr-seat.mjs', clause: 'a marker removed while the stop worked is NOT recreated',
+    from: '          if (!current || current.agent_id !== seat.agent_id) { log(',
+    to: '          if (current && current.agent_id !== seat.agent_id) { log(' },
   { name: 'focus that could not be read never closes a pane', file: 'dctr-lib.mjs', clause: 'focus that could not be READ never closes a pane',
     from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
     to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused !== true).map((c) => c.seat)' },
@@ -223,8 +232,8 @@ const MUTATIONS = [
     from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)\n            if (!gone) {',
     to: '            const gone = false\n            if (!gone) {' },
   { name: 'the stop write checks the marker is still this seat', file: 'dctr-seat.mjs', clause: 'the stop does not overwrite a marker that now belongs to a replacement seat',
-    from: "            if (!current || current.agent_id !== seat.agent_id) {",
-    to: "            if (false) {" },
+    from: "          if (!current || current.agent_id !== seat.agent_id) {",
+    to: "          if (current && false) {" },
   { name: 'the gate ticker reports real elapsed time', file: 'dctr-gate.mjs', clause: 'elapsed time that INCREASES',
     from: 'elapsedLabel(label, Date.now() - started)',
     to: 'elapsedLabel(label, 0)' },
@@ -259,8 +268,8 @@ const MUTATIONS = [
     from: '      if (payload.agent_type === CODEX_ROLE) {',
     to: '      if (true) {' },
   { name: 'the stop path records which job the pane follows', file: 'dctr-seat.mjs', clause: 'the marker records WHICH job the pane follows',
-    from: "            writeMarker(file, { ...seat, codexJob: job.file })",
-    to: "            writeMarker(file, { ...seat })" },
+    from: "          writeMarker(file, { ...seat, codexJob: job.file })",
+    to: "          writeMarker(file, { ...seat })" },
   { name: 'the gate names the pane it split', file: 'dctr-gate.mjs', clause: 'the pane path NAMES the pane it split',
     from: "        if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate \"${label}\": rename of ${paneId} failed (${String(e.message).split('\\n')[0]})`) }\n",
     to: '' },
@@ -313,12 +322,15 @@ const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
 const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))
-if (poolShortfall(baselineResults, SUITES.length)) {
-  console.log(`  FAIL the baseline pool produced ${SUITES.length - poolShortfall(baselineResults, SUITES.length)} of ${SUITES.length} results`)
+const baselineShort = poolShortfall(baselineResults, SUITES.length)
+if (baselineShort) {
+  console.log(`  FAIL the baseline pool produced ${SUITES.length - baselineShort} of ${SUITES.length} results`)
   failures += 1
 }
 for (const r of baselineResults) {
-  if (r.res.code !== 0) {
+  // `r` can be undefined when the pool short-changed us, and the shortfall above has already been
+  // counted; dereferencing it here died with a TypeError instead of printing the footer.
+  if (r && r.res.code !== 0) {
     console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
   }
