@@ -29,7 +29,7 @@ import {
   PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE } from './dctr-lib.mjs'
-import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta } from './dctr-state.mjs'
+import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
 
 // Watcher mode, typed into a codex seat's pane by SubagentStop:
 //
@@ -134,6 +134,9 @@ if (why) stand_down(why)
 
 const liveSeats = () => readSeats(sessionId)
 const withPlacementLock = (fn) => placementLock(sessionId, fn)
+// The session cwd: where a seat's pane shell starts, and the workspace a codex job record names.
+// It is in the payload; process.cwd() stands in when it is not.
+const cwd = payload.cwd || process.cwd()
 
 try {
   if (event === 'SubagentStart') {
@@ -142,9 +145,6 @@ try {
 
     const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
     if (!file) stand_down('could not resolve the seat transcript path')
-    // The pane shell starts where herdr is told to, not where the session is. The session cwd is
-    // in the payload; process.cwd() stands in when it is not.
-    const cwd = payload.cwd || process.cwd()
     // The harness writes the seat's spawn metadata beside its transcript in the same second this
     // hook fires; its `description` is the Agent tool's description, the title the status line
     // shows. Read outside the lock, since the retry inside it would hold every seat behind this one.
@@ -292,13 +292,12 @@ try {
       // written since the seat started, allowing a minute for the plugin's own clock. The plugin
       // writes it after the wrapper is dispatched, so the record is polled for up to five seconds
       // inside the hook's ten. No record means the job never started, and the seat closes as any.
-      const cwd = payload.cwd || process.cwd()
       let notBefore = 0
       try { notBefore = fs.statSync(path.join(seatsDir(sessionId), `${seat.agent}.json`)).mtimeMs - 60000 } catch { /* the epoch, then */ }
       const deadline = Date.now() + 5000
       let job = codexJobMatch(codexJobRecords(cwd), cwd, notBefore)
       while (!job && Date.now() < deadline) {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+        sleepMs(500)
         job = codexJobMatch(codexJobRecords(cwd), cwd, notBefore)
       }
       if (job) {

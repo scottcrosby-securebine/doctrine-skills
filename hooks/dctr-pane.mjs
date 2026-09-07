@@ -351,11 +351,13 @@ async function open(label, tee, connect) {
       // unreadable anyway. A tab is sidebar-listed, still watched, still taken over. It is the same
       // rule a dispatched seat already follows. A tab pane occupies no column slot, and isSideSeat
       // is false for a marker carrying a tabId, so it never counts against the cap afterwards.
+      // The pane shell starts where herdr is told to, not where this launcher runs, and the
+      // launcher runs in the session cwd.
       let id, tabId = null
       if (seatPlacement(occupants, sessionPane) === 'pane') {
-        id = herdr(splitArgs(occupants, sessionPane, layout)).result.pane.pane_id
+        id = herdr(splitArgs(occupants, sessionPane, layout, process.cwd())).result.pane.pane_id
       } else {
-        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label))
+        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label, process.cwd()))
         tabId = tab.result.tab.tab_id
         id = tab.result.root_pane.pane_id
         console.log(`overflow=tab ${tabId} (${occupants.filter(isSideSeat).length} panes already beside this session, cap ${SIDE_CAP})`)

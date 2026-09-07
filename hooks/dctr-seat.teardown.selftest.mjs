@@ -15,8 +15,9 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { readMeta } from './dctr-state.mjs'
 
 const hook = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dctr-seat.mjs')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-teardown-'))
@@ -239,6 +240,16 @@ console.log('clause 1: a seat pane is named for its status-line title and starts
   reset(); start('a8', 'Explore')
   check('a seat with no meta file is named type plus counter', called(/^pane rename w1:pS explore · 1$/m), callLines(/^pane rename/).join(' | '))
 
+  // A meta file caught mid-write parses as a SyntaxError, not ENOENT, and the harness finishes it
+  // within the same second. The second read has to happen for any parse failure, not only absence.
+  const midWrite = path.join(proj, 'sess', 'subagents', 'agent-a9.meta.json')
+  fs.writeFileSync(midWrite, '{"agentType":"Explore","descrip')
+  const finisher = spawn('node', ['-e', `setTimeout(() => require('fs').writeFileSync(process.argv[1], JSON.stringify({ description: 'Finished later' })), 100)`, midWrite], { stdio: 'ignore' })
+  const late = readMeta(midWrite, 600)
+  check('a meta file that is invalid JSON at first read and valid shortly after yields the description', late && late.description === 'Finished later', JSON.stringify(late))
+  finisher.kill()
+  check('the mid-write fixture really failed to parse before the finisher ran', (() => { try { JSON.parse('{"agentType":"Explore","descrip'); return false } catch { return true } })())
+
   reset(); start('a7', 'general-purpose', { DCTR_TEST_LAYOUT_FAILS: '1' })
   check('a tab seat is created under the same label and reports it as its sidebar message',
     called(/^tab create .*--label general-purpose · Fresh refuter of N1-N16 /m) && called(/^pane report-agent w1:pT .*--message general-purpose · Fresh refuter of N1-N16$/m) && !called(/^pane rename w1:pT/m),
@@ -275,19 +286,30 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     fs.writeFileSync(path.join(jobs, `${name}.json`), JSON.stringify({ id: name, workspaceRoot, createdAt: new Date(createdAt).toISOString(), status, pid: null, logFile }))
     return path.join(jobs, `${name}.json`)
   }
+  // A second state directory under the same root, named for another workspace, whose record claims
+  // this workspace and is newer than anything here. The reader picks directories by the workspace
+  // basename, so this record is never read; a reader that took every directory would choose it.
+  const foreignJobs = path.join(home, '.claude', 'plugins', 'data', 'codex-openai-codex', 'state', 'elsewhere-ffff0000', 'jobs')
+  fs.mkdirSync(foreignJobs, { recursive: true })
+  const foreignJob = path.join(foreignJobs, 'task-foreign.json')
+  fs.writeFileSync(foreignJob, JSON.stringify({ id: 'task-foreign', workspaceRoot: WS, createdAt: new Date(now + 5000).toISOString(), status: 'running', pid: null, logFile: path.join(foreignJobs, 'task-foreign.log') }))
   const oldJob = job('task-old', now - 3600000, WS, 'completed')
   const otherJob = job('task-other', now + 1000, path.join(tmp, 'ws', 'elsewhere'), 'running')
   const runningJob = job('task-run', now, WS, 'running')
   const LABEL = 'codex-codex-rescue · Red team the spec'
+  const R = (f) => JSON.parse(fs.readFileSync(f, 'utf8'))
   const codexSeat = () => fs.writeFileSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json'), JSON.stringify({ agent: 'dctr-codex-codex-rescue-1', agent_id: 'cx-1', role: 'codex:codex-rescue', n: 1, tabId: null, paneId: 'w1:s1', file: '/t/x.jsonl', label: LABEL }))
   const stop = (cwd) => run({ hook_event_name: 'SubagentStop', agent_id: 'cx-1', agent_type: 'codex:codex-rescue', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd }, { HOME: home })
 
   reset(); codexSeat(); stop(WS)
   const runs = callLines(/^pane run w1:s1 /)
   check('the pane is not closed', !called(/^pane close w1:s1/m), callLines(/^pane close/).join(' | '))
-  check('and the renderer is interrupted before the watcher is typed in', called(/^pane send-keys w1:s1 ctrl\+c$/m), callLines(/^pane send-keys/).join(' | '))
+  const seq = callLines(/^pane (send-keys|run) w1:s1 /)
+  check('and the renderer is interrupted before the watcher is typed in',
+    seq.length === 2 && seq[0] === 'pane send-keys w1:s1 ctrl+c' && /^pane run w1:s1 .*--codex-tail /.test(seq[1]), seq.join(' | '))
   check('and exactly one watcher is run in it, on the running job', runs.length === 1 && runs[0].includes('--codex-tail') && runs[0].includes(runningJob) && runs[0].includes(LABEL), runs.join(' | '))
   check('and the marker stays, so the pane still counts against the cap', fs.existsSync(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')))
+  check("and a record in another workspace's state directory is not chosen, though newer", runs.length === 1 && !runs[0].includes(foreignJob), runs.join(' | '))
 
   reset(); codexSeat(); stop(path.join(tmp, 'ws', 'nowhere'))
   const logged = (() => { try { return fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { return '' } })()
@@ -297,6 +319,28 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   reset(); seat('dctr-explore-1', 'w1:s1', 'agent-1')
   run({ hook_event_name: 'SubagentStop', agent_id: 'agent-1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS }, { HOME: home })
   check('a general-purpose seat in the same session still closes', called(/^pane close w1:s1/m) && !called(/--codex-tail/))
+
+  // The watcher on a job that is still running: it stays up and leaves the label alone until the
+  // record changes, then shows the log's last bytes, relabels and exits. The record is replaced by
+  // rename so the watcher never reads a half-written file, which is how the plugin writes it too.
+  reset()
+  const live = spawn('node', [hook, '--codex-tail', runningJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp } })
+  let liveOut = ''
+  live.stdout.on('data', (d) => { liveOut += d })
+  const liveExit = new Promise((resolve) => live.on('exit', (code) => resolve(code)))
+  await new Promise((r) => setTimeout(r, 2500))
+  check('the watcher stays alive while the job runs', live.exitCode === null, `exit ${live.exitCode}`)
+  check('and does not relabel the pane yet', !called(/^pane rename w1:s1/m), callLines(/^pane rename/).join(' | '))
+  const finished = { ...R(runningJob), status: 'completed' }
+  fs.writeFileSync(`${runningJob}.tmp`, JSON.stringify(finished)); fs.renameSync(`${runningJob}.tmp`, runningJob)
+  fs.appendFileSync(finished.logFile, 'last line of task-run\n')
+  const bound = setTimeout(() => live.kill('SIGKILL'), 8000)
+  const liveCode = await liveExit
+  clearTimeout(bound)
+  check('and exits once the record leaves running', liveCode === 0, `exit ${liveCode}: ${liveOut}`)
+  check('having shown the log written after it started', liveOut.includes('last line of task-run'), liveOut)
+  check('and relabelled the pane with the final status', called(/^pane rename w1:s1 codex-codex-rescue · Red team the spec · completed$/m), callLines(/^pane rename/).join(' | '))
+  job('task-run', now, WS, 'running')
 
   // The watcher itself, against a job that has already left `running`: it prints the log, renames
   // the pane with the status and exits, leaving the pane's shell where the output is.
@@ -311,12 +355,13 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check('and showed the log', tail.out.includes('codex output for task-done'), tail.out)
 
   console.log('clause 3: the codex and meta fixtures really carry what their clauses lean on, proved without the hook')
-  const R = (f) => JSON.parse(fs.readFileSync(f, 'utf8'))
   check('the running job really is this workspace, running, and within the last minute',
     R(runningJob).workspaceRoot === WS && R(runningJob).status === 'running' && Date.parse(R(runningJob).createdAt) >= now - 60000)
   check('the old job really is older than the window and the other job really is another workspace, though newer',
     Date.parse(R(oldJob).createdAt) < now - 60000 && R(otherJob).workspaceRoot !== WS && Date.parse(R(otherJob).createdAt) > Date.parse(R(runningJob).createdAt))
   check('the done job really is not running', R(doneJob).status !== 'running')
+  check('the foreign record really claims this workspace, is newer than the running job, and sits in a directory not named for it',
+    R(foreignJob).workspaceRoot === WS && Date.parse(R(foreignJob).createdAt) > Date.parse(R(runningJob).createdAt) && !path.basename(path.dirname(foreignJobs)).startsWith('doctrine-skills-'))
   const metaFixture = JSON.parse(fs.readFileSync(path.join(tmp, 'proj', 'sess', 'subagents', 'agent-a7.meta.json'), 'utf8'))
   check('the meta fixture really carries a description, at the path derived from the transcript',
     metaFixture.description === 'Fresh refuter of N1-N16' && !fs.existsSync(path.join(tmp, 'proj', 'sess', 'subagents', 'agent-a8.meta.json')))
