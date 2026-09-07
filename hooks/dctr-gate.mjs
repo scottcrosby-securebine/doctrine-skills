@@ -149,6 +149,7 @@ if (argv[0] === '--run') {
       // takes the tab path rather than splitting onto a column it cannot see. It did once fall back
       // to stacking on the newest side pane, and that could stack onto a pane in another tab.
       let layout = null
+      // herdr-lint: creation, not destruction. An unreadable layout falls to the tab path, which destroys nothing.
       try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* tab path below */ }
       // THROW, never return a reason. This callback's contract is a placement object and the caller
       // reads its fields; a string return made every field undefined, skipped `pane run` entirely,
@@ -196,7 +197,9 @@ if (argv[0] === '--run') {
         const occupants = sideOccupants(seats, layout)
         if (!occupants) hookLog(sessionId, `gate "${label}": could not observe the side column (${sideColumnReason()}); taking the tab path`)
         if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
+          // herdr-lint: creation. The catch retries the split, and the retry sets paneId null for the tab path.
           try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, process.cwd())).result.pane.pane_id }
+          // herdr-lint: creation. Its catch sets paneId null, which takes the tab path.
           catch { try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID, null, process.cwd())).result.pane.pane_id } catch { paneId = null } }
         }
         if (!paneId) {

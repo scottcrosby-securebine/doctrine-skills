@@ -168,6 +168,7 @@ try {
       // takes the tab path rather than splitting onto a column it cannot see. It did once fall back
       // to stacking on the newest side pane, and that could stack onto a pane in another tab.
       let layout = null
+      // herdr-lint: creation, not destruction. An unreadable layout falls to the tab path.
       try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* tab path below */ }
       // An unreadable marker makes the seat count unknown, and an unknown count must not become a
       // small one: standing down costs this seat its pane, placing blind costs the whole column.
@@ -195,6 +196,7 @@ try {
         // "not focused" — destroying the tab the user was looking at.
         let tabs, tabListFailed = false
         if (seats.some((s) => s.codexJob && s.tabId)) {
+          // herdr-lint: separated by the tabListFailed FLAG rather than a predicate, and both answers mean do not close.
           try { tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result?.tabs }
           catch { tabListFailed = true }
           if (!Array.isArray(tabs)) { tabs = undefined; tabListFailed = true }
@@ -317,9 +319,11 @@ try {
         log(`could not observe the side column (${why}); taking the tab path rather than splitting blind`)
       }
       if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
+        // herdr-lint: creation. The catch logs and retries; the retry sets paneId null for the tab path.
         try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, cwd)).result.pane.pane_id }
         catch (e) {
           log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
+          // herdr-lint: creation. Its catch sets paneId null, which takes the tab path.
           try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID, null, cwd)).result.pane.pane_id }
           catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
         }
@@ -448,6 +452,7 @@ try {
       // so a transport blip destroyed the tab the user was watching. The pane branch below already
       // made this separation; this branch, ten lines above it, never got the fix.
       let mine, listFailed = null
+      // herdr-lint: separated by the listFailed FLAG: the caller turns it into unknown and keeps the marker.
       try {
         const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
         mine = tabs.find((t) => t.tab_id === seat.tabId)

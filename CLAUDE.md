@@ -19,6 +19,8 @@ node tools/doc-check.mjs              # prose gate over every .md under skills/;
 node tools/doc-check.mjs --selftest   # its three-clause tamper test, which lives in tools/doc-check.selftest.mjs
 python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
 python3 -m json.tool .claude-plugin/marketplace.json
+node tools/herdr-lint.mjs           # the ONE class this repo kept re-finding by review round: a herdr reply whose failure OR emptiness is read as an answer that authorizes destruction; exit 0 clean, 1 on any finding
+node tools/herdr-lint.selftest        # not a command — run `node tools/herdr-lint.mjs --selftest`; exit 2 if the sidecar is missing
 node hooks/dctr-seat.selftest.mjs   # three-clause tamper test for the seat hook's pure decisions
 node hooks/dctr-seat.contained.selftest.mjs   # contained posture calls herdr zero times (tripwire on PATH)
 node hooks/dctr-gate.selftest.mjs   # gate launcher: the check runs, the file ends exit=N, the no-herdr path calls herdr zero times
