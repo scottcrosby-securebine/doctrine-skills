@@ -11,8 +11,10 @@
 // the property its clause depends on, without calling the function under test — the clause that
 // catches a check which silently measures nothing.
 
+import fs from 'node:fs'
+import { SESSION_END_WAIT_MS } from './dctr-state.mjs'
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
@@ -89,11 +91,48 @@ clause('clause 1h — a focused tab is relabelled and an unfocused one is closed
 // Issue #20 defect 2: a tab the workspace list does not carry was skipped, its marker deleted, and
 // nothing could ever reach it again. The seat's tab, mislocated into w4X by defect 1, is absent
 // from this session's own w4Z list — the stop decision must still be a close, by recorded id.
+// That decision is the CALLER's now. `stopAction` cannot make it: an absent record and an
+// unreachable herdr arrive here as the same `undefined`, only one of them may close anything, and a
+// pure function cannot see which its caller observed. Three call sites each assumed the caller above
+// had already separated them and two had not, so the collapse moved out of this function entirely.
+// The close-by-id behaviour is pinned where the distinction exists, in dctr-seat.teardown.selftest.mjs.
 const FOREIGN_LIST = [{ tab_id: 'w4X:t2', focused: false }, { tab_id: 'w4X:t3', focused: true }]
 const SEAT_TAB_ID = 'w4Z:t9'
-clause('clause 1p — a tab absent from the workspace list is closed by id, never skipped',
-  stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'close',
-  'a skipped tab outlives its marker and the SessionEnd sweep can never reach it')
+// The one round-2 finding whose repair no fixture in the diff could drive, which is why it was the
+// one that was wrong. A constant expressing "wait longer" is meaningless past the lifetime of the
+// process doing the waiting, and nothing connected the two numbers until this clause.
+{
+  const hooksJson = JSON.parse(fs.readFileSync(new URL('./hooks.json', import.meta.url), 'utf8'))
+  const sessionEnd = (hooksJson.hooks?.SessionEnd || []).flatMap((m) => m.hooks || [])
+  const timeoutMs = Math.min(...sessionEnd.map((h) => (h.timeout ?? 60) * 1000))
+  clause('clause 1ay — SESSION_END_WAIT_MS fits inside the SessionEnd hook\'s own configured timeout',
+    Number.isFinite(timeoutMs) && SESSION_END_WAIT_MS < timeoutMs,
+    `wait ${SESSION_END_WAIT_MS}ms vs hooks.json timeout ${timeoutMs}ms — a deadline past the process's lifetime is a silent death, not a longer wait`)
+  clause('clause 1az — and it is still longer than a placement waits, which is the point of having two',
+    SESSION_END_WAIT_MS > 5000, `${SESSION_END_WAIT_MS}`)
+  clause('clause 3t — hooks.json really declares a SessionEnd timeout, so the clause above is reading something',
+    sessionEnd.length > 0 && Number.isFinite(timeoutMs) && timeoutMs > 0,
+    `parsed ${sessionEnd.length} SessionEnd hook(s), timeout ${timeoutMs}ms`)
+}
+
+clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
+  anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
+  `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
+clause('clause 1ax — and the two refusals are DISTINCT, so a runner cannot collapse "occurs twice" into "not there"',
+  anchorVerdict(0) !== anchorVerdict(2),
+  'a comparison of hits === 0 in place of hits !== 1 accepts duplicate anchors again, silently')
+
+clause('clause 1p — stopAction answers `unknown` for a record it has not seen, never `close`',
+  stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'unknown',
+  'collapsing unseen into close is how a transport blip destroys the tab the user is watching')
+clause('clause 1p2 — and `unknown` for a record carrying no boolean focus, which a reply can do',
+  stopAction({ tab_id: SEAT_TAB_ID }) === 'unknown' &&
+  stopAction({ tab_id: SEAT_TAB_ID, focused: 'yes' }) === 'unknown' &&
+  stopAction(null) === 'unknown',
+  `${stopAction({ tab_id: SEAT_TAB_ID })} / ${stopAction({ tab_id: SEAT_TAB_ID, focused: 'yes' })} / ${stopAction(null)}`)
+clause('clause 1p3 — the fixtures really are what those clauses lean on: one carries no focus key, one a non-boolean, and the list really lacks the seat tab',
+  !('focused' in { tab_id: SEAT_TAB_ID }) && typeof 'yes' !== 'boolean' && !FOREIGN_LIST.some((t) => t.tab_id === SEAT_TAB_ID),
+  'without this the two clauses above could pass against inputs that never carried the defect')
 
 // Issue #20 defect 1: without --workspace the tab lands in whatever workspace the user focused.
 const CREATE_ARGS = tabCreateArgs('w4Z', 'dctr · explore · 1')
@@ -228,6 +267,16 @@ clause('clause 1y — a side seat whose pane the layout lacks is stale; tab seat
   staleSideSeats([SIDE_SEAT(3)], null).length === 0 && staleSideSeats([SIDE_SEAT(3)], []).length === 0 &&
   staleSideSeats([TAB_SEAT(1)], LAYOUT).length === 0,
   JSON.stringify(STALE))
+
+// A layout with an entry carrying no `pane_id` is a PARTIAL observation, and it was read as a
+// complete one: `undefined` went into the live set, every real pane then failed the `has`, and EVERY
+// live side seat came back stale — with both callers unlinking those markers without an existence
+// lookup. Emptiness already meant "I could not look"; partiality has to mean the same thing.
+const PARTIAL_LAYOUT = [{ pane_id: SIDE_SEAT(1).paneId }, {}]
+clause('clause 1bb — a layout carrying an entry with no pane_id is not an observed layout, so nothing is judged stale',
+  staleSideSeats([SIDE_SEAT(2)], PARTIAL_LAYOUT).length === 0 &&
+  staleSideSeats([SIDE_SEAT(1), SIDE_SEAT(2), SIDE_SEAT(3)], PARTIAL_LAYOUT).length === 0,
+  JSON.stringify(staleSideSeats([SIDE_SEAT(1), SIDE_SEAT(2), SIDE_SEAT(3)], PARTIAL_LAYOUT)))
 
 // Clause 3 — the fixtures really carry their properties, shown without the functions above.
 clause('clause 3a — the long-role fixture really would overflow herdr\'s limit untruncated',
@@ -393,6 +442,16 @@ clause('clause 3m — the layout fixture really carries seats 1 and 2 and really
   LAYOUT.some((p) => p.pane_id === SIDE_SEAT(1).paneId) && LAYOUT.some((p) => p.pane_id === SIDE_SEAT(2).paneId) &&
   !LAYOUT.some((p) => p.pane_id === SIDE_SEAT(3).paneId) && !LAYOUT.some((p) => p.pane_id === TAB_SEAT(1).paneId),
   'if the layout carried seat 3, 1y would prove staleSideSeats never fires; if it carried the tab pane, the tab clause would be vacuous')
+
+// Third clause for 1bb, and it never calls staleSideSeats: it runs the OLD body's own expression
+// (`new Set(layoutPanes.map(p => p.pane_id))`) over the fixture and shows a live seat is absent from
+// it, which is exactly how a live pane got condemned. Without this, 1bb would pass just as well
+// against a fixture that could never have broken anything.
+clause('clause 3w — the partial-layout fixture really carries the defect: the naive live-set built from it lacks a LIVE seat, shown without staleSideSeats',
+  PARTIAL_LAYOUT.length === 2 && PARTIAL_LAYOUT[0].pane_id === SIDE_SEAT(1).paneId &&
+  PARTIAL_LAYOUT[1].pane_id === undefined &&
+  !new Set(PARTIAL_LAYOUT.map((p) => p.pane_id)).has(SIDE_SEAT(2).paneId),
+  `naive set: ${JSON.stringify([...new Set(PARTIAL_LAYOUT.map((p) => p.pane_id))])} — SIDE_SEAT(2) is live and absent from it`)
 
 clause('clause 3n — the mountinfo fixture really carries a 64-hex id under /containers/, shown without the parser',
   MOUNTINFO.includes('/containers/') && CID.length === 64 && [...CID].every((c) => '0123456789abcdef'.includes(c)) &&

@@ -31,7 +31,7 @@ import {
   PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose } from './dctr-lib.mjs'
-import { stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+import { SESSION_END_WAIT_MS, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
 
 // Watcher mode, typed into a codex seat's pane by SubagentStop:
 //
@@ -77,7 +77,8 @@ if (process.argv[2] === '--codex-tail') {
   // production interval: the teardown suite used to wait 2500ms purely to outlast this. Production
   // is the default, so a run without the variable behaves exactly as before. The PUMP interval is
   // NOT injectable: it was, briefly, and nothing needed it and no clause could tell whether it was
-  // honoured — an override no fixture can show the absence of is the class this repo removes.
+  // honoured. Not because no fixture could show it — one plainly could, and CLAUDE.md calls that a
+  // missing fixture — but because nothing needed the override in the first place.
   setInterval(pump, PUMP_MS)
   setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)
   poll()
@@ -168,6 +169,7 @@ try {
       // takes the tab path rather than splitting onto a column it cannot see. It did once fall back
       // to stacking on the newest side pane, and that could stack onto a pane in another tab.
       let layout = null
+      // herdr-lint: creation, not destruction. An unreadable layout falls to the tab path.
       try { layout = herdr(['pane', 'layout', '--pane', process.env.HERDR_PANE_ID]).result.layout.panes } catch { /* tab path below */ }
       // An unreadable marker makes the seat count unknown, and an unknown count must not become a
       // small one: standing down costs this seat its pane, placing blind costs the whole column.
@@ -187,33 +189,91 @@ try {
       // A close that FAILS keeps its marker, the same rule SubagentStop's teardown follows — a pane
       // we could not close is one we cannot claim is gone.
       if (payload.agent_type === CODEX_ROLE) {
+        // ASK WHAT YOU ARE ABOUT TO CLOSE (Scott's ruling, 2026-09-08). A tab seat is closed with
+        // `tab close`, so its focus is the TAB's, read once here rather than per candidate. Reading
+        // the recorded ROOT PANE and then closing the whole tab asks a different question than the
+        // one being acted on: a user who splits the tab and closes the root leaves a live focused
+        // sibling, herdr answers `pane_not_found` for the pane that went, and that was read as
+        // "not focused" — destroying the tab the user was looking at.
+        let tabs, tabListFailed = false
+        if (seats.some((s) => s.codexJob && s.tabId)) {
+          // herdr-lint: separated by the tabListFailed FLAG rather than a predicate, and both answers mean do not close.
+          try { tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result?.tabs }
+          catch { tabListFailed = true }
+          if (!Array.isArray(tabs)) { tabs = undefined; tabListFailed = true }
+        }
         const candidates = seats.filter((s) => s.codexJob).map((s) => {
           let status = null
           try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* unreadable is not terminal */ }
           // "It is gone" and "I could not look" are different answers, and only the first is one.
-          // A pane the lookup cannot REACH keeps focus unknown, and codexPanesToClose spares it —
-          // the same separation the ordinary stop path makes, and for the same reason: the pane a
-          // blind close destroys is the focused one the user is watching.
+          // A pane or tab the lookup cannot REACH keeps focus unknown, and codexPanesToClose spares
+          // it — the same separation the ordinary stop path makes, and for the same reason: the one
+          // a blind close destroys is the one the user is watching.
           // THREE states, not two: true, false, and "could not observe". Only a definite false ever
           // closes anything. `?.focused === true` collapsed the third into false — a reply carrying
           // `result` but no `pane` read as "not focused" and closed the pane — which is the very
           // defect this block was rewritten to remove, reintroduced by the rewrite.
           let focused
-          try {
-            const pane = herdr(['pane', 'get', s.paneId]).result?.pane
-            if (typeof pane?.focused === 'boolean') focused = pane.focused
-          } catch (e) {
-            // `pane_not_found` IS an observation: that pane is gone, so it is not focused, and the
-            // seat should be swept. Everything else leaves focus unknown. This branch was deleted
-            // once for being unreachable by any fixture; the fixture was the thing missing, and a
-            // finished codex TAB whose pane has gone leaked its marker for the whole session,
-            // because staleSideSeats never judges a tab seat (dctr-lib.mjs).
-            if (isPaneNotFound(e)) focused = false
+          if (s.tabId) {
+            // A list that SUCCEEDED and does not carry this tab has observed the tab's absence, and
+            // that is what keeps a finished codex TAB from leaking its marker for the whole session:
+            // staleSideSeats never judges a tab seat (dctr-lib.mjs), so nothing else would sweep it.
+            if (!tabListFailed) {
+              const mine = tabs.find((t) => t.tab_id === s.tabId)
+              if (!mine) focused = false
+              // NOT pinned by a mutation, and deliberately kept. Since the close loop re-asks before
+              // destroying anything, forcing this to `false` only makes a tab a candidate that the
+              // re-ask then spares — defence in depth, so no clause can redden. The failure it
+              // prevents is a wasted round trip, not a wrong close. Missing fixture, not dead code.
+              else if (typeof mine.focused === 'boolean') focused = mine.focused
+            }
+          } else {
+            try {
+              const pane = herdr(['pane', 'get', s.paneId]).result?.pane
+              // NOT pinned by a mutation any more, and deliberately kept — the same position round 2
+              // reached for the tab half. Since the close loop now re-asks a PANE before destroying
+              // it, forcing this to a bare `=== true` only makes a seat a candidate the re-ask then
+              // spares: the cost is a wasted round trip, never a wrong close, so no clause can
+              // redden. Behaviourally identical is the dead-branch case; this is the guard that stays
+              // because the re-ask below is what makes it so, and it stops being so if that changes.
+              if (typeof pane?.focused === 'boolean') focused = pane.focused
+            } catch (e) {
+              // `pane_not_found` IS an observation: that pane is gone, so it is not focused, and the
+              // seat should be swept. Everything else leaves focus unknown. This branch was deleted
+              // once for being unreachable by any fixture; the fixture was the thing missing.
+              if (isPaneNotFound(e)) focused = false
+            }
           }
           return { seat: s, status, focused }
         })
         const closed = new Set()
         for (const s of codexPanesToClose(candidates)) {
+          // RE-ASK IMMEDIATELY BEFORE DESTROYING, for a PANE seat exactly as for a tab one. The
+          // snapshot above is taken once, and candidate collection then makes a herdr round trip for
+          // every pane seat after it, plus a re-ask for every tab and a close for every candidate
+          // already handled — on the order of ten calls, each bounded at HERDR_TIMEOUT_MS. The user
+          // can focus a pane or a tab anywhere inside that window, and the placement lock serializes
+          // placements, not the user's attention. Hoisting the read fixed a wrong question and
+          // introduced a stale answer; re-asking only for tabs fixed the stale answer for half the
+          // candidates and left the other half reading a snapshot that is older still, because the
+          // tab re-asks now sit between that read and this close.
+          let stillUnfocused = false
+          if (s.tabId) {
+            // herdr-lint: separated by the stillUnfocused FLAG, which starts false. Every failure of the list leaves it false and the candidate is spared, so no answer this try can fail to get authorizes the close below.
+            try {
+              const now = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result?.tabs
+              if (Array.isArray(now)) {
+                const t = now.find((x) => x.tab_id === s.tabId)
+                stillUnfocused = !t || t.focused === false   // absent is an observed absence; unknown focus is not
+              }
+            } catch { stillUnfocused = false }   // a LIST that failed is "I could not look", about no tab in particular
+          } else {
+            try {
+              const pane = herdr(['pane', 'get', s.paneId]).result?.pane
+              if (typeof pane?.focused === 'boolean') stillUnfocused = pane.focused === false
+            } catch (e) { stillUnfocused = isPaneNotFound(e) }   // gone IS an answer; anything else is not
+          }
+          if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }
           try { herdr(s.tabId ? ['tab', 'close', s.tabId] : ['pane', 'close', s.paneId]) }
           catch (e) {
             // A not-found code is an ANSWER: that pane or tab is already gone, so its marker should
@@ -226,15 +286,23 @@ try {
             if (!gone) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
           }
           // Removed by name, and that is safe HERE and nowhere else: this runs inside the placement
-          // lock, `seats` was read from disk in the same critical section, and every writer of a
-          // SEAT marker holds that lock without exception — placement, SubagentStop's removal,
-          // SessionEnd's sweep, and the codex stop path's write, which is why that write has no
-          // unlocked fallback. (The gate launcher removes its own gate
+          // lock, `seats` was read from disk in the same critical section, and every writer that can
+          // publish or rename ANOTHER seat's marker holds that lock — placement, SubagentStop's
+          // removal, SessionEnd's sweep, and the codex stop path's write, which is why that write
+          // has no unlocked fallback. Two removals sit outside it and neither can reach a name this
+          // block considers: `releaseReserved` unlinks only the reservation THIS process made, which
+          // carries no codexJob and is therefore never a candidate here, and the gate launcher
+          // removes its own gate
           // marker outside the lock, in another process; close-on-next never considers one, since a
           // gate marker carries no codexJob and only codexJob seats are candidates.) No identity
-          // check, because no interleaving can change the name under it, and a guard whose absence
-          // no fixture can show is the class this repo removes.
-          try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
+          // check, because no interleaving can change the name under it. That argument is the whole
+          // reason; "no fixture reaches it" would not be one, per CLAUDE.md's narrowed rule.
+          // Logged, not silent: every other branch of this file's marker logic says what it did,
+          // and an unlink that fails here drops the seat from the in-memory roster while its record
+          // survives on disk. Self-correcting (the next placement sees the pane gone and retries,
+          // and O_EXCL stops the freed name being reused meanwhile), but it left no evidence at all.
+          try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) }
+          catch (e) { log(`close-on-next: closed ${s.agent} but could not remove its marker (${String(e.message).split('\n')[0]}); the next placement will retry`) }
           closed.add(s.agent)
           log(`close-on-next: closed finished codex seat ${s.agent}`)
         }
@@ -253,8 +321,9 @@ try {
       // No index bound here on purpose. One was added and removed in the same round: with the errno
       // split above, a real failure leaves through `fatal`, and unbounded EEXIST would need another
       // process to steal each freshly-chosen name in turn, which a six-pane cap does not produce.
-      // The mutation gate reported it as pinned by nothing, and a guard whose absence no fixture can
-      // show is the class this repo keeps finding. `nextIndex` carries the only bound that fires.
+      // The mutation gate reported it as pinned by nothing, which under CLAUDE.md's narrowed rule
+      // asks for a fixture rather than licensing a deletion. It stays out because the bound would be
+      // unreachable, not merely unpinned: `nextIndex` carries the only bound that fires.
       while (n && !marker && !fatal) {
         name = agentName(payload.agent_type, n)
         try {
@@ -288,9 +357,11 @@ try {
         log(`could not observe the side column (${why}); taking the tab path rather than splitting blind`)
       }
       if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
+        // herdr-lint: creation. The catch logs and retries; the retry sets paneId null for the tab path.
         try { paneId = herdr(splitArgs(occupants, process.env.HERDR_PANE_ID, layout, cwd)).result.pane.pane_id }
         catch (e) {
           log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
+          // herdr-lint: creation. Its catch sets paneId null, which takes the tab path.
           try { paneId = herdr(splitArgs([], process.env.HERDR_PANE_ID, null, cwd)).result.pane.pane_id }
           catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
         }
@@ -387,8 +458,11 @@ try {
         // out was tried and removed: its window runs from the marker read through writeMarker's
         // rename, with no code-enforced bound, and it can rename over a replacement seat's record
         // and leave that seat's live pane tracked by nothing. Losing close-on-next for one seat
-        // under sustained contention is the pre-existing behaviour and is bounded; untracking a
-        // live pane is neither. Every other contended path in this file defers to SessionEnd too.
+        // under sustained contention is the pre-existing behaviour and is bounded BY SESSIONEND —
+        // which is why SessionEnd's sweep now waits SESSION_END_WAIT_MS and not a placement's
+        // deadline: at one shared 5s bound that sweep could time out too, its caller swallowed the
+        // throw, and the bound this sentence claims did not exist. Untracking a live pane is bounded
+        // by nothing at all. Every other contended path in this file defers to SessionEnd too.
         const recordJob = () => {
           const file = path.join(seatsDir(sessionId), `${seat.agent}.json`)
           let current = null
@@ -411,12 +485,23 @@ try {
       // the list does not carry — mislocated by a pre-#20 hook, or the list call itself failing — is
       // closed by its recorded id, which is global. Skipping it here would orphan it for good, since
       // the marker removal below also takes the seat out of the SessionEnd sweep.
-      let mine
+      // A list that FAILED is not a list that reported an absence, and the old code gave both the
+      // same answer: `mine` was left undefined either way and `stopAction(undefined)` closed the tab,
+      // so a transport blip destroyed the tab the user was watching. The pane branch below already
+      // made this separation; this branch, ten lines above it, never got the fix.
+      let mine, listFailed = null
+      // herdr-lint: separated by the listFailed FLAG: the caller turns it into unknown and keeps the marker.
       try {
         const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
         mine = tabs.find((t) => t.tab_id === seat.tabId)
-      } catch { /* fall through to close-by-id */ }
-      if (stopAction(mine) === 'relabel') try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
+      } catch (e) { listFailed = String(e.message).split('\n')[0] }
+      // Listed and absent is an OBSERVED absence: close by id, per issue #20. Everything else the
+      // list could not answer for keeps the marker so SessionEnd can try again.
+      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'
+      if (act === 'unknown') closeFailed = listFailed
+        ? `could not list tabs for ${seat.tabId} (${listFailed})`
+        : `${seat.tabId} was listed with no readable focus`
+      else if (act === 'relabel') try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
       else try { herdr(['tab', 'close', seat.tabId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     } else {
       // A side seat: same relabel-vs-close rule, read from the pane's own record. A pane the get
@@ -425,14 +510,21 @@ try {
       // 'close', so a lookup that merely FAILED used to close the pane anyway — and the one pane
       // stopAction would have spared is the focused one, the pane the user is watching. "It is gone"
       // and "I could not look" need separating here for the same reason they do on the close.
-      let pane, lookupFailed = null
+      let pane, lookupFailed = null, gone = false
       try { pane = herdr(['pane', 'get', seat.paneId]).result.pane }
-      catch (e) { if (!isPaneNotFound(e)) lookupFailed = String(e.message).split('\n')[0] }
-      if (lookupFailed) {
+      catch (e) { if (isPaneNotFound(e)) gone = true; else lookupFailed = String(e.message).split('\n')[0] }
+      // `gone` still closes, because the close is a no-op on an absent pane and its POINT is that
+      // closeFailed stays null so the marker is removed. What changed: a lookup that SUCCEEDED and
+      // carried no pane, or a pane with no boolean `focused`, used to fall through to close as well
+      // — the same blind close by another road, and the one it destroys is the focused pane.
+      const act = lookupFailed ? 'unknown' : gone ? 'close' : stopAction(pane)
+      if (act === 'unknown') {
         // Keep the record rather than act blind. SessionEnd will try again, which is the whole
         // reason a marker survives a close it could not make.
-        closeFailed = `could not look up ${seat.paneId} (${lookupFailed})`
-      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
+        closeFailed = lookupFailed
+          ? `could not look up ${seat.paneId} (${lookupFailed})`
+          : `${seat.paneId} answered with no readable focus`
+      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
       else try { herdr(['pane', 'close', seat.paneId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     }
 
@@ -474,6 +566,10 @@ try {
     // pane being closed — an untracked pane nothing can ever find.
     try {
       let removable = false
+      // The LAST chance, so it waits far longer than a placement does. At the shared 5s deadline
+      // this call could time out under contention and be swallowed by the catch below, and the
+      // "losing close-on-next is bounded by SessionEnd" claim beside the codex stop path was then
+      // false: nothing else ever reclaims that pane, and the next session reads its own state dir.
       placementLock(sessionId, () => {
         const { seats, unreadable } = liveSeatsPartial(sessionId)
         // Close every seat we can read. A close that FAILS is not "already gone" — a timeout or a
@@ -481,6 +577,16 @@ try {
         // the records that say how to tear it down.
         let failed = 0
         for (const seat of seats) {
+          // A record that NAMES nothing cannot be closed. `reserveMarker` publishes `{}` and it
+          // survives whenever a rollback's republish also failed, so this shape reaches disk; asking
+          // herdr to close `undefined` turned a useless record into a failed close, which is a
+          // different thing from a pane that would not die. Counted rather than ignored, so the
+          // directory is kept with the evidence still in it.
+          if (!seat || (!seat.tabId && !seat.paneId)) {
+            failed += 1
+            log('SessionEnd: a seat record names neither a pane nor a tab; there is nothing to close, keeping it')
+            continue
+          }
           try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) }
           catch (e) {
             // Same rule as SubagentStop above: "not found" is an answer, and the thing we were
@@ -499,7 +605,7 @@ try {
           try { fs.rmSync(path.join(stateDir(sessionId), name), { recursive: true, force: true }) } catch { /* best effort */ }
         }
         removable = true
-      })
+      }, SESSION_END_WAIT_MS)
       // The lock is released by now, so the directory can go. If anything above kept a record, this
       // does not run and the directory stays for a human to look at.
       // rmdir, NOT a recursive remove. The lock was released a line ago, and a waiting placement can

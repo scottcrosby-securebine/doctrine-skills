@@ -240,7 +240,15 @@ function readRecords(tee) {
 /** live | gone | unknowable. herdr answers a pane that does not exist with an error CODE and exit 1,
  *  which is an answer; anything else that throws is an observation that failed. */
 function askPane(paneId) {
-  try { return herdr(['pane', 'get', paneId]).result.pane ? 'live' : 'gone' }
+  try {
+    // The SUCCESS half needs the same three answers as the catch half below, and did not have them:
+    // `.result.pane ? 'live' : 'gone'` read a reply carrying `result` but no `pane` as a definite
+    // absence. Downstream that is `proceed: true` with the pane listed stale, and guardWrite then
+    // TRUNCATES the user's transcript. A reply that answered nothing is not a pane that is gone.
+    const reply = herdr(['pane', 'get', paneId]).result
+    if (reply && typeof reply === 'object' && 'pane' in reply) return reply.pane ? 'live' : 'gone'
+    return 'unknowable'
+  }
   catch (e) { return isPaneNotFound(e) ? 'gone' : 'unknowable' }
 }
 
@@ -312,9 +320,11 @@ async function open(label, tee, connect) {
   // as "not in the layout" and split a seventh. A snapshot taken before the lock is not evidence of
   // anything by the time the lock is held.
   let paneId, opened = null
+  // herdr-lint: creation, not destruction. The split and the tab create are the only reads this try owns; a failure leaves through the catch below, which dies and closes nothing.
   try {
     paneId = withPlacementLock(sessionId, () => {
       let layout
+      // herdr-lint: separated by DIE, not by a predicate: the next line refuses to split blind.
       try { layout = herdr(['pane', 'layout', '--pane', sessionPane]).result.layout.panes } catch { layout = null }
       if (!layout?.length) die('cannot observe the pane layout; not splitting blind')
 
@@ -335,8 +345,13 @@ async function open(label, tee, connect) {
       // them itself: that raced this sweep and mutated a record in the middle of reading it.
       const staleFromDecision = mine.filter((p) => decision.stale.includes(p.paneId))
       for (const dead of [...staleSideSeats(mine, layout), ...mine.filter((p) => p.tabId), ...staleFromDecision]) {
+        // Same three answers, same reason: only a DEFINITE absence may remove a record. This read
+        // negated the reply directly, so a response carrying nothing deleted a live pane's marker.
         let gone = false
-        try { gone = !herdr(['pane', 'get', dead.paneId]).result.pane } catch (e) { gone = isPaneNotFound(e) }
+        try {
+          const reply = herdr(['pane', 'get', dead.paneId]).result
+          gone = !!(reply && typeof reply === 'object' && 'pane' in reply && !reply.pane)
+        } catch (e) { gone = isPaneNotFound(e) }
         if (gone) try { fs.rmSync(markerFor(dead.paneId), { force: true }) } catch { /* already gone */ }
       }
 

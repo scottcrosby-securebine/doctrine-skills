@@ -20,11 +20,17 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+// Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
+// pins SESSION_END_WAIT_MS against the SessionEnd timeout declared there; without the copy that
+// clause threw ENOENT, the whole pure suite died on load, and eleven previously-pinned functions
+// reported unpinned in one run. A suite that reads a file outside this list is silently disabled
+// inside the gate, which is the loudest quiet failure this harness has.
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
-  'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs']
+  'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
+  'hooks.json']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -50,6 +56,22 @@ const MUTATIONS = [
   { name: 'the unread window is re-checked after the recorder lookup', file: 'dctr-pane.mjs', clause: 'bytes arriving during the lookup refuse the write',
     from: '  const settled = size(tee)',
     to: '  const settled = end' },
+  { name: 'close-on-next trusts the snapshot for a side PANE instead of re-asking', file: 'dctr-seat.mjs',
+    clause: 'a side PANE focused BETWEEN the hoisted snapshot and the close is spared',
+    from: `          } else {
+            try {
+              const pane = herdr(['pane', 'get', s.paneId]).result?.pane
+              if (typeof pane?.focused === 'boolean') stillUnfocused = pane.focused === false
+            } catch (e) { stillUnfocused = isPaneNotFound(e) }   // gone IS an answer; anything else is not
+          }`,
+    to: '          } else { stillUnfocused = true }' },
+  { name: "a re-ask LIST that answered not-found is read as this tab's absence", file: 'dctr-seat.mjs',
+    clause: 'a tab whose re-ask LIST answered tab_not_found is spared',
+    from: `            } catch { stillUnfocused = false }   // a LIST that failed is "I could not look", about no tab in particular`,
+    to: '            } catch (e) { stillUnfocused = isTabNotFound(e) }' },
+  { name: 'a partially observed layout is read as a complete one', file: 'dctr-lib.mjs', clause: 'clause 1bb — an entry with no pane_id means nothing is judged stale',
+    from: "  if (!layoutPanes.every((p) => p && typeof p.pane_id === 'string' && p.pane_id)) return []\n",
+    to: '' },
   { name: 'a lock inside its window is not examined', file: 'dctr-state.mjs', clause: 'a lock inside its window is not examined at all',
     from: '  if (age <= (condemned === null ? pidlessMs : staleMs)) return false',
     to: '  if (false) return false' },
@@ -115,8 +137,8 @@ const MUTATIONS = [
   { name: 'tabs get their own not-found code', file: 'dctr-seat.mjs', clause: 'SessionEnd sweeps the state directory when a TAB answers tab_not_found',
     from: '    const alreadyGone = (e) => (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e))',
     to: '    const alreadyGone = (e) => isPaneNotFound(e)' },
-  { name: 'a lookup that failed does not become a close', file: 'dctr-seat.mjs', clause: 'a pane whose lookup failed is NOT closed',
-    from: '      catch (e) { if (!isPaneNotFound(e)) lookupFailed = String(e.message).split(\'\\n\')[0] }',
+  { name: 'a lookup that failed does not become a close', file: 'dctr-seat.mjs', clause: 'removes it when the LOOKUP is what answered pane_not_found',
+    from: '      catch (e) { if (isPaneNotFound(e)) gone = true; else lookupFailed = String(e.message).split(\'\\n\')[0] }',
     to: '      catch { /* gone */ }' },
   { name: 'the marker is removed by identity, not by name', file: 'dctr-seat.mjs', clause: 'a marker whose agent_id has changed hands is left alone',
     from: '        } else if (current && current.agent_id !== seat.agent_id) {',
@@ -213,12 +235,48 @@ const MUTATIONS = [
   { name: 'the gate requires an anchor to occur exactly once', file: 'dctr-lib.mjs', clause: 'anchorCount counts occurrences',
     from: 'export const anchorCount = (text, from) => text.split(from).length - 1',
     to: 'export const anchorCount = (text, from) => (text.includes(from) ? 1 : 0)' },
+  { name: 'the gate REFUSES a duplicated anchor rather than applying it', file: 'dctr-lib.mjs', clause: 'the gate applies an anchor that occurs exactly once',
+    from: "export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')",
+    to: "export const anchorVerdict = (hits) => (hits === 0 ? 'missing' : 'apply')" },
+  { name: 'stopAction collapses an unobserved record into close', file: 'dctr-lib.mjs', clause: 'stopAction answers `unknown` for a record it has not seen',
+    from: "  if (typeof rec?.focused !== 'boolean') return 'unknown'",
+    to: "  if (typeof rec?.focused !== 'boolean') return 'close'" },
+  { name: 'a failed tab list becomes a close by id', file: 'dctr-seat.mjs', clause: 'a tab whose LIST CALL FAILED is not closed',
+    from: "      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'",
+    to: "      const act = mine ? stopAction(mine) : 'close'" },
+  { name: 'a successful pane lookup carrying no pane becomes a close', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
+    from: "      const act = lookupFailed ? 'unknown' : gone ? 'close' : stopAction(pane)",
+    to: "      const act = lookupFailed ? 'unknown' : 'close'" },
+  { name: 'close-on-next trusts the hoisted snapshot instead of re-asking', file: 'dctr-seat.mjs', clause: 'a finished codex tab that is FOCUSED is spared',
+    from: "          if (!stillUnfocused) { log(`close-on-next: ${s.agent} is focused or unreadable now; leaving it`); continue }",
+    to: '          if (false) continue' },
+  { name: 'the gate launcher treats a pane that is GONE as unobservable', file: 'dctr-gate.mjs', clause: 'a pane the lookup says is GONE keeps no marker',
+    from: "      catch (e) { if (isPaneNotFound(e)) gone = true }",
+    to: '      catch { /* gone */ }' },
+  { name: 'the gate launcher drops the record of a pane it could not observe', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
+    from: "        process.stderr.write(`${PREFIX}: focus of ${paneId} could not be observed; leaving it for SessionEnd\\n`)",
+    to: '        dropMarker()' },
+  { name: 'the gate launcher drops a FOCUSED pane\'s record', file: 'dctr-gate.mjs', clause: 'a FOCUSED pane is relabelled and keeps its record',
+    from: "        try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
+    to: "        dropMarker(); try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
+  { name: "a failed rollback keeps reserveMarker's bare {} instead of publishing a real record", file: 'dctr-gate.mjs',
+    clause: 'clause 1o — a rollback that could not close its pane leaves a record carrying the pane id',
+    from: `            writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
+            published = true`,
+    to: '            published = true' },
+  { name: 'the gate launcher drops the record BEFORE a close that can fail', file: 'dctr-gate.mjs',
+    clause: 'clause 1p — a close that FAILED keeps the record of the pane it could not close',
+    from: "        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }",
+    to: "        dropMarker()\n        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }" },
+  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
+    from: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); process.exit(127) })",
+    to: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+  { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
+    from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
+    to: '    ? `script -q -F ${shq(tee)} `' },
   { name: 'the tab close reads the TAB not-found code', file: 'dctr-seat.mjs', clause: 'a finished codex TAB herdr says is not there has its marker removed too',
     from: '            const gone = s.tabId ? isTabNotFound(e) : isPaneNotFound(e)',
     to: '            const gone = isPaneNotFound(e)' },
-  { name: 'a reply carrying no pane is not an observation of focus', file: 'dctr-seat.mjs', clause: 'a lookup that SUCCEEDS but carries no pane is still not an observation',
-    from: "            if (typeof pane?.focused === 'boolean') focused = pane.focused",
-    to: '            focused = pane?.focused === true' },
   { name: 'an absent marker is not this seat\'s', file: 'dctr-seat.mjs', clause: 'a marker removed while the stop worked is NOT recreated',
     from: '          if (!current || current.agent_id !== seat.agent_id) { log(',
     to: '          if (current && current.agent_id !== seat.agent_id) { log(' },
@@ -283,11 +341,14 @@ const MUTATIONS = [
     from: '  const ticker = paneId\n',
     to: '  const ticker = null && paneId\n' },
   { name: 'a finished pane is relabelled with its exit status', file: 'dctr-gate.mjs', clause: 'the LAST name a finished pane carries is its exit status',
-    from: "      if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }",
-    to: "      if (false) try { herdr(['pane', 'rename', paneId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }" },
+    from: "      } else if (act === 'relabel') {",
+    to: '      } else if (false) {' },
+  { name: 'SESSION_END_WAIT_MS outgrows the hook timeout that kills it', file: 'dctr-state.mjs', clause: "SESSION_END_WAIT_MS fits inside the SessionEnd hook's own configured timeout",
+    from: 'export const SESSION_END_WAIT_MS = 8000',
+    to: 'export const SESSION_END_WAIT_MS = 30000' },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
-    from: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
-    to: "      } else if (stopAction(pane) === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
+    from: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
+    to: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
@@ -298,7 +359,13 @@ const execFileAsync = promisify(execFile)
  *  Not `availableParallelism()`: the suites make real timing assertions (a watcher that must still
  *  be alive after N polls), and a box loaded to its core count is where those go flaky. Eight is
  *  well inside the headroom on the 32-core host this was measured on; DCTR_JOBS overrides it. */
-const JOBS = Math.max(1, Number(process.env.DCTR_JOBS) || Math.min(8, os.availableParallelism?.() ?? 4))
+// `|| default` read 0 as absent, so DCTR_JOBS=0 silently ran the full parallel default — the
+// OPPOSITE of what the operator asked for, and silently, which is how a measurement run reports a
+// number that means the other thing. Any finite value is honoured and clamped to at least 1.
+const ENV_JOBS = Number(process.env.DCTR_JOBS)
+const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
+  ? Math.max(1, Math.floor(ENV_JOBS))
+  : Math.min(8, os.availableParallelism?.() ?? 4)
 
 /** A mutation is caught if ANY suite notices it. Running all of them is what lets one harness cover
  *  the launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
@@ -341,6 +408,15 @@ for (const r of baselineResults) {
     failures += 1
   }
 }
+// STOP HERE. Every mutation below compares against a suite that is already red, so all of them
+// report "reverted, and the suite stayed green" whether they are pinned or not. Running them anyway
+// cost four minutes and printed eleven confident, meaningless failures under one true line at the
+// top — which the operator then read from the bottom. A result nobody can act on is worse than no
+// result, because it looks like one.
+if (failures) {
+  console.log(`\nBASELINE RED — ${failures} suite(s) fail before any mutation. Nothing below would mean anything, so nothing below ran.`)
+  process.exit(1)
+}
 
 // Printed in INPUT order as results settle, never completion order: a run must read the same twice,
 // and a reader lining a FAIL up against the mutation list must not have to sort it first. A slow
@@ -356,9 +432,10 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
   const hits = anchorCount(before, m.from)
-  if (hits !== 1) {
+  const verdict = anchorVerdict(hits)
+  if (verdict !== 'apply') {
     failures += 1
-    results[idx] = hits === 0
+    results[idx] = verdict === 'missing'
       ? `  FAIL ${m.name} — its anchor is no longer in ${m.file}; a mutation that cannot apply guards nothing`
       : `  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}; replace() takes the first and the rest go unguarded`
   } else {

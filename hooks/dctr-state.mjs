@@ -310,13 +310,26 @@ export function breakStaleLock(lock, condemnedPid = null) {
  *  a lock or poll a file, so the wait blocks the thread. */
 export const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
-export function withPlacementLock(sessionId, fn) {
+/** How long a caller waits for the placement lock. A placement gives up quickly because another wave
+ *  is behind it; SessionEnd waits longer because it is the LAST chance, and a sweep that gives up
+ *  leaves a live pane with nobody left to reclaim it.
+ *
+ *  SESSION_END_WAIT_MS MUST STAY UNDER THE SessionEnd HOOK'S OWN TIMEOUT IN hooks.json. It was set
+ *  to 30000 against a hook Claude Code SIGKILLs at 10s, which is strictly worse than the 5s it
+ *  replaced: the 5s deadline threw, reached its caller's catch and logged, where the 30s one is
+ *  killed mid-wait and logs nothing. A deadline past the lifetime of the process holding it is not
+ *  a longer wait, it is a silent death. `dctr-seat.selftest.mjs` reads hooks.json and pins the
+ *  relationship, so drift on either side fails rather than going quiet. */
+const PLACEMENT_WAIT_MS = 5000
+export const SESSION_END_WAIT_MS = 8000
+
+export function withPlacementLock(sessionId, fn, waitMs = PLACEMENT_WAIT_MS) {
   const lock = path.join(stateDir(sessionId), 'placement.lock')
   // The parent has to exist first. mkdir of a lock inside a directory that is not there yet fails
   // with ENOENT on every pass, so the wait runs to its deadline and blames a holder that never
   // existed. The tee lock carried this same defect and was repaired; this one was not.
   try { fs.mkdirSync(path.dirname(lock), { recursive: true }) } catch { /* acquireLock reports it */ }
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + waitMs
   for (;;) {
     if (acquireLock(lock)) break
     // Age alone never breaks a lock. A holder waiting on a herdr call bounded at HERDR_TIMEOUT_MS
@@ -325,7 +338,7 @@ export function withPlacementLock(sessionId, fn) {
     breakIfOrphaned(lock, PLACEMENT_STALE_MS)
     // Checked on every path through the loop: a `continue` used to skip it, which is the recorded
     // spin-forever defect here.
-    if (Date.now() > deadline) throw new Error('placement lock timed out')
+    if (Date.now() > deadline) throw new Error(`placement lock timed out after ${waitMs}ms`)
     sleepMs(50)
   }
   // fn stands down by returning a reason, never by exiting: process.exit skips finally and the

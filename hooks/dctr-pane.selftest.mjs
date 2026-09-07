@@ -265,8 +265,16 @@ console.log('platform branch — both script(1) invocations, so the macOS shape 
   // `bash -c` legitimately carries a -c; what must not is script's OWN argument list, which ends at
   // the file. Asserting on the whole string failed here for that reason, which is the check firing
   // on a correct artifact — the thing clause 2 exists to catch.
-  check('darwin: file first, and script itself takes no -c',
-    mac.startsWith("script -q -F '/t/x.log' ") && !mac.slice(0, mac.indexOf("'/t/x.log'")).includes('-c'), mac)
+  // The whole shape, not a prefix. `script -q -F '/t/x.log' ` with nothing after it satisfied both
+  // halves of the old predicate — bash and the connection command could vanish entirely and this
+  // clause stayed green, on the one line no run on this host can otherwise reach.
+  check('darwin: file first, script itself takes no -c, and the command is actually carried',
+    /^script -q -F '\/t\/x\.log' bash -c '.+'$/.test(mac) &&
+    !mac.slice(0, mac.indexOf("'/t/x.log'")).includes('-c') &&
+    mac.endsWith("'ssh h'"), mac)
+  check('and the degenerate command-less form is REJECTED by that predicate, proved without recorderLine',
+    !/^script -q -F '\/t\/x\.log' bash -c '.+'$/.test("script -q -F '/t/x.log' "),
+    'the old predicate accepted exactly this string')
   check('neither branch enables input logging', !/ -k| -I| -B/.test(lin + mac), lin + ' | ' + mac)
 }
 
