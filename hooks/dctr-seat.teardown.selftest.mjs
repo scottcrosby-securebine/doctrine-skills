@@ -294,6 +294,7 @@ console.log('clause 1: a focused side seat is relabelled under its own title, no
   check('and its MARKER survives, because a pane that LIVES must stay reclaimable (F14)',
     fs.existsSync(path.join(seatsDir, 'dctr-explore-1.json')),
     'spared and then forgotten: staleSideSeats filters RECORDED seats and SessionEnd enumerates MARKERS, so with no record neither can reach it')
+  check('the focused fixture really answers focused, proved without the hook', /"focused":true/.test(focused), focused)
 }
 
 console.log('clause 1: a focused TAB is relabelled and KEEPS its marker (F14)')
