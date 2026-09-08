@@ -1,7 +1,7 @@
 {
   "name": "doctrine",
   "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Nine skills: a shared doctrine, wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, and document writing, plus doctrine-pane for an interactive terminal session in a pane the user watches and can take over. Composes with (and degrades gracefully without) Matt Pocock's engineering skills, superpowers, codex, ponytail, and Claude Design. Two prerequisites do not degrade, and both refuse rather than falling back to a weaker version of themselves: doctrine-gauntlet needs Playwright, because its critics judge rendered output — without a browser its harness refuses to run rather than report a pass — and doctrine-pane needs herdr, because an interactive session nobody can watch has no purpose. The other seven skills need nothing installed.",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "author": {
     "name": "Scott Crosby"
   },
