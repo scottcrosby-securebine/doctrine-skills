@@ -1105,8 +1105,8 @@
   "args": {
    "sections": {
     "name": "hero",
-    "builderPrompt": "unreachable: the guard blocks before any pair is dispatched",
-    "criticPrompt": "unreachable: the guard blocks before any pair is dispatched"
+    "builderPrompt": "unreachable: the local empties the list, so no pair is ever dispatched from it",
+    "criticPrompt": "unreachable: the local empties the list, so no pair is ever dispatched from it"
    },
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
    "blindPrompt": "",

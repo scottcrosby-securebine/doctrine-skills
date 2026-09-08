@@ -152,10 +152,12 @@ function checkRollCall(rollCall, expected, words, key, who) {
 if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
-// `malformed()` records and does not halt, so the local is what keeps a present non-array from
-// reaching `pipeline()` below.
-const sectionArgs = Array.isArray(a.sections) ? a.sections : []
-if (!Array.isArray(a.sections)) malformed('sections: missing or not an array — a gate-only round passes sections: [], which is not the same as omitting the key')
+// `malformed()` records and does not halt, so it is the `Array.isArray` fallback, not the mere
+// existence of a local, that keeps a present non-array from reaching `pipeline()` below: widen it
+// to `a.sections || []` and the object goes through while this guard still files its finding.
+const sectionsGiven = Array.isArray(a.sections)
+const sectionArgs = sectionsGiven ? a.sections : []
+if (!sectionsGiven) malformed('sections: missing or not an array — a gate-only round passes sections: [], which is not the same as omitting the key')
 
 // ---- Sections: builder then critic, three rejections put it to the user. The tool cannot keep
 // one critic alive across retries, so each retry's critic is handed every earlier rejection. ----

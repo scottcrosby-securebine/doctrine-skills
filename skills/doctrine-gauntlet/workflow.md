@@ -38,7 +38,7 @@ Workflow({ scriptPath: '<plugin>/skills/doctrine-gauntlet/harness/round.workflow
 
 The agents replay as just described, but the body they replay into is the **current** one, not the
 body the run was journaled under, so the round's arithmetic re-runs and the verdict can differ from
-the one the journal carries. Resuming therefore costs no agent work and still re-judges. That is observed
+the one the journal carries. That is observed
 behaviour of the host rather than something it documents, so re-check it if a resume ever returns
 the journalled verdict unchanged. What it means here: a run journaled with no `sections` key resumes
 into that key's block, so re-run it, or resume it with `sections: []` supplied, which is what it meant.
