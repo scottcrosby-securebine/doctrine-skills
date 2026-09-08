@@ -20,7 +20,11 @@
 //
 // The pane runs this same script in `--run` mode, which is also what the detached path runs:
 //
-//   node hooks/dctr-gate.mjs --run <out> <marker> <pane-id|''> <label> -- <command>
+//   node hooks/dctr-gate.mjs --run <out> <marker> <pane-id|''> <tab-id|''> <workspace|''> <label> -- <command>
+//
+// A gate placed in a TAB carries its tab id and workspace through, because the completion path runs
+// inside the pane — whose shell has a fresh environment, so HERDR_WORKSPACE_ID is not there — and
+// the thing it must ask about and close is the TAB, not the tab's root pane.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -38,14 +42,22 @@ const self = path.resolve(process.argv[1])
 const argv = process.argv.slice(2)
 const usage = () => {
   console.error('usage: node dctr-gate.mjs <label> <out-file> -- <command...>')
+  console.error("   or: node dctr-gate.mjs --run <out> <marker> <pane-id|''> <tab-id|''> <workspace|''> <label> -- <command...>")
   process.exit(1)
 }
 
 if (argv[0] === '--run') {
   // Inside the pane, or detached. Run the check, tee, mark the exit, tidy the pane.
-  const [, out, marker, paneId, label] = argv
+  const [, out, marker, paneId, tabId, workspace, label] = argv
+  // THE SEPARATOR'S POSITION IS THE CONTRACT, not merely its presence. These arguments are read by
+  // position, so a caller that omits one slides every later value left: omit the workspace and
+  // `workspace` becomes the label while `label` becomes `--`, which the old guard accepted because
+  // `--` is truthy. The launcher then queried the wrong workspace and, on a successful list that did
+  // not carry this tab, closed the tab by id. Requiring the separator at exactly index 7 and a
+  // non-empty command makes the whole class of slid arguments impossible rather than relying on
+  // every caller to remember its placeholders. Same shape as the outer form's guard below.
   const dash = argv.indexOf('--')
-  if (dash < 0 || !out || !label) usage()
+  if (dash !== 7 || !out || !label || argv.length < 9) usage()
   const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
@@ -92,7 +104,36 @@ if (argv[0] === '--run') {
     // against a file whose own module says a truncated marker stands down every later seat.
     // Removing the machinery removes all three defects: there is no window and nothing to restore.
     const dropMarker = () => { if (marker) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ } }
-    if (paneId) {
+    if (tabId) {
+      // A TAB gate asks the TAB. Scott's ruling, 2026-09-08, and CLAUDE.md law: the thing being
+      // closed is the tab, so the thing whose focus decides it is the tab. This launcher asked
+      // `pane get` about the tab's ROOT pane and then closed that pane — a different question from
+      // the one it acted on, and the exact defect the sibling hook had repaired at dctr-seat.mjs.
+      // A user who splits this tab and closes the root leaves a focused sibling: `pane_not_found`
+      // on the root was read as an observed absence and dropped the marker, orphaning the tab for
+      // the rest of the session, because staleSideSeats never judges a tab seat.
+      let mine, listFailed = null
+      // herdr-lint: separated by the listFailed FLAG: a failed list becomes `unknown`, which keeps the record and closes nothing.
+      try {
+        const tabs = herdr(['tab', 'list', '--workspace', workspace]).result.tabs
+        mine = tabs.find((t) => t.tab_id === tabId)
+      } catch (e) { listFailed = String(e.message).split('\n')[0] }
+      // Listed and ABSENT is an observed absence and closes by id (issue #20); a list that FAILED
+      // answered nothing. Identical to the seat hook's tab stop, deliberately: two launchers making
+      // the same decision differently is what put this defect here.
+      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'
+      if (act === 'unknown') {
+        process.stderr.write(`${PREFIX}: focus of ${tabId} could not be observed (${listFailed || 'no readable focus'}); leaving it for SessionEnd\n`)
+      } else if (act === 'relabel') {
+        // The tab LIVES and the user is watching it, so its record must live too.
+        try { herdr(['tab', 'rename', tabId, `${label} · ${exitLine(code)}`]) } catch { /* label only */ }
+      } else {
+        // The record stays, for the same reason as the pane branch below: this call kills the shell,
+        // and a close that fails must leave SessionEnd something to act on. A tab marker is swept by
+        // SessionEnd rather than by the next placement, since staleSideSeats never judges one.
+        try { herdr(['tab', 'close', tabId]) } catch { /* the tab may already be gone */ }
+      }
+    } else if (paneId) {
       // Same rule as a seat's stop, and the same THREE answers. A lookup that FAILED is not a pane
       // that is unfocused: this bare catch fed `stopAction` an undefined it could not distinguish
       // from an observed absence, so a transport blip closed the gate pane the user was watching.
@@ -138,7 +179,11 @@ if (argv[0] === '--run') {
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID
 
   const detached = (reason) => {
-    const child = spawn('node', [self, '--run', outFile, '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
+    // FOUR empties: marker, paneId, tabId, workspace. The detached path has no pane and no tab, and
+    // `--run` reads by position — with two of them missing the label landed in the tabId slot and the
+    // completion path called `tab list` on a path whose whole contract is that it touches herdr zero
+    // times. The tripwire clause caught it; the placeholders are what keep it caught.
+    const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
     console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; output ${outFile}, done when its last line is exit=N`)
@@ -226,7 +271,7 @@ if (argv[0] === '--run') {
         // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.
         if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
         writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
-        herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, label, command)])
+        herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, tabId, process.env.HERDR_WORKSPACE_ID, label, command)])
       } catch (e) {
         // Close FIRST, then drop the record, and only if the close was answered. This runs in the
         // launcher process rather than inside the pane's own shell, so the ordering the completion

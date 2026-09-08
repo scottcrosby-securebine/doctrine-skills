@@ -477,8 +477,16 @@ export const GATE_ROLE = 'gate'
  * arguments the caller gave and not one flattened string (the first live use lost its quoting this
  * way). `paneId` is empty on the detached path, and `--run` then touches no pane.
  */
-export const gateRunCommand = (script, out, marker, paneId, label, command) =>
-  `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
+/** `tabId` and `workspace` are carried because the completion path runs INSIDE the pane, whose shell
+ *  starts with a fresh environment: `HERDR_WORKSPACE_ID` is not there, and `tab list --workspace` is
+ *  the only tab read this codebase has. Deriving the workspace from the tab id's prefix was rejected
+ *  on evidence — dctr-seat.selftest.mjs runs workspace `w4W` with tab ids `w4Z:t9`, so the prefix is
+ *  not the workspace id even here, and `workspaceOf` in dctr-pane.mjs only ever compares two ids
+ *  with it. For a side-column gate `tabId` is empty and the WORKSPACE IS NOT: the launcher passes
+ *  HERDR_WORKSPACE_ID on both paths, and only the empty tab id is what sends the completion down the
+ *  pane branch. */
+export const gateRunCommand = (script, out, marker, paneId, tabId, workspace, label, command) =>
+  `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(tabId || '')} ${shq(workspace || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
 
 /** The last line the output file ends with; the orchestrator's completion signal and the record's
  *  exit status in one. A file without it is a check still running, or one that never finished. */
