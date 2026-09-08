@@ -145,8 +145,9 @@ Gate: shipped at an escalation, round 6, zero clean passes. Open: 2 blocking fin
 ```
 
 Those are two of the forms. A run can also stop for your decision, end blocked on a question you
-have not answered, or close a prose job with a list of what it did not fix. The wording varies and the
-line always says which, and a run that never came clean is never summarised as finished.
+have not answered, or close a prose job with a list of what it did not fix. The wording varies. What
+the line always does is distinguish a clean pass from an ending without one, and name what is still
+open.
 
 ## The nine skills
 
