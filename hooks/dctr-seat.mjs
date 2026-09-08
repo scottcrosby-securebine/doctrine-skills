@@ -418,8 +418,10 @@ try {
     // gets. Both flags reach the same block below and keep the marker for the same reason.
     // It holds a STRING rather than a boolean, and the simplification pass tried to cut that: with
     // `spared = true` both assignments become the identical line, and dctr-mutations.mjs requires an
-    // anchor to occur EXACTLY ONCE and fails rather than skipping. The two branches would collapse
-    // into one unpinnable pair. The distinct text is what keeps each site separately pinned.
+    // anchor to occur EXACTLY ONCE and fails rather than skipping, so the two SINGLE-LINE anchors
+    // would collapse into one unpinnable pair. Not that distinct text is REQUIRED — a multi-line
+    // anchor carrying the following line disambiguates them, and that file already uses three. The
+    // string is the cheaper way to keep each site addressable, not the only one.
     let closeFailed = null, spared = null
     try {
       if (reportsSidebarRow(seat)) {

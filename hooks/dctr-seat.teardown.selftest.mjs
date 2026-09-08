@@ -314,6 +314,13 @@ console.log('clause 1: a focused TAB is relabelled and KEEPS its marker (F14)')
   check('and its MARKER survives, so SessionEnd can still reclaim it (F14)',
     fs.existsSync(path.join(seatsDir, 'dctr-explore-12.json')),
     'the tab was spared and then forgotten')
+  // The LOG is the operator's only account of what this hook did, and it was unpinned: swapping
+  // `spared` for `closeFailed` kept every other clause green while the account read "close failed"
+  // for a seat working exactly as designed. Both directions asserted, because only the negative one
+  // catches that swap.
+  const logged = (() => { try { return fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { return '' } })()
+  check('and the log says it was RELABELLED and its marker kept', /is focused, so it was relabelled rather than closed; keeping its marker/.test(logged), logged.split('\n').filter(Boolean).slice(-3).join(' | '))
+  check('and never says a close failed, because none was attempted', !/close failed/.test(logged), logged.split('\n').filter(Boolean).slice(-3).join(' | '))
   // Third clause: the fixture really carries a focused entry for THIS tab, behind a decoy whose focus
   // is the opposite, so nothing above can pass by taking the first entry instead of matching the id.
   const tabsOut = execFileSync('bash', ['-c', `${bin}/herdr tab list --workspace w1`], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_TABS: TABS12 } })
@@ -329,14 +336,25 @@ console.log('clause 1: an UNfocused seat still closes AND still loses its marker
   // Keeping the marker on relabel is only correct while the ordinary path still removes it: a change
   // that kept every marker passes both clauses above while leaving a record claiming a live seat for
   // something already closed. NOT a cap claim — a stale SIDE marker is pruned by staleSideSeats
-  // before the next placement counts (dctr-seat.mjs:178-182), and a TAB marker is never counted at
-  // all. What it costs is a false record, which SessionEnd then acts on.
+  // before the next placement counts, and a TAB marker is never counted at all. What it costs is a
+  // false record, which SessionEnd then acts on.
+  //
+  // WHAT THIS BLOCK CANNOT DO, stated because the first version implied it could: it cannot prove the
+  // fixture's `"focused":false` was READ. `const act = ... mine ? stopAction(mine) : 'close'` gives
+  // 'close' from BOTH arms, so a tab absent from the list reaches the same outcome as an unfocused
+  // one. Discrimination on focus lives in the FOCUSED blocks above, which is where it can exist. What
+  // this proves is the close-and-remove path itself, and the third clause below proves the fixture is
+  // well formed rather than accidentally empty.
   reset()
   fs.writeFileSync(path.join(seatsDir, 'dctr-explore-13.json'), JSON.stringify({ agent: 'dctr-explore-13', agent_id: 'agent-13', role: 'Explore', n: 13, tabId: 'w1:t13', paneId: null, file: '/t/x.jsonl' }))
   run({ hook_event_name: 'SubagentStop', agent_id: 'agent-13', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' },
     { DCTR_TEST_TABS: '[{"tab_id":"w1:t13","focused":false,"label":"seat 13"}]' })
   check('an unfocused tab is still closed', called(/^tab close w1:t13/m), callLines(/^tab (rename|close)/).join(' | ') || '(no tab calls)')
   check('and its marker is still removed', !fs.existsSync(path.join(seatsDir, 'dctr-explore-13.json')))
+  const tabs13 = execFileSync('bash', ['-c', `${bin}/herdr tab list --workspace w1`], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_TABS: '[{"tab_id":"w1:t13","focused":false,"label":"seat 13"}]' } })
+  const p13 = JSON.parse(tabs13).result.tabs
+  check('the fixture really carries w1:t13 with focused false, proved without the hook',
+    p13.length === 1 && p13[0].tab_id === 'w1:t13' && p13[0].focused === false, tabs13)
 }
 
 console.log('clause 1 — a finishing seat must not delete a replacement that reused its name')
