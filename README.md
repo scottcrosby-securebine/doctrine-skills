@@ -122,6 +122,43 @@ rejected that file outright and named the duplicate header, so the repair replac
 a silent write across the catalog. The next round's different-model adversary caught it by running the
 real exporter and importer rather than reading them.
 
+## How this differs from looping
+
+Running an agent in a loop is not new and this does not claim it. Geoffrey Huntley's
+[Ralph](https://ghuntley.com/ralph/) is an unconditional bash loop that pipes a prompt file into the
+agent over and over, and its central insight, that state belongs on disk and each pass gets a fresh
+context, is one the doctrine uses too.
+
+The difference is what ends the loop.
+
+- **Ralph's published loop has no exit condition.** Huntley describes stopping as "a matter of taste",
+  and the community playbook's default is "unlimited (manual stop with Ctrl+C)". Anthropic's own Ralph
+  plugin adds two exits, an iteration counter or a phrase the working agent emits about itself, and
+  its README tells you to rely on the counter.
+- **Most of the field is the same.** Across two dozen published methods, fewer than half define a
+  completion condition at all, and the two most-used commercial agents define none: Devin sleeps on
+  idle, and Cursor's documented stop is a person clicking Stop.
+- **This loop cannot exit until a reviewer that did not write the work passes it**, on a revision that
+  has actually run, with nothing outstanding from any earlier pass. A fresh reviewer is not the
+  novelty. Anthropic documents that pattern and other projects require it. Making it the gate the loop
+  must pass, rather than a tool the agent may call, is the part that changes the outcome.
+
+That is also what lets a long run go unattended: it stops on a condition rather than on you
+noticing, and rule 6's alarms bring the decision back to you.
+
+**Scope.** Your words are written down before any work is aimed and handed to every agent that later
+judges the result, and delivery walks your original request item by item. Ralph holds scope with specs
+and with prompt "signs" added after drift is noticed.
+
+**Where Ralph is better.** Greenfield. Huntley: "There's no way in heck would I use Ralph in an
+existing code base ... This works best as a technique for bootstrapping Greenfield." That is the
+opposite end of the problem from this, which makes them complements rather than rivals.
+
+One caution worth passing on, since it is the strongest argument against the whole idea. Reviewers
+disagree far more than you would expect: one measurement across four review tools found 93.4% of
+flagged locations were caught by exactly one tool, and none by all four. That is a reason to want more
+than one reviewer, and a reason not to trust any single verdict, including a clean one.
+
 ## Install
 
 ```text
