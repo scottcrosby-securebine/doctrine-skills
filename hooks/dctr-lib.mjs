@@ -475,7 +475,9 @@ export const GATE_ROLE = 'gate'
  * output to `out`, appends `exit=N`, then relabels or closes the pane. It does NOT then drop the
  * marker, and said it did until 2026-09-08: a relabelled pane keeps its record because the user is
  * watching it, and a closed one keeps it because the close call kills this shell and a close that
- * failed must leave SessionEnd something to act on. Only an observed-absent pane drops it. Every
+ * failed must leave SessionEnd something to act on. An observed-absent pane drops it, and so does a
+ * completion that was handed no pane and no tab at all, which is the detached path's own shape and
+ * has no marker to drop. Every
  * argument goes through shq, one per argv element, so `bash -c "a; b"` reaches `--run` as the three
  * arguments the caller gave and not one flattened string (the first live use lost its quoting this
  * way). `paneId` is empty on the detached path, and `--run` then touches no pane.

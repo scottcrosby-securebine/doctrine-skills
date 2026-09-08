@@ -316,8 +316,11 @@ console.log('clause 1: a focused TAB is relabelled and KEEPS its marker (F14)')
     'the tab was spared and then forgotten')
   // The LOG is the operator's only account of what this hook did, and it was unpinned: swapping
   // `spared` for `closeFailed` kept every other clause green while the account read "close failed"
-  // for a seat working exactly as designed. Both directions asserted, because only the negative one
-  // catches that swap.
+  // for a seat working exactly as designed. Both directions are asserted because they fail for
+  // different reasons and neither is redundant: the positive one also catches the log line being
+  // dropped or reworded, the negative one also catches a second path filing a spare as a failure.
+  // (An earlier revision here said only the negative one catches the flag swap. The certifying pass
+  // executed it and both fail. Stated wrong, and the fix was to run it rather than reason about it.)
   const logged = (() => { try { return fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { return '' } })()
   check('and the log says it was RELABELLED and its marker kept', /is focused, so it was relabelled rather than closed; keeping its marker/.test(logged), logged.split('\n').filter(Boolean).slice(-3).join(' | '))
   check('and never says a close failed, because none was attempted', !/close failed/.test(logged), logged.split('\n').filter(Boolean).slice(-3).join(' | '))

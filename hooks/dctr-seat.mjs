@@ -420,8 +420,10 @@ try {
     // `spared = true` both assignments become the identical line, and dctr-mutations.mjs requires an
     // anchor to occur EXACTLY ONCE and fails rather than skipping, so the two SINGLE-LINE anchors
     // would collapse into one unpinnable pair. Not that distinct text is REQUIRED — a multi-line
-    // anchor carrying the following line disambiguates them, and that file already uses three. The
-    // string is the cheaper way to keep each site addressable, not the only one.
+    // anchor carrying the following line disambiguates them, and that file already uses that form.
+    // The string is the cheaper way to keep each site addressable, not the only one. No count of
+    // those anchors is written here on purpose: two reviewers counted this differently depending on
+    // whether an escaped newline in a quoted string counts, and a number here would be cited as fact.
     let closeFailed = null, spared = null
     try {
       if (reportsSidebarRow(seat)) {
