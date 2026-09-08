@@ -20,7 +20,7 @@ node tools/doc-check.mjs --selftest   # its three-clause tamper test, which live
 python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
 python3 -m json.tool .claude-plugin/marketplace.json
 node tools/herdr-lint.mjs           # the ONE class this repo kept re-finding by review round: a herdr reply whose failure OR emptiness is read as an answer that authorizes destruction; exit 0 clean, 1 on any finding
-node tools/herdr-lint.selftest        # not a command — run `node tools/herdr-lint.mjs --selftest`; exit 2 if the sidecar is missing
+node tools/herdr-lint.mjs --selftest  # its three-clause tamper test, which lives in tools/herdr-lint.selftest.mjs; exit 2 if the sidecar is missing
 node hooks/dctr-seat.selftest.mjs   # three-clause tamper test for the seat hook's pure decisions
 node hooks/dctr-seat.contained.selftest.mjs   # contained posture calls herdr zero times (tripwire on PATH)
 node hooks/dctr-gate.selftest.mjs   # gate launcher: the check runs, the file ends exit=N, the no-herdr path calls herdr zero times
@@ -106,7 +106,7 @@ made, it belongs in a sidecar. A third kind existed and no longer ships: a recor
 of rulings already made, read by a maintainer and never assembled into a prompt.
 Two of those were removed on 2026-08-29 because this repo is used by people other
 than its author and internal review history is not theirs to download. `harness/floor.mjs`
-and `harness/round.workflow.mjs` are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `fixtures/shadcn.sh` and the files under `hooks/`, none of which a skill loads. One qualification since issue #19: the hub's steps 3 and 5 *name* `hooks/dctr-gate.mjs` and `hooks/dctr-token.mjs`, and `doctrine-pane` names `hooks/dctr-pane.mjs`, as commands a run invokes — invocation, not loading; no skill carries its content and the harness files stay the only code any skill ships. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
+and `harness/round.workflow.mjs` are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `tools/herdr-lint.mjs` and its sidecar `tools/herdr-lint.selftest.mjs`, `fixtures/shadcn.sh` and the files under `hooks/`, none of which a skill loads. One qualification since issue #19: the hub's steps 3 and 5 *name* `hooks/dctr-gate.mjs` and `hooks/dctr-token.mjs`, and `doctrine-pane` names `hooks/dctr-pane.mjs`, as commands a run invokes — invocation, not loading; no skill carries its content and the harness files stay the only code any skill ships. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
 `node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
 which wraps its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
