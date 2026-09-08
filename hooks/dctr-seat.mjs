@@ -412,7 +412,19 @@ try {
     const seat = readable.find((s) => s.agent_id === payload.agent_id)
     if (!seat) stand_down(`no live seat recorded for ${payload.agent_id}`)
 
-    let closeFailed = null
+    // `spared` is the relabel branches' own answer, kept apart from `closeFailed` on purpose: no
+    // close was attempted and none was meant to be, so reusing closeFailed would log "close failed"
+    // for a seat that is working exactly as designed, and this log is the only account an operator
+    // gets. Both flags reach the same block below and keep the marker for the same reason.
+    // It holds a STRING rather than a boolean, and the simplification pass tried to cut that: with
+    // `spared = true` both assignments become the identical line, and dctr-mutations.mjs requires an
+    // anchor to occur EXACTLY ONCE and fails rather than skipping, so the two SINGLE-LINE anchors
+    // would collapse into one unpinnable pair. Not that distinct text is REQUIRED — a multi-line
+    // anchor carrying the following line disambiguates them, and that file already uses that form.
+    // The string is the cheaper way to keep each site addressable, not the only one. No count of
+    // those anchors is written here on purpose: two reviewers counted this differently depending on
+    // whether an escaped newline in a quoted string counts, and a number here would be cited as fact.
+    let closeFailed = null, spared = null
     try {
       if (reportsSidebarRow(seat)) {
         herdr(['pane', 'report-agent', seat.paneId, '--source', `custom:${PREFIX}`, '--agent', seat.agent, '--state', 'idle'])
@@ -506,7 +518,18 @@ try {
       if (act === 'unknown') closeFailed = listFailed
         ? `could not list tabs for ${seat.tabId} (${listFailed})`
         : `${seat.tabId} was listed with no readable focus`
-      else if (act === 'relabel') try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
+      else if (act === 'relabel') {
+        // The tab LIVES and the user is watching it, so its record must live too — the sibling
+        // launcher's words (dctr-gate.mjs), repaired there twice and never here. Removing the marker
+        // makes the tab UNRECLAIMABLE for the rest of the session: SessionEnd's sweep enumerates
+        // markers (liveSeatsPartial below) and staleSideSeats filters RECORDED seats and never judges
+        // a tab at all, so with no record neither can reach it.
+        // NO cap consequence here, and the temptation to write one is why this says so: `isSideSeat`
+        // is `paneId && !tabId`, so a tab marker is not counted by seatPlacement whether it exists or
+        // not. sideOccupants says the same in its own comment. The harm is the orphaned tab alone.
+        spared = `${seat.tabId} is focused`
+        try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
+      }
       else try { herdr(['tab', 'close', seat.tabId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     } else {
       // A side seat: same relabel-vs-close rule, read from the pane's own record. A pane the get
@@ -529,7 +552,18 @@ try {
         closeFailed = lookupFailed
           ? `could not look up ${seat.paneId} (${lookupFailed})`
           : `${seat.paneId} answered with no readable focus`
-      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
+      } else if (act === 'relabel') {
+        // Identical to the tab branch above and for the identical reason. This is not a second
+        // defect found nearby: it is the same one, in the other arm of the same if/else, reaching
+        // the same removal block. staleSideSeats DOES judge pane seats, but it filters the RECORDED
+        // ones, so a pane with no record is as unreachable as a tab with none.
+        // The cap consequence lives HERE, not on the tab branch: this pane stays in the layout and
+        // holds a column slot, but with no marker it is in neither half of sideOccupants, so
+        // seatPlacement counts one fewer side seat than the column really has and a seventh pane is
+        // split onto six.
+        spared = `${seat.paneId} is focused`
+        try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
+      }
       else try { herdr(['pane', 'close', seat.paneId]) } catch (e) { if (!alreadyGone(e)) closeFailed = String(e.message).split('\n')[0] }
     }
 
@@ -538,6 +572,8 @@ try {
     // still be on screen, and SessionEnd's own preservation cannot help — the record is gone first.
     if (closeFailed) {
       log(`stop ${seat.agent}: close failed (${closeFailed}); keeping its marker so SessionEnd can try again`)
+    } else if (spared) {
+      log(`stop ${seat.agent}: ${spared}, so it was relabelled rather than closed; keeping its marker`)
     } else {
       // Remove by IDENTITY, under the same lock SubagentStart allocates names in. Removing by NAME,
       // outside the lock, let a finishing seat delete a REPLACEMENT's marker: SubagentStart sees this
