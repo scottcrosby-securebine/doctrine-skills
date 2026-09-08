@@ -6,9 +6,9 @@ pass comes back clean.
 
 ## The problem
 
-You already get good work out of Claude Code by pushing on it. Check that again. Did the linter run.
-It works, and you do it differently every time, so what you get back tracks how much attention you
-had that day. The failures that survive that do not look like failures.
+You already get good work out of Claude Code by pushing on it: check that again, did the linter run,
+are you sure. That works, and you do it differently every time, so what you get back tracks how much
+attention you had that day. The failures that survive it do not look like failures.
 
 - The tests pass, the linter is clean, the build is green, and the code is wrong.
 - The context that wrote the code reviews it and finds it reasonable.
@@ -18,25 +18,35 @@ had that day. The failures that survive that do not look like failures.
 
 ## What the doctrine does
 
-Seven rules, applied to every job, in the same order every time.
+Seven rules, applied to every job. Rules 3 to 6 are a loop rather than a sequence, which is the
+point of rule 6.
 
 1. **Ask first.** Questions reach you before work is aimed, and your answers go verbatim to every
    agent that later judges the result.
 2. **Split the work** into phases with checkable exit gates, and run independent work in parallel.
 3. **Run every check your project documents**, not the ones an agent thought of. A check that could
    not run is recorded as not run, never as clean.
-4. **Send an adversary**: a reviewer that did not write the code, a different model where one is
+4. **Send an adversary**: a reviewer that did not write the code, a different model if you have one
    installed. Its findings are verified against source first, because adversaries invent things too.
-5. **Ask where else.** Every surviving finding gets one question: where else would whatever produced
-   this have left the same mark. The class gets fixed, not the instance.
+   Without a second model the run says so, rather than reporting a stronger gate than it ran.
+5. **Ask where else.** Every blocking finding that survives verification gets one question: what else
+   the same mistake would have touched. The fix goes to the cause, not just the place it showed up.
 6. **Loop** until one full pass comes back clean with nothing outstanding. Two alarms stop the loop
-   and put the decision to you rather than spending your budget quietly.
-7. **Cut what nobody asked for, then deliver** the way your repo delivers, and say whether what
-   shipped is what the clean pass certified.
+   and put the decision to you rather than spending your budget without telling you.
+7. **Cut what nobody asked for, then deliver** by whatever route your project normally ships work,
+   and say whether what shipped is what the clean pass certified.
+
+**What it touches.** It edits your working tree, the way Claude Code already does. It commits only
+where your repo's conventions say to, and pushes or opens a PR only if that is your documented norm
+or you asked for one. Where it cannot write, it hands you the diff instead. A phase writes its state
+to a file as it goes, so a run that is interrupted or compacted resumes from disk rather than from
+whatever the conversation still remembers.
 
 ## What that catches
 
-Three defects from real work, anonymized. Each pair is the code as it was and as it is now.
+Three defects from real work. In each pair the first block is the defect and the second is the fix.
+The code is real and the identifiers are renamed: no client, product, person or repository is named,
+so these are mnemonics for the rule beside them, not citations you can follow.
 
 ### Every check was green
 
@@ -54,10 +64,11 @@ const show = (value: unknown) =>
 are user-supplied. Name a field `toString`, open that record's history, and the page dies. It dies
 again on every reopen, because the event is stored.
 
-At that moment: 837 backend tests green, 492 frontend tests green, build clean, linter clean, and a
-reviewer that read the whole 2,283-line change end to end and returned nothing blocking. A
-different-model adversary read it and also returned nothing. A second adversarial pass over the same
-unchanged revision found it.
+At that moment: 837 backend tests green, 492 frontend tests green, a clean build, linters green apart
+from one pre-existing error the change did not cause, and a reviewer that read the whole 2,283-line
+diff end to end and returned nothing blocking. A different-model adversary read it and also returned
+nothing. The same adversary, run again on that unchanged revision with no memory of the first pass,
+found it.
 
 ### One finding was a class
 
@@ -80,9 +91,9 @@ const value = globalItem.value;
 wrong here because this zero is written to the database as a price: when a background reload failed,
 clicking "Re-include" on a $5,000 benefit saved it as $0, silently.
 
-The adversary found one button. Rule 5 asked where else that mark appears, and the answer was five
-handlers already reaching the same path, so the fix went to the shared root instead of the two doors
-the round happened to be looking at.
+The different-model adversary found one button. Rule 5 asked what else could reach the same code, and
+the answer was five other handlers that already did, so the fix went into the shared function they all
+call rather than into the button the round happened to be looking at.
 
 ### The fix was where the next bug lived
 
@@ -96,19 +107,20 @@ for label in custom_labels:
 ```
 
 ```python
-reserved = {normalize(name) for name in RESERVED_COLUMNS}
-labels = [label for label in custom_labels if normalize(label) not in reserved]
+levels = {normalize(name) for name in LEVEL_COLUMNS}
+labels = [label for label in custom_labels if normalize(label) not in levels]
 ```
 
 De-duplicating a header against every name already in it is textbook correct, and it fixed the bug
 that round had reported. But the importer resolves custom labels above ordinary field names, so
 dropping the duplicate leaves the wrong column standing: export the catalog, import the same file
-back unedited, and every product silently gets a field overwritten with an unrelated cost figure.
+back unedited, and the import silently overwrites a field on every product with an unrelated
+catalog value.
 
-The first block is not the original code. It is the previous round's repair. Before it, that file was
-refused outright as a duplicate header, so the repair replaced a loud refusal with a silent write
-across the catalog. The next round's adversary caught it by running the real exporter and importer
-rather than reading them.
+The first block is not the original code. It is the previous round's repair. Before it, the importer
+rejected that file outright and named the duplicate header, so the repair replaced a loud refusal with
+a silent write across the catalog. The next round's different-model adversary caught it by running the
+real exporter and importer rather than reading them.
 
 ## Install
 
@@ -124,15 +136,16 @@ always load into the session that installed it.
 
 Do not start with a big audit. Point it at one file you suspect: `use doctrine-audit on
 src/whatever.ts (scope is that file only)`. It asks what counts as a bug before changing anything,
-runs whatever your repo documents as a gate, and opens its report with the gate before the work:
+runs whatever your repo has written down as a gate, and puts the verdict at the top of its report,
+ahead of the work:
 
 ```text
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 Gate: shipped at an escalation, round 6, zero clean passes. Open: 2 blocking findings.
 ```
 
-The wording varies. What that line contains does not, and there is no third form where a run that
-never got clean is summarised as finished.
+Those are the two forms it comes in, and the wording varies inside them. There is no third form where
+a run that never came clean is summarised as finished.
 
 ## The nine skills
 
@@ -150,14 +163,16 @@ never got clean is summarised as finished.
 
 ## What it costs
 
-More time and more tokens than a single pass, with no lighter mode to pick, so point it at work where
-being wrong is expensive. No time or token figures are published here: the runs behind this page did
-not measure them, and a number this README could not source is the thing it argues against.
+More time and more tokens than a single pass, so point it at work where being wrong is expensive. No
+mode skips the gate, though `doctrine-gauntlet` asks which of its two modes you want and the hub
+scales the gate down for work shown to have small reach. No token figures appear here: the runs behind
+this page did not measure them, and an unsourced number is what this page argues against.
 
 ## Built on other people's work
 
-Invoked by name at runtime rather than copied, so their updates flow through. All optional, each with
-a fallback: [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) for the build and
+These are the disciplines the loop runs on, each published by someone who does this work. The doctrine
+invokes them by name at runtime rather than copying them, so their updates flow through. All optional,
+each with a fallback: [Matt Pocock's engineering skills](https://github.com/mattpocock/skills) for the build and
 review disciplines; [superpowers](https://github.com/obra/superpowers), by Jesse Vincent and Prime
 Radiant, for parallel dispatch and worktree isolation;
 [ponytail](https://github.com/DietrichGebert/ponytail), by Dietrich Gebert, for the pass that deletes
@@ -166,8 +181,9 @@ what nobody asked for;
 Strunk's rules as a skill, by Josh Thomas via softaworks; [OpenAI's codex
 plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team;
 [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands) for handoffs
-between sessions; and the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer,
-folded into `doctrine-gauntlet`.
+between sessions; and the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose
+method `doctrine-gauntlet` builds on. One exception to invoking by name: Matt Pocock's `code-review`
+ships as a renamed copy, because the original name collides with Claude Code's own `/code-review`.
 
 ## Requirements
 
@@ -182,14 +198,22 @@ workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything o
 `doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
+## Watching it work
+
+A doctrine run dispatches a lot of subagents and Claude Code shows you none of them: the terminal goes
+quiet and an answer appears some minutes later. Run it inside [herdr](https://herdr.dev) and every
+subagent gets a live pane you can read while it works. Optional, and nothing here needs it:
+[docs/watching-a-run.md](docs/watching-a-run.md).
+
 ## Limits
 
 These rules came out of real work, and the failures behind them are ones this author hit. There is no
-third-party benchmark. Known defects are in [`docs/known-issues.md`](docs/known-issues.md). The
-specification is [`skills/doctrine/SKILL.md`](skills/doctrine/SKILL.md), the file the agent actually
-loads, so it is the one that stays correct. How the work is checked, and what those checks cannot
-reach, is in [docs/how-this-is-tested.md](docs/how-this-is-tested.md); the optional herdr integration
-that lets you watch a run is in [docs/watching-a-run.md](docs/watching-a-run.md).
+third-party benchmark, and the three examples are anonymized, so you cannot check them yourself.
+Defects found and not yet fixed are in [`docs/known-issues.md`](docs/known-issues.md).
+
+The specification is [`skills/doctrine/SKILL.md`](skills/doctrine/SKILL.md), the file the agent
+actually loads, so trust it over this page wherever the two disagree. How the work is checked, and
+what those checks cannot reach, are in [docs/how-this-is-tested.md](docs/how-this-is-tested.md).
 
 ## License
 

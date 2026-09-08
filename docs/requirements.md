@@ -1,7 +1,7 @@
 # Requirements
 
-What each optional integration is for, and what happens without it. The two hard requirements are
-named in the [README](../README.md#requirements); everything else here is optional.
+The two hard requirements in full, then every optional integration and what happens without it. The
+[README](../README.md#requirements) names them all; this page is the detail.
 
 ## A browser, for `doctrine-gauntlet`
 
@@ -22,9 +22,9 @@ process on the host, so a contained session refuses for the same reason a non-he
 
 For everything else the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
 
-The skills the README names as optional are covered below. Each entry below says what happens when it is missing — every one has a fallback, and a tool that is installed but reports itself unusable degrades the same way rather than stalling the run.
-
 ## Optional integrations and their fallbacks
+
+Each entry says what happens when it is missing. Every one has a fallback, and a tool that is installed but reports itself unusable degrades the same way rather than stalling the run.
 
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills): `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content.
 
@@ -40,7 +40,7 @@ The skills the README names as optional are covered below. Each entry below says
 
 - [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), plus the Codex CLI logged in. Run `/codex:setup` to verify. Supplies the default red team, `doctrine-research`'s second engine, and the gauntlet's image generation.
 
-  Without it — or with the plugin installed and its CLI unreachable — a fresh-context subagent prompted to refute. Research loses cross-model diversity and says so in its report; the gauntlet directs native CSS, SVG and canvas art instead of generated assets.
+  Without it, or with the plugin installed and its CLI unreachable: a fresh-context subagent prompted to refute. Research loses cross-model diversity and says so in its report; the gauntlet directs native CSS, SVG and canvas art instead of generated assets.
 
 - [ponytail](https://github.com/DietrichGebert/ponytail): the simplification review, and the audit lens in `doctrine-audit`.
 
@@ -50,17 +50,17 @@ The skills the README names as optional are covered below. Each entry below says
 
   Without it: a lens prompted with Strunk's core rules.
 
-- **Claude Code's `deep-research` workflow**, built into Claude Code on hosts that carry it — nothing to install. `doctrine-research`'s first engine. It is a workflow rather than a skill, so it will not appear in your skills list.
+- **Claude Code's `deep-research` workflow**, built into Claude Code on hosts that carry it, nothing to install. `doctrine-research`'s first engine. It is a workflow rather than a skill, so it will not appear in your skills list.
 
   Without it: a fan-out of web-search agents with per-claim adversarial verification.
 
-- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it — nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script.
+- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it, nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script.
 
   Without it: the prose flow in the skill is the round, unchanged.
 
 - **Claude Design**, on a claude.ai login. A gauntlet run with a bound Design project can push finished sections for you to watch in the Design pane as the run goes. A Design project is a rendering, never a design-system binding.
 
-  Without it: git is the source of record either way — the run says the sync was skipped and delivers from the repo.
+  Without it: git is the source of record either way, and the run says the sync was skipped and delivers from the repo.
 
 - [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands): `/BackupMemory`, `/LoadMemory`, `/primer`. The hub's step 5 names the backup command as the writer of a phase's handoff document and the loaders as what acts on its first line.
 

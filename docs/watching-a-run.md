@@ -2,7 +2,7 @@
 
 When Claude Code dispatches a subagent, you cannot see what it is doing. The terminal goes quiet and some minutes later an answer appears. A doctrine run dispatches a lot of them, so that quiet gets long, and if one is off down the wrong path you find out at the end.
 
-[herdr](https://herdr.dev) fixes that. It is a terminal multiplexer that knows which agent is running in which pane. Run Claude Code inside it (0.8.2 or later) and **every subagent gets a live pane you can read while it works** — its instructions, the files it opens, the commands it runs, as they happen. Optional, and nothing here is needed to use the skills.
+[herdr](https://herdr.dev) fixes that. It is a terminal multiplexer that knows which agent is running in which pane. Run Claude Code inside it (0.8.2 or later) and **every subagent gets a live pane you can read while it works**: its instructions, the files it opens, the commands it runs, as they happen. Optional, and nothing here is needed to use the skills.
 
 Up to six panes stack beside your session, which keeps the bigger share of the screen:
 
