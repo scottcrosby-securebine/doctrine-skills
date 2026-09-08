@@ -515,8 +515,10 @@ try {
         // launcher's words (dctr-gate.mjs), repaired there twice and never here. Removing the marker
         // makes the tab UNRECLAIMABLE for the rest of the session: SessionEnd's sweep enumerates
         // markers (liveSeatsPartial below) and staleSideSeats filters RECORDED seats and never judges
-        // a tab at all, so with no record neither can reach it. sideOccupants counts markers too, so
-        // the column then under-counts and a seventh pane is split onto six.
+        // a tab at all, so with no record neither can reach it.
+        // NO cap consequence here, and the temptation to write one is why this says so: `isSideSeat`
+        // is `paneId && !tabId`, so a tab marker is not counted by seatPlacement whether it exists or
+        // not. sideOccupants says the same in its own comment. The harm is the orphaned tab alone.
         spared = `${seat.tabId} is focused`
         try { herdr(['tab', 'rename', seat.tabId, `${mine.label} · done`]) } catch { /* label only */ }
       }
@@ -547,6 +549,10 @@ try {
         // defect found nearby: it is the same one, in the other arm of the same if/else, reaching
         // the same removal block. staleSideSeats DOES judge pane seats, but it filters the RECORDED
         // ones, so a pane with no record is as unreachable as a tab with none.
+        // The cap consequence lives HERE, not on the tab branch: this pane stays in the layout and
+        // holds a column slot, but with no marker it is in neither half of sideOccupants, so
+        // seatPlacement counts one fewer side seat than the column really has and a seventh pane is
+        // split onto six.
         spared = `${seat.paneId} is focused`
         try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }
       }

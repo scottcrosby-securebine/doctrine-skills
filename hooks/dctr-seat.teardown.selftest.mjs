@@ -301,8 +301,10 @@ console.log('clause 1: a focused TAB is relabelled and KEEPS its marker (F14)')
 {
   // The sibling of the clause above, and the thing the gate launcher already gets right: "The tab
   // LIVES and the user is watching it, so its record must live too." The seat hook renamed the tab
-  // and removed its marker anyway, so SessionEnd could never reclaim it and sideOccupants, which
-  // counts markers, under-counted the column for the rest of the session.
+  // and removed its marker anyway, so SessionEnd could never reclaim it. No cap consequence for a
+  // TAB: isSideSeat is `paneId && !tabId`, so a tab marker is never counted by seatPlacement either
+  // way. The under-count belongs to the PANE branch, and saying otherwise here was a false claim the
+  // adversarial pass caught.
   const TABS12 = '[{"tab_id":"w1:tDECOY","focused":false,"label":"decoy"},{"tab_id":"w1:t12","focused":true,"label":"seat 12"}]'
   reset()
   fs.writeFileSync(path.join(seatsDir, 'dctr-explore-12.json'), JSON.stringify({ agent: 'dctr-explore-12', agent_id: 'agent-12', role: 'Explore', n: 12, tabId: 'w1:t12', paneId: null, file: '/t/x.jsonl' }))
@@ -325,7 +327,10 @@ console.log('clause 1: an UNfocused seat still closes AND still loses its marker
 {
   // The other direction of the same repair, and the one that makes it a repair rather than a leak.
   // Keeping the marker on relabel is only correct while the ordinary path still removes it: a change
-  // that kept every marker passes both clauses above and holds every finished seat against the cap.
+  // that kept every marker passes both clauses above while leaving a record claiming a live seat for
+  // something already closed. NOT a cap claim — a stale SIDE marker is pruned by staleSideSeats
+  // before the next placement counts (dctr-seat.mjs:178-182), and a TAB marker is never counted at
+  // all. What it costs is a false record, which SessionEnd then acts on.
   reset()
   fs.writeFileSync(path.join(seatsDir, 'dctr-explore-13.json'), JSON.stringify({ agent: 'dctr-explore-13', agent_id: 'agent-13', role: 'Explore', n: 13, tabId: 'w1:t13', paneId: null, file: '/t/x.jsonl' }))
   run({ hook_event_name: 'SubagentStop', agent_id: 'agent-13', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' },
