@@ -400,8 +400,23 @@ const MUTATIONS = [
     from: 'export const SESSION_END_WAIT_MS = 8000',
     to: 'export const SESSION_END_WAIT_MS = 30000' },
   { name: 'a focused side pane keeps its title on stop', file: 'dctr-seat.mjs', clause: 'a focused side pane is renamed to its label plus done',
-    from: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
-    to: "      } else if (act === 'relabel') try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
+    from: "        try { herdr(['pane', 'rename', seat.paneId, `${seat.label || seat.agent} · done`]) } catch { /* label only */ }",
+    to: "        try { herdr(['pane', 'rename', seat.paneId, `${seat.agent} · done`]) } catch { /* label only */ }" },
+  // F14. The relabel branches keep the marker; without that the thing the user is watching lives on
+  // with no record and NOTHING can reclaim it, because SessionEnd enumerates markers and
+  // staleSideSeats filters recorded seats. One entry per branch, because they are two sites.
+  { name: 'a relabelled TAB loses its marker again', file: 'dctr-seat.mjs',
+    clause: 'and its MARKER survives, so SessionEnd can still reclaim it (F14)',
+    from: "        spared = `${seat.tabId} is focused`",
+    to: "        spared = null" },
+  { name: 'a relabelled PANE loses its marker again', file: 'dctr-seat.mjs',
+    clause: 'and its MARKER survives, because a pane that LIVES must stay reclaimable (F14)',
+    from: "        spared = `${seat.paneId} is focused`",
+    to: "        spared = null" },
+  { name: 'the shared block stops honouring spared', file: 'dctr-seat.mjs',
+    clause: 'both F14 MARKER clauses, tab and pane',
+    from: "    } else if (spared) {",
+    to: "    } else if (false) {" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

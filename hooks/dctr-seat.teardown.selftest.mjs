@@ -291,7 +291,46 @@ console.log('clause 1: a focused side seat is relabelled under its own title, no
   check('a focused side pane is renamed to its label plus done', called(/^pane rename w1:s1 explore · Sweep the hooks · done$/m), callLines(/^pane rename/).join(' | '))
   check('and is not closed', !called(/^pane close w1:s1/m), callLines(/^pane close/).join(' | '))
   const focused = execFileSync('bash', ['-c', `${bin}/herdr pane get w1:s1`], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_GET_FOCUSED: 'w1:s1' } })
-  check('the focused fixture really answers focused, proved without the hook', /"focused":true/.test(focused), focused)
+  check('and its MARKER survives, because a pane that LIVES must stay reclaimable (F14)',
+    fs.existsSync(path.join(seatsDir, 'dctr-explore-1.json')),
+    'spared and then forgotten: staleSideSeats filters RECORDED seats and SessionEnd enumerates MARKERS, so with no record neither can reach it')
+}
+
+console.log('clause 1: a focused TAB is relabelled and KEEPS its marker (F14)')
+{
+  // The sibling of the clause above, and the thing the gate launcher already gets right: "The tab
+  // LIVES and the user is watching it, so its record must live too." The seat hook renamed the tab
+  // and removed its marker anyway, so SessionEnd could never reclaim it and sideOccupants, which
+  // counts markers, under-counted the column for the rest of the session.
+  const TABS12 = '[{"tab_id":"w1:tDECOY","focused":false,"label":"decoy"},{"tab_id":"w1:t12","focused":true,"label":"seat 12"}]'
+  reset()
+  fs.writeFileSync(path.join(seatsDir, 'dctr-explore-12.json'), JSON.stringify({ agent: 'dctr-explore-12', agent_id: 'agent-12', role: 'Explore', n: 12, tabId: 'w1:t12', paneId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-12', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' }, { DCTR_TEST_TABS: TABS12 })
+  check('a focused tab is renamed', called(/^tab rename w1:t12 seat 12 . done$/m), callLines(/^tab (rename|close)/).join(' | ') || '(no tab calls)')
+  check('and is not closed', !called(/^tab close w1:t12/m), callLines(/^tab close/).join(' | ') || '(no tab close)')
+  check('and its MARKER survives, so SessionEnd can still reclaim it (F14)',
+    fs.existsSync(path.join(seatsDir, 'dctr-explore-12.json')),
+    'the tab was spared and then forgotten')
+  // Third clause: the fixture really carries a focused entry for THIS tab, behind a decoy whose focus
+  // is the opposite, so nothing above can pass by taking the first entry instead of matching the id.
+  const tabsOut = execFileSync('bash', ['-c', `${bin}/herdr tab list --workspace w1`], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_TABS: TABS12 } })
+  const parsed = JSON.parse(tabsOut).result.tabs
+  check('the tab fixture really answers focused for w1:t12 behind an UNfocused decoy, proved without the hook',
+    parsed.length === 2 && parsed[0].tab_id === 'w1:tDECOY' && parsed[0].focused === false && parsed[1].tab_id === 'w1:t12' && parsed[1].focused === true,
+    tabsOut)
+}
+
+console.log('clause 1: an UNfocused seat still closes AND still loses its marker (F14 must not leak every record)')
+{
+  // The other direction of the same repair, and the one that makes it a repair rather than a leak.
+  // Keeping the marker on relabel is only correct while the ordinary path still removes it: a change
+  // that kept every marker passes both clauses above and holds every finished seat against the cap.
+  reset()
+  fs.writeFileSync(path.join(seatsDir, 'dctr-explore-13.json'), JSON.stringify({ agent: 'dctr-explore-13', agent_id: 'agent-13', role: 'Explore', n: 13, tabId: 'w1:t13', paneId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SubagentStop', agent_id: 'agent-13', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' },
+    { DCTR_TEST_TABS: '[{"tab_id":"w1:t13","focused":false,"label":"seat 13"}]' })
+  check('an unfocused tab is still closed', called(/^tab close w1:t13/m), callLines(/^tab (rename|close)/).join(' | ') || '(no tab calls)')
+  check('and its marker is still removed', !fs.existsSync(path.join(seatsDir, 'dctr-explore-13.json')))
 }
 
 console.log('clause 1 — a finishing seat must not delete a replacement that reused its name')
