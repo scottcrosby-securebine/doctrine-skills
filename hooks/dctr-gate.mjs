@@ -118,6 +118,11 @@ if (argv[0] === '--run') {
         const tabs = herdr(['tab', 'list', '--workspace', workspace]).result.tabs
         mine = tabs.find((t) => t.tab_id === tabId)
       } catch (e) { listFailed = String(e.message).split('\n')[0] }
+      // The partial-entry worry is CLOSED, verified at herdr's source on 2026-09-08 against v0.8.2
+      // (the shipped binary) and v0.9.0: TabInfo carries `tab_id` and `focused` as plain non-Option
+      // fields with no skip_serializing_if, and tab_info() is total over the caller's own
+      // 0..tabs.len(), so an id-less entry cannot be emitted and a tab that exists is never left
+      // out. Listed-and-absent really is an absence. Re-check if TabInfo ever gains an Option.
       // Listed and ABSENT is an observed absence and closes by id (issue #20); a list that FAILED
       // answered nothing. Identical to the seat hook's tab stop, deliberately: two launchers making
       // the same decision differently is what put this defect here.

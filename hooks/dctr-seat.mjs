@@ -495,6 +495,11 @@ try {
         const tabs = herdr(['tab', 'list', '--workspace', process.env.HERDR_WORKSPACE_ID]).result.tabs
         mine = tabs.find((t) => t.tab_id === seat.tabId)
       } catch (e) { listFailed = String(e.message).split('\n')[0] }
+      // The partial-entry worry is CLOSED, verified at herdr's source on 2026-09-08 against v0.8.2
+      // (the shipped binary) and v0.9.0: TabInfo carries `tab_id` and `focused` as plain non-Option
+      // fields with no skip_serializing_if, and tab_info() is total over the caller's own
+      // 0..tabs.len(), so an id-less entry cannot be emitted and a tab that exists is never left
+      // out. Listed-and-absent really is an absence. Re-check if TabInfo ever gains an Option.
       // Listed and absent is an OBSERVED absence: close by id, per issue #20. Everything else the
       // list could not answer for keeps the marker so SessionEnd can try again.
       const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'

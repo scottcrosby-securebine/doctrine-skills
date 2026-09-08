@@ -11,6 +11,13 @@
 //
 // It mutates a COPY. The repo is never written to.
 //
+// SCOPE: hooks/ only, and that is a RULING (2026-09-08), not an oversight. FILES and SUITES below
+// are bare names resolved against this directory, and the two tools/ checkers are `--selftest`
+// flags on themselves rather than standalone suites, so reaching them means paths AND arguments
+// in the one list whose own comment says a suite outside it is silently disabled. Weighed against
+// four files that already carry three-clause tamper tests running in CI, it is not worth it. A
+// repair in tools/ is pinned by that tool's own selftest and never by this gate.
+//
 // A mutation whose `from` text is absent is a FAILURE, not a skip. Otherwise renaming a line
 // silently retires the mutation that guarded it, which is the same defect one level up.
 
