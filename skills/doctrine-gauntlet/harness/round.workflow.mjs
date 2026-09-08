@@ -151,18 +151,17 @@ function checkRollCall(rollCall, expected, words, key, who) {
 if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
-// A gate-only round declares itself with `sections: []`; omitting the key is a miscall, and the two
-// arrived alike while the reads below defaulted it. `secs` is not stylistic: `malformed()` records
-// and does not halt, so a present non-array would otherwise reach `pipeline()` and crash the round
-// instead of returning the finding.
-const secs = Array.isArray(a.sections) ? a.sections : []
+// The local is not stylistic: `malformed()` records and does not halt, so a present non-array would
+// otherwise reach `pipeline()` below and crash the round instead of returning the finding. The
+// contract itself is stated once, in the args block at the top of this file.
+const sectionArgs = Array.isArray(a.sections) ? a.sections : []
 if (!Array.isArray(a.sections)) malformed('sections: missing or not an array — a gate-only round passes sections: [], which is not the same as omitting the key')
 
 // ---- Sections: builder then critic, three rejections put it to the user. The tool cannot keep
 // one critic alive across retries, so each retry's critic is handed every earlier rejection. ----
 phase('Sections')
 const deadlocked = []
-const sections = await pipeline(secs, async (s) => {
+const sections = await pipeline(sectionArgs, async (s) => {
   let rejections = counters.sectionRejections[s.name] || 0
   let notes = []
   const history = (s.priorNotes || []).map((h) => h.slice())   // prior rounds' rejections you pass in,
@@ -188,7 +187,7 @@ const sections = await pipeline(secs, async (s) => {
 // A round that rebuilt any section is a diff after the last clean pass, so the count restarts
 // here — before the deadlock return can carry a stale count out — and two clean passes must
 // both be over the work as it now stands.
-if (secs.length) counters.cleanPasses = 0
+if (sectionArgs.length) counters.cleanPasses = 0
 // A dead builder or critic means that section never passed, and the gate begins only after
 // every section passes — so a dead pair returns pre-gate exactly as a deadlock does.
 if (deadlocked.length || sections.some((s) => s && s.dead)) {

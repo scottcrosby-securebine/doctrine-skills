@@ -1100,5 +1100,46 @@
    ]
   },
   "_note": "The `sections` key is absent from args, not empty. A gate-only round declares itself with `sections: []`; omitting the key entirely is a miscall, and before the guard both arrived as the same input because `a.sections || []` read them alike. The defect here is an absence, so nothing in the stub prompts states it and this note and the `expect` are what carry it, as with `floor-not-run-blocks`. Otherwise these are `clean-exits`'s own stubs, which pass: the only difference is the missing key. Delete the Array.isArray guard and this fixture goes clean and exits."
+ },
+ "sections-not-array": {
+  "args": {
+   "sections": {
+    "name": "hero",
+    "builderPrompt": "unreachable: the guard blocks before any pair is dispatched",
+    "criticPrompt": "unreachable: the guard blocks before any pair is dispatched"
+   },
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "reader and register",
+    "the wall",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall clearance against the 360 render; image is second in source order; nothing to file\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\", \"the set\", \"print panels\", \"ledger numbers\"]}",
+   "counters": {
+    "cleanPasses": 1,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": []
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "sections: missing or not an array"
+   ]
+  },
+  "_note": "`sections` is present but is a single section object rather than a list of them, which is the miscall a required-key check alone does not catch. It pins the second half of the guard's predicate: the key is there, so a presence-only implementation passes it, and `malformed()` records without halting, so the value would go on to reach `pipeline()`. The stub prompts are unreachable by construction and say so. Narrow the guard from `Array.isArray` to a presence test and this fixture goes clean and exiting."
  }
 }
