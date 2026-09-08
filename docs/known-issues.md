@@ -11,11 +11,12 @@ per CLAUDE.md, internal review history does not ship.
 
 | Item | Site | What happens | Issue |
 |---|---|---|---|
-| Focused tab seat loses its record | `hooks/dctr-seat.mjs`, the `relabel` branch of the tab stop and the marker removal under `placementLock` | A tab seat the user is watching is relabelled rather than closed, `closeFailed` stays null, and the marker is removed anyway. The tab lives with nothing on disk naming it, so SessionEnd cannot reclaim it. No cap effect for a tab: `isSideSeat` is `paneId && !tabId`, so a tab marker is never counted by `seatPlacement` either way. The same branch for a PANE does under-count the column, because a spared pane stays in the layout holding a slot while appearing in neither half of `sideOccupants`. Fails safe in both cases: the thing is spared, then forgotten | [#36](https://github.com/scottcrosby-securebine/doctrine-skills/issues/36) |
 | Off-beat offset read from the wrong clock | `hooks/dctr-seat.teardown.selftest.mjs`, the latency-watcher clause | The offset is measured from the parent's clock at spawn instead of the watcher's own poll beat, so the clause stops discriminating a production-interval watcher from an injected-interval one when boot latency stretches. Instrument only | [#37](https://github.com/scottcrosby-securebine/doctrine-skills/issues/37) |
 | Third clause certifies a hand-copy | `tools/herdr-lint.selftest.mjs`, clauses 3a/3b/3c | They prove two hand-written functions differ on an empty reply. The checker runs against the `BROKEN_E2` fixture, which nothing ties to them, so the fixture can lose its defect while the clauses stay green. Instrument only | [#37](https://github.com/scottcrosby-securebine/doctrine-skills/issues/37) |
 
 ## Settled, with the evidence
+
+**A relabelled seat keeps its marker.** Fixed 2026-09-08 ([#36](https://github.com/scottcrosby-securebine/doctrine-skills/issues/36)). `stopAction` answers `relabel` when a seat's tab or pane is focused, and both relabel branches once removed the marker anyway, leaving the thing the user was watching alive with no record: SessionEnd enumerates markers and `staleSideSeats` filters recorded seats, so neither could reach it. Verified on a live herdr server with a control that reproduced the loss without the fix.
 
 **A herdr tab list never carries an entry without a `tab_id`, and never omits a tab that exists.**
 Checked at herdr's source on 2026-09-08 against `v0.8.2` and `v0.9.0`: `TabInfo` declares `tab_id`
