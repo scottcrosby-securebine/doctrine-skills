@@ -5,7 +5,8 @@
 // args = {
 //   sections: [{ name, builderPrompt, criticPrompt, priorNotes? }],   // REQUIRED; `[]` is the
 //                                        // gate-only round (no pairs run, no clean-pass reset) and
-//                                        // omitting the key is a miscall, not a mode. Critic prompts
+//                                        // omitting the key is a miscall, not a way to ask for that
+//                                        // round. Critic prompts
 //                                        // per the critic brief, each stating it is a step-6 section review
 //   floorPrompt,                         // an agent runs the floor (and every documented
 //                                        // gate) and returns the report; '' blocks, it is not a skip
@@ -151,9 +152,8 @@ function checkRollCall(rollCall, expected, words, key, who) {
 if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
-// The local is not stylistic: `malformed()` records and does not halt, so a present non-array would
-// otherwise reach `pipeline()` below and crash the round instead of returning the finding. The
-// contract itself is stated once, in the args block at the top of this file.
+// `malformed()` records and does not halt, so the local is what keeps a present non-array from
+// reaching `pipeline()` below.
 const sectionArgs = Array.isArray(a.sections) ? a.sections : []
 if (!Array.isArray(a.sections)) malformed('sections: missing or not an array — a gate-only round passes sections: [], which is not the same as omitting the key')
 

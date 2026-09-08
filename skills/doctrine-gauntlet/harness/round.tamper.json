@@ -1140,6 +1140,6 @@
     "sections: missing or not an array"
    ]
   },
-  "_note": "`sections` is present but is a single section object rather than a list of them, which is the miscall a required-key check alone does not catch. It pins the second half of the guard's predicate: the key is there, so a presence-only implementation passes it, and `malformed()` records without halting, so the value would go on to reach `pipeline()`. The stub prompts are unreachable by construction and say so. Narrow the guard from `Array.isArray` to a presence test and this fixture goes clean and exiting."
+  "_note": "`sections` is present but is a single section object rather than a list of them, which is the miscall a required-key check alone does not catch. It pins the second half of the guard's predicate: the key is there, so a presence-only guard accepts it. The stub prompts are unreachable by construction and say so. Narrow the guard's own test to a presence check while leaving the local's `Array.isArray` fallback, and this fixture goes clean and exiting. That mutation is named because its outcome follows from this file; what `pipeline` would do with a non-array is the host's behaviour and is not asserted here."
  }
 }
