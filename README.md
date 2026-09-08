@@ -31,7 +31,8 @@ point of rule 6.
    Without a second model the run says so, rather than reporting a stronger gate than it ran.
 5. **Ask where else.** Every blocking finding that survives verification gets one question: what else
    the same mistake would have touched. The fix goes to the cause, not just the place it showed up.
-6. **Loop** until one full pass comes back clean with nothing outstanding. Two alarms stop the loop
+6. **Loop** until one full pass comes back clean with no blocking finding left over from an
+   earlier pass. Two alarms stop the loop
    and put the decision to you rather than spending your budget without telling you.
 7. **Cut what nobody asked for, then deliver** by whatever route your project normally ships work,
    and say whether what shipped is what the clean pass certified.
@@ -126,38 +127,44 @@ real exporter and importer rather than reading them.
 
 Running an agent in a loop is not new and this does not claim it. Geoffrey Huntley's
 [Ralph](https://ghuntley.com/ralph/) is an unconditional bash loop that pipes a prompt file into the
-agent over and over, and its central insight, that state belongs on disk and each pass gets a fresh
-context, is one the doctrine uses too.
+agent over and over. Each pass gets a fresh context and progress lives on disk, a design this borrows
+rather than improves on.
 
-The difference is what ends the loop.
+What differs is what ends the loop.
 
-- **Ralph's published loop has no exit condition.** Huntley describes stopping as "a matter of taste",
-  and the community playbook's default is "unlimited (manual stop with Ctrl+C)". Anthropic's own Ralph
-  plugin adds two exits, an iteration counter or a phrase the working agent emits about itself, and
-  its README tells you to rely on the counter.
-- **Most of the field is the same.** Across two dozen published methods, fewer than half define a
-  completion condition at all, and the two most-used commercial agents define none: Devin sleeps on
-  idle, and Cursor's documented stop is a person clicking Stop.
-- **This loop cannot exit until a reviewer that did not write the work passes it**, on a revision that
-  has actually run, with nothing outstanding from any earlier pass. A fresh reviewer is not the
-  novelty. Anthropic documents that pattern and other projects require it. Making it the gate the loop
-  must pass, rather than a tool the agent may call, is the part that changes the outcome.
+Ralph's published loop has no exit condition, and the post documents no stopping rule.
+[Clayton Farr's Ralph playbook](https://github.com/ClaytonFarr/ralph-playbook) adds one, an optional
+iteration cap. Anthropic's own Ralph plugin adds two, an iteration counter or a phrase the working
+agent emits about itself, and its README says to rely on the counter rather than the phrase.
 
-That is also what lets a long run go unattended: it stops on a condition rather than on you
-noticing, and rule 6's alarms bring the decision back to you.
+Here the loop cannot reach a certified exit until a reviewer that did not write the work passes it,
+on a revision that has actually run, with no blocking findings left over from any earlier pass. It
+can still end other ways, and the report names which: stopped by you, shipped at an alarm with
+findings open, or closed with a punch list of what it did not fix. What it never does is present an
+uncertified ending as a clean one.
+
+Independent review and gating are both documented practice rather than inventions here. Anthropic's
+own docs describe an adversarial reviewer in a fresh context, a stop hook that blocks a turn until a
+check passes, and a separate evaluator that keeps working until a goal resolves. What this adds is
+the combination: the reviewer is the gate, and the gate's conditions include the real run and the
+findings carried over from before.
+
+Those conditions are also what lets a long run leave you alone. It stops at its own thresholds and
+comes back to you there, rather than needing you to watch for the end.
 
 **Scope.** Your words are written down before any work is aimed and handed to every agent that later
-judges the result, and delivery walks your original request item by item. Ralph holds scope with specs
-and with prompt "signs" added after drift is noticed.
+judges the result, and delivery walks your original request item by item.
 
 **Where Ralph is better.** Greenfield. Huntley: "There's no way in heck would I use Ralph in an
-existing code base ... This works best as a technique for bootstrapping Greenfield." That is the
-opposite end of the problem from this, which makes them complements rather than rivals.
+existing code base though, if you try, I'd be interested in hearing what your outcomes are. This
+works best as a technique for bootstrapping Greenfield, with the expectation you'll get 90% done with
+it." That is the opposite end of the problem from this one.
 
-One caution worth passing on, since it is the strongest argument against the whole idea. Reviewers
-disagree far more than you would expect: one measurement across four review tools found 93.4% of
-flagged locations were caught by exactly one tool, and none by all four. That is a reason to want more
-than one reviewer, and a reason not to trust any single verdict, including a clean one.
+One number worth carrying, from [Addy Osmani's case for adversarial
+review](https://addyosmani.com/blog/agentic-code-review/): across four review tools on 146 real pull
+requests, 93.4% of flagged locations were caught by exactly one tool, and none by all four. He draws
+the conclusion this page draws, that heterogeneity is the point, and attaches a limit this page keeps
+too: measure it on your own code, because each of those results was specific to a codebase.
 
 ## Install
 
