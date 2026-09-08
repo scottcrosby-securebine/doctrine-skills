@@ -416,6 +416,10 @@ try {
     // close was attempted and none was meant to be, so reusing closeFailed would log "close failed"
     // for a seat that is working exactly as designed, and this log is the only account an operator
     // gets. Both flags reach the same block below and keep the marker for the same reason.
+    // It holds a STRING rather than a boolean, and the simplification pass tried to cut that: with
+    // `spared = true` both assignments become the identical line, and dctr-mutations.mjs requires an
+    // anchor to occur EXACTLY ONCE and fails rather than skipping. The two branches would collapse
+    // into one unpinnable pair. The distinct text is what keeps each site separately pinned.
     let closeFailed = null, spared = null
     try {
       if (reportsSidebarRow(seat)) {
