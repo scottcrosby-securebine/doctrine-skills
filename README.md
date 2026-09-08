@@ -18,7 +18,7 @@ attention you had that day. The failures that survive it do not look like failur
 
 ## What the doctrine does
 
-Seven rules, applied to every job. Rules 3 to 6 are a loop rather than a sequence, which is the
+Seven rules, applied to every job the hub and its seven wrappers run. Rules 3 to 6 are a loop rather than a sequence, which is the
 point of rule 6.
 
 1. **Ask first.** Questions reach you before work is aimed, and your answers go verbatim to every
@@ -36,9 +36,9 @@ point of rule 6.
 7. **Cut what nobody asked for, then deliver** by whatever route your project normally ships work,
    and say whether what shipped is what the clean pass certified.
 
-**What it touches.** It edits your working tree, the way Claude Code already does. It commits only
-where your repo's conventions say to, and pushes or opens a PR only if that is your documented norm
-or you asked for one. Where it cannot write, it hands you the diff instead. A phase writes its state
+**What it touches.** It edits your working tree, the way Claude Code already does. It commits the way
+your repo does, and where your repo documents no norm the coding workflow commits locally and asks. It
+pushes or opens a PR only if that is your documented norm or you asked for one. Where it cannot write, it hands you the diff instead. A phase writes its state
 to a file as it goes, so a run that is interrupted or compacted resumes from disk rather than from
 whatever the conversation still remembers.
 
@@ -144,8 +144,9 @@ Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 Gate: shipped at an escalation, round 6, zero clean passes. Open: 2 blocking findings.
 ```
 
-Those are the two forms it comes in, and the wording varies inside them. There is no third form where
-a run that never came clean is summarised as finished.
+Those are two of the forms. A run can also stop for your decision, end blocked on a question you
+have not answered, or close a prose job with a list of what it did not fix. The wording varies and the
+line always says which, and a run that never came clean is never summarised as finished.
 
 ## The nine skills
 
@@ -159,7 +160,7 @@ a run that never came clean is summarised as finished.
 | [`doctrine-write`](skills/doctrine-write/) | Proposals, briefs, PRDs, reports. |
 | [`doctrine-research`](skills/doctrine-research/) | Multi-source questions needing a fact-checked answer. |
 | [`doctrine-gauntlet`](skills/doctrine-gauntlet/) | Web design, judged on the rendered page. |
-| [`doctrine-pane`](skills/doctrine-pane/) | An interactive terminal session in a pane you can take over. |
+| [`doctrine-pane`](skills/doctrine-pane/) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
 
 ## What it costs
 
@@ -182,8 +183,9 @@ Strunk's rules as a skill, by Josh Thomas via softaworks; [OpenAI's codex
 plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team;
 [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands) for handoffs
 between sessions; and the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose
-method `doctrine-gauntlet` builds on. One exception to invoking by name: Matt Pocock's `code-review`
-ships as a renamed copy, because the original name collides with Claude Code's own `/code-review`.
+method `doctrine-gauntlet` builds on. One exception to invoking by name: you install Matt Pocock's
+`code-review` yourself as a renamed `matts-code-review` copy, because the original name collides with
+Claude Code's own `/code-review`. This plugin does not bundle it.
 
 ## Requirements
 
