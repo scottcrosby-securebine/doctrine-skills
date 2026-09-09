@@ -8,7 +8,7 @@
 // over its own display. Only malformed arguments exit 1, because those are the caller's bug.
 //
 // The tokens render only if the user's herdr config carries `$doctrine` in a row under
-// `[ui.sidebar.agents]`; the README's herdr bullet documents that one line.
+// `[ui.sidebar.agents]`; docs/watching-a-run.md carries that row, with the 0.9.0 colour rules.
 
 import { spawnSync } from 'node:child_process'
 import { skipReason, metadataTokenArgs } from './dctr-lib.mjs'
