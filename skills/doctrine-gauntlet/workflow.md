@@ -61,11 +61,11 @@ into that key's block, so re-run it, or resume it with `sections: []` supplied, 
 | `tieIsPass` | `true` only where fidelity is the run's bar (The brief); a named-material grant keeps it `false` |
 | `counters` | `{ cleanPasses, unresolvedRounds, sectionRejections, sectionResets }` from the ledger's run-state block; the script returns them updated. `sectionResets` is yours to write: when the user rules on a deadlocked section and you clear its rejections, add one there, and a second deadlock on the same section returns marked terminal |
 
-Every list argument above is a list or is absent: `sections`, `criticAxes`, `redTeamItems`,
-`inherited` and `stale` and `waived` from the table, plus `priorNotes` on each entry of `sections`. A truthy non-array files a blocking
-finding and the round runs on the default instead, so the round returns its findings rather than
-throwing them away. Falsy values are treated as absent, which is what they always were. `sections`
-is the one exception in the other direction: it is required, and omitting it blocks, per its row.
+Every argument above that takes a list is a list or is absent, as is `priorNotes` on each entry of
+`sections`. A truthy non-array files a blocking finding and the round runs on the default instead, so
+it returns its findings rather than throwing them away. A falsy value is treated as absent, which is
+what it always was. `sections` is the exception in the other direction: it is required, so a falsy or
+absent `sections` blocks rather than taking a default.
 
 ## What each agent must return
 
