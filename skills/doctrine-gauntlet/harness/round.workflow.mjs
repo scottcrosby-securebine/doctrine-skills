@@ -87,12 +87,27 @@ const RED_TEAM = {
 }
 
 const a = args || {}
-const ITEMS = a.redTeamItems || [1, 2, 3, 4]
-const INHERITED = a.inherited || []
-const STALE = a.stale || []
-const WAIVED = a.waived || []
-const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const blocking = []   // every reason this round is not clean, as a string the orchestrator can read
+// Declared before the arguments below because they file into it: `malformed()` is a function
+// declaration and hoists, `blocking` is a const and does not.
+
+// A list argument is absent or a list. A present non-array used to survive `a.X || []` and throw
+// later — at a spread, a `for..of` or an `.includes` — which killed the round and took every finding
+// already recorded with it, including the one its own emptiness guard had just filed. Falling back
+// keeps the round evaluable so the findings come back; the round is not clean either way.
+function listArg(label, given, fallback) {
+  if (given === undefined) return fallback
+  if (Array.isArray(given)) return given
+  malformed(`${label}: present but not an array — the default is used instead and this round is not clean`)
+  return fallback
+}
+
+const ITEMS = listArg('red team items', a.redTeamItems, [1, 2, 3, 4])
+const INHERITED = listArg('inherited', a.inherited, [])
+const STALE = listArg('stale', a.stale, [])
+const WAIVED = listArg('waived', a.waived, [])
+const CRITIC_AXES = listArg('critic axes', a.criticAxes, [])
+const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const recorded = []   // reasons that would block but the run ruled inherited, stale or waived; named, never silent
 const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
 
@@ -149,7 +164,7 @@ function checkRollCall(rollCall, expected, words, key, who) {
   return seen
 }
 
-if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
+if (!CRITIC_AXES.length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
 // `malformed()` records and does not halt, so it is the `Array.isArray` fallback, not the mere
@@ -234,7 +249,7 @@ else if (a.candidateIs !== 'A' && a.candidateIs !== 'B') {
 
 // ---- Gate: integrated critic and red team, both read off their roll calls ----
 phase('Gate')
-const criticAxes = [...(a.criticAxes || []), ...floorLines]
+const criticAxes = [...CRITIC_AXES, ...floorLines]
 const criticPrompt = floor
   ? `${a.criticPrompt}\n\nItem 1 — this round's floor report, every line of it:\n${floor.report}\n\nYour roll call answers every axis you were told to and, in addition, each of these floor lines as its own axis, quoted exactly:\n- ${floorLines.join('\n- ') || '(none)'}`
   : a.criticPrompt
