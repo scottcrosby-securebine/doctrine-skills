@@ -1172,10 +1172,12 @@
   "expect": {
    "clean": false,
    "blocking_contains": [
-    "critic axes: present but not an array"
+    "critic axes: present but not an array",
+    "critic roll call: axis \"reader and register\" is nothing the dispatcher named",
+    "critic roll call: axis \"the wall\" is nothing the dispatcher named"
    ]
   },
-  "_note": "`criticAxes` is present but is an object. Before the guard it passed the emptiness test at `:152` \u2014 an object's `.length` is `undefined`, so that guard fired \u2014 and then threw at the `:237` spread, so the round died carrying the very finding it had just recorded. Remove the `Array.isArray` test from `listArg` and this fixture stops returning at all: what it catches is a thrown round, not a wrong verdict."
+  "_note": "`criticAxes` is present but is an object. Before the guard it passed the emptiness test at its own line \u2014 an object's `.length` is `undefined`, so that guard fired \u2014 and then threw at the `[...DISPATCHED_AXES, ...floorLines]` spread, so the round died carrying the finding it had just recorded. It also asserts two roll-call lines: with the dispatched set fallen back to empty, every axis the critic returns is one nobody named, which is the only place in this file that check is asserted rather than merely emitted. Revert this argument's read to `a.criticAxes || []` and the round throws at that spread instead of returning."
  },
  "red-team-items-not-array": {
   "args": {
@@ -1209,7 +1211,7 @@
     "red team items: present but not an array"
    ]
   },
-  "_note": "`redTeamItems` is present but is an object. It reaches `for (const item of ITEMS)` and `ITEMS.includes(...)`, each of which throws on a non-array. This key is not named in issue #42; the fix-the-class rule brings it in, because it is read exactly as the four that are. Its fallback is the documented default `[1, 2, 3, 4]`, not an empty list, so the roll call still has items to be judged against."
+  "_note": "`redTeamItems` is present but is an object. It throws inside `checkRollCall`, whose body does `expected.includes(r[key])` \u2014 earlier than the `for (const item of ITEMS)` and `ITEMS.includes(...)` reads further down, which is why tracing the call order matters more than reading the argument's name. This key is not named in issue #42; the fix-the-class rule brings it in, because it is read exactly as the four that are. Its fallback is the documented default `[1, 2, 3, 4]`, not an empty list, so the roll call still has items to be judged against. Revert this argument's read to `a.redTeamItems || []` and the round throws in `checkRollCall` instead of returning."
  },
  "inherited-not-array": {
   "args": {
@@ -1248,7 +1250,7 @@
     "inherited: present but not an array"
    ]
   },
-  "_note": "`inherited` is present but is an object. Its stubs are all clean, so no finding is ever filed and `block()` is never called: the throw was at the closing `[...INHERITED, ...STALE, ...WAIVED]` loop, the LAST check of the round, after the critic and the red team had both been judged. That makes it the latest of the three top-level crash sites, not the earliest. `match()` is a second site the guard also protects, and no fixture reaches it, because with the guard in place a non-array can no longer get that far."
+  "_note": "`inherited` is present but is an object. Its stubs are all clean, so no finding is ever filed and `block()` is never called: the throw was at the closing `[...INHERITED, ...STALE, ...WAIVED]` loop, the LAST check of the round, after the critic and the red team had both been judged. That makes it the latest of the top-level crash sites, not the earliest. `match()` is a second site the guard also protects, and no fixture reaches it, because with the guard in place a non-array can no longer get that far. Revert this argument's read to `a.inherited || []` and the round throws at that closing loop instead of returning."
  },
  "stale-not-array": {
   "args": {
@@ -1288,7 +1290,7 @@
     "stale: present but not an array"
    ]
   },
-  "_note": "`stale` is present but is an object. It reaches `listArg` on a line of its own, and it is also the one of the three whose contents are read against a reviewer's own recorded findings when a marked-stale clause is checked. Revert only this call to `a.stale || []` and no other fixture in this file changes verdict, which is the regression it is here to catch."
+  "_note": "`stale` is present but is an object. It reaches `listArg` on a line of its own, and it is also the one of the three whose contents are read against a reviewer's own recorded findings when a marked-stale clause is checked. Revert only this argument's read to `a.stale || []` and no other fixture in this file changes verdict, which is the regression it is here to catch."
  },
  "waived-not-array": {
   "args": {
@@ -1327,7 +1329,7 @@
     "waived: present but not an array"
    ]
   },
-  "_note": "`waived` is present but is an object. It reaches `listArg` on a line of its own, and it is the second lookup inside `block()`: a reason that is not inherited is tested against it before it is allowed to block. Revert only this call to `a.waived || []` and every other fixture still passes, so nothing but this one would notice."
+  "_note": "`waived` is present but is an object. It reaches `listArg` on a line of its own, and it is the second lookup inside `block()`: a reason that is not inherited is tested against it before it is allowed to block. Revert only this argument's read to `a.waived || []` and every other fixture still passes, so nothing but this one would notice."
  },
  "prior-notes-not-array": {
   "args": {
@@ -1370,10 +1372,10 @@
   "expect": {
    "clean": false,
    "blocking_contains": [
-    "priorNotes: present but not an array"
+    "section hero priorNotes: present but not an array"
    ]
   },
-  "_note": "The malformed value is one argument deeper than the others: it sits on a section rather than at the top of `args`, and it is read as `(s.priorNotes || []).map(...)`, so a `.map` on a non-array threw and took the round with it. The label carries the section's name because a round can carry several sections and the caller needs to know which one is wrong. Drop the guard from this read and the fixture stops returning."
+  "_note": "The malformed value is one argument deeper than the others: it sits on a section rather than at the top of `args`, and it was read as `(s.priorNotes || []).map(...)`, so a `.map` on a non-array threw and took the round with it. The assertion carries the whole label, `section hero priorNotes`, because a round can hold several sections and a caller needs to know which one is wrong: assert only the suffix and dropping the section's name from the label would go unnoticed. Revert this read to `s.priorNotes || []` and the round throws instead of returning."
  },
  "falsy-list-arg-stays-clean": {
   "args": {
@@ -1411,6 +1413,6 @@
     "cleanPasses": 2
    }
   },
-  "_note": "Two list arguments are `null` rather than absent. `a.X || []` always treated a falsy value as no value, and callers rely on that, so the guard passes them through untouched and this fixture must stay clean and exit. It is the quiet half of the same check the not-an-array fixtures cover loudly: widen the guard to reject anything that is not an array and this fixture goes red, which is the compatibility break it exists to catch."
+  "_note": "Two list arguments are `null` rather than absent. `a.X || []` always treated a falsy value as no value, and callers rely on that, so the guard passes them through untouched and this fixture must stay clean and exit. It is the quiet half of the branch the not-an-array fixtures cover loudly, and one fixture is enough for it because all seven reads share the one helper. Widen the guard to reject anything that is not an array and this fixture goes red, which is the compatibility break it exists to catch."
  }
 }
