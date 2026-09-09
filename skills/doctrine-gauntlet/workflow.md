@@ -65,7 +65,7 @@ Every argument above that takes a list is a list or is absent, as is `priorNotes
 `sections`. A truthy non-array files a blocking finding and the round runs on the default instead, so
 it returns its findings rather than throwing them away. A falsy value is treated as absent, which is
 what it always was. `sections` is the exception in the other direction: it is required, so a falsy or
-absent `sections` blocks rather than taking a default.
+absent `sections` files a blocking finding, though the round still runs on an empty list.
 
 ## What each agent must return
 
