@@ -61,6 +61,12 @@ into that key's block, so re-run it, or resume it with `sections: []` supplied, 
 | `tieIsPass` | `true` only where fidelity is the run's bar (The brief); a named-material grant keeps it `false` |
 | `counters` | `{ cleanPasses, unresolvedRounds, sectionRejections, sectionResets }` from the ledger's run-state block; the script returns them updated. `sectionResets` is yours to write: when the user rules on a deadlocked section and you clear its rejections, add one there, and a second deadlock on the same section returns marked terminal |
 
+Every argument above that takes a list is a list or is absent, as is `priorNotes` on each entry of
+`sections`. A truthy non-array files a blocking finding and the round runs on the default instead, so
+it returns its findings rather than throwing them away. A falsy value is treated as absent, which is
+what it always was. `sections` is the exception in the other direction: it is required, so a falsy or
+absent `sections` files a blocking finding, though the round still runs on an empty list.
+
 ## What each agent must return
 
 The script enforces a JSON schema on every agent it dispatches **except the section builder**,
@@ -253,11 +259,12 @@ deadlocks eventually either way and no fixture bounds the loop; pinning it needs
 rejects until the mutated bound is reached, which would dispatch dozens of agents, and it was
 judged not worth that. **Per-check unwaivability is only partly pinned**: several broken
 fixtures name their own axis or item in `waived` so that routing *those* checks back through
-`block()` fails their own fixture, but most `malformed()` sites carry no such guard. And **two
-roll-call checks have no fixture at all** — a roll-call line naming something the dispatcher never
-named, and a line carrying a word outside the vocabulary. Every fixture's roll call uses in-vocabulary
-words on dispatched keys, so neither reason has ever been emitted by the suite; delete either check
-and all fixtures still pass.
+`block()` fails their own fixture, but most `malformed()` sites carry no such guard. And **one
+roll-call check still has no fixture** — a line carrying a word outside the vocabulary. Every
+fixture's roll call uses in-vocabulary words, so that reason has never been emitted by the suite:
+delete the check and every fixture still passes. Its twin, a line naming something the dispatcher
+never named, is pinned. `critic-axes-not-array` hands a non-array `criticAxes`, so the dispatched
+set falls back to empty and every axis the critic returns is one nobody named.
 
 Rerun all three clauses after any change that makes the script quieter as well as louder. An agent
 that dies mid-round returns `null`, and the script counts that as "no return", which

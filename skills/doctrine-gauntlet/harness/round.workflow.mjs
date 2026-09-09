@@ -87,12 +87,30 @@ const RED_TEAM = {
 }
 
 const a = args || {}
-const ITEMS = a.redTeamItems || [1, 2, 3, 4]
-const INHERITED = a.inherited || []
-const STALE = a.stale || []
-const WAIVED = a.waived || []
-const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const blocking = []   // every reason this round is not clean, as a string the orchestrator can read
+// Declared before the arguments below because they file into it: `malformed()` is a function
+// declaration and hoists, `blocking` is a const and does not.
+
+// A list argument is a list, or absent and takes its default. A truthy non-array used to survive
+// `a.X || []` and then either throw — at a spread, a `for..of`, a `.map` or an `.includes`, which
+// killed the round and took every finding already recorded with it, including the one its own
+// emptiness guard had just filed — or, for a string, quietly iterate character by character and be
+// judged as if those characters were the caller's list. Falsy values are passed through untouched
+// because `|| []` already did that safely and callers rely on it; only a truthy non-array is a
+// miscall. The fallback keeps the round evaluable so its findings come back; it is not clean either way.
+function listArg(label, given, fallback) {
+  if (!given) return fallback
+  if (Array.isArray(given)) return given
+  malformed(`${label}: present but not an array — the default is used instead and this round is not clean`)
+  return fallback
+}
+
+const ITEMS = listArg('red team items', a.redTeamItems, [1, 2, 3, 4])
+const INHERITED = listArg('inherited', a.inherited, [])
+const STALE = listArg('stale', a.stale, [])
+const WAIVED = listArg('waived', a.waived, [])
+const DISPATCHED_AXES = listArg('critic axes', a.criticAxes, [])
+const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const recorded = []   // reasons that would block but the run ruled inherited, stale or waived; named, never silent
 const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
 
@@ -149,7 +167,7 @@ function checkRollCall(rollCall, expected, words, key, who) {
   return seen
 }
 
-if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
+if (!DISPATCHED_AXES.length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
 // `malformed()` records and does not halt, so it is the `Array.isArray` fallback, not the mere
@@ -166,7 +184,7 @@ const deadlocked = []
 const sections = await pipeline(sectionArgs, async (s) => {
   let rejections = counters.sectionRejections[s.name] || 0
   let notes = []
-  const history = (s.priorNotes || []).map((h) => h.slice())   // prior rounds' rejections you pass in,
+  const history = listArg(`section ${s.name} priorNotes`, s.priorNotes, []).map((h) => h.slice())   // prior rounds' rejections you pass in,
   // then every rejection this round — handed to each retry's critic in place of memory
   let work = null
   let dead = false
@@ -234,7 +252,7 @@ else if (a.candidateIs !== 'A' && a.candidateIs !== 'B') {
 
 // ---- Gate: integrated critic and red team, both read off their roll calls ----
 phase('Gate')
-const criticAxes = [...(a.criticAxes || []), ...floorLines]
+const criticAxes = [...DISPATCHED_AXES, ...floorLines]
 const criticPrompt = floor
   ? `${a.criticPrompt}\n\nItem 1 — this round's floor report, every line of it:\n${floor.report}\n\nYour roll call answers every axis you were told to and, in addition, each of these floor lines as its own axis, quoted exactly:\n- ${floorLines.join('\n- ') || '(none)'}`
   : a.criticPrompt
