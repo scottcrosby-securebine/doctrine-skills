@@ -3,8 +3,11 @@
 // not encoded.
 //
 // args = {
-//   sections: [{ name, builderPrompt, criticPrompt, priorNotes? }],   // critic prompts per the critic brief,
-//                                        // each stating it is a step-6 section review
+//   sections: [{ name, builderPrompt, criticPrompt, priorNotes? }],   // REQUIRED; `[]` is the
+//                                        // gate-only round (no pairs run, no clean-pass reset) and
+//                                        // omitting the key is a miscall, not a way to ask for that
+//                                        // round. Critic prompts
+//                                        // per the critic brief, each stating it is a step-6 section review
 //   floorPrompt,                         // an agent runs the floor (and every documented
 //                                        // gate) and returns the report; '' blocks, it is not a skip
 //   blindPrompt,                         // the blind comparison pass; '' on a no-reference run
@@ -149,11 +152,18 @@ function checkRollCall(rollCall, expected, words, key, who) {
 if (!(a.criticAxes || []).length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
+// `malformed()` records and does not halt, so it is the `Array.isArray` fallback, not the mere
+// existence of a local, that keeps a present non-array from reaching `pipeline()` below: widen it
+// to `a.sections || []` and the object goes through while this guard still files its finding.
+const sectionsGiven = Array.isArray(a.sections)
+const sectionArgs = sectionsGiven ? a.sections : []
+if (!sectionsGiven) malformed('sections: missing or not an array — a gate-only round passes sections: [], which is not the same as omitting the key')
+
 // ---- Sections: builder then critic, three rejections put it to the user. The tool cannot keep
 // one critic alive across retries, so each retry's critic is handed every earlier rejection. ----
 phase('Sections')
 const deadlocked = []
-const sections = await pipeline(a.sections || [], async (s) => {
+const sections = await pipeline(sectionArgs, async (s) => {
   let rejections = counters.sectionRejections[s.name] || 0
   let notes = []
   const history = (s.priorNotes || []).map((h) => h.slice())   // prior rounds' rejections you pass in,
@@ -179,7 +189,7 @@ const sections = await pipeline(a.sections || [], async (s) => {
 // A round that rebuilt any section is a diff after the last clean pass, so the count restarts
 // here — before the deadlock return can carry a stale count out — and two clean passes must
 // both be over the work as it now stands.
-if ((a.sections || []).length) counters.cleanPasses = 0
+if (sectionArgs.length) counters.cleanPasses = 0
 // A dead builder or critic means that section never passed, and the gate begins only after
 // every section passes — so a dead pair returns pre-gate exactly as a deadlock does.
 if (deadlocked.length || sections.some((s) => s && s.dead)) {

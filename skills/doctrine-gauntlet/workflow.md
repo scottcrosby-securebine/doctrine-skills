@@ -36,11 +36,18 @@ from the journal instead of running again:
 Workflow({ scriptPath: '<plugin>/skills/doctrine-gauntlet/harness/round.workflow.mjs', resumeFromRunId: '<run id>', args })
 ```
 
+The agents replay as just described, but the body they replay into is the **current** one, not the
+body the run was journaled under, so the round's arithmetic re-runs and the verdict can differ from
+the one the journal carries. That is observed
+behaviour of the host rather than something it documents, so re-check it if a resume ever returns
+the journalled verdict unchanged. What it means here: a run journaled with no `sections` key resumes
+into that key's block, so re-run it, or resume it with `sections: []` supplied, which is what it meant.
+
 `args`:
 
 | key | what it is |
 |---|---|
-| `sections` | `[{ name, builderPrompt, criticPrompt, priorNotes? }]` — one per section; each critic prompt carries the section-review row's Present line, since it is a step-6 section review. `priorNotes` (an array of earlier rounds' rejection-note lists, oldest first) is how a resumed section's critics keep seeing what was already rejected: `sectionRejections` carries the count across rounds, this carries the content |
+| `sections` | `[{ name, builderPrompt, criticPrompt, priorNotes? }]` — **required**, and `[]` is the gate-only round: no builder/critic pairs run and the clean-pass reset does not fire. Omitting the key is a miscall, not a way to ask for that round, and it blocks. One per section; each critic prompt carries the section-review row's Present line, since it is a step-6 section review. `priorNotes` (an array of earlier rounds' rejection-note lists, oldest first) is how a resumed section's critics keep seeing what was already rejected: `sectionRejections` carries the count across rounds, this carries the content |
 | `floorPrompt` | a prompt carrying the floor invocation itself — the command line, the flags this run's shape needs (theme, fragment, crop), and the exit-code meanings, read out of `floor.md` by you — plus every documented gate, returning `{ exitCode, report, unmeasured[], failedGates[] }`. The filename alone hands over nothing: no path beside this skill resolves from inside a seat, and an agent told to "run the floor (`floor.md`)" holds neither the command nor what its exit codes mean; `''` is not a skip — the round blocks on a floor nobody ran unless `waived` or `inherited` names `floor` |
 | `blindPrompt` | the blind comparison pass per The comparison, returning `{ winner: 'A'|'B'|'tie', why }`; `''` declares a no-reference run and is recorded, not checked — on a run that has a reference, an empty `blindPrompt` is exactly the omission step 7 warns about, and only you can see it |
 | `candidateIs` | `'A'` or `'B'` — which neutral filename is the build; you randomized the pair, so only you know |
