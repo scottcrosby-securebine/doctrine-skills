@@ -1248,6 +1248,169 @@
     "inherited: present but not an array"
    ]
   },
-  "_note": "`inherited` is present but is an object. `match()` is `rulings.find(...)`, so this one throws on the first `block()` call, earlier in the round than the other two in this group. `stale` and `waived` are read the same way and reach the same helper branch, which is why one fixture stands for all three."
+  "_note": "`inherited` is present but is an object. Its stubs are all clean, so no finding is ever filed and `block()` is never called: the throw was at the closing `[...INHERITED, ...STALE, ...WAIVED]` loop, the LAST check of the round, after the critic and the red team had both been judged. That makes it the latest of the three top-level crash sites, not the earliest. `match()` is a second site the guard also protects, and no fixture reaches it, because with the guard in place a non-array can no longer get that far."
+ },
+ "stale-not-array": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "reader and register",
+    "the wall",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall clearance against the 360 render; image is second in source order; nothing to file\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\", \"the set\", \"print panels\", \"ledger numbers\"]}",
+   "counters": {
+    "cleanPasses": 1,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": [],
+   "stale": {
+    "note": "a present non-array where a list belongs"
+   }
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "stale: present but not an array"
+   ]
+  },
+  "_note": "`stale` is present but is an object. It reaches `listArg` on a line of its own, and it is also the one of the three whose contents are read against a reviewer's own recorded findings when a marked-stale clause is checked. Revert only this call to `a.stale || []` and no other fixture in this file changes verdict, which is the regression it is here to catch."
+ },
+ "waived-not-array": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "reader and register",
+    "the wall",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall clearance against the 360 render; image is second in source order; nothing to file\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\", \"the set\", \"print panels\", \"ledger numbers\"]}",
+   "counters": {
+    "cleanPasses": 1,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": {
+    "note": "a present non-array where a list belongs"
+   }
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "waived: present but not an array"
+   ]
+  },
+  "_note": "`waived` is present but is an object. It reaches `listArg` on a line of its own, and it is the second lookup inside `block()`: a reason that is not inherited is tested against it before it is allowed to block. Revert only this call to `a.waived || []` and every other fixture still passes, so nothing but this one would notice."
+ },
+ "prior-notes-not-array": {
+  "args": {
+   "sections": [
+    {
+     "name": "hero",
+     "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": []}",
+     "priorNotes": {
+      "note": "a present non-array where a list belongs"
+     }
+    }
+   ],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "reader and register",
+    "the wall",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall clearance against the 360 render; image is second in source order; nothing to file\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\", \"the set\", \"print panels\", \"ledger numbers\"]}",
+   "counters": {
+    "cleanPasses": 1,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": []
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "priorNotes: present but not an array"
+   ]
+  },
+  "_note": "The malformed value is one argument deeper than the others: it sits on a section rather than at the top of `args`, and it is read as `(s.priorNotes || []).map(...)`, so a `.map` on a non-array threw and took the round with it. The label carries the section's name because a round can carry several sections and the caller needs to know which one is wrong. Drop the guard from this read and the fixture stops returning."
+ },
+ "falsy-list-arg-stays-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "reader and register",
+    "the wall",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall clearance against the 360 render; image is second in source order; nothing to file\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\", \"the set\", \"print panels\", \"ledger numbers\"]}",
+   "counters": {
+    "cleanPasses": 1,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": null,
+   "waived": null
+  },
+  "expect": {
+   "clean": true,
+   "exit": true,
+   "counters": {
+    "cleanPasses": 2
+   }
+  },
+  "_note": "Two list arguments are `null` rather than absent. `a.X || []` always treated a falsy value as no value, and callers rely on that, so the guard passes them through untouched and this fixture must stay clean and exit. It is the quiet half of the same check the not-an-array fixtures cover loudly: widen the guard to reject anything that is not an array and this fixture goes red, which is the compatibility break it exists to catch."
  }
 }
