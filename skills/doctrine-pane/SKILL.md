@@ -22,7 +22,8 @@ work**: ten devices you were asked to watch is ten sessions, and one device you 
 script. A pane is for the session a human wants to watch or join.
 
 **Never open a pane the user did not ask for.** There is no heuristic here and there should not be:
-"pop a pane" is a request, and everything else is not.
+an ask in the description's own terms (pop a pane, ssh into, log into, get onto the console, tail or
+monitor a log while you work) is a request, and everything else is not.
 
 Two kinds, and only one has any state:
 
@@ -80,7 +81,8 @@ never a secret.
 2. `read`. This is also how you find out what you are on.
 3. **Stop and profile it.** Before you type anything, work out what platform this is from the
    banner, then go and find out how it pages, how to cancel on it, and what is destructive on it.
-   Record that with `profile`. `type` and `enter` refuse until you have. You cannot run commands to
+   Record that with `profile`. `type` and `enter` refuse until you have, and `profile` refuses a
+   one-liner: it enforces a length floor because it cannot judge the research. You cannot run commands to
    learn how to run commands safely, so this comes from the banner plus real research.
 4. The user hands you the pane in words. `own <tee> agent`.
 5. `type`, judge the echo yourself, then `enter`. They are separate calls on purpose.
