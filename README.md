@@ -197,15 +197,15 @@ open.
 
 | Skill | Use it for |
 |---|---|
-| [`doctrine`](skills/doctrine/) | The shared posture. The seven wrappers invoke it. |
-| [`doctrine-code`](skills/doctrine-code/) | Features, specs and tickets. |
-| [`doctrine-debug`](skills/doctrine-debug/) | Anything broken, throwing, failing or slow. |
-| [`doctrine-audit`](skills/doctrine-audit/) | Bug hunts and deep code audits. |
-| [`doctrine-docs`](skills/doctrine-docs/) | Documentation sweeps. |
-| [`doctrine-write`](skills/doctrine-write/) | Proposals, briefs, PRDs, reports. |
-| [`doctrine-research`](skills/doctrine-research/) | Multi-source questions needing a fact-checked answer. |
-| [`doctrine-gauntlet`](skills/doctrine-gauntlet/) | Web design, judged on the rendered page. |
-| [`doctrine-pane`](skills/doctrine-pane/) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
+| [`doctrine`](docs/skills/doctrine.md) | The shared posture. The seven wrappers invoke it. |
+| [`doctrine-code`](docs/skills/doctrine-code.md) | Features, specs and tickets. |
+| [`doctrine-debug`](docs/skills/doctrine-debug.md) | Anything broken, throwing, failing or slow. |
+| [`doctrine-audit`](docs/skills/doctrine-audit.md) | Bug hunts and deep code audits. |
+| [`doctrine-docs`](docs/skills/doctrine-docs.md) | Documentation sweeps. |
+| [`doctrine-write`](docs/skills/doctrine-write.md) | Proposals, briefs, PRDs, reports. |
+| [`doctrine-research`](docs/skills/doctrine-research.md) | Multi-source questions needing a fact-checked answer. |
+| [`doctrine-gauntlet`](docs/skills/doctrine-gauntlet.md) | Web design, judged on the rendered page. |
+| [`doctrine-pane`](docs/skills/doctrine-pane.md) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
 
 ## What it costs
 
