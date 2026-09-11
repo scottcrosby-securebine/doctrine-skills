@@ -10,8 +10,8 @@
 // Run by the doctrine orchestrator at step 3 for a check that will outrun the Bash tool's own
 // ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
-// stacks next to it. Outside herdr the check runs detached from the harness with the same output
-// file. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
+// stacks next to it. Outside herdr the check runs detached from the harness with the same two
+// files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
 // on malformed arguments — a display failure must never fail the gate it is showing.
 //
 // TWO FILES, and the split is the whole point (Scott's ruling 2026-09-11, after three review rounds
@@ -20,9 +20,12 @@
 //   <out>         the transcript. The check's own bytes and NOTHING else: no verdict line, no echoed
 //                 command. That is what makes it safe to read and safe to grep.
 //   <out>.result  the verdict, written by this launcher alone, at completion, via a temp file and a
-//                 rename so a half-written one is never readable. One line `exit=N`, plus a second
-//                 line `capture=incomplete` when any transcript write failed or a child output
-//                 stream errored, because a status over a broken record must not read as clean.
+//                 rename so a half-written one is never readable. One line `exit=N`, plus a line
+//                 `capture=incomplete` when any transcript write failed or a child output stream
+//                 errored, because a status over a broken record must not read as clean, and a line
+//                 `error=<message>` when the check could not be spawned at all (`exit=127`), since
+//                 that message is the launcher's and the transcript is the check's. A previous run's
+//                 result on the same path is removed before the check starts.
 //
 // Wait for the RESULT FILE to exist, never for a line inside the transcript:
 //   until [ -f <out>.result ]; do sleep 15; done; cat <out>.result
@@ -96,10 +99,13 @@ if (argv[0] === '--run') {
   }
   /** The verdict, and the only thing this launcher writes outside the transcript. Temp plus rename so
    *  a reader waiting on the file's existence can never catch it half written. */
-  const writeResult = (code) => {
-    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}`
+  const writeResult = (code, error = null) => {
+    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}${error ? `error=${String(error).split('\n')[0]}\n` : ''}`
     const tmp = `${resultFile}.partial`
-    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) } catch { /* nothing left to tell */ }
+    // Not "nothing left to tell": the pane and stderr are still there. The wait then never ends, which
+    // the time alarm bounds, and the line below says why.
+    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) }
+    catch (e) { process.stderr.write(`${PREFIX}: could not write ${resultFile} (${e.message}); the wait on it will not end\n`) }
   }
   // A closed display pipe is a DISPLAY failure and must never fail the gate it is showing, which the
   // header has always promised and the async `error` event did not honour: an EPIPE on the detached
@@ -123,7 +129,9 @@ if (argv[0] === '--run') {
   // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.
-  child.on('error', (e) => { raw(Buffer.from(`${e.message}\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })
+  // The message is the launcher's, not the check's, so it goes in the RESULT and the transcript stays
+  // empty: the one launcher write the rewrite had left inside the transcript (round 4).
+  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })
   child.stdout.on('data', raw)
   child.stderr.on('data', raw)
   // A CHILD stream error is a capture failure on the authoritative transcript, NOT a display failure.
@@ -236,6 +244,15 @@ if (argv[0] === '--run') {
   const command = argv.slice(dash + 1)
   const outFile = path.resolve(out)
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID
+  // A REUSED PATH carried the previous run's verdict: the transcript was truncated on open but the
+  // result file was not touched, so the documented existence wait returned at once with a stale
+  // `exit=0` while the new check was still running. Reproduced in round 4. Removed HERE, in the
+  // caller's own process before this launcher returns, and not in `--run`: that mode starts in a pane
+  // or detached, and the window between this process exiting and that one reaching its first line is
+  // exactly where a caller's wait would have read the stale file. Refuse to run if it cannot be
+  // cleared: a wait that never ends is visible, and a stale pass is not.
+  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }
+  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`); process.exit(1) }
 
   const detached = (reason) => {
     // FOUR empties: marker, paneId, tabId, workspace. The detached path has no pane and no tab, and

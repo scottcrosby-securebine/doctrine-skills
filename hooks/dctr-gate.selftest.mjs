@@ -4,10 +4,10 @@
 //
 // Runs the script on its detached path (no herdr in the environment) with a tripwire `herdr` first
 // on PATH, so it proves three things no pure test can: the check really runs and its output really
-// reaches the file, the file really ends with the check's own exit status, and the no-herdr path
-// really makes no herdr call. Clause 1 breaks the check and confirms the exit line trips. Clause 2
-// runs a passing check and confirms the line reads 0 with the output intact. Clause 3 proves the
-// broken fixture really fails when bash runs it without the script.
+// reaches the transcript, the result file really carries the check's own exit status, and the
+// no-herdr path really makes no herdr call. Clause 1 breaks the check and confirms the verdict trips.
+// Clause 2 runs a passing check and confirms the verdict reads 0 with the output intact. Clause 3
+// proves the broken fixture really fails when bash runs it without the script.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -398,8 +398,9 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // close and is the half that shows why the ordering changed.
   const c = run(3, {}, 'ordinary')
   clause('clause 1k: an ordinary unfocused pane is CLOSED, and its record is left for the sweep rather than dropped ahead of a close that may fail',
-    c.calls.includes('pane close w1:pS') && fs.existsSync(c.m),
-    `close: ${c.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
+    // Exact line: `includes('pane close w1:pS')` was also true of `pane close w1:pS0` (round 4).
+    c.calls.split('\n').includes('pane close w1:pS') && fs.existsSync(c.m),
+    `close: ${c.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
 
   const d = run(4, { DCTR_TEST_GET_GONE: '1' }, 'pane gone')
   clause('clause 1l: a pane the lookup says is GONE has its record dropped and is not closed — not-found is an answer',
@@ -412,8 +413,8 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // that used to end with a live pane and no record.
   const e = run(5, { DCTR_TEST_CLOSE_FAILS: '1' }, 'close fails')
   clause('clause 1p: a close that FAILED leaves the pane alive AND its record intact, so SessionEnd can still reach it',
-    e.calls.includes('pane close w1:pS') && fs.existsSync(e.m),
-    `close attempted: ${e.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
+    e.calls.split('\n').includes('pane close w1:pS') && fs.existsSync(e.m),
+    `close attempted: ${e.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
 
   clause('clause 1m: the five differ ONLY in the herdr reply, so the record\'s fate is what the reply decides and nothing else',
     [a, b, c, d, e].every((r) => r.calls.includes('pane get w1:pS')),
@@ -442,9 +443,9 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   } catch (e) { spawnExit = e.status }
   clause('clause 1n: a check that could not be spawned keeps its record, because the pane it was to run in is still there',
     fs.existsSync(m), 'the record is the only thing that can lead SessionEnd to that pane')
-  clause('clause 3e: and the spawn really did fail, proved by the result file and the status rather than by the launcher',
-    spawnExit === 127 && verdict(out) === exitLine(127) && /ENOENT/.test(fs.readFileSync(out, 'utf8')),
-    `status ${spawnExit}; verdict ${JSON.stringify(verdict(out))}; ${fs.readFileSync(out, 'utf8').split('\n').slice(-3).join(' | ')}`)
+  clause('clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY because no check ran',
+    spawnExit === 127 && verdict(out) === exitLine(127) && resultBody(out).split('\n').some((l) => l.startsWith('error=') && /ENOENT/.test(l)) && fs.readFileSync(out, 'utf8') === '',
+    `status ${spawnExit}; result ${JSON.stringify(resultBody(out))}; transcript ${JSON.stringify(fs.readFileSync(out, 'utf8'))} — the launcher's message belongs in the result, never in the transcript`)
 }
 
 // A rollback whose own close FAILS. reserveMarker publishes `{}`, so if writeMarker never ran the
@@ -596,12 +597,18 @@ clause('clause 5d — the fixture really emits a line starting exit= and really 
 // `out` is a symlink to /dev/full, so every transcript write fails with ENOSPC while the result file is
 // an ordinary path. Nothing about this is hostile input: a full disk does it.
 const outN = path.join(tmp, 'nospace.out')
-fs.symlinkSync('/dev/full', outN)
-launch('nospace gate', outN, 'echo this cannot be recorded')
-waitResult(outN)   // NEVER read this transcript: reading /dev/full yields zero bytes without end
-clause('clause 7 — a verdict over a transcript that could not be written says capture=incomplete, so a broken record never reads as clean',
-  verdict(outN) === exitLine(0) && resultBody(outN).split('\n').includes('capture=incomplete'),
-  `result was ${JSON.stringify(resultBody(outN))}: the status alone would have read as a clean pass over nothing`)
+if (fs.existsSync('/dev/full')) {
+  fs.symlinkSync('/dev/full', outN)
+  launch('nospace gate', outN, 'echo this cannot be recorded')
+  waitResult(outN)   // NEVER read this transcript: reading /dev/full yields zero bytes without end
+  clause('clause 7 — a verdict over a transcript that could not be written says capture=incomplete, so a broken record never reads as clean',
+    verdict(outN) === exitLine(0) && resultBody(outN).split('\n').includes('capture=incomplete'),
+    `result was ${JSON.stringify(resultBody(outN))}: the status alone would have read as a clean pass over nothing`)
+} else {
+  // macOS has no /dev/full. Said out loud rather than passed: a clause that measured nothing prints
+  // exactly what a passing one prints, and that is the failure this file exists to catch.
+  console.log('UNMEASURED  clause 7 — no /dev/full on this platform, so the capture=incomplete path was not driven here; CI (Linux) drives it')
+}
 clause('clause 7b — and a healthy run\'s result is that ONE line, so capture=incomplete means something',
   resultBody(out2) === `${exitLine(0)}\n`,
   `a quiet gate and a blind one print the same thing: ${JSON.stringify(resultBody(out2))}`)
@@ -609,6 +616,21 @@ const fullProbe = spawnSync('bash', ['-c', 'echo x > /dev/full'], { encoding: 'u
 clause('clause 7c — /dev/full really refuses the write, proved without the launcher',
   fullProbe.status !== 0 && /No space left/i.test(fullProbe.stderr),
   `if this device accepted writes, clause 7 would be asserting over a transcript that recorded fine: status=${fullProbe.status} stderr=${JSON.stringify(fullProbe.stderr)}`)
+
+// A REUSED PATH. Nothing removed a previous run's result file, so the documented existence wait ended
+// at once with the old verdict while the new check was still running: a stale pass with no hostile
+// input, found in round 4. The transcript was always truncated; the verdict was not.
+const outR = path.join(tmp, 'reuse.out')
+fs.writeFileSync(`${outR}.result`, `${exitLine(0)}\n`)
+launch('reuse gate', outR, 'sleep 0.5; exit 7')
+const staleSeenEarly = waitResult(outR, 150)
+const tR = waitDone(outR)
+clause('clause 8 — a previous run\'s result on the same path is gone before the check starts, so the wait cannot end on a stale verdict',
+  !staleSeenEarly && verdict(outR) === exitLine(7),
+  `stale result still present ${staleSeenEarly ? 'within 150ms of launch' : 'no'}; final verdict ${JSON.stringify(verdict(outR))}`)
+clause('clause 8b — and that fixture really finishes after the early read and really exits 7, proved without the launcher',
+  spawnSync('bash', ['-c', 'sleep 0.5; exit 7']).status === 7 && tR === '',
+  'if the check finished inside 150ms, clause 8 could pass on a fresh verdict that arrived in time rather than on the stale one being removed')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

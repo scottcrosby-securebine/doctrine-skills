@@ -59,8 +59,8 @@ const MUTATIONS = [
   // it does not have. Two such entries were found in round 3.
   { name: 'the verdict is appended to the transcript instead of its own result file', file: 'dctr-gate.mjs',
     clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
-    from: "    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) } catch { /* nothing left to tell */ }",
-    to: "    try { fs.appendFileSync(out, body) } catch { /* nothing left to tell */ }" },
+    from: "    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) }",
+    to: "    try { fs.appendFileSync(out, body) }" },
   { name: 'the transcript is written as a decoded string, corrupting a split multi-byte character', file: 'dctr-gate.mjs',
     // Aimed at 6d, not 6: 6d forces the boundary with two deliberate writes, while 6's bulk fixture
     // survives the mutation whenever the reader's chunks happen to align to the character width.
@@ -355,8 +355,16 @@ const MUTATIONS = [
   // mis-named entry passes the gate while advertising the wrong pin. Re-aimed at 1n, the clause that
   // drives an unspawnable check.
   { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'clause 1n: a check that could not be spawned keeps its record',
-    from: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })",
-    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+    from: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+  { name: 'the spawn error is written into the transcript instead of the result', file: 'dctr-gate.mjs',
+    clause: 'clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY',
+    from: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })" },
+  { name: "a previous run's result on the same path is left in place, so the wait ends on a stale verdict", file: 'dctr-gate.mjs',
+    clause: "clause 8 — a previous run's result on the same path is gone before the check starts",
+    from: "  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }",
+    to: "  try { fs.rmSync(`${outFile}.result.partial`, { force: true }) }" },
   { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
     from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
     to: '    ? `script -q -F ${shq(tee)} `' },
@@ -408,7 +416,10 @@ const MUTATIONS = [
   { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
     from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
     to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
-  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'a FINISHED codex pane someone is looking at still stays',
+  // Round 4: this named the teardown clause "a FINISHED codex pane someone is looking at still stays",
+  // which stays green under the mutation because the seat hook rechecks focus independently before
+  // closing. The pure clause 1am is what reddens, verified by applying the mutation to a copy.
+  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'clause 1am — close-on-next closes exactly the terminal, unfocused, codex-job panes',
     from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
     to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status)).map((c) => c.seat)' },
   { name: 'close-on-next only considers seats following a codex job', file: 'dctr-lib.mjs', clause: 'close-on-next closes exactly the terminal, unfocused, codex-job panes',
