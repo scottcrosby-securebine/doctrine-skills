@@ -12,7 +12,8 @@
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same two
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
-// on malformed arguments or when a previous run's `<out>.result` cannot be removed — a display failure
+// on malformed arguments or when a previous run's `<out>.result` or `.result.partial` cannot be
+// removed — a display failure
 // must never fail the gate it is showing. One path is one check at a time: two launches on the same
 // `<out>` are not detected, and the first to finish publishes under the other's name.
 //
@@ -22,7 +23,8 @@
 //   <out>         the transcript. The check's own bytes and NOTHING else: no verdict line, no echoed
 //                 command. That is what makes it safe to read and safe to grep.
 //   <out>.result  the verdict, written by this launcher alone, at completion, via a temp file and a
-//                 rename so a half-written one is never readable. One line `exit=N`, plus a line
+//                 rename so a half-written one is never readable. One line `exit=N` (`exit=signal`
+//                 when the check died of a signal and has no status), plus a line
 //                 `capture=incomplete` when any transcript write failed or a child output stream
 //                 errored, because a status over a broken record must not read as clean, and a line
 //                 `error=<message>` when the check could not be spawned at all (`exit=127`), since
@@ -85,10 +87,11 @@ if (argv[0] === '--run') {
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
   const resultFile = `${out}.result`
-  // The outer launcher already cleared a stale result in the caller's process, which is the removal
-  // clause 8 pins. This one covers `--run` entered directly (the pane line, re-run by hand) and can
-  // fail quietly: the transcript is open, so refusing here would leave a live pane over no verdict.
-  try { fs.rmSync(resultFile, { force: true }) } catch { /* the outer launcher is the guarantee */ }
+  // No stale-result removal HERE, on purpose. The outer launcher clears `<out>.result` in the caller's
+  // own process before it returns, and that is the guarantee clause 8 pins. A second removal in this
+  // mode was added and taken out in one round: with the outer one mutated away it still cleared the
+  // file after node startup, so the clause reddened only by the margin of process start. `--run` is
+  // the pane line, not an entry: re-running it by hand over a previous result is not supported.
   // A short write leaves the transcript incomplete, and an earlier revision ignored the count that
   // says so while deriving state from the whole intended buffer. Write it all, and remember if we
   // could not: a verdict over a broken record must say so rather than read as clean.
@@ -106,7 +109,7 @@ if (argv[0] === '--run') {
   /** The verdict, and the only thing this launcher writes outside the transcript. Temp plus rename so
    *  a reader waiting on the file's existence can never catch it half written. */
   const writeResult = (code, error = null) => {
-    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}${error ? `error=${String(error).split('\n')[0]}\n` : ''}`
+    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}${error ? `error=${error.split('\n')[0]}\n` : ''}`
     const tmp = `${resultFile}.partial`
     // Not "nothing left to tell": the pane and stderr are still there. The wait then never ends, which
     // the time alarm bounds, and the line below says why.
@@ -137,7 +140,7 @@ if (argv[0] === '--run') {
   // completion path above is written to avoid, one screen up in the same function.
   // The message is the launcher's, not the check's, so it goes in the RESULT and the transcript stays
   // empty: the one launcher write the rewrite had left inside the transcript (round 4).
-  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })
+  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })
   child.stdout.on('data', raw)
   child.stderr.on('data', raw)
   // A CHILD stream error is a capture failure on the authoritative transcript, NOT a display failure.
@@ -162,7 +165,9 @@ if (argv[0] === '--run') {
   // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
     // A close that throws (ENOSPC or a network filesystem flushing late) has lost bytes the transcript
-    // was meant to hold. Say so in the verdict rather than dying with none.
+    // was meant to hold. Say so in the verdict rather than dying with none. NO FIXTURE reaches this
+    // catch, here or on the spawn-error path above: nothing in the selftest can make a close throw.
+    // A missing fixture, recorded, like the short-write and child-stream branches.
     try { fs.closeSync(file) } catch { captureFailed = true }
     writeResult(code)
     // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`

@@ -46,8 +46,8 @@ const waitDone = (out, ms = 8000) => {
 }
 /** The verdict's first line. Read from the result file, never from the transcript: that separation IS
  *  the contract, so a clause that read the status out of the transcript would certify its absence. */
-const verdict = (out) => { try { return fs.readFileSync(`${out}.result`, 'utf8').trim().split('\n')[0] } catch { return '' } }
 const resultBody = (out) => { try { return fs.readFileSync(`${out}.result`, 'utf8') } catch { return '' } }
+const verdict = (out) => resultBody(out).trim().split('\n')[0]
 // Derived from the owner, never restated, for the same reason the launcher derives it.
 const MARK = exitLine('')
 
@@ -67,7 +67,7 @@ clause('clause 1 — a failing check puts exit=3 in the RESULT file, and the lau
 // nothing else. No verdict line (a `grep -q` wait would have ended early on it) and no echoed command
 // (six assertions in this file's history were satisfied by that echo).
 clause('clause 1a — and the TRANSCRIPT carries neither the verdict nor the echoed command',
-  !t1.split('\n').some((l) => l.startsWith(MARK)) && !t1.includes(BROKEN) && t1.split('\n').filter(Boolean).join('\n') === 'about to fail',
+  t1.split('\n').filter(Boolean).join('\n') === 'about to fail',
   `the transcript must hold the check's bytes alone: ${JSON.stringify(t1)}`)
 
 const out2 = path.join(tmp, 'good.out')
@@ -184,21 +184,24 @@ esac
 fs.chmodSync(path.join(bin2, 'herdr'), 0o755)
 const paneEnv = (extra) => ({ ...process.env, PATH: `${bin2}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', CLAUDE_CODE_SESSION_ID: 'gate-selftest', DCTR_VIEW_REQUEST_DIR: '', ...extra })
 const HERE = process.cwd()
+/** The recorder joins argv with spaces, so the cwd is matched as the `--cwd` value bounded by a space or
+ *  the line's end: a prefix of it (`${HERE}-wrong`, round 5) fails, and a cwd containing a space (round
+ *  6, where a split on spaces compared half of it) still matches. */
+const hasCwd = (line) => line.includes(` --cwd ${HERE} `) || line.endsWith(` --cwd ${HERE}`)
 const callLine = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').find((l) => re.test(l)) || '' } catch { return '' } }
 
 fs.writeFileSync(calls, '')
 execFileSync('node', [script, 'pane gate', path.join(tmp, 'pane.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
 const split = callLine(/^pane split /)
 clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher was started in',
-  // Exact token: `includes(` --cwd ${HERE}`)` was also true of `--cwd ${HERE}-wrong` (round 5).
-  split.split(' ').includes('--cwd') && split.split(' ')[split.split(' ').indexOf('--cwd') + 1] === HERE && callLine(/^pane run w1:pS /).includes('--run'),
+  hasCwd(split) && callLine(/^pane run w1:pS /).includes('--run'),
   `split: ${split}; run: ${callLine(/^pane run /)}`)
 
 fs.writeFileSync(calls, '')
 execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
 const create = callLine(/^tab create /)
 clause('clause 1e: the tab path creates with the same --cwd',
-  create.split(' ').includes('--cwd') && create.split(' ')[create.split(' ').indexOf('--cwd') + 1] === HERE && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
+  hasCwd(create) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
   `create: ${create}`)
 
 // THE WIRING FROM PLACEMENT TO COMPLETION, which nothing joined: the clause above only asked that
@@ -525,7 +528,6 @@ clause('clause 4c — the fixture really carries the defect: bash alone exits 0 
 // DELETED rather than left green over nothing: the machinery they named is gone, and the invariant they
 // were really protecting is now "the transcript is the check's bytes and the verdict is elsewhere",
 // which is what the two clauses below assert directly.
-const markerLines = (t) => t.split('\n').filter((l) => l.startsWith(MARK)).length
 const outF = path.join(tmp, 'forge.out')
 launch('forging gate', outF, "env -i exit=0; exit 7")
 const tF = waitDone(outF)
@@ -537,7 +539,7 @@ const outQ = path.join(tmp, 'quiet.out')
 launch('quiet gate', outQ, "echo no marker here")
 const tQ = waitDone(outQ)
 clause('clause 5c — an ordinary check\'s transcript is its own bytes ALONE: no verdict line, no echoed command',
-  markerLines(tQ) === 0 && tQ === 'no marker here\n',
+  tQ === 'no marker here\n',
   `the transcript must be byte-for-byte the check's output: ${JSON.stringify(tQ)}`)
 
 // GT1: the transcript is written as BYTES. A revision that decoded each chunk with String() corrupted a
@@ -566,8 +568,8 @@ const outH = path.join(tmp, 'header.out')
 launch('header gate', outH, ":\nexit=0\nsleep 0.2\nexit 7")
 const tH = waitDone(outH)
 clause('clause 6b — a command whose own text contains a marker line puts NO line in the transcript, because the command is never written there',
-  markerLines(tH) === 0 && tH === '' && verdict(outH) === exitLine(7),
-  `the header was a transcript write and was unguarded: got ${markerLines(tH)} marker lines, transcript ${JSON.stringify(tH)}, verdict ${JSON.stringify(verdict(outH))}`)
+  tH === '' && verdict(outH) === exitLine(7),
+  `the header was a transcript write and was unguarded: transcript ${JSON.stringify(tH)}, verdict ${JSON.stringify(verdict(outH))}`)
 
 // The forced boundary: one byte of a three-byte character, a pause, then the other two. Decoding per
 // chunk turns this into replacement characters; scanning bytes keeps it.

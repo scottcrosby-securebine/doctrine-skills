@@ -355,12 +355,12 @@ const MUTATIONS = [
   // mis-named entry passes the gate while advertising the wrong pin. Re-aimed at 1n, the clause that
   // drives an unspawnable check.
   { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'clause 1n: a check that could not be spawned keeps its record',
-    from: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })",
-    to: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+    from: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
   { name: 'the spawn error is written into the transcript instead of the result', file: 'dctr-gate.mjs',
     clause: 'clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY',
-    from: "  child.on('error', (e) => { fs.closeSync(file); writeResult(127, e.message); process.exit(127) })",
-    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })" },
+    from: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127); process.exit(127) })" },
   { name: "a previous run's result on the same path is left in place, so the wait ends on a stale verdict", file: 'dctr-gate.mjs',
     clause: "clause 8 — a previous run's result on the same path is gone before the check starts",
     from: "  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }",
