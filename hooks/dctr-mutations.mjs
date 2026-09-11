@@ -56,7 +56,7 @@ const MUTATIONS = [
   // Scott's 2026-09-11 ruling replaced. Every clause that reads `<out>.result` then finds no file, and
   // clause 1 is the first of them — named here because the harness reports the clause it was told to
   // expect and accepts any failing one, so an entry naming a clause that cannot redden advertises a pin
-  // it does not have. Two such entries were found in round 3.
+  // it does not have. Two such entries were found on 2026-09-11.
   { name: 'the verdict is appended to the transcript instead of its own result file', file: 'dctr-gate.mjs',
     clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
     from: "    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) }",
@@ -332,7 +332,7 @@ const MUTATIONS = [
     clause: 'clause 1s — a TAB gate whose list FAILED closes nothing and keeps its record',
     from: "      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'",
     to: "      const act = mine ? stopAction(mine) : 'close'" },
-  // IT2 (round 3): this named clause 2b and could not redden it. Dropping two placeholders makes the
+  // IT2 (2026-09-11): this named clause 2b and could not redden it. Dropping two placeholders makes the
   // `--run` argv short, so the positional guard refuses before any output file exists — herdr is still
   // called zero times and 2b passes, while clause 1, the first clause that drives the detached path and
   // reads its result file, is the one that goes red. The harness accepts any failing clause, so the
@@ -361,6 +361,10 @@ const MUTATIONS = [
     clause: 'clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY',
     from: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })",
     to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127); process.exit(127) })" },
+  { name: 'a stale result that cannot be removed no longer stops the launch', file: 'dctr-gate.mjs',
+    clause: 'clause 8c — a stale result that cannot be removed makes the launcher REFUSE',
+    from: "  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`); process.exit(1) }",
+    to: "  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`) }" },
   { name: "a previous run's result on the same path is left in place, so the wait ends on a stale verdict", file: 'dctr-gate.mjs',
     clause: "clause 8 — a previous run's result on the same path is gone before the check starts",
     from: "  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }",
@@ -416,7 +420,7 @@ const MUTATIONS = [
   { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
     from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
     to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
-  // Round 4: this named the teardown clause "a FINISHED codex pane someone is looking at still stays",
+  // 2026-09-12: this named the teardown clause "a FINISHED codex pane someone is looking at still stays",
   // which stays green under the mutation because the seat hook rechecks focus independently before
   // closing. The pure clause 1am is what reddens, verified by applying the mutation to a copy.
   { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'clause 1am — close-on-next closes exactly the terminal, unfocused, codex-job panes',

@@ -143,8 +143,12 @@ clause('clause 1b — the pane line carries an argv command through bash as the 
 // with the cwd this launcher was started in. The tab path is reached by failing the layout read.
 const bin2 = path.join(tmp, 'bin2'); fs.mkdirSync(bin2)
 const calls = path.join(tmp, 'calls')
+const cwds = path.join(tmp, 'cwds')
 fs.writeFileSync(path.join(bin2, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
+# The joined line above loses argument boundaries, so the --cwd VALUE is also recorded whole, one per
+# line: a clause comparing it against the joined line accepted a cwd with extra words after it.
+prev=''; for a in "$@"; do if [ "$prev" = "--cwd" ]; then printf '%s\\n' "$a" >> ${JSON.stringify(cwds)}; fi; prev="$a"; done
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{"error":{"code":"transport_error"}}' >&2; exit 1; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
@@ -184,25 +188,35 @@ esac
 fs.chmodSync(path.join(bin2, 'herdr'), 0o755)
 const paneEnv = (extra) => ({ ...process.env, PATH: `${bin2}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', CLAUDE_CODE_SESSION_ID: 'gate-selftest', DCTR_VIEW_REQUEST_DIR: '', ...extra })
 const HERE = process.cwd()
-/** The recorder joins argv with spaces, so the cwd is matched as the `--cwd` value bounded by a space or
- *  the line's end: a prefix of it (`${HERE}-wrong`, round 5) fails, and a cwd containing a space (round
- *  6, where a split on spaces compared half of it) still matches. */
-const hasCwd = (line) => line.includes(` --cwd ${HERE} `) || line.endsWith(` --cwd ${HERE}`)
+/** The whole `--cwd` argument as the recorder received it, compared exactly: a prefix (`${HERE}-wrong`),
+ *  a suffix (`${HERE} wrong`) and a cwd containing a space were each accepted or rejected wrongly by
+ *  matchers over the space-joined call line. */
+const cwdArgs = () => { try { return fs.readFileSync(cwds, 'utf8').split('\n').filter(Boolean) } catch { return [] } }
 const callLine = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').find((l) => re.test(l)) || '' } catch { return '' } }
 
-fs.writeFileSync(calls, '')
+fs.writeFileSync(calls, ''); fs.writeFileSync(cwds, '')
 execFileSync('node', [script, 'pane gate', path.join(tmp, 'pane.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
 const split = callLine(/^pane split /)
 clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher was started in',
-  hasCwd(split) && callLine(/^pane run w1:pS /).includes('--run'),
-  `split: ${split}; run: ${callLine(/^pane run /)}`)
+  split.startsWith('pane split ') && cwdArgs().length === 1 && cwdArgs()[0] === HERE && callLine(/^pane run w1:pS /).includes('--run'),
+  `split: ${split}; cwd args: ${JSON.stringify(cwdArgs())}; run: ${callLine(/^pane run /)}`)
 
-fs.writeFileSync(calls, '')
+fs.writeFileSync(calls, ''); fs.writeFileSync(cwds, '')
 execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
 const create = callLine(/^tab create /)
 clause('clause 1e: the tab path creates with the same --cwd',
-  hasCwd(create) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
-  `create: ${create}`)
+  create.startsWith('tab create ') && cwdArgs().length === 1 && cwdArgs()[0] === HERE && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
+  `create: ${create}; cwd args: ${JSON.stringify(cwdArgs())}`)
+// The recorder's cwd capture, proved without the launcher: a value with a space and a value with a
+// trailing word each arrive whole and distinct, so the two clauses above cannot pass on a joined line.
+{
+  fs.writeFileSync(cwds, '')
+  spawnSync(`${bin2}/herdr`, ['pane', 'split', '--cwd', `${HERE} wrong`, '--env', 'X=1'], { encoding: 'utf8' })
+  spawnSync(`${bin2}/herdr`, ['tab', 'create', '--cwd', '/a dir/with spaces'], { encoding: 'utf8' })
+  clause('clause 3f: the recording herdr captures each --cwd value whole, so a suffix or a space inside it is visible to 1d and 1e',
+    cwdArgs().length === 2 && cwdArgs()[0] === `${HERE} wrong` && cwdArgs()[1] === '/a dir/with spaces',
+    `recorded: ${JSON.stringify(cwdArgs())}`)
+}
 
 // THE WIRING FROM PLACEMENT TO COMPLETION, which nothing joined: the clause above only asked that
 // the pane-run line contained `--run`, and the completion fixtures hand-build their own arguments.
@@ -402,7 +416,7 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // close and is the half that shows why the ordering changed.
   const c = run(3, {}, 'ordinary')
   clause('clause 1k: an ordinary unfocused pane is CLOSED, and its record is left for the sweep rather than dropped ahead of a close that may fail',
-    // Exact line: `includes('pane close w1:pS')` was also true of `pane close w1:pS0` (round 4).
+    // Exact line: `includes('pane close w1:pS')` was also true of `pane close w1:pS0` (2026-09-12).
     c.calls.split('\n').includes('pane close w1:pS') && fs.existsSync(c.m),
     `close: ${c.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
 
@@ -621,7 +635,7 @@ clause('clause 7b — and a healthy run\'s result is that ONE line, so capture=i
   `a quiet gate and a blind one print the same thing: ${JSON.stringify(resultBody(out2))}`)
 // A REUSED PATH. Nothing removed a previous run's result file, so the documented existence wait ended
 // at once with the old verdict while the new check was still running: a stale pass with no hostile
-// input, found in round 4. The transcript was always truncated; the verdict was not.
+// input, found 2026-09-12. The transcript was always truncated; the verdict was not.
 const outR = path.join(tmp, 'reuse.out')
 fs.writeFileSync(`${outR}.result`, `${exitLine(0)}\n`)
 launch('reuse gate', outR, 'sleep 0.5; exit 7')
@@ -640,6 +654,30 @@ const elapsed8 = Date.now() - t8
 clause('clause 8b — and that fixture really outlasts the 150ms early read and really exits 7, proved without the launcher',
   bare8.status === 7 && elapsed8 >= 150 && tR === '',
   `status ${bare8.status}, elapsed ${elapsed8}ms, transcript ${JSON.stringify(tR)}: a fixture that finishes inside the window would make clause 8 fail on its own fresh verdict, not pass`)
+
+// The REFUSAL. A stale result that cannot be removed must stop the launch: continuing would let a
+// caller consume the old pass. The result sits in a directory with no write bit, so unlink fails.
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  console.log('UNMEASURED  clause 8c — running as root, where a directory without its write bit still allows unlink; CI drives this as an ordinary user')
+} else {
+  const lockedDir = path.join(tmp, 'locked'); fs.mkdirSync(lockedDir)
+  const outL = path.join(lockedDir, 'stale.out')
+  fs.writeFileSync(`${outL}.result`, `${exitLine(0)}\n`)
+  fs.chmodSync(lockedDir, 0o500)
+  let refusal = null
+  try { execFileSync('node', [script, 'locked gate', outL, '--', 'echo ran'], { env, encoding: 'utf8', stdio: 'pipe' }); refusal = { status: 0, stderr: '' } }
+  catch (e) { refusal = { status: e.status, stderr: String(e.stderr) } }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300)
+  const lockedRan = (() => { try { return fs.readFileSync(outL, 'utf8') } catch { return null } })()
+  clause('clause 8c — a stale result that cannot be removed makes the launcher REFUSE: exit 1, says so, and the check never runs',
+    refusal.status === 1 && refusal.stderr.includes('refusing to run') && lockedRan === null && fs.readFileSync(`${outL}.result`, 'utf8') === `${exitLine(0)}\n`,
+    `status ${refusal.status}; stderr ${JSON.stringify(refusal.stderr.trim())}; transcript ${JSON.stringify(lockedRan)}: a launch that went ahead would have let the wait end on the stale exit=0`)
+  fs.chmodSync(lockedDir, 0o700)
+  const unlinkProbe = (() => { fs.chmodSync(lockedDir, 0o500); try { fs.rmSync(`${outL}.result`); return 'removed' } catch (e) { return e.code } finally { fs.chmodSync(lockedDir, 0o700) } })()
+  clause('clause 8d — that directory really refuses the unlink, proved without the launcher',
+    unlinkProbe === 'EACCES' || unlinkProbe === 'EPERM',
+    `unlink answered ${unlinkProbe}: if it succeeded, clause 8c would be asserting a refusal the launcher never had to make`)
+}
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

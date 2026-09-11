@@ -89,7 +89,7 @@ if (argv[0] === '--run') {
   const resultFile = `${out}.result`
   // No stale-result removal HERE, on purpose. The outer launcher clears `<out>.result` in the caller's
   // own process before it returns, and that is the guarantee clause 8 pins. A second removal in this
-  // mode was added and taken out in one round: with the outer one mutated away it still cleared the
+  // mode was added and taken out the same day: with the outer one mutated away it still cleared the
   // file after node startup, so the clause reddened only by the margin of process start. `--run` is
   // the pane line, not an entry: re-running it by hand over a previous result is not supported.
   // A short write leaves the transcript incomplete, and an earlier revision ignored the count that
@@ -139,7 +139,7 @@ if (argv[0] === '--run') {
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.
   // The message is the launcher's, not the check's, so it goes in the RESULT and the transcript stays
-  // empty: the one launcher write the rewrite had left inside the transcript (round 4).
+  // empty: the one launcher write the rewrite had left inside the transcript (2026-09-12).
   child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })
   child.stdout.on('data', raw)
   child.stderr.on('data', raw)
@@ -259,7 +259,7 @@ if (argv[0] === '--run') {
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID
   // A REUSED PATH carried the previous run's verdict: the transcript was truncated on open but the
   // result file was not touched, so the documented existence wait returned at once with a stale
-  // `exit=0` while the new check was still running. Reproduced in round 4. Removed HERE, in the
+  // `exit=0` while the new check was still running. Reproduced 2026-09-12. Removed HERE, in the
   // caller's own process before this launcher returns, and not in `--run`: that mode starts in a pane
   // or detached, and the window between this process exiting and that one reaching its first line is
   // exactly where a caller's wait would have read the stale file. Refuse to run if it cannot be
