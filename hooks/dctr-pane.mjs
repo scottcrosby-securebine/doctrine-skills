@@ -34,8 +34,8 @@
 //    once connected, and guessing from a hostname beforehand is not. `profile` records what the
 //    platform is and what its pager, cancel key and destructive commands are; `type` and `enter`
 //    refuse until it exists. This cannot check that the research was any good. It can force the
-//    stop, and it puts the claim in the transcript where the user can see whether the work was
-//    done. It exists because the agent knew `| no-more` and typed anyway, under momentum, and put
+//    stop, and it records the claim in the state file and prints it, so it sits in the agent's own
+//    output where the user can see whether the work was done. It exists because the agent knew `| no-more` and typed anyway, under momentum, and put
 //    a filename prompt on a live switch.
 //  - The recorder must still be alive: when ssh exits, script(1) exits and the pane falls back to a
 //    shell ON THIS MACHINE. Narrowed, not closed — see recorderAlive.
@@ -182,7 +182,8 @@ function region(tee, from, to) {
 }
 
 const markerFor = (paneId) => path.join(PANES_DIR, `${paneId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`)
-/** Q8's default transcript path. Keyed by label so two open sessions never share a tee. */
+/** Q8's default transcript path. Keyed by the sanitised label, so two sessions share a tee only
+ *  when their labels sanitise to the same string. */
 const defaultTee = (label) => path.join(TEES_DIR, `${String(label).replace(/[^A-Za-z0-9_-]/g, '_') || 'pane'}.log`)
 const workspaceOf = (paneId) => String(paneId).split(':')[0]
 /** Exposed so the selftest can assert the two directories are actually distinct, rather than
@@ -505,7 +506,7 @@ if (cmd === 'open' && argv.length === 3) {
   await withTeeLock(tee, () => {
     // A length floor, and it is honestly only a floor: it stops a one-word answer standing in for
     // the work, and nothing here can tell good research from confident invention. The real check is
-    // that this text goes into the transcript, under the user's eye, before anything is typed.
+    // that this text is recorded and printed, under the user's eye, before anything is typed.
     if (argv[2].trim().length < MIN_PROFILE) die(`a profile of ${argv[2].trim().length} characters is not one; say what the platform is, how it pages, how to cancel, and what is destructive on it`)
     const s = readState(tee)
     s.profile = argv[2].trim()
