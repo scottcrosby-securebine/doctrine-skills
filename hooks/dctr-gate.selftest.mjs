@@ -26,15 +26,28 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 // session's hook.log (it did, the first time it ran there).
 const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', CLAUDE_CODE_SESSION_ID: '' }
 const launch = (label, out, ...command) => execFileSync('node', [script, label, out, '--', ...command], { env, encoding: 'utf8' })
-const waitDone = (out, ms = 8000) => {
+// TWO FILES (Scott's ruling 2026-09-11). The verdict is in `<out>.result`, written by rename, so its
+// EXISTENCE is the completion signal and the transcript is already closed when it appears. Waiting on
+// a line inside the transcript is the thing this rewrite deletes: six assertions had been satisfied by
+// the launcher's own writes into that file, and a check printing `exit=0` ended the wait while running.
+const waitResult = (out, ms = 8000) => {
   const until = Date.now() + ms
   while (Date.now() < until) {
-    try { const t = fs.readFileSync(out, 'utf8'); if (/^exit=\S+\n?$/m.test(t.trim().split('\n').pop())) return t } catch { /* not yet */ }
+    if (fs.existsSync(`${out}.result`)) return true
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
   }
+  return false
+}
+/** Waits, then reads the transcript. Clause 7's transcript is a character device that never ends, so
+ *  that one clause waits with `waitResult` and never reads it. */
+const waitDone = (out, ms = 8000) => {
+  waitResult(out, ms)
   try { return fs.readFileSync(out, 'utf8') } catch { return '' }
 }
-const lastLine = (t) => t.trim().split('\n').pop()
+/** The verdict's first line. Read from the result file, never from the transcript: that separation IS
+ *  the contract, so a clause that read the status out of the transcript would certify its absence. */
+const verdict = (out) => { try { return fs.readFileSync(`${out}.result`, 'utf8').trim().split('\n')[0] } catch { return '' } }
+const resultBody = (out) => { try { return fs.readFileSync(`${out}.result`, 'utf8') } catch { return '' } }
 // Derived from the owner, never restated, for the same reason the launcher derives it.
 const MARK = exitLine('')
 
@@ -47,16 +60,22 @@ const GOOD = "echo one; echo two >&2; printf 'it'\"'\"'s quoted\\n'"
 const out1 = path.join(tmp, 'broken.out')
 const said1 = launch('broken gate', out1, BROKEN)
 const t1 = waitDone(out1)
-clause('clause 1 — a failing check leaves exit=3 as the last line, and the launcher said where to look',
-  lastLine(t1) === exitLine(3) && t1.includes('about to fail') && said1.includes(out1) && said1.includes('detached'),
-  `last line: ${JSON.stringify(lastLine(t1))}; launcher: ${said1.trim()}`)
+clause('clause 1 — a failing check puts exit=3 in the RESULT file, and the launcher named that file to wait on',
+  verdict(out1) === exitLine(3) && t1.includes('about to fail') && said1.includes(`${out1}.result`) && said1.includes('detached'),
+  `verdict: ${JSON.stringify(verdict(out1))}; launcher: ${said1.trim()}`)
+// The other half of the split, and the half a reader acts on: the transcript is the check's bytes and
+// nothing else. No verdict line (a `grep -q` wait would have ended early on it) and no echoed command
+// (six assertions in this file's history were satisfied by that echo).
+clause('clause 1a — and the TRANSCRIPT carries neither the verdict nor the echoed command',
+  !t1.split('\n').some((l) => l.startsWith(MARK)) && !t1.includes(BROKEN) && t1.split('\n').filter(Boolean).join('\n') === 'about to fail',
+  `the transcript must hold the check's bytes alone: ${JSON.stringify(t1)}`)
 
 const out2 = path.join(tmp, 'good.out')
 launch('good gate', out2, GOOD)
 const t2 = waitDone(out2)
-clause('clause 2 — a passing check ends exit=0 with stdout, stderr and the quoted text all in the file',
-  lastLine(t2) === exitLine(0) && t2.includes('one\n') && t2.includes('two\n') && t2.includes("it's quoted"),
-  JSON.stringify(t2))
+clause('clause 2 — a passing check records exit=0 with stdout, stderr and the quoted text all in the transcript',
+  verdict(out2) === exitLine(0) && t2.includes('one\n') && t2.includes('two\n') && t2.includes("it's quoted"),
+  `${JSON.stringify(verdict(out2))} ${JSON.stringify(t2)}`)
 
 clause('clause 2b — the no-herdr path called herdr ZERO times',
   !fs.existsSync(tripwire),
@@ -68,10 +87,11 @@ const out3 = path.join(tmp, 'argv.out')
 launch('argv gate', out3, 'bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4')
 const t3 = waitDone(out3)
 clause('clause 1c — an argv-form command keeps its quoting: two spaces survive and it exits 4',
-  lastLine(t3) === exitLine(4) && t3.split('\n').includes('a  b'),
-  // A SUBSTRING test passes on the echoed command, which contains `echo "a  b"` verbatim, so this
-  // clause certified preserved quoting with the child's output absent. Exact line, not substring.
-  JSON.stringify(t3))
+  verdict(out3) === exitLine(4) && t3.split('\n').includes('a  b'),
+  // A SUBSTRING test used to pass on the echoed command, which contained `echo "a  b"` verbatim, so
+  // this clause once certified preserved quoting with the child's output absent. The echo has left the
+  // transcript, which kills the class; the exact-line test stays, because the next revision may not.
+  `${JSON.stringify(verdict(out3))} ${JSON.stringify(t3)}`)
 
 const direct = spawnSync('bash', ['-c', BROKEN], { encoding: 'utf8' })
 clause('clause 3 — the broken fixture really exits 3 under bash alone, without the script',
@@ -266,7 +286,8 @@ execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:p
   { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
 const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
 // The completion path's FOUR answers and the record's fate under each. Only `pane close` kills the
-// shell this process runs in, so only that branch has to drop the record first. Asking BEFORE
+// shell this process runs in, so only that branch cannot act after its call — and the ruling is that it
+// therefore does NOT drop the record at all, which clause 1p and its mutation enforce. Asking BEFORE
 // removing is what let the restore machinery go: there is no window and nothing to put back.
 {
   const mk = (n) => { const f = path.join(tmp, `gm${n}.json`); fs.writeFileSync(f, JSON.stringify({ agent: `dctr-gate-${n}`, role: 'gate', paneId: 'w1:pS' })); return f }
@@ -421,9 +442,9 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   } catch (e) { spawnExit = e.status }
   clause('clause 1n: a check that could not be spawned keeps its record, because the pane it was to run in is still there',
     fs.existsSync(m), 'the record is the only thing that can lead SessionEnd to that pane')
-  clause('clause 3e: and the spawn really did fail, proved by the output file and the status rather than by the launcher',
-    spawnExit === 127 && /exit=127/.test(fs.readFileSync(out, 'utf8')) && /ENOENT/.test(fs.readFileSync(out, 'utf8')),
-    `status ${spawnExit}; ${fs.readFileSync(out, 'utf8').split('\n').slice(-3).join(' | ')}`)
+  clause('clause 3e: and the spawn really did fail, proved by the result file and the status rather than by the launcher',
+    spawnExit === 127 && verdict(out) === exitLine(127) && /ENOENT/.test(fs.readFileSync(out, 'utf8')),
+    `status ${spawnExit}; verdict ${JSON.stringify(verdict(out))}; ${fs.readFileSync(out, 'utf8').split('\n').slice(-3).join(' | ')}`)
 }
 
 // A rollback whose own close FAILS. reserveMarker publishes `{}`, so if writeMarker never ran the
@@ -477,15 +498,15 @@ const outP = path.join(tmp, 'pipe.out')
 launch('piped gate', outP, "false | cat")
 const tP = waitDone(outP)
 clause('clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
-  lastLine(tP) === exitLine(1),
-  `without pipefail bash reports the last stage and this reads ${JSON.stringify(lastLine(tP))}, a pass the check never earned`)
+  verdict(outP) === exitLine(1),
+  `without pipefail bash reports the last stage and this reads ${JSON.stringify(verdict(outP))}, a pass the check never earned`)
 
 const outPg = path.join(tmp, 'pipe-good.out')
 launch('piped good gate', outPg, "echo ok | cat")
 const tPg = waitDone(outPg)
 clause('clause 4b — a piped check that really passes still records exit=0, so pipefail did not make the gate louder than the truth',
-  lastLine(tPg) === exitLine(0) && tPg.split('\n').includes('ok'),
-  `a correct piped check must stay quiet: got ${JSON.stringify(lastLine(tPg))}`)
+  verdict(outPg) === exitLine(0) && tPg.split('\n').includes('ok'),
+  `a correct piped check must stay quiet: got ${JSON.stringify(verdict(outPg))}`)
 
 const bare = spawnSync('bash', ['-c', 'false | cat'], { encoding: 'utf8' })
 const withPf = spawnSync('bash', ['-o', 'pipefail', '-c', 'false | cat'], { encoding: 'utf8' })
@@ -494,67 +515,57 @@ clause('clause 4c — the fixture really carries the defect: bash alone exits 0 
   `this clause is what proves clause 4 measures anything: bare=${bare.status} pipefail=${withPf.status}`)
 
 // ---------------------------------------------------------------------------------------------
-// B2: the launcher owns the completion marker. A check printing its own `exit=` line would end the
-// documented `until grep -q '^exit='` wait while still running. `env` with a variable named `exit`
-// does it with no hostile input, which is the fixture below.
+// B2: a check printing its own `exit=` line used to end the documented `until grep -q '^exit='` wait
+// while still running. `env` with a variable named `exit` does it with no hostile input, which is the
+// fixture below. The repair is the SPLIT, not an escape: the verdict is in a file the launcher alone
+// writes, so the child's line is just output. Four clauses that asserted the old escaping — the
+// one-space indent, the held-back prefix and its flush, and the marker split across two writes — are
+// DELETED rather than left green over nothing: the machinery they named is gone, and the invariant they
+// were really protecting is now "the transcript is the check's bytes and the verdict is elsewhere",
+// which is what the two clauses below assert directly.
 const markerLines = (t) => t.split('\n').filter((l) => l.startsWith(MARK)).length
 const outF = path.join(tmp, 'forge.out')
 launch('forging gate', outF, "env -i exit=0; exit 7")
 const tF = waitDone(outF)
-clause('clause 5 — a check that prints its own exit= line leaves exactly ONE marker line, and it is the launcher\'s real status',
-  markerLines(tF) === 1 && lastLine(tF) === exitLine(7),
-  `got ${markerLines(tF)} marker lines, last ${JSON.stringify(lastLine(tF))}: an early match would have ended the wait while the check still ran`)
-clause('clause 5b — the child\'s own line is still in the file, readable, one space in from the margin',
-  tF.split('\n').includes(' exit=0'),
-  'escaping must keep the output, not drop it: a quieter gate and a blinder one print the same thing. A SUBSTRING test passes here on the echoed command `$ env -i exit=0; exit 7`, which is how this clause first shipped unable to fail')
+clause('clause 5 — a check that prints its own exit= line cannot touch the verdict, which is the check\'s real status',
+  verdict(outF) === exitLine(7) && tF.split('\n').includes('exit=0'),
+  `verdict ${JSON.stringify(verdict(outF))}, transcript ${JSON.stringify(tF)}: the child's line must survive VERBATIM and flush with the margin — nothing mangles it now, and nothing reads a status out of it`)
 
 const outQ = path.join(tmp, 'quiet.out')
 launch('quiet gate', outQ, "echo no marker here")
 const tQ = waitDone(outQ)
-clause('clause 5c — a check with no marker of its own is untouched and still has exactly one marker line',
-  markerLines(tQ) === 1 && tQ.split('\n').includes('no marker here'),
-  'the guard must not indent ordinary output, and the line must appear flush with the margin — note the launcher echoes the command itself, so a substring test here would pass on the echo')
+clause('clause 5c — an ordinary check\'s transcript is its own bytes ALONE: no verdict line, no echoed command',
+  markerLines(tQ) === 0 && tQ === 'no marker here\n',
+  `the transcript must be byte-for-byte the check's output: ${JSON.stringify(tQ)}`)
 
-// The flush at close is pinned HERE, not by clause 5e. The mutation gate proved 5e does not pin it:
-// that fixture completes the token in a later chunk, so `carry` is already empty by close and
-// disabling the flush changes nothing observable. The flush only matters when the child's FINAL write
-// is an unterminated marker prefix with nothing after it — then the held bytes are the last thing the
-// check said, and dropping them loses output silently, which is the one failure mode a quieter gate
-// and a blinder one cannot be told apart by.
-const outT = path.join(tmp, 'tail.out')
-launch('tail gate', outT, "printf 'exi'; exit 5")
-const tT = waitDone(outT)
-clause("clause 5f — a check whose LAST write is an unterminated marker prefix keeps that output, and the status is still the check's",
-  tT.split('\n').includes('exi') && lastLine(tT) === exitLine(5) && markerLines(tT) === 1,
-  `without the flush the held bytes are dropped and the check's final output vanishes: file was ${JSON.stringify(tT)}. Note 'exi' is a SUBSTRING of the receipt 'exit=5' itself, so a substring test here cannot fail — that is how this clause first shipped, and both the red team and the mutation gate caught it`)
-
-// GT1: the guard scans BYTES. A first revision decoded each chunk with String(), which corrupts a
-// multi-byte character split across a chunk boundary. This bulk fixture does NOT guarantee such a
-// boundary — a reader whose chunk size happens to be a multiple of three would split nothing, and the
-// decoder mutation survives aligned chunks. It is kept as breadth, and clause 6d below forces the
-// boundary deliberately. Neither can make chunk arrival an API guarantee; the limitation is recorded
-// rather than asserted away.
+// GT1: the transcript is written as BYTES. A revision that decoded each chunk with String() corrupted a
+// multi-byte character split across a chunk boundary, and that is a transcript-fidelity defect whether
+// or not any escaping exists — so these clauses outlive the escape. This bulk fixture does NOT guarantee
+// such a boundary: a reader whose chunk size happens to be a multiple of three would split nothing. It
+// is kept as breadth, and clause 6d below forces the boundary deliberately. Neither can make chunk
+// arrival an API guarantee; the limitation is recorded rather than asserted away.
 const outU = path.join(tmp, 'utf8.out')
-// The command text deliberately contains no euro sign: the launcher ECHOES the command into the same
-// file, and an assertion that counts occurrences would otherwise count the echo too. That mistake was
-// made FIVE times in this file's history — clauses 5b, 5f, 1c, 4b and this one — the last two found by
-// a second adversarial pass after a comment here claimed every assertion was already clean. Prefer an
-// exact line, or a fixture whose command text cannot contain what the assertion looks for. Do not write
-// that claim again without checking every clause: it was false when it was written.
+// The command text deliberately contains no euro sign. The launcher no longer writes the command into
+// the transcript, which is what made five assertions in this file's history unable to fail — clauses 5b,
+// 5f, 1c, 4b and this one, the last two found by a second adversarial pass after a comment here claimed
+// every assertion was already clean. The fixture keeps the discipline anyway: prefer an exact line, or a
+// fixture whose command text cannot contain what the assertion looks for.
 launch('utf8 gate', outU, `node -e 'process.stdout.write(String.fromCharCode(8364).repeat(100000))'`)
 const tU = waitDone(outU)
-clause('clause 6 — a multi-byte character split across chunk boundaries survives the guard intact',
-  !tU.includes('�') && tU.split('€').length - 1 === 100000 && lastLine(tU) === exitLine(0),
+clause('clause 6 — a multi-byte character split across chunk boundaries reaches the transcript intact',
+  !tU.includes('�') && tU.split('€').length - 1 === 100000 && verdict(outU) === exitLine(0),
   `decoding per chunk corrupts these: found ${(tU.match(/�/g) || []).length} replacement characters and ${tU.split('€').length - 1} of 100000 euro signs`)
 
-// GT2: the launcher's own header echoes the command, so a single-string command carrying a newline
-// forged a marker line BEFORE the child was spawned. Every non-receipt write is guarded now.
+// GT2: the launcher's header echoed the command INTO the transcript, so a single-string command carrying
+// a newline forged a verdict line before the child was even spawned. The echo is console-only now, so
+// the command's own text reaches the transcript never — which is what this asserts, with the nastiest
+// fixture the class produced.
 const outH = path.join(tmp, 'header.out')
 launch('header gate', outH, ":\nexit=0\nsleep 0.2\nexit 7")
 const tH = waitDone(outH)
-clause('clause 6b — a command whose own text contains a marker line cannot forge one through the echoed header',
-  markerLines(tH) === 1 && lastLine(tH) === exitLine(7),
-  `the header is a launcher write and was unguarded: got ${markerLines(tH)} marker lines, last ${JSON.stringify(lastLine(tH))}`)
+clause('clause 6b — a command whose own text contains a marker line puts NO line in the transcript, because the command is never written there',
+  markerLines(tH) === 0 && tH === '' && verdict(outH) === exitLine(7),
+  `the header was a transcript write and was unguarded: got ${markerLines(tH)} marker lines, transcript ${JSON.stringify(tH)}, verdict ${JSON.stringify(verdict(outH))}`)
 
 // The forced boundary: one byte of a three-byte character, a pause, then the other two. Decoding per
 // chunk turns this into replacement characters; scanning bytes keeps it.
@@ -575,25 +586,29 @@ clause('clause 6c — that command really is valid shell that really exits 7, so
   headerBare.status === 7,
   `status=${headerBare.status}: if this command did not run, clause 6b would pass on a failed spawn`)
 
-const tailBare = spawnSync('bash', ['-c', "printf 'exi'; exit 5"], { encoding: 'utf8' })
-clause('clause 5g — that fixture really writes an unterminated prefix and really exits 5, proved without the launcher',
-  tailBare.stdout === 'exi' && tailBare.status === 5,
-  `stdout=${JSON.stringify(tailBare.stdout)} status=${tailBare.status}`)
-
 const forgeBare = spawnSync('bash', ['-c', 'env -i exit=0; exit 7'], { encoding: 'utf8' })
 clause('clause 5d — the fixture really emits a line starting exit= and really exits 7, proved without the launcher',
   forgeBare.stdout.split('\n').some((l) => l.startsWith(MARK)) && forgeBare.status === 7,
   `without this, clause 5 could pass on a fixture that never forged anything: status=${forgeBare.status}`)
 
-// A chunk boundary splitting the marker. Arrival in two chunks is not guaranteed by any API, so this
-// asserts the invariant rather than the carry path: whichever way the bytes arrive, the file must
-// carry one marker line and the real status. Recorded as a known limit rather than dressed up.
-const outS = path.join(tmp, 'split.out')
-launch('split gate', outS, "printf 'exi'; sleep 0.3; printf 't=0\\n'; exit 5")
-const tS = waitDone(outS)
-clause('clause 5e — a marker split across two writes still leaves one marker line and the real status',
-  markerLines(tS) === 1 && lastLine(tS) === exitLine(5),
-  `got ${markerLines(tS)} marker lines, last ${JSON.stringify(lastLine(tS))}`)
+// The OTHER half of the new contract, and it had no fixture at all: a verdict written over a transcript
+// the launcher could not fully record must say so, or a broken recording reads exactly like a clean one.
+// `out` is a symlink to /dev/full, so every transcript write fails with ENOSPC while the result file is
+// an ordinary path. Nothing about this is hostile input: a full disk does it.
+const outN = path.join(tmp, 'nospace.out')
+fs.symlinkSync('/dev/full', outN)
+launch('nospace gate', outN, 'echo this cannot be recorded')
+waitResult(outN)   // NEVER read this transcript: reading /dev/full yields zero bytes without end
+clause('clause 7 — a verdict over a transcript that could not be written says capture=incomplete, so a broken record never reads as clean',
+  verdict(outN) === exitLine(0) && resultBody(outN).split('\n').includes('capture=incomplete'),
+  `result was ${JSON.stringify(resultBody(outN))}: the status alone would have read as a clean pass over nothing`)
+clause('clause 7b — and a healthy run\'s result is that ONE line, so capture=incomplete means something',
+  resultBody(out2) === `${exitLine(0)}\n`,
+  `a quiet gate and a blind one print the same thing: ${JSON.stringify(resultBody(out2))}`)
+const fullProbe = spawnSync('bash', ['-c', 'echo x > /dev/full'], { encoding: 'utf8' })
+clause('clause 7c — /dev/full really refuses the write, proved without the launcher',
+  fullProbe.status !== 0 && /No space left/i.test(fullProbe.stderr),
+  `if this device accepted writes, clause 7 would be asserting over a transcript that recorded fine: status=${fullProbe.status} stderr=${JSON.stringify(fullProbe.stderr)}`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

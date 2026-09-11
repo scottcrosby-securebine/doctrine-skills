@@ -11,12 +11,27 @@
 // ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same output
-// file. Either way the output file ends with `exit=N` when the check is done; that line is the
-// completion signal to monitor and the exit status to record, and the LAUNCHER OWNS IT: a child line
-// that would start with the marker is written with one leading space, so a check that prints `exit=0`
-// of its own cannot end the wait early. The pane is display; the file is the
-// record. It exits 0 once the check is launched, 1 only on malformed arguments, and the check's
-// own status is in the file — a display failure must never fail the gate it is showing.
+// file. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
+// on malformed arguments — a display failure must never fail the gate it is showing.
+//
+// TWO FILES, and the split is the whole point (Scott's ruling 2026-09-11, after three review rounds
+// each found a new defect in the machinery that kept them in one file):
+//
+//   <out>         the transcript. The check's own bytes and NOTHING else: no verdict line, no echoed
+//                 command. That is what makes it safe to read and safe to grep.
+//   <out>.result  the verdict, written by this launcher alone, at completion, via a temp file and a
+//                 rename so a half-written one is never readable. One line `exit=N`, plus a second
+//                 line `capture=incomplete` when any transcript write failed or a child output
+//                 stream errored, because a status over a broken record must not read as clean.
+//
+// Wait for the RESULT FILE to exist, never for a line inside the transcript:
+//   until [ -f <out>.result ]; do sleep 15; done; cat <out>.result
+//
+// GRADE, stated because a reader will otherwise assume more: this stops a check from ACCIDENTALLY
+// ending the wait, which is what happened — `env` with a variable named `exit` prints `exit=0`, and a
+// single-string command containing a newline put the same line into the echoed header before the child
+// even spawned. It does NOT stop a check that deliberately writes to `<out>.result`, since a check
+// runs as this user and can write any path. Confused-agent-grade, not adversarial.
 //
 // The pane shell starts in the launcher's cwd and with a fresh environment, so an env prefix goes
 // after `--` (`-- env K=V <command>`), never on the launcher.
@@ -64,58 +79,37 @@ if (argv[0] === '--run') {
   const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
-  // ONLY THE LAUNCHER MAY WRITE THE COMPLETION MARKER, and that means every OTHER write is guarded —
-  // the child's output and the launcher's own header alike. The completion contract is a line starting
-  // `exit=`, so anything else that produces one ends the documented `until grep -q '^exit='` wait
-  // while the check is still running. It needs no hostile input: `env` with a variable named `exit`
-  // prints `exit=0`, and a single-string command containing a newline puts its own forged line into
-  // the echoed header BEFORE the child is even spawned (found by the red team, 2026-09-11, after a
-  // first repair that guarded only the child and claimed ownership it did not have).
-  //
-  // The marker is DERIVED from the function that owns it rather than restated: `exitLine('')` is
-  // exactly the marker with no code after it. A literal here would fork from dctr-lib.mjs the first
-  // time either was corrected.
-  //
-  // BYTES, NOT STRINGS. An earlier revision of this guard decoded each chunk with `String(chunk)`,
-  // which corrupts any multi-byte character split across a chunk boundary: a three-byte `€` arriving
-  // as one byte then two decoded to three replacement characters, where the original `fs.writeSync`
-  // of the raw chunk had preserved it. The marker is ASCII, so the scan is byte-oriented and every
-  // other byte is passed through untouched.
-  const MARKER = Buffer.from(exitLine(''))
-  const SPACE = Buffer.from(' ')
-  const NEWLINE = Buffer.from('\n')
-  let atLineStart = true
-  let carry = Buffer.alloc(0)
-  const raw = (buf) => { fs.writeSync(file, buf); try { process.stdout.write(buf) } catch { /* no terminal on the detached path */ } }
-  /** Every write that is not the completion receipt. A line that would start with the marker gets one
-   *  leading space and stays readable. `carry` holds back at most four bytes, and only a tail that
-   *  could still grow into the marker at a line start, so a chunk boundary splitting `exi|t=` cannot
-   *  smuggle one through. It is flushed at close, or the check's last word is lost. */
-  const guarded = (input) => {
-    const chunk = Buffer.isBuffer(input) ? input : Buffer.from(String(input))
-    const s = carry.length ? Buffer.concat([carry, chunk]) : chunk
-    carry = Buffer.alloc(0)
-    const parts = []
-    let i = 0
-    while (i < s.length) {
-      const nl = s.indexOf(0x0a, i)
-      const end = nl === -1 ? s.length : nl + 1
-      const line = s.subarray(i, end)
-      if (nl === -1 && atLineStart && line.length < MARKER.length && MARKER.subarray(0, line.length).equals(line)) { carry = Buffer.from(line); break }
-      if (atLineStart && line.length >= MARKER.length && line.subarray(0, MARKER.length).equals(MARKER)) parts.push(SPACE)
-      parts.push(line)
-      atLineStart = nl !== -1
-      i = end
+  const resultFile = `${out}.result`
+  // A short write leaves the transcript incomplete, and an earlier revision ignored the count that
+  // says so while deriving state from the whole intended buffer. Write it all, and remember if we
+  // could not: a verdict over a broken record must say so rather than read as clean.
+  let captureFailed = false
+  const raw = (buf) => {
+    let off = 0
+    while (off < buf.length) {
+      let n
+      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }
+      if (!n) { captureFailed = true; break }
+      off += n
     }
-    if (parts.length) raw(Buffer.concat(parts))
+    try { process.stdout.write(buf) } catch { /* display only: no terminal on the detached path */ }
   }
-  /** The completion receipt: the one unguarded write, because it is the one the contract is about. */
-  const receipt = (text) => { raw(Buffer.from(text)); atLineStart = text.endsWith('\n') }
+  /** The verdict, and the only thing this launcher writes outside the transcript. Temp plus rename so
+   *  a reader waiting on the file's existence can never catch it half written. */
+  const writeResult = (code) => {
+    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}`
+    const tmp = `${resultFile}.partial`
+    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) } catch { /* nothing left to tell */ }
+  }
   // A closed display pipe is a DISPLAY failure and must never fail the gate it is showing, which the
   // header has always promised and the async `error` event did not honour: an EPIPE on the detached
-  // path ended the process at 1 with only a header in the file and no receipt at all.
+  // path ended the process at 1 with no verdict written at all. This one really is display; the two
+  // handlers on the CHILD's streams below are not, and they set captureFailed instead.
   process.stdout.on('error', () => { /* display only, never the gate */ })
-  guarded(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`)
+  // Console only. Writing the command into the transcript is what satisfied six selftest assertions
+  // that were looking for the check's own output, and it is what let a command's own text forge a
+  // verdict line. The pane still shows it live; the transcript stays the check's bytes alone.
+  try { process.stdout.write(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`) } catch { /* display only */ }
   // `-o pipefail` because a gate passes on its exit status and a pipeline reports only its LAST
   // stage: `bash -c 'false | cat'` exits 0, so a check piped into `tee` recorded a pass it never
   // earned. Measured, and the masking is narrower than it first looks: `true | false` and
@@ -129,11 +123,13 @@ if (argv[0] === '--run') {
   // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.
-  child.on('error', (e) => { guarded(`${e.message}\n`); receipt(`${exitLine(127)}\n`); fs.closeSync(file); process.exit(127) })
-  child.stdout.on('data', guarded)
-  child.stderr.on('data', guarded)
-  child.stdout.on('error', () => { /* display only, never the gate */ })
-  child.stderr.on('error', () => { /* display only, never the gate */ })
+  child.on('error', (e) => { raw(Buffer.from(`${e.message}\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })
+  child.stdout.on('data', raw)
+  child.stderr.on('data', raw)
+  // A CHILD stream error is a capture failure on the authoritative transcript, NOT a display failure.
+  // An earlier revision swallowed both alike and produced a clean status over an incomplete record.
+  child.stdout.on('error', () => { captureFailed = true })
+  child.stderr.on('error', () => { captureFailed = true })
   // The progress name. Only on the pane path: `paneId` is empty when this same mode serves the
   // detached path, and a rename with no pane is a herdr call that can only fail. The herdr call is
   // synchronous and bounded at HERDR_TIMEOUT_MS, so a hung server delays this pump rather than
@@ -151,15 +147,8 @@ if (argv[0] === '--run') {
   // the two paths are behaviourally identical: with the handler running synchronously through to
   // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
-    // Flush a held-back marker prefix before the marker itself is written, or `exi` from the child's
-    // last unterminated write would land after the exit line instead of before it.
-    // Flush a held-back marker prefix, or the check's final bytes are dropped without a trace.
-    if (carry.length) { raw(carry); carry = Buffer.alloc(0); atLineStart = false }
-    // A check whose last write has no newline would otherwise fuse with the exit line, and the
-    // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
-    if (!atLineStart) { raw(NEWLINE); atLineStart = true }
-    receipt(`${exitLine(code)}\n`)
     fs.closeSync(file)
+    writeResult(code)
     // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`
     // kills the shell this process runs in; `pane get` and `pane rename` do not, and an earlier
     // revision never checked which. Removing the record up front and restoring it on failure was
@@ -256,7 +245,7 @@ if (argv[0] === '--run') {
     const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
-    console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; output ${outFile}, done when its last line is exit=N`)
+    console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; transcript ${outFile}, done when ${outFile}.result exists`)
     process.exit(0)
   }
 
@@ -382,5 +371,5 @@ if (argv[0] === '--run') {
     detached(`could not place a pane — ${String(e.message).split('\n')[0]}`)
   }
   hookLog(sessionId, `gate "${label}" ${placed.name}: ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}, output ${outFile}`)
-  console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; output ${outFile}, done when its last line is exit=N`)
+  console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; transcript ${outFile}, done when ${outFile}.result exists`)
 }

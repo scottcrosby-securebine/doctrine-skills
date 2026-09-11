@@ -55,7 +55,7 @@ jobs:
 
       - name: gate launcher tamper test
         # Runs the launcher's detached path with a tripwire herdr on PATH: the check runs, its
-        # output file ends with exit=N, and herdr is called zero times. Needs only node and bash.
+        # result file says exit=N, and herdr is called zero times. Needs only node and bash.
         run: node hooks/dctr-gate.selftest.mjs
 
       - name: interactive pane launcher tamper test

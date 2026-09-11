@@ -52,24 +52,29 @@ const MUTATIONS = [
     clause: 'clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
     from: "spawn('bash', ['-o', 'pipefail', '-c', command[0]]",
     to: "spawn('bash', ['-c', command[0]]" },
-  { name: 'the child writes the completion marker unescaped, forging the wait predicate', file: 'dctr-gate.mjs',
-    clause: "clause 5 — a check that prints its own exit= line leaves exactly ONE marker line, and it is the launcher's real status",
-    from: "      if (atLineStart && line.length >= MARKER.length && line.subarray(0, MARKER.length).equals(MARKER)) parts.push(SPACE)",
-    to: "      if (false) parts.push(SPACE)" },
-  { name: 'the guard decodes each chunk as a string, corrupting a split multi-byte character', file: 'dctr-gate.mjs',
+  // THE SPLIT, reverted: the verdict goes back into the transcript, which is the whole contract
+  // Scott's 2026-09-11 ruling replaced. Every clause that reads `<out>.result` then finds no file, and
+  // clause 1 is the first of them — named here because the harness reports the clause it was told to
+  // expect and accepts any failing one, so an entry naming a clause that cannot redden advertises a pin
+  // it does not have. Two such entries were found in round 3.
+  { name: 'the verdict is appended to the transcript instead of its own result file', file: 'dctr-gate.mjs',
+    clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
+    from: "    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) } catch { /* nothing left to tell */ }",
+    to: "    try { fs.appendFileSync(out, body) } catch { /* nothing left to tell */ }" },
+  { name: 'the transcript is written as a decoded string, corrupting a split multi-byte character', file: 'dctr-gate.mjs',
     // Aimed at 6d, not 6: 6d forces the boundary with two deliberate writes, while 6's bulk fixture
     // survives the mutation whenever the reader's chunks happen to align to the character width.
     clause: 'clause 6d — a three-byte character split across two writes arrives intact',
-    from: "    const chunk = Buffer.isBuffer(input) ? input : Buffer.from(String(input))",
-    to: "    const chunk = Buffer.from(String(input))" },
-  { name: "the launcher's own header is written unguarded, so a command's text can forge a marker", file: 'dctr-gate.mjs',
-    clause: 'clause 6b — a command whose own text contains a marker line cannot forge one through the echoed header',
-    from: "  guarded(`\\x1b[2m── doctrine gate · ${label}\\x1b[0m\\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\\n`)",
+    from: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }",
+    to: "      try { n = fs.writeSync(file, String(buf).slice(off)) } catch { captureFailed = true; break }" },
+  { name: "the launcher's own header is echoed into the transcript, so a command's text can forge a verdict line", file: 'dctr-gate.mjs',
+    clause: 'clause 6b — a command whose own text contains a marker line puts NO line in the transcript',
+    from: "  try { process.stdout.write(`\\x1b[2m── doctrine gate · ${label}\\x1b[0m\\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\\n`) } catch { /* display only */ }",
     to: "  raw(Buffer.from(`\\x1b[2m── doctrine gate · ${label}\\x1b[0m\\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\\n`))" },
-  { name: 'a held-back marker prefix is never flushed, so the last unterminated write lands after the exit line', file: 'dctr-gate.mjs',
-    clause: "clause 5f — a check whose LAST write is an unterminated marker prefix keeps that output, and the status is still the check's",
-    from: "    if (carry.length) { raw(carry); carry = Buffer.alloc(0); atLineStart = false }",
-    to: "    if (false) { raw(carry); carry = Buffer.alloc(0); atLineStart = false }" },
+  { name: 'a transcript write that failed is not recorded, so the verdict reads clean over a broken record', file: 'dctr-gate.mjs',
+    clause: 'clause 7 — a verdict over a transcript that could not be written says capture=incomplete',
+    from: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }",
+    to: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { break }" },
   { name: 'pane_not_found is read as an answer', file: 'dctr-pane.mjs', clause: 'reopen after the user closes a pane',
     from: "catch (e) { return isPaneNotFound(e) ? 'gone' : 'unknowable' }",
     to: "catch { return 'unknowable' }" },
@@ -327,8 +332,13 @@ const MUTATIONS = [
     clause: 'clause 1s — a TAB gate whose list FAILED closes nothing and keeps its record',
     from: "      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'",
     to: "      const act = mine ? stopAction(mine) : 'close'" },
+  // IT2 (round 3): this named clause 2b and could not redden it. Dropping two placeholders makes the
+  // `--run` argv short, so the positional guard refuses before any output file exists — herdr is still
+  // called zero times and 2b passes, while clause 1, the first clause that drives the detached path and
+  // reads its result file, is the one that goes red. The harness accepts any failing clause, so the
+  // mis-aimed entry passed while advertising a pin on the tripwire it never touched.
   { name: 'the detached path stops emitting its positional placeholders', file: 'dctr-gate.mjs',
-    clause: 'clause 2b — the no-herdr path called herdr ZERO times',
+    clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
     from: "    const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })",
     to: "    const child = spawn('node', [self, '--run', outFile, '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })" },
   { name: 'the pane line stops carrying the tab id and workspace', file: 'dctr-lib.mjs',
@@ -345,8 +355,8 @@ const MUTATIONS = [
   // mis-named entry passes the gate while advertising the wrong pin. Re-aimed at 1n, the clause that
   // drives an unspawnable check.
   { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'clause 1n: a check that could not be spawned keeps its record',
-    from: "  child.on('error', (e) => { guarded(`${e.message}\\n`); receipt(`${exitLine(127)}\\n`); fs.closeSync(file); process.exit(127) })",
-    to: "  child.on('error', (e) => { guarded(`${e.message}\\n`); receipt(`${exitLine(127)}\\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+    from: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); process.exit(127) })",
+    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); fs.closeSync(file); writeResult(127); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
   { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
     from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
     to: '    ? `script -q -F ${shq(tee)} `' },
