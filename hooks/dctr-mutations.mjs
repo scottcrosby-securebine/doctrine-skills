@@ -48,6 +48,33 @@ const SUITES = ['dctr-seat.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.s
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
 const MUTATIONS = [
+  { name: 'the single-string gate path drops pipefail, so a piped check reports its last stage', file: 'dctr-gate.mjs',
+    clause: 'clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
+    from: "spawn('bash', ['-o', 'pipefail', '-c', command[0]]",
+    to: "spawn('bash', ['-c', command[0]]" },
+  // THE SPLIT, reverted: the verdict goes back into the transcript, which is the whole contract
+  // Scott's 2026-09-11 ruling replaced. Every clause that reads `<out>.result` then finds no file, and
+  // clause 1 is the first of them — named here because the harness reports the clause it was told to
+  // expect and accepts any failing one, so an entry naming a clause that cannot redden advertises a pin
+  // it does not have. Two such entries were found on 2026-09-11.
+  { name: 'the verdict is appended to the transcript instead of its own result file', file: 'dctr-gate.mjs',
+    clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
+    from: "    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) }",
+    to: "    try { fs.appendFileSync(out, body) }" },
+  { name: 'the transcript is written as a decoded string, corrupting a split multi-byte character', file: 'dctr-gate.mjs',
+    // Aimed at 6d, not 6: 6d forces the boundary with two deliberate writes, while 6's bulk fixture
+    // survives the mutation whenever the reader's chunks happen to align to the character width.
+    clause: 'clause 6d — a three-byte character split across two writes arrives intact',
+    from: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }",
+    to: "      try { n = fs.writeSync(file, String(buf).slice(off)) } catch { captureFailed = true; break }" },
+  { name: "the launcher's own header is echoed into the transcript, so a command's text can forge a verdict line", file: 'dctr-gate.mjs',
+    clause: 'clause 6b — a command whose own text contains a marker line puts NO line in the transcript',
+    from: "  try { process.stdout.write(`\\x1b[2m── doctrine gate · ${label}\\x1b[0m\\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\\n`) } catch { /* display only */ }",
+    to: "  raw(Buffer.from(`\\x1b[2m── doctrine gate · ${label}\\x1b[0m\\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\\n`))" },
+  { name: 'a transcript write that failed is not recorded, so the verdict reads clean over a broken record', file: 'dctr-gate.mjs',
+    clause: 'clause 7 — a verdict over a transcript that could not be written says capture=incomplete',
+    from: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }",
+    to: "      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { break }" },
   { name: 'pane_not_found is read as an answer', file: 'dctr-pane.mjs', clause: 'reopen after the user closes a pane',
     from: "catch (e) { return isPaneNotFound(e) ? 'gone' : 'unknowable' }",
     to: "catch { return 'unknowable' }" },
@@ -305,8 +332,13 @@ const MUTATIONS = [
     clause: 'clause 1s — a TAB gate whose list FAILED closes nothing and keeps its record',
     from: "      const act = listFailed ? 'unknown' : mine ? stopAction(mine) : 'close'",
     to: "      const act = mine ? stopAction(mine) : 'close'" },
+  // IT2 (2026-09-11): this named clause 2b and could not redden it. Dropping two placeholders makes the
+  // `--run` argv short, so the positional guard refuses before any output file exists — herdr is still
+  // called zero times and 2b passes, while clause 1, the first clause that drives the detached path and
+  // reads its result file, is the one that goes red. The harness accepts any failing clause, so the
+  // mis-aimed entry passed while advertising a pin on the tripwire it never touched.
   { name: 'the detached path stops emitting its positional placeholders', file: 'dctr-gate.mjs',
-    clause: 'clause 2b — the no-herdr path called herdr ZERO times',
+    clause: 'clause 1 — a failing check puts exit=3 in the RESULT file',
     from: "    const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })",
     to: "    const child = spawn('node', [self, '--run', outFile, '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })" },
   { name: 'the pane line stops carrying the tab id and workspace', file: 'dctr-lib.mjs',
@@ -317,9 +349,26 @@ const MUTATIONS = [
     clause: 'clause 1p — a close that FAILED keeps the record of the pane it could not close',
     from: "        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }",
     to: "        dropMarker()\n        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }" },
-  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
-    from: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); process.exit(127) })",
-    to: "  child.on('error', (e) => { both(`${e.message}\\n${exitLine(127)}\\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+  // The clause named here is the one that must go red, and it is NOT the focus-lookup clause this
+  // entry named until 2026-09-11: that clause spawns a command that succeeds and never reaches the
+  // spawn-error handler this mutation edits. `anySuiteNotices` accepts ANY failing clause, so a
+  // mis-named entry passes the gate while advertising the wrong pin. Re-aimed at 1n, the clause that
+  // drives an unspawnable check.
+  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'clause 1n: a check that could not be spawned keeps its record',
+    from: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
+  { name: 'the spawn error is written into the transcript instead of the result', file: 'dctr-gate.mjs',
+    clause: 'clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY',
+    from: "  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })",
+    to: "  child.on('error', (e) => { raw(Buffer.from(`${e.message}\\n`)); try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127); process.exit(127) })" },
+  { name: 'a stale result that cannot be removed no longer stops the launch', file: 'dctr-gate.mjs',
+    clause: 'clause 8c — a stale result that cannot be removed makes the launcher REFUSE',
+    from: "  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`); process.exit(1) }",
+    to: "  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`) }" },
+  { name: "a previous run's result on the same path is left in place, so the wait ends on a stale verdict", file: 'dctr-gate.mjs',
+    clause: "clause 8 — a previous run's result on the same path is gone before the check starts",
+    from: "  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }",
+    to: "  try { fs.rmSync(`${outFile}.result.partial`, { force: true }) }" },
   { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',
     from: "    ? `script -q -F ${shq(tee)} bash -c ${shq(connect)}`",
     to: '    ? `script -q -F ${shq(tee)} `' },
@@ -371,7 +420,10 @@ const MUTATIONS = [
   { name: 'an unreadable job record is not terminal', file: 'dctr-lib.mjs', clause: 'an unreadable job record is NOT terminal, matching the watcher',
     from: "export const codexTerminal = (status) => Boolean(status) && status !== 'running' && status !== 'queued'",
     to: "export const codexTerminal = (status) => status !== 'running' && status !== 'queued'" },
-  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'a FINISHED codex pane someone is looking at still stays',
+  // 2026-09-12: this named the teardown clause "a FINISHED codex pane someone is looking at still stays",
+  // which stays green under the mutation because the seat hook rechecks focus independently before
+  // closing. The pure clause 1am is what reddens, verified by applying the mutation to a copy.
+  { name: 'close-on-next spares a FOCUSED finished pane', file: 'dctr-lib.mjs', clause: 'clause 1am — close-on-next closes exactly the terminal, unfocused, codex-job panes',
     from: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status) && c.focused === false).map((c) => c.seat)',
     to: '  candidates.filter((c) => c.seat?.codexJob && codexTerminal(c.status)).map((c) => c.seat)' },
   { name: 'close-on-next only considers seats following a codex job', file: 'dctr-lib.mjs', clause: 'close-on-next closes exactly the terminal, unfocused, codex-job panes',

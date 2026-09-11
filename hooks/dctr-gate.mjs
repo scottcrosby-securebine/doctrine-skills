@@ -3,17 +3,42 @@
 //   node hooks/dctr-gate.mjs <label> <out-file> -- <command...>
 //
 // Everything after `--` is the check's argv, passed through exactly as given: one argument runs
-// under `bash -c`, several are executed as they stand, so `bash -c "a; b"` keeps its quoting. The
-// first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+// under `bash -o pipefail -c`, several are executed as they stand, so `bash -c "a; b"` keeps its
+// quoting. The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+// `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
 // Run by the doctrine orchestrator at step 3 for a check that will outrun the Bash tool's own
 // ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
-// stacks next to it. Outside herdr the check runs detached from the harness with the same output
-// file. Either way the output file ends with `exit=N` when the check is done; that line is the
-// completion signal to monitor and the exit status to record. The pane is display; the file is the
-// record. It exits 0 once the check is launched, 1 only on malformed arguments, and the check's
-// own status is in the file — a display failure must never fail the gate it is showing.
+// stacks next to it. Outside herdr the check runs detached from the harness with the same two
+// files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
+// on malformed arguments or when a previous run's `<out>.result` or `.result.partial` cannot be
+// removed — a display failure
+// must never fail the gate it is showing. One path is one check at a time: two launches on the same
+// `<out>` are not detected, and the first to finish publishes under the other's name.
+//
+// TWO FILES, and the split is the whole point (Scott's ruling 2026-09-11, after three review rounds
+// each found a new defect in the machinery that kept them in one file):
+//
+//   <out>         the transcript. The check's own bytes and NOTHING else: no verdict line, no echoed
+//                 command. That is what makes it safe to read and safe to grep.
+//   <out>.result  the verdict, written by this launcher alone, at completion, via a temp file and a
+//                 rename so a half-written one is never readable. One line `exit=N` (`exit=signal`
+//                 when the check died of a signal and has no status), plus a line
+//                 `capture=incomplete` when any transcript write failed or a child output stream
+//                 errored, because a status over a broken record must not read as clean, and a line
+//                 `error=<message>` when the check could not be spawned at all (`exit=127`), since
+//                 that message is the launcher's and the transcript is the check's. A previous run's
+//                 result on the same path is removed before the check starts.
+//
+// Wait for the RESULT FILE to exist, never for a line inside the transcript:
+//   until [ -f <out>.result ]; do sleep 15; done; cat <out>.result
+//
+// GRADE, stated because a reader will otherwise assume more: this stops a check from ACCIDENTALLY
+// ending the wait, which is what happened — `env` with a variable named `exit` prints `exit=0`, and a
+// single-string command containing a newline put the same line into the echoed header before the child
+// even spawned. It does NOT stop a check that deliberately writes to `<out>.result`, since a check
+// runs as this user and can write any path. Confused-agent-grade, not adversarial.
 //
 // The pane shell starts in the launcher's cwd and with a fresh environment, so an env prefix goes
 // after `--` (`-- env K=V <command>`), never on the launcher.
@@ -61,18 +86,67 @@ if (argv[0] === '--run') {
   const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
-  let atLineStart = true
-  const both = (chunk) => { fs.writeSync(file, chunk); atLineStart = String(chunk).endsWith('\n'); try { process.stdout.write(chunk) } catch { /* no terminal on the detached path */ } }
-  both(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`)
+  const resultFile = `${out}.result`
+  // No stale-result removal HERE, on purpose. The outer launcher clears `<out>.result` in the caller's
+  // own process before it returns, and that is the guarantee clause 8 pins. A second removal in this
+  // mode was added and taken out the same day: with the outer one mutated away it still cleared the
+  // file after node startup, so the clause reddened only by the margin of process start. `--run` is
+  // the pane line, not an entry: re-running it by hand over a previous result is not supported.
+  // A short write leaves the transcript incomplete, and an earlier revision ignored the count that
+  // says so while deriving state from the whole intended buffer. Write it all, and remember if we
+  // could not: a verdict over a broken record must say so rather than read as clean.
+  let captureFailed = false
+  const raw = (buf) => {
+    let off = 0
+    while (off < buf.length) {
+      let n
+      try { n = fs.writeSync(file, buf, off, buf.length - off) } catch { captureFailed = true; break }
+      if (!n) { captureFailed = true; break }
+      off += n
+    }
+    try { process.stdout.write(buf) } catch { /* display only: no terminal on the detached path */ }
+  }
+  /** The verdict, and the only thing this launcher writes outside the transcript. Temp plus rename so
+   *  a reader waiting on the file's existence can never catch it half written. */
+  const writeResult = (code, error = null) => {
+    const body = `${exitLine(code)}\n${captureFailed ? 'capture=incomplete\n' : ''}${error ? `error=${error.split('\n')[0]}\n` : ''}`
+    const tmp = `${resultFile}.partial`
+    // Not "nothing left to tell": the pane and stderr are still there. The wait then never ends, which
+    // the time alarm bounds, and the line below says why.
+    try { fs.writeFileSync(tmp, body); fs.renameSync(tmp, resultFile) }
+    catch (e) { process.stderr.write(`${PREFIX}: could not write ${resultFile} (${e.message}); the wait on it will not end\n`) }
+  }
+  // A closed display pipe is a DISPLAY failure and must never fail the gate it is showing, which the
+  // header has always promised and the async `error` event did not honour: an EPIPE on the detached
+  // path ended the process at 1 with no verdict written at all. This one really is display; the two
+  // handlers on the CHILD's streams below are not, and they set captureFailed instead.
+  process.stdout.on('error', () => { /* display only, never the gate */ })
+  // Console only. Writing the command into the transcript is what satisfied six selftest assertions
+  // that were looking for the check's own output, and it is what let a command's own text forge a
+  // verdict line. The pane still shows it live; the transcript stays the check's bytes alone.
+  try { process.stdout.write(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`) } catch { /* display only */ }
+  // `-o pipefail` because a gate passes on its exit status and a pipeline reports only its LAST
+  // stage: `bash -c 'false | cat'` exits 0, so a check piped into `tee` recorded a pass it never
+  // earned. Measured, and the masking is narrower than it first looks: `true | false` and
+  // `false && true` both already exit non-zero, so only an upstream failure under a succeeding final
+  // stage was hidden. FAIL DIRECTION: closed. A pipeline whose consumer deliberately stops early
+  // (`... | head -1`) now surfaces its SIGPIPE as a gate failure, which is the safe direction to be
+  // wrong in: a false failure is visible and a false pass is not.
   const child = command.length === 1
-    ? spawn('bash', ['-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
+    ? spawn('bash', ['-o', 'pipefail', '-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
   // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.
-  child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); process.exit(127) })
-  child.stdout.on('data', both)
-  child.stderr.on('data', both)
+  // The message is the launcher's, not the check's, so it goes in the RESULT and the transcript stays
+  // empty: the one launcher write the rewrite had left inside the transcript (2026-09-12).
+  child.on('error', (e) => { try { fs.closeSync(file) } catch { captureFailed = true }; writeResult(127, e.message); process.exit(127) })
+  child.stdout.on('data', raw)
+  child.stderr.on('data', raw)
+  // A CHILD stream error is a capture failure on the authoritative transcript, NOT a display failure.
+  // An earlier revision swallowed both alike and produced a clean status over an incomplete record.
+  child.stdout.on('error', () => { captureFailed = true })
+  child.stderr.on('error', () => { captureFailed = true })
   // The progress name. Only on the pane path: `paneId` is empty when this same mode serves the
   // detached path, and a rename with no pane is a herdr call that can only fail. The herdr call is
   // synchronous and bounded at HERDR_TIMEOUT_MS, so a hung server delays this pump rather than
@@ -90,11 +164,12 @@ if (argv[0] === '--run') {
   // the two paths are behaviourally identical: with the handler running synchronously through to
   // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
-    // A check whose last write has no newline would otherwise fuse with the exit line, and the
-    // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
-    if (!atLineStart) both('\n')
-    both(`${exitLine(code)}\n`)
-    fs.closeSync(file)
+    // A close that throws (ENOSPC or a network filesystem flushing late) has lost bytes the transcript
+    // was meant to hold. Say so in the verdict rather than dying with none. NO FIXTURE reaches this
+    // catch, here or on the spawn-error path above: nothing in the selftest can make a close throw.
+    // A missing fixture, recorded, like the short-write and child-stream branches.
+    try { fs.closeSync(file) } catch { captureFailed = true }
+    writeResult(code)
     // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`
     // kills the shell this process runs in; `pane get` and `pane rename` do not, and an earlier
     // revision never checked which. Removing the record up front and restoring it on failure was
@@ -182,6 +257,15 @@ if (argv[0] === '--run') {
   const command = argv.slice(dash + 1)
   const outFile = path.resolve(out)
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID
+  // A REUSED PATH carried the previous run's verdict: the transcript was truncated on open but the
+  // result file was not touched, so the documented existence wait returned at once with a stale
+  // `exit=0` while the new check was still running. Reproduced 2026-09-12. Removed HERE, in the
+  // caller's own process before this launcher returns, and not in `--run`: that mode starts in a pane
+  // or detached, and the window between this process exiting and that one reaching its first line is
+  // exactly where a caller's wait would have read the stale file. Refuse to run if it cannot be
+  // cleared: a wait that never ends is visible, and a stale pass is not.
+  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }
+  catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`); process.exit(1) }
 
   const detached = (reason) => {
     // FOUR empties: marker, paneId, tabId, workspace. The detached path has no pane and no tab, and
@@ -191,7 +275,7 @@ if (argv[0] === '--run') {
     const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
-    console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; output ${outFile}, done when its last line is exit=N`)
+    console.log(`${PREFIX}-gate: no pane (${reason}) — running detached, pid ${child.pid}; transcript ${outFile}, done when ${outFile}.result exists`)
     process.exit(0)
   }
 
@@ -290,11 +374,13 @@ if (argv[0] === '--run') {
           // PUBLISH a real record, do not just keep whatever is there. If writeMarker was what
           // failed, the file is still reserveMarker's `{}` — it carries no paneId and no tabId, so
           // SessionEnd receives a marker it cannot act on while the log line claims otherwise.
-          // NOT pinned, and no fixture currently reaches it: the placement writeMarker above runs
-          // BEFORE `pane run`, so by the time a rollback happens the record normally already carries
-          // its ids. This branch is for the narrow case where THAT write is what failed, leaving
-          // reserveMarker's `{}` — which SessionEnd cannot act on. Reaching it needs the seats
-          // directory to become unwritable between reserve and write. Missing fixture, not dead code.
+          // PINNED, and the comment that said otherwise was stale. This branch is for the narrow case
+          // where the placement's own writeMarker is what failed, leaving reserveMarker's `{}` — which
+          // SessionEnd cannot act on. Reaching it needs the seats directory to become unwritable
+          // between reserve and write, and the selftest's fake herdr does exactly that (chmod 500 on
+          // the placement rename, 700 again on the close). Clause 1o drives it and a mutation removes
+          // this republication. Found 2026-09-11: the comment claimed a missing fixture that had
+          // since been written, which sends the next maintainer to build coverage that exists.
           // The success line is GATED on the publish, and it was not: both lines printed, the second
           // contradicting the first, and an operator reading "its record is published" then believed
           // SessionEnd could reach a pane whose record was still reserveMarker's `{}`.
@@ -315,5 +401,5 @@ if (argv[0] === '--run') {
     detached(`could not place a pane — ${String(e.message).split('\n')[0]}`)
   }
   hookLog(sessionId, `gate "${label}" ${placed.name}: ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}, output ${outFile}`)
-  console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; output ${outFile}, done when its last line is exit=N`)
+  console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; transcript ${outFile}, done when ${outFile}.result exists`)
 }

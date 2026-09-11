@@ -4,10 +4,10 @@
 //
 // Runs the script on its detached path (no herdr in the environment) with a tripwire `herdr` first
 // on PATH, so it proves three things no pure test can: the check really runs and its output really
-// reaches the file, the file really ends with the check's own exit status, and the no-herdr path
-// really makes no herdr call. Clause 1 breaks the check and confirms the exit line trips. Clause 2
-// runs a passing check and confirms the line reads 0 with the output intact. Clause 3 proves the
-// broken fixture really fails when bash runs it without the script.
+// reaches the transcript, the result file really carries the check's own exit status, and the
+// no-herdr path really makes no herdr call. Clause 1 breaks the check and confirms the verdict trips.
+// Clause 2 runs a passing check and confirms the verdict reads 0 with the output intact. Clause 3
+// proves the broken fixture really fails when bash runs it without the script.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -26,15 +26,30 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 // session's hook.log (it did, the first time it ran there).
 const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', CLAUDE_CODE_SESSION_ID: '' }
 const launch = (label, out, ...command) => execFileSync('node', [script, label, out, '--', ...command], { env, encoding: 'utf8' })
-const waitDone = (out, ms = 8000) => {
+// TWO FILES (Scott's ruling 2026-09-11). The verdict is in `<out>.result`, written by rename, so its
+// EXISTENCE is the completion signal and the transcript is already closed when it appears. Waiting on
+// a line inside the transcript is the thing this rewrite deletes: six assertions had been satisfied by
+// the launcher's own writes into that file, and a check printing `exit=0` ended the wait while running.
+const waitResult = (out, ms = 8000) => {
   const until = Date.now() + ms
   while (Date.now() < until) {
-    try { const t = fs.readFileSync(out, 'utf8'); if (/^exit=\S+\n?$/m.test(t.trim().split('\n').pop())) return t } catch { /* not yet */ }
+    if (fs.existsSync(`${out}.result`)) return true
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
   }
+  return false
+}
+/** Waits, then reads the transcript. Clause 7's transcript is a character device that never ends, so
+ *  that one clause waits with `waitResult` and never reads it. */
+const waitDone = (out, ms = 8000) => {
+  waitResult(out, ms)
   try { return fs.readFileSync(out, 'utf8') } catch { return '' }
 }
-const lastLine = (t) => t.trim().split('\n').pop()
+/** The verdict's first line. Read from the result file, never from the transcript: that separation IS
+ *  the contract, so a clause that read the status out of the transcript would certify its absence. */
+const resultBody = (out) => { try { return fs.readFileSync(`${out}.result`, 'utf8') } catch { return '' } }
+const verdict = (out) => resultBody(out).trim().split('\n')[0]
+// Derived from the owner, never restated, for the same reason the launcher derives it.
+const MARK = exitLine('')
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -45,16 +60,22 @@ const GOOD = "echo one; echo two >&2; printf 'it'\"'\"'s quoted\\n'"
 const out1 = path.join(tmp, 'broken.out')
 const said1 = launch('broken gate', out1, BROKEN)
 const t1 = waitDone(out1)
-clause('clause 1 — a failing check leaves exit=3 as the last line, and the launcher said where to look',
-  lastLine(t1) === exitLine(3) && t1.includes('about to fail') && said1.includes(out1) && said1.includes('detached'),
-  `last line: ${JSON.stringify(lastLine(t1))}; launcher: ${said1.trim()}`)
+clause('clause 1 — a failing check puts exit=3 in the RESULT file, and the launcher named that file to wait on',
+  verdict(out1) === exitLine(3) && t1.includes('about to fail') && said1.includes(`${out1}.result`) && said1.includes('detached'),
+  `verdict: ${JSON.stringify(verdict(out1))}; launcher: ${said1.trim()}`)
+// The other half of the split, and the half a reader acts on: the transcript is the check's bytes and
+// nothing else. No verdict line (a `grep -q` wait would have ended early on it) and no echoed command
+// (six assertions in this file's history were satisfied by that echo).
+clause('clause 1a — and the TRANSCRIPT carries neither the verdict nor the echoed command',
+  t1.split('\n').filter(Boolean).join('\n') === 'about to fail',
+  `the transcript must hold the check's bytes alone: ${JSON.stringify(t1)}`)
 
 const out2 = path.join(tmp, 'good.out')
 launch('good gate', out2, GOOD)
 const t2 = waitDone(out2)
-clause('clause 2 — a passing check ends exit=0 with stdout, stderr and the quoted text all in the file',
-  lastLine(t2) === exitLine(0) && t2.includes('one\n') && t2.includes('two\n') && t2.includes("it's quoted"),
-  JSON.stringify(t2))
+clause('clause 2 — a passing check records exit=0 with stdout, stderr and the quoted text all in the transcript',
+  verdict(out2) === exitLine(0) && t2.includes('one\n') && t2.includes('two\n') && t2.includes("it's quoted"),
+  `${JSON.stringify(verdict(out2))} ${JSON.stringify(t2)}`)
 
 clause('clause 2b — the no-herdr path called herdr ZERO times',
   !fs.existsSync(tripwire),
@@ -66,8 +87,11 @@ const out3 = path.join(tmp, 'argv.out')
 launch('argv gate', out3, 'bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4')
 const t3 = waitDone(out3)
 clause('clause 1c — an argv-form command keeps its quoting: two spaces survive and it exits 4',
-  lastLine(t3) === exitLine(4) && t3.includes('a  b'),
-  JSON.stringify(t3))
+  verdict(out3) === exitLine(4) && t3.split('\n').includes('a  b'),
+  // A SUBSTRING test used to pass on the echoed command, which contained `echo "a  b"` verbatim, so
+  // this clause once certified preserved quoting with the child's output absent. The echo has left the
+  // transcript, which kills the class; the exact-line test stays, because the next revision may not.
+  `${JSON.stringify(verdict(out3))} ${JSON.stringify(t3)}`)
 
 const direct = spawnSync('bash', ['-c', BROKEN], { encoding: 'utf8' })
 clause('clause 3 — the broken fixture really exits 3 under bash alone, without the script',
@@ -119,8 +143,12 @@ clause('clause 1b — the pane line carries an argv command through bash as the 
 // with the cwd this launcher was started in. The tab path is reached by failing the layout read.
 const bin2 = path.join(tmp, 'bin2'); fs.mkdirSync(bin2)
 const calls = path.join(tmp, 'calls')
+const cwds = path.join(tmp, 'cwds')
 fs.writeFileSync(path.join(bin2, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
+# The joined line above loses argument boundaries, so the --cwd VALUE is also recorded whole, one per
+# line: a clause comparing it against the joined line accepted a cwd with extra words after it.
+prev=''; for a in "$@"; do if [ "$prev" = "--cwd" ]; then printf '%s\\n' "$a" >> ${JSON.stringify(cwds)}; fi; prev="$a"; done
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then echo '{"error":{"code":"transport_error"}}' >&2; exit 1; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FAILS" ]; then echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; fi
@@ -160,21 +188,35 @@ esac
 fs.chmodSync(path.join(bin2, 'herdr'), 0o755)
 const paneEnv = (extra) => ({ ...process.env, PATH: `${bin2}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', CLAUDE_CODE_SESSION_ID: 'gate-selftest', DCTR_VIEW_REQUEST_DIR: '', ...extra })
 const HERE = process.cwd()
+/** The whole `--cwd` argument as the recorder received it, compared exactly: a prefix (`${HERE}-wrong`),
+ *  a suffix (`${HERE} wrong`) and a cwd containing a space were each accepted or rejected wrongly by
+ *  matchers over the space-joined call line. */
+const cwdArgs = () => { try { return fs.readFileSync(cwds, 'utf8').split('\n').filter(Boolean) } catch { return [] } }
 const callLine = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').find((l) => re.test(l)) || '' } catch { return '' } }
 
-fs.writeFileSync(calls, '')
+fs.writeFileSync(calls, ''); fs.writeFileSync(cwds, '')
 execFileSync('node', [script, 'pane gate', path.join(tmp, 'pane.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
 const split = callLine(/^pane split /)
 clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher was started in',
-  split.includes(` --cwd ${HERE}`) && callLine(/^pane run w1:pS /).includes('--run'),
-  `split: ${split}; run: ${callLine(/^pane run /)}`)
+  split.startsWith('pane split ') && cwdArgs().length === 1 && cwdArgs()[0] === HERE && callLine(/^pane run w1:pS /).includes('--run'),
+  `split: ${split}; cwd args: ${JSON.stringify(cwdArgs())}; run: ${callLine(/^pane run /)}`)
 
-fs.writeFileSync(calls, '')
+fs.writeFileSync(calls, ''); fs.writeFileSync(cwds, '')
 execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
 const create = callLine(/^tab create /)
 clause('clause 1e: the tab path creates with the same --cwd',
-  create.includes(` --cwd ${HERE}`) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
-  `create: ${create}`)
+  create.startsWith('tab create ') && cwdArgs().length === 1 && cwdArgs()[0] === HERE && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
+  `create: ${create}; cwd args: ${JSON.stringify(cwdArgs())}`)
+// The recorder's cwd capture, proved without the launcher: a value with a space and a value with a
+// trailing word each arrive whole and distinct, so the two clauses above cannot pass on a joined line.
+{
+  fs.writeFileSync(cwds, '')
+  spawnSync(`${bin2}/herdr`, ['pane', 'split', '--cwd', `${HERE} wrong`, '--env', 'X=1'], { encoding: 'utf8' })
+  spawnSync(`${bin2}/herdr`, ['tab', 'create', '--cwd', '/a dir/with spaces'], { encoding: 'utf8' })
+  clause('clause 3f: the recording herdr captures each --cwd value whole, so a suffix or a space inside it is visible to 1d and 1e',
+    cwdArgs().length === 2 && cwdArgs()[0] === `${HERE} wrong` && cwdArgs()[1] === '/a dir/with spaces',
+    `recorded: ${JSON.stringify(cwdArgs())}`)
+}
 
 // THE WIRING FROM PLACEMENT TO COMPLETION, which nothing joined: the clause above only asked that
 // the pane-run line contained `--run`, and the completion fixtures hand-build their own arguments.
@@ -262,7 +304,8 @@ execFileSync('node', [script, '--run', path.join(tmp, 'exitname.out'), '', 'w1:p
   { env: paneEnv({ DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }), encoding: 'utf8' })
 const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('pane rename'))
 // The completion path's FOUR answers and the record's fate under each. Only `pane close` kills the
-// shell this process runs in, so only that branch has to drop the record first. Asking BEFORE
+// shell this process runs in, so only that branch cannot act after its call — and the ruling is that it
+// therefore does NOT drop the record at all, which clause 1p and its mutation enforce. Asking BEFORE
 // removing is what let the restore machinery go: there is no window and nothing to put back.
 {
   const mk = (n) => { const f = path.join(tmp, `gm${n}.json`); fs.writeFileSync(f, JSON.stringify({ agent: `dctr-gate-${n}`, role: 'gate', paneId: 'w1:pS' })); return f }
@@ -373,8 +416,9 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // close and is the half that shows why the ordering changed.
   const c = run(3, {}, 'ordinary')
   clause('clause 1k: an ordinary unfocused pane is CLOSED, and its record is left for the sweep rather than dropped ahead of a close that may fail',
-    c.calls.includes('pane close w1:pS') && fs.existsSync(c.m),
-    `close: ${c.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
+    // Exact line: `includes('pane close w1:pS')` was also true of `pane close w1:pS0` (2026-09-12).
+    c.calls.split('\n').includes('pane close w1:pS') && fs.existsSync(c.m),
+    `close: ${c.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(c.m)}`)
 
   const d = run(4, { DCTR_TEST_GET_GONE: '1' }, 'pane gone')
   clause('clause 1l: a pane the lookup says is GONE has its record dropped and is not closed — not-found is an answer',
@@ -387,11 +431,11 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   // that used to end with a live pane and no record.
   const e = run(5, { DCTR_TEST_CLOSE_FAILS: '1' }, 'close fails')
   clause('clause 1p: a close that FAILED leaves the pane alive AND its record intact, so SessionEnd can still reach it',
-    e.calls.includes('pane close w1:pS') && fs.existsSync(e.m),
-    `close attempted: ${e.calls.includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
+    e.calls.split('\n').includes('pane close w1:pS') && fs.existsSync(e.m),
+    `close attempted: ${e.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
 
   clause('clause 1m: the five differ ONLY in the herdr reply, so the record\'s fate is what the reply decides and nothing else',
-    [a, b, c, d, e].every((r) => r.calls.includes('pane get w1:pS')),
+    [a, b, c, d, e].every((r) => r.calls.split('\n').includes('pane get w1:pS')),
     'if any of them never called pane get, its clause is measuring the launcher standing down')
 
   clause('clause 3d: the fixtures really answer differently, proved without the launcher',
@@ -417,9 +461,9 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
   } catch (e) { spawnExit = e.status }
   clause('clause 1n: a check that could not be spawned keeps its record, because the pane it was to run in is still there',
     fs.existsSync(m), 'the record is the only thing that can lead SessionEnd to that pane')
-  clause('clause 3e: and the spawn really did fail, proved by the output file and the status rather than by the launcher',
-    spawnExit === 127 && /exit=127/.test(fs.readFileSync(out, 'utf8')) && /ENOENT/.test(fs.readFileSync(out, 'utf8')),
-    `status ${spawnExit}; ${fs.readFileSync(out, 'utf8').split('\n').slice(-3).join(' | ')}`)
+  clause('clause 3e: and the spawn really did fail, proved by the result file and the status, with the transcript EMPTY because no check ran',
+    spawnExit === 127 && verdict(out) === exitLine(127) && resultBody(out).split('\n').some((l) => l.startsWith('error=') && /ENOENT/.test(l)) && fs.readFileSync(out, 'utf8') === '',
+    `status ${spawnExit}; result ${JSON.stringify(resultBody(out))}; transcript ${JSON.stringify(fs.readFileSync(out, 'utf8'))} — the launcher's message belongs in the result, never in the transcript`)
 }
 
 // A rollback whose own close FAILS. reserveMarker publishes `{}`, so if writeMarker never ran the
@@ -463,6 +507,177 @@ clause('clause 3b: the recording herdr really answers a split and a tab create w
   spawnSync(`${bin2}/herdr`, ['tab', 'create'], { encoding: 'utf8' }).stdout.includes('w1:pT') &&
   spawnSync(`${bin2}/herdr`, ['pane', 'layout'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_LAYOUT_FAILS: '1' } }).status === 1,
   'if the fake answered nothing, both paths would fall to detached and the clauses above would read an empty call list')
+
+// ---------------------------------------------------------------------------------------------
+// B1: a pipeline reports only its last stage, so the single-string path runs under `-o pipefail`.
+// Found 2026-09-11 by comparison against another project's command policy, which refuses five
+// separate shell shapes around a protected command. Ours cannot refuse the shape (a gate is
+// whatever the project documents), so it makes the status honest instead.
+const outP = path.join(tmp, 'pipe.out')
+launch('piped gate', outP, "false | cat")
+const tP = waitDone(outP)
+clause('clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
+  verdict(outP) === exitLine(1),
+  `without pipefail bash reports the last stage and this reads ${JSON.stringify(verdict(outP))}, a pass the check never earned`)
+
+const outPg = path.join(tmp, 'pipe-good.out')
+launch('piped good gate', outPg, "echo ok | cat")
+const tPg = waitDone(outPg)
+clause('clause 4b — a piped check that really passes still records exit=0, so pipefail did not make the gate louder than the truth',
+  verdict(outPg) === exitLine(0) && tPg.split('\n').includes('ok'),
+  `a correct piped check must stay quiet: got ${JSON.stringify(verdict(outPg))}`)
+
+const bare = spawnSync('bash', ['-c', 'false | cat'], { encoding: 'utf8' })
+const withPf = spawnSync('bash', ['-o', 'pipefail', '-c', 'false | cat'], { encoding: 'utf8' })
+clause('clause 4c — the fixture really carries the defect: bash alone exits 0 on it and only pipefail exits non-zero',
+  bare.status === 0 && withPf.status !== 0,
+  `this clause is what proves clause 4 measures anything: bare=${bare.status} pipefail=${withPf.status}`)
+
+// ---------------------------------------------------------------------------------------------
+// B2: a check printing its own `exit=` line used to end the documented `until grep -q '^exit='` wait
+// while still running. `env` with a variable named `exit` does it with no hostile input, which is the
+// fixture below. The repair is the SPLIT, not an escape: the verdict is in a file the launcher alone
+// writes, so the child's line is just output. Four clauses that asserted the old escaping — the
+// one-space indent, the held-back prefix and its flush, and the marker split across two writes — are
+// DELETED rather than left green over nothing: the machinery they named is gone, and the invariant they
+// were really protecting is now "the transcript is the check's bytes and the verdict is elsewhere",
+// which is what the two clauses below assert directly.
+const outF = path.join(tmp, 'forge.out')
+launch('forging gate', outF, "env -i exit=0; exit 7")
+const tF = waitDone(outF)
+clause('clause 5 — a check that prints its own exit= line cannot touch the verdict, which is the check\'s real status',
+  verdict(outF) === exitLine(7) && tF.split('\n').includes('exit=0'),
+  `verdict ${JSON.stringify(verdict(outF))}, transcript ${JSON.stringify(tF)}: the child's line must survive VERBATIM and flush with the margin — nothing mangles it now, and nothing reads a status out of it`)
+
+const outQ = path.join(tmp, 'quiet.out')
+launch('quiet gate', outQ, "echo no marker here")
+const tQ = waitDone(outQ)
+clause('clause 5c — an ordinary check\'s transcript is its own bytes ALONE: no verdict line, no echoed command',
+  tQ === 'no marker here\n',
+  `the transcript must be byte-for-byte the check's output: ${JSON.stringify(tQ)}`)
+
+// GT1: the transcript is written as BYTES. A revision that decoded each chunk with String() corrupted a
+// multi-byte character split across a chunk boundary, and that is a transcript-fidelity defect whether
+// or not any escaping exists — so these clauses outlive the escape. This bulk fixture does NOT guarantee
+// such a boundary: a reader whose chunk size happens to be a multiple of three would split nothing. It
+// is kept as breadth, and clause 6d below forces the boundary deliberately. Neither can make chunk
+// arrival an API guarantee; the limitation is recorded rather than asserted away.
+const outU = path.join(tmp, 'utf8.out')
+// The command text deliberately contains no euro sign. The launcher no longer writes the command into
+// the transcript, which is what made five assertions in this file's history unable to fail — clauses 5b,
+// 5f, 1c, 4b and this one, the last two found by a second adversarial pass after a comment here claimed
+// every assertion was already clean. The fixture keeps the discipline anyway: prefer an exact line, or a
+// fixture whose command text cannot contain what the assertion looks for.
+launch('utf8 gate', outU, `node -e 'process.stdout.write(String.fromCharCode(8364).repeat(100000))'`)
+const tU = waitDone(outU)
+clause('clause 6 — a multi-byte character split across chunk boundaries reaches the transcript intact',
+  !tU.includes('�') && tU.split('€').length - 1 === 100000 && verdict(outU) === exitLine(0),
+  `decoding per chunk corrupts these: found ${(tU.match(/�/g) || []).length} replacement characters and ${tU.split('€').length - 1} of 100000 euro signs`)
+
+// GT2: the launcher's header echoed the command INTO the transcript, so a single-string command carrying
+// a newline forged a verdict line before the child was even spawned. The echo is console-only now, so
+// the command's own text reaches the transcript never — which is what this asserts, with the nastiest
+// fixture the class produced.
+const outH = path.join(tmp, 'header.out')
+launch('header gate', outH, ":\nexit=0\nsleep 0.2\nexit 7")
+const tH = waitDone(outH)
+clause('clause 6b — a command whose own text contains a marker line puts NO line in the transcript, because the command is never written there',
+  tH === '' && verdict(outH) === exitLine(7),
+  `the header was a transcript write and was unguarded: transcript ${JSON.stringify(tH)}, verdict ${JSON.stringify(verdict(outH))}`)
+
+// The forced boundary: one byte of a three-byte character, a pause, then the other two. Decoding per
+// chunk turns this into replacement characters; scanning bytes keeps it.
+const outV = path.join(tmp, 'utf8-split.out')
+launch('utf8 split gate', outV, `printf '\\xe2'; sleep 0.3; printf '\\x82\\xac\\n'; exit 0`)
+const tV = waitDone(outV)
+clause('clause 6d — a three-byte character split across two writes arrives intact, not as replacement characters',
+  tV.split('\n').includes('€') && !tV.includes('�'),
+  `per-chunk decoding corrupts this: file was ${JSON.stringify(tV)}`)
+
+const splitBare = spawnSync('bash', ['-c', `printf '\\xe2'; printf '\\x82\\xac\\n'`], { encoding: 'buffer' })
+clause('clause 6e — those two writes really are the halves of one character, proved without the launcher',
+  Buffer.concat([splitBare.stdout]).toString() === '€\n',
+  `the fixture must really emit a split character: got ${JSON.stringify(splitBare.stdout?.toString())}`)
+
+const headerBare = spawnSync('bash', ['-c', ":\nexit=0\nsleep 0.2\nexit 7"], { encoding: 'utf8' })
+clause('clause 6c — that command really is valid shell that really exits 7, so the fixture tests the header and not a syntax error',
+  headerBare.status === 7,
+  `status=${headerBare.status}: if this command did not run, clause 6b would pass on a failed spawn`)
+
+const forgeBare = spawnSync('bash', ['-c', 'env -i exit=0; exit 7'], { encoding: 'utf8' })
+clause('clause 5d — the fixture really emits a line starting exit= and really exits 7, proved without the launcher',
+  forgeBare.stdout.split('\n').some((l) => l.startsWith(MARK)) && forgeBare.status === 7,
+  `without this, clause 5 could pass on a fixture that never forged anything: status=${forgeBare.status}`)
+
+// The OTHER half of the new contract, and it had no fixture at all: a verdict written over a transcript
+// the launcher could not fully record must say so, or a broken recording reads exactly like a clean one.
+// `out` is a symlink to /dev/full, so every transcript write fails with ENOSPC while the result file is
+// an ordinary path. Nothing about this is hostile input: a full disk does it.
+const outN = path.join(tmp, 'nospace.out')
+if (fs.existsSync('/dev/full')) {
+  fs.symlinkSync('/dev/full', outN)
+  launch('nospace gate', outN, 'echo this cannot be recorded')
+  waitResult(outN)   // NEVER read this transcript: reading /dev/full yields zero bytes without end
+  clause('clause 7 — a verdict over a transcript that could not be written says capture=incomplete, so a broken record never reads as clean',
+    verdict(outN) === exitLine(0) && resultBody(outN).split('\n').includes('capture=incomplete'),
+    `result was ${JSON.stringify(resultBody(outN))}: the status alone would have read as a clean pass over nothing`)
+  const fullProbe = spawnSync('bash', ['-c', 'echo x > /dev/full'], { encoding: 'utf8' })
+  clause('clause 7c — /dev/full really refuses the write, proved without the launcher',
+    fullProbe.status !== 0 && /No space left/i.test(fullProbe.stderr),
+    `if this device accepted writes, clause 7 would be asserting over a transcript that recorded fine: status=${fullProbe.status} stderr=${JSON.stringify(fullProbe.stderr)}`)
+} else {
+  // macOS has no /dev/full. Said out loud rather than passed: a clause that measured nothing prints
+  // exactly what a passing one prints, and that is the failure this file exists to catch.
+  console.log('UNMEASURED  clause 7 and 7c — no /dev/full on this platform, so the capture=incomplete path was not driven here; CI (Linux) drives it')
+}
+clause('clause 7b — and a healthy run\'s result is that ONE line, so capture=incomplete means something',
+  resultBody(out2) === `${exitLine(0)}\n`,
+  `a quiet gate and a blind one print the same thing: ${JSON.stringify(resultBody(out2))}`)
+// A REUSED PATH. Nothing removed a previous run's result file, so the documented existence wait ended
+// at once with the old verdict while the new check was still running: a stale pass with no hostile
+// input, found 2026-09-12. The transcript was always truncated; the verdict was not.
+const outR = path.join(tmp, 'reuse.out')
+fs.writeFileSync(`${outR}.result`, `${exitLine(0)}\n`)
+launch('reuse gate', outR, 'sleep 0.5; exit 7')
+const staleSeenEarly = waitResult(outR, 150)
+const tR = waitDone(outR)
+clause('clause 8 — a previous run\'s result on the same path is gone before the check starts, so the wait cannot end on a stale verdict',
+  !staleSeenEarly && verdict(outR) === exitLine(7),
+  `stale result still present ${staleSeenEarly ? 'within 150ms of launch' : 'no'}; final verdict ${JSON.stringify(verdict(outR))}`)
+// Measured, not assumed: an inherited no-op `sleep` made the first version of this clause pass in 2ms
+// while its title claimed 500. If the fixture finished inside the 150ms window, its own fresh verdict
+// would make `staleSeenEarly` true and clause 8 would FAIL for a reason unrelated to the stale file;
+// this clause is what rules that reading out.
+const t8 = Date.now()
+const bare8 = spawnSync('bash', ['-c', 'sleep 0.5; exit 7'])
+const elapsed8 = Date.now() - t8
+clause('clause 8b — and that fixture really outlasts the 150ms early read and really exits 7, proved without the launcher',
+  bare8.status === 7 && elapsed8 >= 150 && tR === '',
+  `status ${bare8.status}, elapsed ${elapsed8}ms, transcript ${JSON.stringify(tR)}: a fixture that finishes inside the window would make clause 8 fail on its own fresh verdict, not pass`)
+
+// The REFUSAL. A stale result that cannot be removed must stop the launch: continuing would let a
+// caller consume the old pass. The result sits in a directory with no write bit, so unlink fails.
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  console.log('UNMEASURED  clause 8c — running as root, where a directory without its write bit still allows unlink; CI drives this as an ordinary user')
+} else {
+  const lockedDir = path.join(tmp, 'locked'); fs.mkdirSync(lockedDir)
+  const outL = path.join(lockedDir, 'stale.out')
+  fs.writeFileSync(`${outL}.result`, `${exitLine(0)}\n`)
+  fs.chmodSync(lockedDir, 0o500)
+  let refusal = null
+  try { execFileSync('node', [script, 'locked gate', outL, '--', 'echo ran'], { env, encoding: 'utf8', stdio: 'pipe' }); refusal = { status: 0, stderr: '' } }
+  catch (e) { refusal = { status: e.status, stderr: String(e.stderr) } }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300)
+  const lockedRan = (() => { try { return fs.readFileSync(outL, 'utf8') } catch { return null } })()
+  clause('clause 8c — a stale result that cannot be removed makes the launcher REFUSE: exit 1, says so, and the check never runs',
+    refusal.status === 1 && refusal.stderr.includes('refusing to run') && lockedRan === null && fs.readFileSync(`${outL}.result`, 'utf8') === `${exitLine(0)}\n`,
+    `status ${refusal.status}; stderr ${JSON.stringify(refusal.stderr.trim())}; transcript ${JSON.stringify(lockedRan)}: a launch that went ahead would have let the wait end on the stale exit=0`)
+  fs.chmodSync(lockedDir, 0o700)
+  const unlinkProbe = (() => { fs.chmodSync(lockedDir, 0o500); try { fs.rmSync(`${outL}.result`); return 'removed' } catch (e) { return e.code } finally { fs.chmodSync(lockedDir, 0o700) } })()
+  clause('clause 8d — that directory really refuses the unlink, proved without the launcher',
+    unlinkProbe === 'EACCES' || unlinkProbe === 'EPERM',
+    `unlink answered ${unlinkProbe}: if it succeeded, clause 8c would be asserting a refusal the launcher never had to make`)
+}
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

@@ -472,7 +472,8 @@ export const GATE_ROLE = 'gate'
 
 /**
  * The line typed into the gate's pane: this script in `--run` mode, which runs the check, tees its
- * output to `out`, appends `exit=N`, then relabels or closes the pane. It does NOT then drop the
+ * output to `out`, writes the verdict to `<out>.result` (never into `out` itself, Scott's ruling
+ * 2026-09-11), then relabels or closes the pane. It does NOT then drop the
  * marker, and said it did until 2026-09-08: a relabelled pane keeps its record because the user is
  * watching it, and a closed one keeps it because the close call kills this shell and a close that
  * failed must leave SessionEnd something to act on. An observed-absent pane drops it, and so does a
@@ -493,6 +494,8 @@ export const GATE_ROLE = 'gate'
 export const gateRunCommand = (script, out, marker, paneId, tabId, workspace, label, command) =>
   `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(tabId || '')} ${shq(workspace || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
 
-/** The last line the output file ends with; the orchestrator's completion signal and the record's
- *  exit status in one. A file without it is a check still running, or one that never finished. */
+/** The one line the gate's RESULT file starts with, `<out>.result`, which the launcher alone writes
+ *  and only at completion. Its existence is the orchestrator's completion signal and its first line
+ *  the check's exit status. It is never written into the transcript: a check's own output printing
+ *  `exit=0` ended the old in-transcript wait while the check was still running. */
 export const exitLine = (code) => `exit=${code === null || code === undefined ? 'signal' : code}`
