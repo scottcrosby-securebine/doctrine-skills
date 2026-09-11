@@ -57,7 +57,9 @@ const MUTATIONS = [
     from: "      if (atLineStart && line.length >= MARKER.length && line.subarray(0, MARKER.length).equals(MARKER)) parts.push(SPACE)",
     to: "      if (false) parts.push(SPACE)" },
   { name: 'the guard decodes each chunk as a string, corrupting a split multi-byte character', file: 'dctr-gate.mjs',
-    clause: 'clause 6 — a multi-byte character split across chunk boundaries survives the guard intact',
+    // Aimed at 6d, not 6: 6d forces the boundary with two deliberate writes, while 6's bulk fixture
+    // survives the mutation whenever the reader's chunks happen to align to the character width.
+    clause: 'clause 6d — a three-byte character split across two writes arrives intact',
     from: "    const chunk = Buffer.isBuffer(input) ? input : Buffer.from(String(input))",
     to: "    const chunk = Buffer.from(String(input))" },
   { name: "the launcher's own header is written unguarded, so a command's text can forge a marker", file: 'dctr-gate.mjs',
@@ -337,7 +339,12 @@ const MUTATIONS = [
     clause: 'clause 1p — a close that FAILED keeps the record of the pane it could not close',
     from: "        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }",
     to: "        dropMarker()\n        try { herdr(['pane', 'close', paneId]) } catch { /* the shell may already be gone */ }" },
-  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'a focus lookup that FAILED closes nothing and KEEPS the record',
+  // The clause named here is the one that must go red, and it is NOT the focus-lookup clause this
+  // entry named until 2026-09-11: that clause spawns a command that succeeds and never reaches the
+  // spawn-error handler this mutation edits. `anySuiteNotices` accepts ANY failing clause, so a
+  // mis-named entry passes the gate while advertising the wrong pin. Re-aimed at 1n, the clause that
+  // drives an unspawnable check.
+  { name: 'a spawn failure drops the record of the pane it left running', file: 'dctr-gate.mjs', clause: 'clause 1n: a check that could not be spawned keeps its record',
     from: "  child.on('error', (e) => { guarded(`${e.message}\\n`); receipt(`${exitLine(127)}\\n`); fs.closeSync(file); process.exit(127) })",
     to: "  child.on('error', (e) => { guarded(`${e.message}\\n`); receipt(`${exitLine(127)}\\n`); fs.closeSync(file); if (marker) try { fs.rmSync(marker, { force: true }) } catch {} ; process.exit(127) })" },
   { name: 'the darwin recorder drops its command', file: 'dctr-pane.mjs', clause: 'darwin: file first, script itself takes no -c, and the command is actually carried',

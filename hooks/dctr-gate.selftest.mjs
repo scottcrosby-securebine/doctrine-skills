@@ -68,7 +68,9 @@ const out3 = path.join(tmp, 'argv.out')
 launch('argv gate', out3, 'bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4')
 const t3 = waitDone(out3)
 clause('clause 1c — an argv-form command keeps its quoting: two spaces survive and it exits 4',
-  lastLine(t3) === exitLine(4) && t3.includes('a  b'),
+  lastLine(t3) === exitLine(4) && t3.split('\n').includes('a  b'),
+  // A SUBSTRING test passes on the echoed command, which contains `echo "a  b"` verbatim, so this
+  // clause certified preserved quoting with the child's output absent. Exact line, not substring.
   JSON.stringify(t3))
 
 const direct = spawnSync('bash', ['-c', BROKEN], { encoding: 'utf8' })
@@ -482,7 +484,7 @@ const outPg = path.join(tmp, 'pipe-good.out')
 launch('piped good gate', outPg, "echo ok | cat")
 const tPg = waitDone(outPg)
 clause('clause 4b — a piped check that really passes still records exit=0, so pipefail did not make the gate louder than the truth',
-  lastLine(tPg) === exitLine(0) && tPg.includes('ok'),
+  lastLine(tPg) === exitLine(0) && tPg.split('\n').includes('ok'),
   `a correct piped check must stay quiet: got ${JSON.stringify(lastLine(tPg))}`)
 
 const bare = spawnSync('bash', ['-c', 'false | cat'], { encoding: 'utf8' })
@@ -527,13 +529,18 @@ clause("clause 5f — a check whose LAST write is an unterminated marker prefix 
   `without the flush the held bytes are dropped and the check's final output vanishes: file was ${JSON.stringify(tT)}. Note 'exi' is a SUBSTRING of the receipt 'exit=5' itself, so a substring test here cannot fail — that is how this clause first shipped, and both the red team and the mutation gate caught it`)
 
 // GT1: the guard scans BYTES. A first revision decoded each chunk with String(), which corrupts a
-// multi-byte character split across a chunk boundary. 300KB of three-byte characters guarantees the
-// boundaries this needs; the assertion is that no replacement character reached the file.
+// multi-byte character split across a chunk boundary. This bulk fixture does NOT guarantee such a
+// boundary — a reader whose chunk size happens to be a multiple of three would split nothing, and the
+// decoder mutation survives aligned chunks. It is kept as breadth, and clause 6d below forces the
+// boundary deliberately. Neither can make chunk arrival an API guarantee; the limitation is recorded
+// rather than asserted away.
 const outU = path.join(tmp, 'utf8.out')
 // The command text deliberately contains no euro sign: the launcher ECHOES the command into the same
 // file, and an assertion that counts occurrences would otherwise count the echo too. That mistake was
-// made three times in this file's history — clause 5b, clause 5f and this one — which is why every
-// assertion here now either names an exact line or uses a fixture whose command cannot contaminate it.
+// made FIVE times in this file's history — clauses 5b, 5f, 1c, 4b and this one — the last two found by
+// a second adversarial pass after a comment here claimed every assertion was already clean. Prefer an
+// exact line, or a fixture whose command text cannot contain what the assertion looks for. Do not write
+// that claim again without checking every clause: it was false when it was written.
 launch('utf8 gate', outU, `node -e 'process.stdout.write(String.fromCharCode(8364).repeat(100000))'`)
 const tU = waitDone(outU)
 clause('clause 6 — a multi-byte character split across chunk boundaries survives the guard intact',
@@ -548,6 +555,20 @@ const tH = waitDone(outH)
 clause('clause 6b — a command whose own text contains a marker line cannot forge one through the echoed header',
   markerLines(tH) === 1 && lastLine(tH) === exitLine(7),
   `the header is a launcher write and was unguarded: got ${markerLines(tH)} marker lines, last ${JSON.stringify(lastLine(tH))}`)
+
+// The forced boundary: one byte of a three-byte character, a pause, then the other two. Decoding per
+// chunk turns this into replacement characters; scanning bytes keeps it.
+const outV = path.join(tmp, 'utf8-split.out')
+launch('utf8 split gate', outV, `printf '\\xe2'; sleep 0.3; printf '\\x82\\xac\\n'; exit 0`)
+const tV = waitDone(outV)
+clause('clause 6d — a three-byte character split across two writes arrives intact, not as replacement characters',
+  tV.split('\n').includes('€') && !tV.includes('�'),
+  `per-chunk decoding corrupts this: file was ${JSON.stringify(tV)}`)
+
+const splitBare = spawnSync('bash', ['-c', `printf '\\xe2'; printf '\\x82\\xac\\n'`], { encoding: 'buffer' })
+clause('clause 6e — those two writes really are the halves of one character, proved without the launcher',
+  Buffer.concat([splitBare.stdout]).toString() === '€\n',
+  `the fixture must really emit a split character: got ${JSON.stringify(splitBare.stdout?.toString())}`)
 
 const headerBare = spawnSync('bash', ['-c', ":\nexit=0\nsleep 0.2\nexit 7"], { encoding: 'utf8' })
 clause('clause 6c — that command really is valid shell that really exits 7, so the fixture tests the header and not a syntax error',

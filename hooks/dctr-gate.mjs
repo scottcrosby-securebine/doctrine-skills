@@ -355,11 +355,13 @@ if (argv[0] === '--run') {
           // PUBLISH a real record, do not just keep whatever is there. If writeMarker was what
           // failed, the file is still reserveMarker's `{}` — it carries no paneId and no tabId, so
           // SessionEnd receives a marker it cannot act on while the log line claims otherwise.
-          // NOT pinned, and no fixture currently reaches it: the placement writeMarker above runs
-          // BEFORE `pane run`, so by the time a rollback happens the record normally already carries
-          // its ids. This branch is for the narrow case where THAT write is what failed, leaving
-          // reserveMarker's `{}` — which SessionEnd cannot act on. Reaching it needs the seats
-          // directory to become unwritable between reserve and write. Missing fixture, not dead code.
+          // PINNED, and the comment that said otherwise was stale. This branch is for the narrow case
+          // where the placement's own writeMarker is what failed, leaving reserveMarker's `{}` — which
+          // SessionEnd cannot act on. Reaching it needs the seats directory to become unwritable
+          // between reserve and write, and the selftest's fake herdr does exactly that (chmod 500 on
+          // the placement rename, 700 again on the close). Clause 1o drives it and a mutation removes
+          // this republication. Found 2026-09-11: the comment claimed a missing fixture that had
+          // since been written, which sends the next maintainer to build coverage that exists.
           // The success line is GATED on the publish, and it was not: both lines printed, the second
           // contradicting the first, and an operator reading "its record is published" then believed
           // SessionEnd could reach a pane whose record was still reserveMarker's `{}`.
