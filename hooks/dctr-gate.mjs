@@ -12,7 +12,9 @@
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same two
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
-// on malformed arguments — a display failure must never fail the gate it is showing.
+// on malformed arguments or when a previous run's `<out>.result` cannot be removed — a display failure
+// must never fail the gate it is showing. One path is one check at a time: two launches on the same
+// `<out>` are not detected, and the first to finish publishes under the other's name.
 //
 // TWO FILES, and the split is the whole point (Scott's ruling 2026-09-11, after three review rounds
 // each found a new defect in the machinery that kept them in one file):
@@ -83,6 +85,10 @@ if (argv[0] === '--run') {
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
   const resultFile = `${out}.result`
+  // The outer launcher already cleared a stale result in the caller's process, which is the removal
+  // clause 8 pins. This one covers `--run` entered directly (the pane line, re-run by hand) and can
+  // fail quietly: the transcript is open, so refusing here would leave a live pane over no verdict.
+  try { fs.rmSync(resultFile, { force: true }) } catch { /* the outer launcher is the guarantee */ }
   // A short write leaves the transcript incomplete, and an earlier revision ignored the count that
   // says so while deriving state from the whole intended buffer. Write it all, and remember if we
   // could not: a verdict over a broken record must say so rather than read as clean.
@@ -155,7 +161,9 @@ if (argv[0] === '--run') {
   // the two paths are behaviourally identical: with the handler running synchronously through to
   // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
-    fs.closeSync(file)
+    // A close that throws (ENOSPC or a network filesystem flushing late) has lost bytes the transcript
+    // was meant to hold. Say so in the verdict rather than dying with none.
+    try { fs.closeSync(file) } catch { captureFailed = true }
     writeResult(code)
     // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`
     // kills the shell this process runs in; `pane get` and `pane rename` do not, and an earlier

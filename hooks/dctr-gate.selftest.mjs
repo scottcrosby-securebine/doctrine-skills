@@ -190,14 +190,15 @@ fs.writeFileSync(calls, '')
 execFileSync('node', [script, 'pane gate', path.join(tmp, 'pane.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
 const split = callLine(/^pane split /)
 clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher was started in',
-  split.includes(` --cwd ${HERE}`) && callLine(/^pane run w1:pS /).includes('--run'),
+  // Exact token: `includes(` --cwd ${HERE}`)` was also true of `--cwd ${HERE}-wrong` (round 5).
+  split.split(' ').includes('--cwd') && split.split(' ')[split.split(' ').indexOf('--cwd') + 1] === HERE && callLine(/^pane run w1:pS /).includes('--run'),
   `split: ${split}; run: ${callLine(/^pane run /)}`)
 
 fs.writeFileSync(calls, '')
 execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
 const create = callLine(/^tab create /)
 clause('clause 1e: the tab path creates with the same --cwd',
-  create.includes(` --cwd ${HERE}`) && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
+  create.split(' ').includes('--cwd') && create.split(' ')[create.split(' ').indexOf('--cwd') + 1] === HERE && !callLine(/^pane split /) && callLine(/^pane run w1:pT /).includes('--run'),
   `create: ${create}`)
 
 // THE WIRING FROM PLACEMENT TO COMPLETION, which nothing joined: the clause above only asked that
@@ -417,7 +418,7 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
     `close attempted: ${e.calls.split('\n').includes('pane close w1:pS')}; marker kept: ${fs.existsSync(e.m)}`)
 
   clause('clause 1m: the five differ ONLY in the herdr reply, so the record\'s fate is what the reply decides and nothing else',
-    [a, b, c, d, e].every((r) => r.calls.includes('pane get w1:pS')),
+    [a, b, c, d, e].every((r) => r.calls.split('\n').includes('pane get w1:pS')),
     'if any of them never called pane get, its clause is measuring the launcher standing down')
 
   clause('clause 3d: the fixtures really answer differently, proved without the launcher',
@@ -604,19 +605,18 @@ if (fs.existsSync('/dev/full')) {
   clause('clause 7 — a verdict over a transcript that could not be written says capture=incomplete, so a broken record never reads as clean',
     verdict(outN) === exitLine(0) && resultBody(outN).split('\n').includes('capture=incomplete'),
     `result was ${JSON.stringify(resultBody(outN))}: the status alone would have read as a clean pass over nothing`)
+  const fullProbe = spawnSync('bash', ['-c', 'echo x > /dev/full'], { encoding: 'utf8' })
+  clause('clause 7c — /dev/full really refuses the write, proved without the launcher',
+    fullProbe.status !== 0 && /No space left/i.test(fullProbe.stderr),
+    `if this device accepted writes, clause 7 would be asserting over a transcript that recorded fine: status=${fullProbe.status} stderr=${JSON.stringify(fullProbe.stderr)}`)
 } else {
   // macOS has no /dev/full. Said out loud rather than passed: a clause that measured nothing prints
   // exactly what a passing one prints, and that is the failure this file exists to catch.
-  console.log('UNMEASURED  clause 7 — no /dev/full on this platform, so the capture=incomplete path was not driven here; CI (Linux) drives it')
+  console.log('UNMEASURED  clause 7 and 7c — no /dev/full on this platform, so the capture=incomplete path was not driven here; CI (Linux) drives it')
 }
 clause('clause 7b — and a healthy run\'s result is that ONE line, so capture=incomplete means something',
   resultBody(out2) === `${exitLine(0)}\n`,
   `a quiet gate and a blind one print the same thing: ${JSON.stringify(resultBody(out2))}`)
-const fullProbe = spawnSync('bash', ['-c', 'echo x > /dev/full'], { encoding: 'utf8' })
-clause('clause 7c — /dev/full really refuses the write, proved without the launcher',
-  fullProbe.status !== 0 && /No space left/i.test(fullProbe.stderr),
-  `if this device accepted writes, clause 7 would be asserting over a transcript that recorded fine: status=${fullProbe.status} stderr=${JSON.stringify(fullProbe.stderr)}`)
-
 // A REUSED PATH. Nothing removed a previous run's result file, so the documented existence wait ended
 // at once with the old verdict while the new check was still running: a stale pass with no hostile
 // input, found in round 4. The transcript was always truncated; the verdict was not.
@@ -628,9 +628,16 @@ const tR = waitDone(outR)
 clause('clause 8 — a previous run\'s result on the same path is gone before the check starts, so the wait cannot end on a stale verdict',
   !staleSeenEarly && verdict(outR) === exitLine(7),
   `stale result still present ${staleSeenEarly ? 'within 150ms of launch' : 'no'}; final verdict ${JSON.stringify(verdict(outR))}`)
-clause('clause 8b — and that fixture really finishes after the early read and really exits 7, proved without the launcher',
-  spawnSync('bash', ['-c', 'sleep 0.5; exit 7']).status === 7 && tR === '',
-  'if the check finished inside 150ms, clause 8 could pass on a fresh verdict that arrived in time rather than on the stale one being removed')
+// Measured, not assumed: an inherited no-op `sleep` made the first version of this clause pass in 2ms
+// while its title claimed 500. If the fixture finished inside the 150ms window, its own fresh verdict
+// would make `staleSeenEarly` true and clause 8 would FAIL for a reason unrelated to the stale file;
+// this clause is what rules that reading out.
+const t8 = Date.now()
+const bare8 = spawnSync('bash', ['-c', 'sleep 0.5; exit 7'])
+const elapsed8 = Date.now() - t8
+clause('clause 8b — and that fixture really outlasts the 150ms early read and really exits 7, proved without the launcher',
+  bare8.status === 7 && elapsed8 >= 150 && tR === '',
+  `status ${bare8.status}, elapsed ${elapsed8}ms, transcript ${JSON.stringify(tR)}: a fixture that finishes inside the window would make clause 8 fail on its own fresh verdict, not pass`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)
