@@ -3,15 +3,18 @@
 //   node hooks/dctr-gate.mjs <label> <out-file> -- <command...>
 //
 // Everything after `--` is the check's argv, passed through exactly as given: one argument runs
-// under `bash -c`, several are executed as they stand, so `bash -c "a; b"` keeps its quoting. The
-// first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+// under `bash -o pipefail -c`, several are executed as they stand, so `bash -c "a; b"` keeps its
+// quoting. The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+// `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
 // Run by the doctrine orchestrator at step 3 for a check that will outrun the Bash tool's own
 // ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same output
 // file. Either way the output file ends with `exit=N` when the check is done; that line is the
-// completion signal to monitor and the exit status to record. The pane is display; the file is the
+// completion signal to monitor and the exit status to record, and the LAUNCHER OWNS IT: a child line
+// that would start with the marker is written with one leading space, so a check that prints `exit=0`
+// of its own cannot end the wait early. The pane is display; the file is the
 // record. It exits 0 once the check is launched, 1 only on malformed arguments, and the check's
 // own status is in the file — a display failure must never fail the gate it is showing.
 //
@@ -61,18 +64,76 @@ if (argv[0] === '--run') {
   const command = argv.slice(dash + 1)
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const file = fs.openSync(out, 'w')
+  // ONLY THE LAUNCHER MAY WRITE THE COMPLETION MARKER, and that means every OTHER write is guarded —
+  // the child's output and the launcher's own header alike. The completion contract is a line starting
+  // `exit=`, so anything else that produces one ends the documented `until grep -q '^exit='` wait
+  // while the check is still running. It needs no hostile input: `env` with a variable named `exit`
+  // prints `exit=0`, and a single-string command containing a newline puts its own forged line into
+  // the echoed header BEFORE the child is even spawned (found by the red team, 2026-09-11, after a
+  // first repair that guarded only the child and claimed ownership it did not have).
+  //
+  // The marker is DERIVED from the function that owns it rather than restated: `exitLine('')` is
+  // exactly the marker with no code after it. A literal here would fork from dctr-lib.mjs the first
+  // time either was corrected.
+  //
+  // BYTES, NOT STRINGS. An earlier revision of this guard decoded each chunk with `String(chunk)`,
+  // which corrupts any multi-byte character split across a chunk boundary: a three-byte `€` arriving
+  // as one byte then two decoded to three replacement characters, where the original `fs.writeSync`
+  // of the raw chunk had preserved it. The marker is ASCII, so the scan is byte-oriented and every
+  // other byte is passed through untouched.
+  const MARKER = Buffer.from(exitLine(''))
+  const SPACE = Buffer.from(' ')
+  const NEWLINE = Buffer.from('\n')
   let atLineStart = true
-  const both = (chunk) => { fs.writeSync(file, chunk); atLineStart = String(chunk).endsWith('\n'); try { process.stdout.write(chunk) } catch { /* no terminal on the detached path */ } }
-  both(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`)
+  let carry = Buffer.alloc(0)
+  const raw = (buf) => { fs.writeSync(file, buf); try { process.stdout.write(buf) } catch { /* no terminal on the detached path */ } }
+  /** Every write that is not the completion receipt. A line that would start with the marker gets one
+   *  leading space and stays readable. `carry` holds back at most four bytes, and only a tail that
+   *  could still grow into the marker at a line start, so a chunk boundary splitting `exi|t=` cannot
+   *  smuggle one through. It is flushed at close, or the check's last word is lost. */
+  const guarded = (input) => {
+    const chunk = Buffer.isBuffer(input) ? input : Buffer.from(String(input))
+    const s = carry.length ? Buffer.concat([carry, chunk]) : chunk
+    carry = Buffer.alloc(0)
+    const parts = []
+    let i = 0
+    while (i < s.length) {
+      const nl = s.indexOf(0x0a, i)
+      const end = nl === -1 ? s.length : nl + 1
+      const line = s.subarray(i, end)
+      if (nl === -1 && atLineStart && line.length < MARKER.length && MARKER.subarray(0, line.length).equals(line)) { carry = Buffer.from(line); break }
+      if (atLineStart && line.length >= MARKER.length && line.subarray(0, MARKER.length).equals(MARKER)) parts.push(SPACE)
+      parts.push(line)
+      atLineStart = nl !== -1
+      i = end
+    }
+    if (parts.length) raw(Buffer.concat(parts))
+  }
+  /** The completion receipt: the one unguarded write, because it is the one the contract is about. */
+  const receipt = (text) => { raw(Buffer.from(text)); atLineStart = text.endsWith('\n') }
+  // A closed display pipe is a DISPLAY failure and must never fail the gate it is showing, which the
+  // header has always promised and the async `error` event did not honour: an EPIPE on the detached
+  // path ended the process at 1 with only a header in the file and no receipt at all.
+  process.stdout.on('error', () => { /* display only, never the gate */ })
+  guarded(`\x1b[2m── doctrine gate · ${label}\x1b[0m\n$ ${command.length === 1 ? command[0] : command.map(shq).join(' ')}\n`)
+  // `-o pipefail` because a gate passes on its exit status and a pipeline reports only its LAST
+  // stage: `bash -c 'false | cat'` exits 0, so a check piped into `tee` recorded a pass it never
+  // earned. Measured, and the masking is narrower than it first looks: `true | false` and
+  // `false && true` both already exit non-zero, so only an upstream failure under a succeeding final
+  // stage was hidden. FAIL DIRECTION: closed. A pipeline whose consumer deliberately stops early
+  // (`... | head -1`) now surfaces its SIGPIPE as a gate failure, which is the safe direction to be
+  // wrong in: a false failure is visible and a false pass is not.
   const child = command.length === 1
-    ? spawn('bash', ['-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
+    ? spawn('bash', ['-o', 'pipefail', '-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
   // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.
-  child.on('error', (e) => { both(`${e.message}\n${exitLine(127)}\n`); fs.closeSync(file); process.exit(127) })
-  child.stdout.on('data', both)
-  child.stderr.on('data', both)
+  child.on('error', (e) => { guarded(`${e.message}\n`); receipt(`${exitLine(127)}\n`); fs.closeSync(file); process.exit(127) })
+  child.stdout.on('data', guarded)
+  child.stderr.on('data', guarded)
+  child.stdout.on('error', () => { /* display only, never the gate */ })
+  child.stderr.on('error', () => { /* display only, never the gate */ })
   // The progress name. Only on the pane path: `paneId` is empty when this same mode serves the
   // detached path, and a rename with no pane is a herdr call that can only fail. The herdr call is
   // synchronous and bounded at HERDR_TIMEOUT_MS, so a hung server delays this pump rather than
@@ -90,10 +151,14 @@ if (argv[0] === '--run') {
   // the two paths are behaviourally identical: with the handler running synchronously through to
   // process.exit, a clearInterval and no clearInterval cannot produce different output.
   child.on('close', (code) => {
+    // Flush a held-back marker prefix before the marker itself is written, or `exi` from the child's
+    // last unterminated write would land after the exit line instead of before it.
+    // Flush a held-back marker prefix, or the check's final bytes are dropped without a trace.
+    if (carry.length) { raw(carry); carry = Buffer.alloc(0); atLineStart = false }
     // A check whose last write has no newline would otherwise fuse with the exit line, and the
     // monitor grepping for `^exit=` would wait forever (the selftest's printf fixture did this).
-    if (!atLineStart) both('\n')
-    both(`${exitLine(code)}\n`)
+    if (!atLineStart) { raw(NEWLINE); atLineStart = true }
+    receipt(`${exitLine(code)}\n`)
     fs.closeSync(file)
     // ASK FIRST, then remove the record only on the branches that actually act. Only `pane close`
     // kills the shell this process runs in; `pane get` and `pane rename` do not, and an earlier

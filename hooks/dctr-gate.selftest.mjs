@@ -35,6 +35,8 @@ const waitDone = (out, ms = 8000) => {
   try { return fs.readFileSync(out, 'utf8') } catch { return '' }
 }
 const lastLine = (t) => t.trim().split('\n').pop()
+// Derived from the owner, never restated, for the same reason the launcher derives it.
+const MARK = exitLine('')
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -463,6 +465,114 @@ clause('clause 3b: the recording herdr really answers a split and a tab create w
   spawnSync(`${bin2}/herdr`, ['tab', 'create'], { encoding: 'utf8' }).stdout.includes('w1:pT') &&
   spawnSync(`${bin2}/herdr`, ['pane', 'layout'], { encoding: 'utf8', env: { ...process.env, DCTR_TEST_LAYOUT_FAILS: '1' } }).status === 1,
   'if the fake answered nothing, both paths would fall to detached and the clauses above would read an empty call list')
+
+// ---------------------------------------------------------------------------------------------
+// B1: a pipeline reports only its last stage, so the single-string path runs under `-o pipefail`.
+// Found 2026-09-11 by comparison against another project's command policy, which refuses five
+// separate shell shapes around a protected command. Ours cannot refuse the shape (a gate is
+// whatever the project documents), so it makes the status honest instead.
+const outP = path.join(tmp, 'pipe.out')
+launch('piped gate', outP, "false | cat")
+const tP = waitDone(outP)
+clause('clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
+  lastLine(tP) === exitLine(1),
+  `without pipefail bash reports the last stage and this reads ${JSON.stringify(lastLine(tP))}, a pass the check never earned`)
+
+const outPg = path.join(tmp, 'pipe-good.out')
+launch('piped good gate', outPg, "echo ok | cat")
+const tPg = waitDone(outPg)
+clause('clause 4b — a piped check that really passes still records exit=0, so pipefail did not make the gate louder than the truth',
+  lastLine(tPg) === exitLine(0) && tPg.includes('ok'),
+  `a correct piped check must stay quiet: got ${JSON.stringify(lastLine(tPg))}`)
+
+const bare = spawnSync('bash', ['-c', 'false | cat'], { encoding: 'utf8' })
+const withPf = spawnSync('bash', ['-o', 'pipefail', '-c', 'false | cat'], { encoding: 'utf8' })
+clause('clause 4c — the fixture really carries the defect: bash alone exits 0 on it and only pipefail exits non-zero',
+  bare.status === 0 && withPf.status !== 0,
+  `this clause is what proves clause 4 measures anything: bare=${bare.status} pipefail=${withPf.status}`)
+
+// ---------------------------------------------------------------------------------------------
+// B2: the launcher owns the completion marker. A check printing its own `exit=` line would end the
+// documented `until grep -q '^exit='` wait while still running. `env` with a variable named `exit`
+// does it with no hostile input, which is the fixture below.
+const markerLines = (t) => t.split('\n').filter((l) => l.startsWith(MARK)).length
+const outF = path.join(tmp, 'forge.out')
+launch('forging gate', outF, "env -i exit=0; exit 7")
+const tF = waitDone(outF)
+clause('clause 5 — a check that prints its own exit= line leaves exactly ONE marker line, and it is the launcher\'s real status',
+  markerLines(tF) === 1 && lastLine(tF) === exitLine(7),
+  `got ${markerLines(tF)} marker lines, last ${JSON.stringify(lastLine(tF))}: an early match would have ended the wait while the check still ran`)
+clause('clause 5b — the child\'s own line is still in the file, readable, one space in from the margin',
+  tF.split('\n').includes(' exit=0'),
+  'escaping must keep the output, not drop it: a quieter gate and a blinder one print the same thing. A SUBSTRING test passes here on the echoed command `$ env -i exit=0; exit 7`, which is how this clause first shipped unable to fail')
+
+const outQ = path.join(tmp, 'quiet.out')
+launch('quiet gate', outQ, "echo no marker here")
+const tQ = waitDone(outQ)
+clause('clause 5c — a check with no marker of its own is untouched and still has exactly one marker line',
+  markerLines(tQ) === 1 && tQ.split('\n').includes('no marker here'),
+  'the guard must not indent ordinary output, and the line must appear flush with the margin — note the launcher echoes the command itself, so a substring test here would pass on the echo')
+
+// The flush at close is pinned HERE, not by clause 5e. The mutation gate proved 5e does not pin it:
+// that fixture completes the token in a later chunk, so `carry` is already empty by close and
+// disabling the flush changes nothing observable. The flush only matters when the child's FINAL write
+// is an unterminated marker prefix with nothing after it — then the held bytes are the last thing the
+// check said, and dropping them loses output silently, which is the one failure mode a quieter gate
+// and a blinder one cannot be told apart by.
+const outT = path.join(tmp, 'tail.out')
+launch('tail gate', outT, "printf 'exi'; exit 5")
+const tT = waitDone(outT)
+clause("clause 5f — a check whose LAST write is an unterminated marker prefix keeps that output, and the status is still the check's",
+  tT.split('\n').includes('exi') && lastLine(tT) === exitLine(5) && markerLines(tT) === 1,
+  `without the flush the held bytes are dropped and the check's final output vanishes: file was ${JSON.stringify(tT)}. Note 'exi' is a SUBSTRING of the receipt 'exit=5' itself, so a substring test here cannot fail — that is how this clause first shipped, and both the red team and the mutation gate caught it`)
+
+// GT1: the guard scans BYTES. A first revision decoded each chunk with String(), which corrupts a
+// multi-byte character split across a chunk boundary. 300KB of three-byte characters guarantees the
+// boundaries this needs; the assertion is that no replacement character reached the file.
+const outU = path.join(tmp, 'utf8.out')
+// The command text deliberately contains no euro sign: the launcher ECHOES the command into the same
+// file, and an assertion that counts occurrences would otherwise count the echo too. That mistake was
+// made three times in this file's history — clause 5b, clause 5f and this one — which is why every
+// assertion here now either names an exact line or uses a fixture whose command cannot contaminate it.
+launch('utf8 gate', outU, `node -e 'process.stdout.write(String.fromCharCode(8364).repeat(100000))'`)
+const tU = waitDone(outU)
+clause('clause 6 — a multi-byte character split across chunk boundaries survives the guard intact',
+  !tU.includes('�') && tU.split('€').length - 1 === 100000 && lastLine(tU) === exitLine(0),
+  `decoding per chunk corrupts these: found ${(tU.match(/�/g) || []).length} replacement characters and ${tU.split('€').length - 1} of 100000 euro signs`)
+
+// GT2: the launcher's own header echoes the command, so a single-string command carrying a newline
+// forged a marker line BEFORE the child was spawned. Every non-receipt write is guarded now.
+const outH = path.join(tmp, 'header.out')
+launch('header gate', outH, ":\nexit=0\nsleep 0.2\nexit 7")
+const tH = waitDone(outH)
+clause('clause 6b — a command whose own text contains a marker line cannot forge one through the echoed header',
+  markerLines(tH) === 1 && lastLine(tH) === exitLine(7),
+  `the header is a launcher write and was unguarded: got ${markerLines(tH)} marker lines, last ${JSON.stringify(lastLine(tH))}`)
+
+const headerBare = spawnSync('bash', ['-c', ":\nexit=0\nsleep 0.2\nexit 7"], { encoding: 'utf8' })
+clause('clause 6c — that command really is valid shell that really exits 7, so the fixture tests the header and not a syntax error',
+  headerBare.status === 7,
+  `status=${headerBare.status}: if this command did not run, clause 6b would pass on a failed spawn`)
+
+const tailBare = spawnSync('bash', ['-c', "printf 'exi'; exit 5"], { encoding: 'utf8' })
+clause('clause 5g — that fixture really writes an unterminated prefix and really exits 5, proved without the launcher',
+  tailBare.stdout === 'exi' && tailBare.status === 5,
+  `stdout=${JSON.stringify(tailBare.stdout)} status=${tailBare.status}`)
+
+const forgeBare = spawnSync('bash', ['-c', 'env -i exit=0; exit 7'], { encoding: 'utf8' })
+clause('clause 5d — the fixture really emits a line starting exit= and really exits 7, proved without the launcher',
+  forgeBare.stdout.split('\n').some((l) => l.startsWith(MARK)) && forgeBare.status === 7,
+  `without this, clause 5 could pass on a fixture that never forged anything: status=${forgeBare.status}`)
+
+// A chunk boundary splitting the marker. Arrival in two chunks is not guaranteed by any API, so this
+// asserts the invariant rather than the carry path: whichever way the bytes arrive, the file must
+// carry one marker line and the real status. Recorded as a known limit rather than dressed up.
+const outS = path.join(tmp, 'split.out')
+launch('split gate', outS, "printf 'exi'; sleep 0.3; printf 't=0\\n'; exit 5")
+const tS = waitDone(outS)
+clause('clause 5e — a marker split across two writes still leaves one marker line and the real status',
+  markerLines(tS) === 1 && lastLine(tS) === exitLine(5),
+  `got ${markerLines(tS)} marker lines, last ${JSON.stringify(lastLine(tS))}`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)
