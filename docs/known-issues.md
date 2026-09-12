@@ -37,7 +37,7 @@ a node process: `spawnSync(process.execPath, ["tools/doc-check.mjs"])` returned
 `error: spawnSync /usr/bin/node EPERM` together with `status: 0` and empty stdout and stderr. The same
 call in an unsandboxed shell on the same host returns `status: 0` with the gate's real output and no
 error, which is the control. A runner that spawns its own workers (most test runners do) can therefore
-come back looking green with nothing behind it, and only `r.error` separates the two.
+come back looking green with nothing behind it, depending on whether it reads the spawn error; the status alone does not separate the two, the error and the absent output do.
 **What is not established**: the enforcing mechanism. This host sets
 `apparmor_restrict_unprivileged_userns=1` and `unshare -Ur true` fails in a plain shell here, but the
 same command returned 0 inside the seat, so the user-namespace restriction is not a sufficient
