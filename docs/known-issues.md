@@ -28,3 +28,17 @@ ever gains an optional field.
 **The mutation gate covers `hooks/` only, by decision rather than by oversight.** The reason is
 written in `hooks/dctr-mutations.mjs`'s header. A repair under `tools/` is pinned by that tool's own
 three-clause tamper test, which runs in CI.
+
+**A nested spawn inside a codex seat can fail while reporting success, on this host.** Probed
+2026-09-12 under `codex:codex-rescue` in `--sandbox read-only`. The seat ran this repo's gates
+directly without trouble (`node tools/doc-check.mjs` exit 0 with its findings count, and
+`node hooks/dctr-seat.selftest.mjs` exit 0 with its PASS lines). What failed was a spawn from inside
+a node process: `spawnSync(process.execPath, ["tools/doc-check.mjs"])` returned
+`error: spawnSync /usr/bin/node EPERM` together with `status: 0` and empty stdout and stderr. The same
+call in an unsandboxed shell on the same host returns `status: 0` with the gate's real output and no
+error, which is the control. A runner that spawns its own workers (most test runners do) can therefore
+come back looking green with nothing behind it, and only `r.error` separates the two.
+**What is not established**: the enforcing mechanism. This host sets
+`apparmor_restrict_unprivileged_userns=1` and `unshare -Ur true` fails in a plain shell here, but the
+same command returned 0 inside the seat, so the user-namespace restriction is not a sufficient
+explanation and no second host has been tested. Do not write a rule that asserts codex cannot spawn.
