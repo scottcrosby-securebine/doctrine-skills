@@ -33,11 +33,11 @@ Until you rule on an item it binds nothing: no seat treats it as a constraint an
 
 - You rule the end state.
 - Epic records are written only for live work that covers it.
-- Every open issue gets one destination: a member of an epic, out of scope, or the post-done backlog.
+- Every open issue, and every open item in a markdown tracker, gets one destination: a member of an epic, out of scope, or the post-done backlog. You rule each one, and the project file records the ruling.
 - History is kept as one linked index. No record is written for a past epic and nothing is deleted.
 - A cutover step rewrites the instructions that route tracking somewhere else. Each cutover edit is put to you and ruled one at a time. Trackers another plugin generates are reported and never edited. Edits to `CLAUDE.md` or `AGENTS.md` are flagged separately. GitHub Projects boards are reported as a tracking surface the run could not read.
 
-It works with whatever tracker the repo names, and with none. Issue numbers are recorded as written and never looked up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
+It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or the README. Where none names one but the remote has open issues, it asks you whether those are the tracker. It also works with no tracker at all. Issue numbers are recorded as written and never looked up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
 
 **The format check.** At every state change, and at the start of every session in a tracked repo, the orchestrator runs:
 
@@ -59,7 +59,7 @@ The hub leaves four slots to the wrapper.
 
 **Red team.** The hub's step 4 seat, on the axes the specification names.
 
-**The record.** Run state goes where the hub puts it. The two tracked files are the project's contracts and are not the run record. Adopt mode's records are prose, so they run under the hub's prose-deliverable exit, which this wrapper adopts by name.
+**The record.** Run state goes where the hub puts it, under `.doctrine/records/` until a project file names another path. The two tracked files are the project's contracts and are not the run record. Both modes produce prose records, so both run under the hub's prose-deliverable exit, which this wrapper adopts by name.
 
 ## A worked example
 

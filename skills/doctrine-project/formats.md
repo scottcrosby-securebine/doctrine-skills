@@ -51,7 +51,7 @@ Records: <path, relative to repo root>
 
 The roster carries no state. An epic's state lives only in its record.
 
-An `## Open issues` row's Issue cell is the tracker id, or, for an open item read from a markdown tracker, its `<path>:<line>`.
+An `## Open issues` row's Issue cell is the tracker id, or, for an open item read from a markdown tracker, its `<path>:<line>`. A row is never removed: when its issue or item closes the row stays, so every `destination` ruling keeps the row it names.
 
 ## `docs/epics/<ID>.md`
 
