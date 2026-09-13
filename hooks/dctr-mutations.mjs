@@ -37,7 +37,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 // inside the gate, which is the loudest quiet failure this harness has.
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
-  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'hooks.json']
+  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-token.mjs', 'hooks.json']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -563,6 +563,22 @@ const MUTATIONS = [
     from: 'if (!Array.isArray(panes)) return null', to: 'if (!Array.isArray(panes)) return []' },
   { name: 'project status: a missing codex state dir reads as no jobs', file: 'dctr-project.mjs', clause: 'CLI status — HERDR_ENV unset prints live seats: unknown, and a missing codex state dir prints codex jobs: unknown',
     from: '  fs.readdirSync(codexStateDir())\n', to: '' },
+  { name: 'the owed suffix is published', file: 'dctr-lib.mjs', clause: 'T-token: each option set builds its exact argv',
+    from: "`doctrine=r${round}·e${exitCount}·v${valve}${owed ? '·owed' : ''}`,",
+    to: "`doctrine=r${round}·e${exitCount}·v${valve}`," },
+  { name: 'the epic token is published', file: 'dctr-lib.mjs', clause: 'T-token: each option set builds its exact argv',
+    from: "    ...(epic ? ['--token', `epic=${epic}`] : []),\n", to: '' },
+  { name: 'the phase token is published', file: 'dctr-lib.mjs', clause: 'T-token: each option set builds its exact argv',
+    from: "    ...(phase ? ['--token', `phase=${phase}`] : []),\n", to: '' },
+  { name: 'an epic or phase value must match the ID pattern', file: 'dctr-token.mjs', clause: 'T-token: every malformed call exits 1',
+    from: '  if (value === undefined || !ID_RE.test(value)) usage()', to: '  if (value === undefined) usage()' },
+  { name: 'a repeated flag is refused', file: 'dctr-token.mjs', clause: 'T-token: every malformed call exits 1',
+    from: '  if (!key || Object.hasOwn(opts, key)) usage()', to: '  if (!key) usage()' },
+  { name: 'flag lookup cannot reach inherited names', file: 'dctr-token.mjs', clause: 'T-token: every malformed call exits 1',
+    from: '  const key = FLAGS.get(rest[i])', to: '  const key = Object.fromEntries(FLAGS)[rest[i]]' },
+  { name: 'the parsed options reach the builder', file: 'dctr-token.mjs', clause: 'T-token: each well-formed call makes exactly one herdr call',
+    from: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve, opts)',
+    to: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve)' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
