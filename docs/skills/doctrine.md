@@ -8,11 +8,11 @@ The figure shows the shape of one phase: seats, gate, loop, and the end states t
 
 ## When to use it, and when not
 
-You do not normally invoke this skill yourself. The seven wrappers (`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`, `doctrine-write`, `doctrine-gauntlet`) load it, and each of them supplies what this file leaves open: the core discipline for the task, the review skill the phase gate uses, the axes the red team attacks on, and where the run's record lives. `doctrine-pane` cites it but is not a wrapper and does not load the posture.
+You do not normally invoke this skill yourself. The eight wrappers (`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`, `doctrine-write`, `doctrine-gauntlet`, `doctrine-project`) load it, and each of them supplies what this file leaves open: the core discipline for the task, the review skill the phase gate uses, the axes the red team attacks on, and where the run's record lives. `doctrine-pane` cites it but is not a wrapper and does not load the posture.
 
-Use it directly when your task fits none of the seven shapes and you still want the gate: parallel seats, an adversary that did not write the work, a loop that exits on one clean pass, and a report that says what it certified. Ask for the work "with the doctrine" and the hub runs the phase without a wrapper; the review slot a wrapper would name is then filled by a fresh-context review of the deliverable against your own words.
+Use it directly when your task fits none of the eight shapes and you still want the gate: parallel seats, an adversary that did not write the work, a loop that exits on one clean pass, and a report that says what it certified. Ask for the work "with the doctrine" and the hub runs the phase without a wrapper; the review slot a wrapper would name is then filled by a fresh-context review of the deliverable against your own words.
 
-Do not use it for a one-off question or a single-file edit. The gate costs more time and tokens than a single pass, and the spec's own description excludes those two cases. If a wrapper fits, use the wrapper: its page is one of the other eight linked from the [README](../../README.md).
+Do not use it for a one-off question or a single-file edit. The gate costs more time and tokens than a single pass, and the spec's own description excludes those two cases. If a wrapper fits, use the wrapper: its page is one of the other nine linked from the [README](../../README.md).
 
 ## What it asks you first
 
@@ -112,7 +112,7 @@ with the doctrine: <your request, with any round count or time budget you want>
 
 ## Requirements
 
-Nothing must be installed; seven of the nine skills, this one included, run with no prerequisites. Each external skill the hub names has a fallback, and a run that uses one says so in its exit statement. [docs/requirements.md](../requirements.md) has the install commands.
+Nothing must be installed; eight of the ten skills, this one included, run with no prerequisites. Each external skill the hub names has a fallback, and a run that uses one says so in its exit statement. [docs/requirements.md](../requirements.md) has the install commands.
 
 | Missing | What happens |
 |---|---|
