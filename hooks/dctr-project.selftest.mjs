@@ -312,7 +312,7 @@ Combined check: npm test -- export ; pass when it exits 0
 ### E1-R1 ruling, 2026-09-13T10:05:00Z
 Kind: baseline
 By: Dana
-> D1 is the Done means for E1.
+> D1 is the Done means for E1. The combined check is \`npm test -- export\` run against the merged export and CLI phases ; pass when it exits 0 and prints no skipped test.
 
 ### E1-X1 return, 2026-09-13T11:00:00Z
 Baseline: E1-R1
