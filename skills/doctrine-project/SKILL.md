@@ -22,10 +22,10 @@ The file formats, and the rule for when a return counts, are in `formats.md` bes
 
 **Adopt**, for a repo that already tracks work some other way. Adoption is forward-only:
 
-1. Inventory every tracking surface the repo uses: goals, plans, PRDs, markdown trackers, and the work-item tracker "Trackers" below finds. Report any GitHub Projects board as an unread tracking surface. Never report it as empty or as having been read.
+1. Inventory every tracking surface the repo uses: goals, plans, PRDs, markdown trackers, and the work-item trackers "Trackers" below finds. Report any GitHub Projects board as an unread tracking surface. Never report it as empty or as having been read.
 2. Draft the end state from what the repo already says. Where it says nothing, interview the owner. The owner rules it.
 3. Write epic records only for live work that covers the end state. Past work gets no epic record and no archive ruling. List its sources as links under `## History`, one index, and nothing more.
-4. Give a destination (a member of an epic, out of scope, or the post-done backlog) to every open item read from a markdown tracker the repo uses, and to every open issue read from the work-item tracker "Trackers" below finds. Each destination is a `destination` ruling and a row in `## Open issues`. Nothing else gets a row: not a remote issue the owner declined as the tracker, and not an issue in a tracker that could not be read.
+4. Give a destination (a member of an epic, out of scope, or the post-done backlog) to every open item read from a markdown tracker the repo uses, and to every open issue read from a work-item tracker "Trackers" below finds. Each destination is a `destination` ruling and a row in `## Open issues`. Nothing else gets a row: not a remote issue the owner declined, and not an issue in a tracker that could not be read.
 5. Cut over. This step is mandatory. Find every instruction that routes tracking somewhere else and put each rewrite to the owner as its own `cutover` ruling, one at a time. A tracker a plugin generates is reported and left alone: it is not cut over and never edited. Flag every CLAUDE.md or AGENTS.md edit separately in the delivery, since it changes agent behaviour.
 6. Delete nothing and repair no history. The diff removes only the routing lines the owner ruled.
 
@@ -33,7 +33,7 @@ The file formats, and the rule for when a return counts, are in `formats.md` bes
 
 **Restart and collision.** Both modes resume after a crash or compaction. Before the first write, look for an existing `docs/PROJECT.md` and for an adoption or start run record both under its `Records:` path and under `.doctrine/records/`, since a crash can fall between writing the project file and moving the record. If a run record exists, resume from it and never re-inventory. If a project file exists and no run record explains it, the repo is already adopted: switch to the lifecycle procedure, and ask the owner before re-drafting anything. One writer at a time: the run record names the session writing the project files. A session that finds an Open run record it did not write writes nothing and asks the owner.
 
-**Trackers.** Read the work-item tracker from the repo's own instructions: CLAUDE.md, AGENTS.md, CONTRIBUTING.md and the README. Where none names one but the remote has open issues, propose the remote's issues as the tracker and put that to the owner: they are the tracker only if the owner accepts. The no-tracker branch applies only when neither holds, when the owner declines the remote's issues, or when the tracker cannot be read: its CLI is missing or unauthenticated, or the session is contained. In that branch adoption still runs, and adopt step 4 says which items get a row. The report names each tracker surface separately: which were read, which the owner declined, and which could not be read. Never invent an issue number. The format check makes no network call and never reads the tracker, so a closed issue or a merged PR is a member's closure, never acceptance.
+**Trackers.** Read the work-item tracker from the repo's own instructions: CLAUDE.md, AGENTS.md, CONTRIBUTING.md and the README. Where the remote has open issues the instructions do not name as the tracker, put the remote's issues to the owner, whether or not the instructions name another tracker: if the owner accepts, they are a work-item tracker like a named one, and if the owner declines, they get no row. The no-tracker branch applies only when the instructions name no tracker and the remote has no open issues, when the instructions name none and the owner declines the remote's issues, or when the tracker cannot be read: its CLI is missing or unauthenticated, or the session is contained. In that branch adoption still runs, and adopt step 4 says which items get a row. The report names each tracker surface separately: which were read, which the owner declined, and which could not be read. Never invent an issue number. The format check makes no network call and never reads the tracker, so a closed issue or a merged PR is a member's closure, never acceptance.
 
 ## Lifecycle procedure
 
@@ -107,7 +107,7 @@ Hand the red team these, per doctrine step 4:
 - A return whose baseline is not current, whose revision is not the certification target, or which a later regression voids.
 - An end-state item with no live satisfy epic, or a Superseded epic's successor counted before it is Done.
 - An item that fails the admission test typed T1 to T3, or a conjunction left unsplit.
-- An item adopt step 4 names with no `destination` ruling or no row, or an issue number nobody read from the tracker.
+- An item adopt step 4 names with no `destination` ruling or no row, or an issue number nobody read from a tracker.
 - An instruction that still routes tracking elsewhere after cutover.
 - History deleted or rewritten, or a plugin-generated tracker edited.
 - A `return` or `regression` entry, or run state, inside a seat's prompt or search scope.

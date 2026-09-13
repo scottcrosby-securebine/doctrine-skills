@@ -33,11 +33,11 @@ Until you rule on an item it binds nothing: no seat treats it as a constraint an
 
 - You rule the end state.
 - Epic records are written only for live work that covers it.
-- Every open item in a markdown tracker the repo uses, and every open issue read from its work-item tracker, gets one destination: a member of an epic, out of scope, or the post-done backlog. You rule each one, and the project file records the ruling and a row.
+- Every open item in a markdown tracker the repo uses, and every open issue read from a work-item tracker, gets one destination: a member of an epic, out of scope, or the post-done backlog. You rule each one, and the project file records the ruling and a row.
 - History is kept as one linked index. No record is written for a past epic and nothing is deleted.
 - A cutover step rewrites the instructions that route tracking somewhere else. Each cutover edit is put to you and ruled one at a time. Trackers another plugin generates are reported and never edited. Edits to `CLAUDE.md` or `AGENTS.md` are flagged separately. GitHub Projects boards are reported as a tracking surface the run could not read.
 
-It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or the README. Where none names one but the remote has open issues, it asks you whether those are the tracker. Adoption still runs with no tracker, when you decline the remote's issues, or when the tracker cannot be read: no issue from it gets a row. The report names each tracker surface as read, declined by you, or not read. Issue numbers are never invented, and the format check never looks them up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
+It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or the README. Where the remote has open issues the instructions do not name as the tracker, it asks you whether to track those too, even beside a named tracker. Adoption still runs with no tracker, when you decline the remote's issues, or when a tracker cannot be read: no issue from a declined or unread tracker gets a row. The report names each tracker surface as read, declined by you, or not read. Issue numbers are never invented, and the format check never looks them up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
 
 **The format check.** At every state change, and at the start of every session in a tracked repo, the orchestrator runs:
 
