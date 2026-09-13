@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, PROJECT_PATH } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -211,8 +211,9 @@ Seat: reviewer-c
 `,
 }
 
-const build = (files) => modelFrom(files[PROJECT_PATH], (rel) => (rel in files ? files[rel] : null))
-const existsIn = (files) => (rel) => rel in files
+// A file whose value is null exists but cannot be read.
+const build = (files) => modelFrom(files[PROJECT_PATH], (rel) => (Object.hasOwn(files, rel) ? files[rel] : null))
+const existsIn = (files) => (rel) => Object.hasOwn(files, rel)
 const run = (files) => check(build(files), existsIn(files))
 
 /** One broken variant: each [file, from, to] must occur exactly once, so a fixture can never silently
@@ -463,12 +464,33 @@ const CASES = [
   { name: 'reference — a return Baseline naming a ruling that is not a baseline or done-means-change', rule: 'reference', frag: 'Baseline R3', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Baseline: R1', 'Baseline: R3']],
     defect: (f) => /^Baseline: R3$/m.test(txt(f, 'docs/epics/E1.md')) && /### R3 ruling[^\n]*\nKind: impact/.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'evidence — a later counting project return with a FAIL decides, though an earlier one passed every item', rule: 'evidence', frag: 'counting project return', at: P,
+    edits: [[P, '- ES3: PASS, evidence: docs/PROJECT.md:78\n', '- ES3: PASS, evidence: docs/PROJECT.md:78\n\n### X2 return, 2026-09-11T10:00:00Z\nBaseline: R1\nRevision: abc123\nSeat: reviewer-z\n- ES1: FAIL, evidence: tests/export.test.mjs:12\n- ES2: PASS, evidence: tests/import.test.mjs:4\n- ES3: PASS, evidence: docs/PROJECT.md:78\n']],
+    defect: (f) => { const t = txt(f, P); return t.indexOf('### X2 return') > t.indexOf('### X1 return') && (t.match(/^Baseline: R1$/gm) || []).length === 2 && (t.match(/^Revision: abc123$/gm) || []).length === 2 && /^Certification target: abc123$/m.test(t) && /^- ES1: FAIL/m.test(t) && !/ regression,/.test(t) && !/Kind: done-means-change/.test(t) } },
+  { name: 'item — an epic Coverage obligation outside satisfy, contribute, preserve (W2)', rule: 'item', frag: 'Coverage part "p2: none"', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', '- Coverage: p1: satisfy, p2: preserve', '- Coverage: p1: satisfy, p2: none']],
+    defect: (f) => /^- Coverage: p1: satisfy, p2: none$/m.test(txt(f, 'docs/epics/E1.md')) && !['satisfy', 'contribute', 'preserve'].includes('none') },
+  { name: 'coverage — a project Coverage part whose keyword is outside the four', rule: 'coverage', frag: 'Coverage part "contibute E1"', at: P,
+    edits: [[P, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E2; contibute E1']],
+    defect: (f) => /^- Coverage: satisfy E2; contibute E1$/m.test(txt(f, P)) },
+  { name: 'entry — a ruling Kind outside the six', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: impacts']],
+    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level'].includes('impacts') },
+  { name: 'entry — a return result outside PASS, FAIL, UNVERIFIED', rule: 'entry', frag: 'is "PASSED"', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', '- D3: PASS, evidence: tests/import.test.mjs:4', '- D3: PASSED, evidence: tests/import.test.mjs:4']],
+    defect: (f) => /^- D3: PASSED, /m.test(txt(f, 'docs/epics/E3.md')) },
+  { name: 'entry — a heading in Rulings and returns that is not <entry ID> ruling|return|regression, <time>', rule: 'entry', frag: 'heading of R3', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', '### R3 ruling, 2026-09-04T11:00:00Z', '### R3 rulling, 2026-09-04T11:00:00Z']],
+    defect: (f) => /^### R3 rulling, /m.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'roster — a record that exists and cannot be read', rule: 'roster', frag: 'could not be read', at: P, edits: [], nullify: ['docs/epics/E3.md'],
+    defect: (f) => Object.hasOwn(f, 'docs/epics/E3.md') && f['docs/epics/E3.md'] === null && /\| E3 \| Import v2 \| docs\/epics\/E3\.md \|/.test(f[P]) },
 ]
 
 for (const c of CASES) {
   let files
   const base = c.base ?? GOOD
   try { files = mutate(c.edits, base) } catch (e) { clause(`${c.name} — fixture builds`, false, e.message); continue }
+  for (const n of c.nullify ?? []) files[n] = null
   // Clause 3 first and alone: the defect is in the text, with no checker code on the path.
   clause(`${c.name} [3: the fixture carries the defect]`, c.defect(files) && !c.defect(base), 'the fixture text does not carry the defect, or the good project does')
   const found = run(files)
@@ -476,6 +498,23 @@ for (const c of CASES) {
   clause(`${c.name} [1: trips]`, hit.length > 0, `wanted ${c.rule} on ${c.at} containing ${JSON.stringify(c.frag)}; got ${found.map(formatFinding).join(' | ') || 'nothing'}`)
   const lines = (files[c.at] || '').split('\n').length
   clause(`${c.name} [1: the finding names a real line]`, hit.every((f) => Number.isInteger(f.line) && f.line >= 1 && f.line <= lines), JSON.stringify(hit))
+}
+
+// ---------------------------------------------------------------- IDs that are also header words or Object.prototype names
+// The roster and issue tables skip their header row by position, and every lookup keyed by an ID is a
+// Map, so `ID`, `Issue` and `constructor` are ordinary epic IDs: GOOD renamed stays clean and prints.
+const renameE1 = (to) => Object.fromEntries(Object.entries(GOOD).map(([k, v]) => [k === 'docs/epics/E1.md' ? `docs/epics/${to}.md` : k, v.replace(/\bE1\b/g, to)]))
+for (const to of ['ID', 'Issue', 'constructor']) {
+  const files = renameE1(to)
+  clause(`id — epic E1 renamed ${to} [3: the fixture carries ${to} as a roster ID, a satisfy epic and a member destination, and no E1]`,
+    files[P].includes(`| ${to} | Export | docs/epics/${to}.md |`) && files[P].includes(`- Coverage: satisfy ${to}`) && files[P].includes(`| #12 | member ${to} |`) &&
+    files[`docs/epics/${to}.md`].startsWith(`# Epic ${to}: Export`) && !/\bE1\b/.test(Object.values(files).join('\n')) && (to !== 'constructor' || to in {}),
+    'fixture')
+  let found, lines, threw = null
+  try { found = run(files); lines = statusLines(build(files), { records: () => null, seats: () => null, codex: () => null }) } catch (e) { threw = e.message }
+  clause(`id — epic E1 renamed ${to} [1/2: check has ZERO findings and neither check nor status throws]`,
+    threw === null && found.length === 0 && lines.includes(`  ${to} Done`) && lines.includes(`  ES1: satisfy ${to} Done`),
+    threw ?? `${found.map(formatFinding).join(' | ')} || ${lines.join(' / ')}`)
 }
 
 // ---------------------------------------------------------------- T-status
@@ -522,6 +561,27 @@ for (const c of CASES) {
   clause('T-status 7 — an epic whose record cannot be read prints unknown for its State, in the roster and for the item it satisfies',
     m2.includes('  E2 unknown') && m2.includes('  ES2: satisfy E2 unknown'), m2.join('\n'))
   clause('T-status 7 [3: that fixture really lacks the record]', !('docs/epics/E2.md' in missing) && /docs\/epics\/E2\.md/.test(missing[P]), 'fixture')
+
+  // Obsolete returns are listed from resolved records only, so an unread or wrongly headed record makes
+  // the list unknown, while the good project, every record read, still prints the list.
+  const misheaded = mutate([['docs/epics/E1.md', '# Epic E1: Export', '# Epic E9: Export']])
+  const m3 = lines2(build(misheaded), failing)
+  clause('T-status 7b — obsolete returns: unknown when a roster record could not be read or resolved, and a list when every one was',
+    m2.includes('obsolete returns: unknown') && m3.includes('obsolete returns: unknown') && lines.includes('obsolete returns:') && !lines.includes('obsolete returns: unknown'),
+    `${m2.join(' / ')} || ${m3.join(' / ')}`)
+  clause('T-status 7b [3: the misheaded fixture names E9 in a record the roster calls E1]',
+    /^# Epic E9:/m.test(misheaded['docs/epics/E1.md']) && misheaded[P].includes('| E1 | Export | docs/epics/E1.md |'), 'fixture')
+
+  // The latest counting project return decides a project-level item, never an earlier one.
+  const later = (body) => mutate([[P, '- ES3: PASS, evidence: docs/PROJECT.md:78\n', `- ES3: PASS, evidence: docs/PROJECT.md:78\n\n### X2 return, 2026-09-11T10:00:00Z\nBaseline: R1\nRevision: abc123\nSeat: reviewer-z\n${body}`]])
+  const failed = later('- ES1: PASS, evidence: a:1\n- ES2: PASS, evidence: b:1\n- ES3: FAIL, evidence: c:1\n')
+  const omitted = later('- ES1: PASS, evidence: a:1\n- ES2: PASS, evidence: b:1\n')
+  clause('T-status 8 — a project-level item shows the latest counting return\'s result, or says that return has none',
+    lines2(build(failed), failing).includes('  ES3: project-level FAIL') && lines2(build(omitted), failing).includes('  ES3: project-level no result in the latest counting return'),
+    `${lines2(build(failed), failing).join(' / ')} || ${lines2(build(omitted), failing).join(' / ')}`)
+  clause('T-status 8 [3: both fixtures add a later return on the same baseline and revision, one failing ES3 and one without it]',
+    [failed, omitted].every((f) => f[P].indexOf('### X2 return') > f[P].indexOf('### X1 return') && (f[P].match(/^Revision: abc123$/gm) || []).length === 2) &&
+    /^- ES3: FAIL/m.test(failed[P]) && omitted[P].slice(omitted[P].indexOf('### X2 return')).indexOf('- ES3:') === -1, 'fixture')
 }
 
 // ---------------------------------------------------------------- the CLI, against a real tree
@@ -575,6 +635,35 @@ clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints un
 const rEmptyReply = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1' }, encoding: 'utf8' })
 clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look": live seats: unknown, and herdr really was asked',
   rEmptyReply.stdout.split('\n').includes('live seats: unknown') && fs.existsSync(trip('herdr')), rEmptyReply.stdout)
+
+// ---------------------------------------------------------------- readCodex: unknown whenever anything could not be read
+{
+  const stateDir = (name, make) => { const sd = path.join(tmp, `codex-${name}`); fs.mkdirSync(sd); make(sd); return sd }
+  const jobsDir = (sd, d = 'good-1') => { const j = path.join(sd, d, 'jobs'); fs.mkdirSync(j, { recursive: true }); return j }
+  const job = (j, f, body) => fs.writeFileSync(path.join(j, f), typeof body === 'string' ? body : JSON.stringify(body))
+  const healthy = stateDir('healthy', (sd) => {
+    const j = jobsDir(sd)
+    job(j, 'a.json', { id: 'job-1', status: 'running', workspaceRoot: good })
+    job(j, 'b.json', { id: 'job-2', status: 'completed', workspaceRoot: good })
+    job(j, 'c.json', { id: 'job-3', status: 'running', workspaceRoot: '/elsewhere' })
+    fs.mkdirSync(path.join(sd, 'good-2'))                                          // a matching directory with no jobs yet
+    job(jobsDir(sd, 'other-1'), 'x.json', '{')                                     // another workspace's broken record
+  })
+  const jobsIsFile = stateDir('jobs-file', (sd) => { fs.mkdirSync(path.join(sd, 'good-1')); fs.writeFileSync(path.join(sd, 'good-1', 'jobs'), '') })
+  const jobIsDir = stateDir('job-dir', (sd) => { fs.mkdirSync(path.join(jobsDir(sd), 'a.json')) })
+  const midWrite = stateDir('mid-write', (sd) => job(jobsDir(sd), 'a.json', '{"id": "job-1", "status": "runn'))
+  const answer = (sd) => { try { return readCodex(good, sd) } catch (e) { return `threw ${e.code || e.name}` } }
+  clause('codex [2: a healthy state dir lists only this workspace\'s unfinished jobs; a matching directory with no jobs is none, not unknown]',
+    JSON.stringify(answer(healthy)) === JSON.stringify(['job-1 running']), JSON.stringify(answer(healthy)))
+  clause('codex [1: a jobs directory that cannot be read, a job file that cannot be read, and a job file that does not parse each throw, printed unknown]',
+    [jobsIsFile, jobIsDir, midWrite].every((sd) => typeof answer(sd) === 'string'), JSON.stringify([jobsIsFile, jobIsDir, midWrite].map(answer)))
+  clause('codex [3: the fixtures carry their defects on disk]',
+    fs.statSync(path.join(jobsIsFile, 'good-1', 'jobs')).isFile() && fs.statSync(path.join(jobIsDir, 'good-1', 'jobs', 'a.json')).isDirectory() &&
+    (() => { try { JSON.parse(fs.readFileSync(path.join(midWrite, 'good-1', 'jobs', 'a.json'), 'utf8')); return false } catch { return true } })() &&
+    !fs.existsSync(path.join(healthy, 'good-2', 'jobs')) && path.basename(good) === 'good', 'fixture')
+  const sl = statusLines(build(GOOD), { records: () => null, seats: () => null, codex: () => readCodex(good, jobsIsFile) })
+  clause('codex [1: through status, an unreadable jobs directory prints codex jobs: unknown]', sl.includes('codex jobs: unknown'), sl.join(' / '))
+}
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

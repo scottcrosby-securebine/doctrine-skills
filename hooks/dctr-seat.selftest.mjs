@@ -298,7 +298,7 @@ const runToken = (args, env = {}) => {
   fs.rmSync(herdrLog, { force: true })
   const r = spawnSync('node', [TOKEN_SCRIPT, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${tokenBin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_FAKE_HERDR_EXIT: '', ...env },
+    env: { ...process.env, PATH: `${tokenBin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', DCTR_FAKE_HERDR_EXIT: '', ...env },
   })
   const calls = fs.existsSync(herdrLog)
     ? fs.readFileSync(herdrLog, 'utf8').split('--END--\n').filter(Boolean).map((c) => c.slice(0, -1).split('\n'))
@@ -339,6 +339,17 @@ clause('clause 1be — T-token: outside herdr it stands down with exit 0 and zer
   outside.code === 0 && /standing down/.test(outside.out) && outside.calls.length === 0 &&
   refused.code === 0 && /herdr refused/.test(refused.out) && refused.calls.length === 1,
   JSON.stringify({ outside, refused }))
+// A contained session makes no herdr call at all, even with every herdr variable set, and still
+// validates its arguments first.
+const CONTAINED = { ...IN_HERDR, DCTR_VIEW_REQUEST_DIR: tokenTmp }
+const contained = runToken(['3', '1', '4', '--epic', 'E7', '--owed'], CONTAINED)
+const containedBad = runToken(['3', '1', '4', '--epic', 'bad id'], CONTAINED)
+clause('clause 1bf — T-token: contained (DCTR_VIEW_REQUEST_DIR set, inside herdr, pane set) it stands down with exit 0 and calls herdr ZERO times, after argument validation',
+  contained.code === 0 && /standing down — contained session/.test(contained.out) && contained.calls.length === 0 &&
+  containedBad.code === 1 && /usage:/.test(containedBad.out) && containedBad.calls.length === 0,
+  JSON.stringify({ contained, containedBad }))
+clause('clause 3y — T-token: the contained fixture really is inside herdr with a workspace and pane, and names a request directory',
+  CONTAINED.HERDR_ENV === '1' && Boolean(CONTAINED.HERDR_WORKSPACE_ID) && Boolean(CONTAINED.HERDR_PANE_ID) && Boolean(CONTAINED.DCTR_VIEW_REQUEST_DIR), JSON.stringify(CONTAINED))
 fs.rmSync(tokenTmp, { recursive: true, force: true })
 
 // Third clause, without the script or the builder: the malformed fixtures really are malformed. The

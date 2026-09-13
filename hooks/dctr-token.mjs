@@ -37,7 +37,10 @@ for (let i = 0; i < rest.length; i++) {
   opts[key] = value
 }
 
-const reason = skipReason(process.env) ??
+// A contained session makes no herdr call at all (the containment ruling, 2026-09-01), and
+// skipReason does not read DCTR_VIEW_REQUEST_DIR, because the seat hook handles containment before it.
+const reason = (process.env.DCTR_VIEW_REQUEST_DIR ? 'contained session (DCTR_VIEW_REQUEST_DIR is set), which reaches nothing on the host' : null) ??
+  skipReason(process.env) ??
   (process.env.HERDR_PANE_ID ? null : 'no HERDR_PANE_ID in the environment')
 if (reason) {
   console.log(`dctr-token: standing down — ${reason}`)

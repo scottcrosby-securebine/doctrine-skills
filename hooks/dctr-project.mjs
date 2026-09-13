@@ -15,16 +15,18 @@
 // Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines) are exported for
 // hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
 //
+// Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id.
+//
 // WHAT `check` DOES NOT ENFORCE, stated so a clean run is not read as more:
 //   - whether a return's per-item results are honest, or the certification target is the right one;
 //   - uniqueness of phase names, or of item and entry IDs across files (a duplicate roster ID, and a
 //     duplicate item or entry ID within one file, are findings);
-//   - the obligation word in an epic item's Coverage (`p1: sastify` is not a finding);
+//   - the format of the time in an entry heading, beyond its being present;
 //   - which fields a ruling Kind requires (Successor), beyond what the named rules read.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { herdr, codexStateDir, codexJobRecords } from './dctr-state.mjs'
+import { herdr, codexStateDir } from './dctr-state.mjs'
 import { codexTerminal, ID_RE } from './dctr-lib.mjs'
 
 export const PROJECT_PATH = 'docs/PROJECT.md'
@@ -32,6 +34,9 @@ const PROJECT_STATES = ['Proposed', 'Ruled', 'Done']
 const EPIC_STATES = ['Proposed', 'Not started', 'Open', 'Done', 'Dropped', 'Superseded']
 const TERMINAL = ['Done', 'Dropped', 'Superseded']
 const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
+const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level']
+const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
+const OBLIGATIONS = ['satisfy', 'contribute', 'preserve']
 
 // ---------------------------------------------------------------- parse
 
@@ -40,8 +45,8 @@ const cells = (t) => t.slice(1, -1).split('|').map((c) => c.trim())
 
 /** Markdown to a model. Every value carries the 1-based line it came from. */
 export function parseDoc(text) {
-  const doc = { title: null, headers: {}, items: [], roster: [], issues: [], phases: [], entries: [] }
-  let section = null, item = null, entry = null
+  const doc = { title: null, headers: Object.create(null), items: [], roster: [], issues: [], phases: [], entries: [] }
+  let section = null, item = null, entry = null, lastRow = null
   String(text).split('\n').forEach((raw, i) => {
     const line = i + 1, t = raw.trimEnd()
     const sec = /^## (.+)$/.exec(t)
@@ -54,16 +59,18 @@ export function parseDoc(text) {
     }
     if (section === 'End state' || section === 'Done means') {
       const hd = /^### ?(.*)$/.exec(t)
-      if (hd) { item = { id: hd[1].trim(), line, fields: {} }; doc.items.push(item); return }
+      if (hd) { item = { id: hd[1].trim(), line, fields: Object.create(null) }; doc.items.push(item); return }
       const f = /^- ([A-Za-z]+):\s?(.*)$/.exec(t)
       if (f && item) item.fields[f[1]] = { value: f[2].trim(), line }
       return
     }
     if ((section === 'Epics' || section === 'Open issues') && /^\|.*\|$/.test(t)) {
-      const c = cells(t)
-      if (/^-+$/.test(c[0].replace(/:/g, '')) || c[0] === 'ID' || c[0] === 'Issue') return
-      if (section === 'Epics') doc.roster.push({ id: c[0], record: c[2] ?? '', line })
-      else doc.issues.push({ issue: c[0], destination: c[1] ?? '', line })
+      const c = cells(t), rows = section === 'Epics' ? doc.roster : doc.issues
+      // The header row is the row directly above the separator, by position: its text is never
+      // compared, since `ID` and `Issue` are valid IDs.
+      if (/^-+$/.test(c[0].replace(/:/g, ''))) { if (lastRow?.line === line - 1 && lastRow.rows === rows) rows.pop(); lastRow = null; return }
+      rows.push(section === 'Epics' ? { id: c[0], record: c[2] ?? '', line } : { issue: c[0], destination: c[1] ?? '', line })
+      lastRow = { rows, line }
       return
     }
     if (section === 'Members') {
@@ -73,13 +80,15 @@ export function parseDoc(text) {
     }
     if (section === 'Rulings and returns') {
       if (/^### /.test(t)) {
-        const m = /^### (\S+) (ruling|return|regression),\s*.*$/.exec(t)
-        entry = { id: m ? m[1] : t.slice(4).trim().split(/\s+/)[0], type: m ? m[2] : null, line, fields: {}, results: [] }
+        // A heading of the wrong shape still opens an entry (type null, a finding), so its lines never
+        // attach to the entry above it.
+        const m = /^### (\S+) (ruling|return|regression),\s*\S.*$/.exec(t)
+        entry = { id: m ? m[1] : t.slice(4).trim().split(/\s+/)[0], type: m ? m[2] : null, line, fields: Object.create(null), results: [] }
         doc.entries.push(entry)
         return
       }
       if (!entry) return
-      const r = /^- (\S+): (PASS|FAIL|UNVERIFIED)(?:,\s*evidence:\s*(.*))?$/.exec(t)
+      const r = entry.type === 'return' && /^- ([^:\s]+):\s*([^,]*?)\s*(?:,\s*evidence:\s*(.*))?$/.exec(t)
       if (r) { entry.results.push({ item: r[1], result: r[2], evidence: (r[3] ?? '').trim(), line }); return }
       const f = /^([A-Za-z][A-Za-z ]*):\s?(.*)$/.exec(t)
       if (f) entry.fields[f[1]] = { value: f[2].trim(), line }
@@ -91,8 +100,8 @@ export function parseDoc(text) {
 /** The project file plus every roster record `read(rel)` can return (null for one it cannot). */
 export function modelFrom(projectText, read) {
   const project = parseDoc(projectText)
-  const epics = {}
-  for (const r of project.roster) if (!(r.record in epics)) { const t = read(r.record); epics[r.record] = t == null ? null : parseDoc(t) }
+  const epics = new Map()
+  for (const r of project.roster) if (!epics.has(r.record)) { const t = read(r.record); epics.set(r.record, t == null ? null : parseDoc(t)) }
   return { project, epics }
 }
 
@@ -119,31 +128,34 @@ function counts(doc, ret) {
 
 /** A PASS with an empty evidence reference is UNVERIFIED. */
 const resultOf = (r) => (r.result === 'PASS' && !r.evidence ? 'UNVERIFIED' : r.result)
-const passesAll = (doc, ids) => doc.entries.some((e) => e.type === 'return' && counts(doc, e) &&
-  ids.every((id) => e.results.some((r) => r.item === id && resultOf(r) === 'PASS')))
+/** The latest counting return decides, never any earlier one that also counts. */
+const latestCounting = (doc) => doc.entries.filter((e) => e.type === 'return' && counts(doc, e)).at(-1) ?? null
+const passesAll = (doc, ids) => { const e = latestCounting(doc); return Boolean(e) && ids.every((id) => e.results.some((r) => r.item === id && resultOf(r) === 'PASS')) }
 
 function projectCoverage(v) {
-  const out = { satisfy: [], projectLevel: null }
+  const out = { satisfy: [], projectLevel: null, unknown: [] }
   for (const part of (v || '').split(';').map((s) => s.trim()).filter(Boolean)) {
-    const m = /^(satisfy|project-level)\s+(.*)$/.exec(part)
+    const m = /^(satisfy|contribute|preserve|project-level)\s+(\S.*)$/.exec(part)
+    if (!m) out.unknown.push(part)
     if (m?.[1] === 'satisfy') out.satisfy.push(...list(m[2]))
     if (m?.[1] === 'project-level') out.projectLevel = m[2].trim()
   }
   return out
 }
 
-/** Roster ID to its readable, correctly headed record. The first line for an ID wins. */
+/** Roster ID to its readable, correctly headed record, as a Map: IDs are user text, and `constructor`
+ *  is a valid one. The first line for an ID wins. */
 function resolveRoster(model) {
-  const byId = {}
+  const byId = new Map()
   for (const r of model.project.roster) {
-    const doc = model.epics[r.record]
-    if (doc && epicHeadingId(doc) === r.id && !byId[r.id]) byId[r.id] = { path: r.record, doc }
+    const doc = model.epics.get(r.record)
+    if (doc && epicHeadingId(doc) === r.id && !byId.has(r.id)) byId.set(r.id, { path: r.record, doc })
   }
   return byId
 }
 
 /** The project file, then each resolved epic record, as { path, doc }. */
-const filesOf = (model, byId) => [{ path: PROJECT_PATH, doc: model.project }, ...Object.values(byId)]
+const filesOf = (model, byId) => [{ path: PROJECT_PATH, doc: model.project }, ...byId.values()]
 
 // ---------------------------------------------------------------- check
 
@@ -153,7 +165,7 @@ export function check(model, exists) {
   const P = PROJECT_PATH, p = model.project
   const rosterIds = new Set(p.roster.map((r) => r.id))
   const byId = resolveRoster(model)
-  const stateOf = (id) => (byId[id] ? val(byId[id].doc, 'State') : null)
+  const stateOf = (id) => (byId.has(id) ? val(byId.get(id).doc, 'State') : null)
   const idCheck = (file, line, what, id) => { if (!ID_RE.test(id)) add(file, line, 'id', `${what} ${JSON.stringify(id)} is outside [A-Za-z0-9][A-Za-z0-9_-]{0,23}`) }
 
   // roster
@@ -163,7 +175,7 @@ export function check(model, exists) {
     seen.add(r.id)
     idCheck(P, r.line, 'epic ID', r.id)
     if (!exists(r.record)) { add(P, r.line, 'roster', `record ${r.record} for ${r.id} does not resolve`); continue }
-    const doc = model.epics[r.record]
+    const doc = model.epics.get(r.record)
     if (!doc) { add(P, r.line, 'roster', `record ${r.record} for ${r.id} could not be read`); continue }
     const hid = epicHeadingId(doc)
     if (hid !== r.id) add(P, r.line, 'roster', `record ${r.record} is headed Epic ${hid ?? '(no heading)'}, not ${r.id}`)
@@ -196,12 +208,13 @@ export function check(model, exists) {
   // end-state coverage
   const chainEndsDone = (id) => {
     const visited = new Set()
-    while (stateOf(id) === 'Superseded' && !visited.has(id)) { visited.add(id); id = rulingsOf(byId[id].doc, 'supersede').at(-1)?.fields.Successor?.value }
+    while (stateOf(id) === 'Superseded' && !visited.has(id)) { visited.add(id); id = rulingsOf(byId.get(id).doc, 'supersede').at(-1)?.fields.Successor?.value }
     return stateOf(id) === 'Done'
   }
   for (const it of p.items) {
     const cov = it.fields.Coverage, ln = cov?.line ?? it.line
     const c = projectCoverage(cov?.value)
+    for (const u of c.unknown) add(P, ln, 'coverage', `end-state item ${it.id} Coverage part ${JSON.stringify(u)} is not satisfy, contribute or preserve <epic IDs>, or project-level <ruling ID>`)
     if (!c.satisfy.length && !c.projectLevel) add(P, ln, 'coverage', `end-state item ${it.id} has no satisfy epic and no project-level ruling`)
     if (c.satisfy.length > 1) add(P, ln, 'coverage', `end-state item ${it.id} has more than one satisfy epic (${c.satisfy.join(', ')})`)
     for (const e of c.satisfy) {
@@ -235,9 +248,12 @@ export function check(model, exists) {
       idCheck(file, e.line, 'entry ID', e.id)
       if (entryIds.has(e.id)) add(file, e.line, 'id', `duplicate entry ID ${e.id}`)
       entryIds.add(e.id)
+      if (e.type === null) add(file, e.line, 'entry', `heading of ${e.id} is not <entry ID> ruling|return|regression, <time>`)
+      if (e.type === 'ruling' && !KINDS.includes(kind(e))) add(file, e.fields.Kind?.line ?? e.line, 'entry', `ruling ${e.id} Kind ${JSON.stringify(kind(e) ?? null)} is not one of ${KINDS.join(', ')}`)
       if (e.type === 'regression') ref(e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
       if (e.type === 'return') {
         for (const r of e.results) ref(r.line, r.item, `return ${e.id} result`)
+        for (const r of e.results) if (!RESULTS.includes(r.result)) add(file, r.line, 'entry', `return ${e.id} result for ${r.item} is ${JSON.stringify(r.result)}, not ${RESULTS.join(', ')}`)
         const b = e.fields.Baseline
         if (!doc.entries.some((x) => x.type === 'ruling' && x.id === b?.value && ['baseline', 'done-means-change'].includes(kind(x)))) {
           add(file, b?.line ?? e.line, 'reference', `return ${e.id} Baseline ${b?.value || '(none)'} is not a baseline or done-means-change ruling in this file`)
@@ -280,7 +296,8 @@ export function check(model, exists) {
       if (!cov.value) { add(file, cov.line, 'coverage', `Done means item ${it.id} has an empty Coverage`); continue }
       const phases = new Set()
       for (const part of list(cov.value)) {
-        const ph = /^(.+?):/.exec(part)?.[1].trim()
+        const m = /^(.+?):\s*(.*)$/.exec(part), ph = m?.[1].trim()
+        if (!OBLIGATIONS.includes(m?.[2])) add(file, cov.line, 'item', `Done means item ${it.id} Coverage part ${JSON.stringify(part)} is not <phase name>: satisfy, contribute or preserve (W2)`)
         if (ph && phases.has(ph)) add(file, cov.line, 'coverage', `Done means item ${it.id} gives phase ${ph} two obligations (W2)`)
         if (ph) phases.add(ph)
       }
@@ -299,7 +316,7 @@ export const formatFinding = (f) => `${f.path}:${f.line}: ${f.rule}: ${f.message
 export function statusLines(model, readers) {
   const p = model.project, out = []
   const byId = resolveRoster(model)
-  const stateOf = (id) => (byId[id] ? val(byId[id].doc, 'State') || 'unknown' : 'unknown')
+  const stateOf = (id) => (byId.has(id) ? val(byId.get(id).doc, 'State') || 'unknown' : 'unknown')
   const ask = (fn) => { try { return fn() ?? null } catch { return null } }
   const block = (label, rows) => {
     if (rows === null) { out.push(`${label}: unknown`); return }
@@ -313,8 +330,8 @@ export function statusLines(model, readers) {
     const c = projectCoverage(it.fields.Coverage?.value)
     if (c.satisfy.length === 1) out.push(`  ${it.id}: satisfy ${c.satisfy[0]} ${stateOf(c.satisfy[0])}`)
     else if (!c.satisfy.length && c.projectLevel) {
-      const r = p.entries.filter((e) => e.type === 'return' && counts(p, e)).flatMap((e) => e.results.filter((x) => x.item === it.id)).at(-1)
-      out.push(`  ${it.id}: project-level ${r ? resultOf(r) : 'no counting return'}`)
+      const last = latestCounting(p), r = last?.results.filter((x) => x.item === it.id).at(-1)
+      out.push(`  ${it.id}: project-level ${!last ? 'no counting return' : r ? resultOf(r) : 'no result in the latest counting return'}`)
     } else out.push(`  ${it.id}: unknown`)
   }
   out.push('epics:')
@@ -326,11 +343,14 @@ export function statusLines(model, readers) {
   block('pending gates', rec && rec.pending)
   if (rec) out.push('  (pending covers only .out transcripts under Records with no sibling .out.result)')
 
+  // Built only from the records it resolved, so one roster line it could not read or resolve makes the
+  // whole list unknown: a return in that record would be missing from it.
+  const allRead = p.roster.every((r) => byId.get(r.id)?.path === r.record)
   const obsolete = []
   for (const { path: file, doc } of filesOf(model, byId)) {
     for (const e of doc.entries) if (e.type === 'return' && !counts(doc, e)) obsolete.push(`${file} ${e.id}: obsolete (baseline ${e.fields.Baseline?.value || 'none'}, revision ${e.fields.Revision?.value || 'none'})`)
   }
-  block('obsolete returns', obsolete)
+  block('obsolete returns', allRead ? obsolete : null)
 
   block('live seats', ask(readers.seats))
   const jobs = ask(readers.codex)
@@ -371,12 +391,25 @@ function readSeats(root, env = process.env) {
     .map((x) => `${x.pane_id} ${x.agent_status ?? 'unknown'} ${x.label || x.terminal_title_stripped || ''}`.trim())
 }
 
-/** Unfinished codex jobs for this workspace. Throws, printed unknown, when the state dir is unreadable:
- *  codexJobRecords answers [] for that too, and [] must mean "none", not "could not look". */
-function readCodex(root) {
-  fs.readdirSync(codexStateDir())
-  return codexJobRecords(root).filter((r) => r.workspaceRoot === root && !codexTerminal(r.status))
-    .map((r) => `${r.id || path.basename(r.file)} ${r.status ?? 'unknown'}`)
+/** Unfinished codex jobs for this workspace, read from each `jobs/*.json` under a `<basename>-` directory of the state dir, the layout
+ *  codexJobRecords in dctr-state.mjs reads. It is not called, because it answers [] or skips a record
+ *  for every failure and [] must mean "none", never "could not look". This throws, printed unknown,
+ *  when the state dir, a matching jobs directory or a job file cannot be read, or a job file does not
+ *  parse: a record mid-write cannot be told apart from a broken one, and either may be a live job. A
+ *  matching directory with no jobs directory yet holds no jobs. */
+export function readCodex(root, stateDir = codexStateDir()) {
+  const prefix = `${path.basename(root)}-`
+  const out = []
+  for (const d of fs.readdirSync(stateDir).filter((n) => n.startsWith(prefix)).sort()) {
+    const jobs = path.join(stateDir, d, 'jobs')
+    let names
+    try { names = fs.readdirSync(jobs) } catch (e) { if (e.code === 'ENOENT') continue; throw e }
+    for (const f of names.filter((n) => n.endsWith('.json')).sort()) {
+      const file = path.join(jobs, f), r = JSON.parse(fs.readFileSync(file, 'utf8'))
+      if (r?.workspaceRoot === root && !codexTerminal(r.status)) out.push(`${r.id || f} ${r.status ?? 'unknown'}`)
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- CLI

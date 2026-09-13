@@ -119,7 +119,7 @@ A return **counts** only when all three hold:
 - its Revision equals the file's `Certification target:`;
 - no `regression` entry against one of its items comes after it in the file.
 
-A PASS with an empty evidence reference counts as UNVERIFIED. A return that does not count stays in the file, and `status` labels it obsolete with its baseline and revision.
+When more than one return counts, the latest counting return decides, and an earlier one that also counts is ignored. A PASS with an empty evidence reference counts as UNVERIFIED. A return that does not count stays in the file, and `status` labels it obsolete with its baseline and revision.
 
 ## Worked example
 

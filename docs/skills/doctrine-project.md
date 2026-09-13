@@ -55,7 +55,7 @@ The hub leaves four slots to the wrapper.
 
 **Core discipline.** The lifecycle procedure above: who writes epics and membership, who dispatches and records exit passes, when the current-epic pointer moves, and the format check at each state change.
 
-**Designated review.** The hub's default: a fresh-context review of the deliverable against the anchor. An exit pass grades the Done means items at one revision. A reviewer is handed a project file or epic record with its Rulings and returns section removed, and its search scope excludes those sections too, so no reviewer sees how earlier passes went.
+**Designated review.** The hub's default: a fresh-context review of the deliverable against the anchor. An exit pass grades the Done means items at one revision. A reviewer is handed a project file or epic record with its return and regression entries removed, and its search scope excludes those entries too, so no reviewer sees how earlier passes went. Your rulings stay in, because an owner-judgement item is checked by finding your ruling.
 
 **Red team.** The hub's step 4 seat, on the axes the specification names.
 
@@ -90,7 +90,7 @@ Nothing has to be installed. `superpowers:brainstorming` runs the interview wher
 ## Red flags
 
 - An epic moved to Done by the context that built it, or on a return with no evidence for an item.
-- A reviewer handed a project file or epic record with its Rulings and returns section still in it.
+- A reviewer handed a project file or epic record with a return or regression entry still in it.
 - A Done means item graded, or used as a constraint, before you ruled it.
 - A cutover edit made without your ruling on that edit, or a plugin-generated tracker edited.
 - An open issue left with no destination, or history rewritten or deleted during adoption.

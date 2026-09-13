@@ -85,10 +85,10 @@ Every item has the seven fields `formats.md` defines. Before any item goes to th
 You open an epic exit pass when its member phases have exited. You open the project exit pass when every roster epic is terminal. That is the project exit entry point. Either pass reuses the hub gate by reference: a context that did not build the work, one identified revision, a recorded return.
 
 1. **Open.** Write the revision on the file's `Certification target:` line as the pass opens. An epic has one certification target at a time. Opening a pass on a new revision voids any pending pass on the old one. Completed returns on the old revision stay in the file as history.
-2. **Dispatch.** The exit seat is handed the project file or epic record with its `## Rulings and returns` section removed, and its search scope excludes those sections in every tracked file, as doctrine step 4 excludes the record. The same exclusion applies to every phase reviewer and red team in an adopted repo. Past exit-pass results and run state never reach a seat.
+2. **Dispatch.** The exit seat is handed the project file or epic record with every `return` and `regression` entry removed, and its search scope excludes those entries in every tracked file, as doctrine step 4 excludes the record. Owner `ruling` entries stay, because a T4 check verifies that a ruling exists. The same exclusion applies to every phase reviewer and red team in an adopted repo. Past exit-pass results and run state never reach a seat.
 3. **Evidence.** The seat returns PASS, FAIL or UNVERIFIED per item, each with an evidence reference. Brief it that missing evidence is UNVERIFIED, never PASS. A `path:line` reference and a web quote held in a retained copy can both be checked offline. Checking that a live page still says what was quoted needs a fetch, which belongs in a separate manual check, never in `check`. A check that a quote is present does not show that the quote supports the claim.
 4. **Record.** You write the return entry. A return missing any item's result is a failed pass. Read what counts from `formats.md`.
-5. **A failed item.** For a failing end-state item with a satisfy epic, record a `regression` in the satisfy epic's record against each of that epic's Done means items that serve the failing end-state item, each by its own ID, and reopen that epic only (Done to Open). A failing item ruled `project-level` may be fixed by a phase outside any epic. The project exit pass then reruns.
+5. **A failed item.** For a failing end-state item with a satisfy epic, the epic that reopens is the Done epic at the end of the satisfy epic's successor chain, which is the satisfy epic itself when it is not Superseded. Record a `regression` in that epic's record against each of its Done means items that serve the failing end-state item, each by its own ID, and reopen that epic only (Done to Open). A failing item ruled `project-level` may be fixed by a phase outside any epic. The project exit pass then reruns.
 
 ### The sidebar
 
@@ -110,7 +110,7 @@ Hand the red team these, per doctrine step 4:
 - An open issue with no destination, or an issue number nobody read from the tracker.
 - An instruction that still routes tracking elsewhere after cutover.
 - History deleted or rewritten, or a plugin-generated tracker edited.
-- A `## Rulings and returns` section, or run state, inside a seat's prompt or search scope.
+- A `return` or `regression` entry, or run state, inside a seat's prompt or search scope.
 
 ## Red flags
 
