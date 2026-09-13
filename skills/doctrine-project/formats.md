@@ -99,7 +99,7 @@ An item's seven fields are its `###` ID and the six list lines.
 Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage | destination | cutover | scope
 Items: <item IDs>            (done-means-change, impact, project-level, coverage)
 Successor: <epic ID>         (supersede)
-Issues: <tracker ids>        (destination)
+Issues: <tracker ids or path:line ids>   (destination)
 To: <member <epic ID> | out of scope | post-done backlog>  (destination)
 Edit: <path>:<line>          (cutover)
 Entries: <never-becomes entries>  (scope)
