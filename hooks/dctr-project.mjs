@@ -31,6 +31,8 @@
 //     wherever it is written;
 //   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
 //     their Coverage line changed: check keeps no history of the line;
+//   - that a changed Combined check line has the baseline ruling SKILL.md requires, or that a change made
+//     without one really left the command and the pass rule alone: same reason, no history of the line;
 //   - which Done means items serve an end-state item;
 //   - lines before the first `##` other than the headers the rules read, lines in a section this file
 //     does not read, and a misspelled section heading, which is such a section;

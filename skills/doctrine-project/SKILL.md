@@ -57,7 +57,7 @@ Epic states are `Proposed`, `Not started`, `Open`, `Done`, `Dropped` and `Supers
 | Proposed | Not started | the owner, ruling the baseline Done means and the coverage map |
 | Not started | Open | you, opening the first member phase |
 | Open | Done | an epic exit pass whose return counts |
-| Done | Open | you, on a `done-means-change` ruling or a recorded regression |
+| Done | Open | you, on a `done-means-change` ruling, a Combined check change as below, or a recorded regression |
 | Proposed, Not started, Open or Done | Dropped | the owner, by a `drop` ruling |
 | Proposed, Not started, Open or Done | Superseded | the owner, by a `supersede` ruling naming the successor |
 
@@ -71,6 +71,7 @@ Epic states are `Proposed`, `Not started`, `Open`, `Done`, `Dropped` and `Supers
 - **Epics.** You create each epic in `Proposed` and record each member phase and issue under `## Members` when it joins.
 - **The pointer.** Move `Current epic:` only when a member phase opens an epic. Never move it when a regression reopens an epic.
 - **A Done means change.** On a `Not started` or `Open` epic it is allowed. On any epic it needs an `impact` ruling from the owner listing the same items (W3), and every phase contribution to those items needs fresh evidence. On a `Done` epic it also moves the epic to `Open`.
+- **A Combined check change.** The owner rules an epic's `Combined check:` line, and a change to it is recorded by a `baseline` ruling in that epic's record whose quoted words give the new line. A change to what the check runs, or to its pass rule, makes that ruling the current baseline, so every return on the older baseline stops counting, and on a `Done` epic it moves the epic to `Open` and the project back to `Ruled`. A change that leaves both alone, a typo or a reworded description of the same command and the same pass rule, is a repair: it needs no ruling and voids nothing. Judge which it is from the old and new lines, never from what the ruling says about itself. The first exit pass opened after a change that advanced the baseline runs the epic's Combined check at the certification target and cites its result in the return, since no Done means item's result shows the seams between phases that the check covers. `check` sees none of this: it keeps no history of the line, so a change recorded with no ruling, and a repair that in fact changed the command, are both invisible to it and are yours to get right.
 - **Work nothing covers.** Work a `Dropped` or `Superseded` epic no longer covers goes into a new epic. A successor covers an end-state item only once it is `Done`. While it is not, `check` reports the item. Where the successor chain ends at an epic that is `Proposed`, `Not started` or `Open`, the fix is a `coverage` ruling naming that epic as the item's satisfy epic. Where it ends at a `Dropped` epic, loops, or leaves the roster, nothing on it can reach `Done`: the fix is a new epic on the roster and a `coverage` ruling naming it. `formats.md` defines the `coverage` ruling: write it in the project file, and change the `Coverage:` line of each end-state item its Items list. Exit passes step 5 below says when it comes first on a failed item.
 
 ### Done means items

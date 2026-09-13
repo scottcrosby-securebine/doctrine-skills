@@ -59,7 +59,7 @@ An `## Open issues` row's Issue cell is the tracker id, or, for an open item rea
 # Epic <ID>: <title>
 State: Proposed | Not started | Open | Done | Dropped | Superseded
 Certification target: <commit sha> | none
-Combined check: <what runs> ; pass when <rule> | none
+Combined check: <what runs> ; pass when <rule> | none, only while Proposed, Dropped or Superseded
 
 ## What this is
 <prose>
@@ -127,6 +127,8 @@ Three Kinds record the owner's start and adoption rulings, each written in the p
 None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
+
+A change to an epic's `Combined check:` line is recorded by a `baseline` ruling in that epic's record, whose quoted words give the new line and whose `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling and what it voids.
 
 A return **counts** only when all three hold:
 
