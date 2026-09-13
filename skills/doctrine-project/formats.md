@@ -93,7 +93,7 @@ An item's seven fields are its `###` ID and the six list lines.
 
 ```
 ### <entry ID> ruling, <ISO 8601 UTC time>
-Kind: baseline | done-means-change | impact | drop | supersede | project-level | reopen
+Kind: baseline | done-means-change | impact | drop | supersede | project-level
 Items: <item IDs>            (done-means-change, impact, project-level)
 Successor: <epic ID>         (supersede)
 By: <owner>

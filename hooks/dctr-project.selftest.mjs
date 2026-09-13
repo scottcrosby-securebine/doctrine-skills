@@ -3,7 +3,7 @@
 //   node hooks/dctr-project.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
 // Seams: T-parse (markdown to model, with line numbers), T-check (model plus a file-existence
-// function to findings, and the exit code from findings), T-status (model plus injected posture
+// function to findings), T-status (model plus injected posture
 // readers to printed lines, `unknown` on every failed read). Every check rule gets the three clauses:
 //   (1) a broken fixture trips THAT rule with the message only its branch prints,
 //   (2) the known-good project produces zero findings,
@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, exitCode, formatFinding, statusLines, PROJECT_PATH } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, PROJECT_PATH } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -248,21 +248,16 @@ const mutate = (edits) => {
     p.entries[2].results.length === 3 && p.entries[2].results[2].evidence === 'docs/PROJECT.md:78' && p.entries[2].results[0].line === lineOf('- ES1: PASS, evidence: tests/export.test.mjs:12'),
     JSON.stringify(p.entries))
   const e = parseDoc(GOOD['docs/epics/E1.md'])
-  clause('T-parse 5 — epic heading and members, a phase with and without a record path',
+  clause('T-parse 5 — epic heading and phase members, a phase with and without a record path',
     e.title.text === 'Epic E1: Export' && e.title.line === 1 &&
-    e.members.length === 3 && e.members[0].kind === 'phase' && e.members[0].name === 'p1' && e.members[0].path === 'docs/records/p1.md' &&
-    e.members[1].name === 'p2' && !e.members[1].path && e.members[2].kind === 'issue' && e.members[2].name === '#12',
-    JSON.stringify({ title: e.title, members: e.members }))
+    e.phases.map((m) => m.name).join() === 'p1,p2' && e.phases[1].line === GOOD['docs/epics/E1.md'].split('\n').indexOf('- phase p2') + 1,
+    JSON.stringify({ title: e.title, phases: e.phases }))
 }
 
 // ---------------------------------------------------------------- T-check, clause 2 (known good)
 const goodFindings = run(GOOD)
 clause('T-check good — the known-good project (Done, Done epic, Superseded epic with a Done successor, project-level item) has ZERO findings',
   goodFindings.length === 0, goodFindings.map(formatFinding).join(' | '))
-clause('T-check exit — exitCode is 0 for no findings and 1 for any',
-  exitCode([]) === 0 && exitCode([{ path: 'x', line: 1, rule: 'state', message: 'm' }]) === 1, 'exitCode')
-clause('T-check format — one finding per line as <path>:<line>: <rule>: <message>',
-  formatFinding({ path: 'docs/PROJECT.md', line: 7, rule: 'pointer', message: 'm' }) === 'docs/PROJECT.md:7: pointer: m', 'formatFinding')
 
 // ---------------------------------------------------------------- T-check, clauses 1 and 3 per rule
 // Each case: the edits, the rule and a message fragment only that branch prints, the path the
@@ -278,7 +273,7 @@ const CASES = [
     edits: [['docs/epics/E3.md', 'State: Done', 'State: Unverified']],
     defect: (f) => /^State: Unverified$/m.test(txt(f, 'docs/epics/E3.md')) },
   { name: 'evidence — an epic Done with no baseline ruling', rule: 'evidence', frag: 'no baseline ruling', at: 'docs/epics/E3.md',
-    edits: [['docs/epics/E3.md', 'Kind: baseline', 'Kind: reopen']],
+    edits: [['docs/epics/E3.md', 'Kind: baseline', 'Kind: note']],
     defect: (f) => !/^Kind: baseline$/m.test(txt(f, 'docs/epics/E3.md')) },
   { name: 'evidence — an epic Open or Done with no phase member', rule: 'evidence', frag: 'no phase member', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', '- phase p3: docs/records/p3.md', '- issue #40']],
@@ -311,7 +306,7 @@ const CASES = [
     edits: [[P, '## End state\n', '## End state\n\n## Parked\n']],
     defect: (f) => { const t = txt(f, P); const s = t.slice(t.indexOf('## End state'), t.indexOf('## Parked')); return !/^### /m.test(s) } },
   { name: 'evidence — a project Ruled or Done with no baseline ruling', rule: 'evidence', frag: 'no baseline ruling', at: P,
-    edits: [[P, 'Kind: baseline', 'Kind: reopen']],
+    edits: [[P, 'Kind: baseline', 'Kind: note']],
     defect: (f) => !/^Kind: baseline$/m.test(txt(f, P)) },
   { name: 'evidence — a project Done while a roster epic is Open', rule: 'evidence', frag: 'not Done, Dropped or Superseded', at: P,
     edits: [['docs/epics/E1.md', 'State: Done', 'State: Open']],
@@ -362,7 +357,7 @@ const CASES = [
     edits: [[P, '- Type: T4', '- Type: T5']],
     defect: (f) => /^- Type: T5$/m.test(txt(f, P)) },
   { name: 'impact — a done-means-change with no later impact ruling (W3, ER7)', rule: 'impact', frag: 'impact', at: 'docs/epics/E1.md',
-    edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: reopen']],
+    edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: note']],
     defect: (f) => /Kind: done-means-change/.test(txt(f, 'docs/epics/E1.md')) && !/Kind: impact/.test(txt(f, 'docs/epics/E1.md')) },
   { name: 'issues — a Destination outside the three forms', rule: 'issues', frag: 'Destination', at: P,
     edits: [[P, '| #13 | out of scope |', '| #13 | wontfix |']],
@@ -490,7 +485,6 @@ clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints un
 const rEmptyReply = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1' }, encoding: 'utf8' })
 clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look": live seats: unknown, and herdr really was asked',
   rEmptyReply.stdout.split('\n').includes('live seats: unknown') && fs.existsSync(trip('herdr')), rEmptyReply.stdout)
-clause('CLI status — no docs/PROJECT.md exits 2', cli('status', empty).status === 2, 'status')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

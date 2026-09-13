@@ -15,9 +15,8 @@
 // `[ui.sidebar.agents]`; docs/watching-a-run.md carries that row, with the 0.9.0 colour rules.
 
 import { spawnSync } from 'node:child_process'
-import { skipReason, metadataTokenArgs } from './dctr-lib.mjs'
+import { skipReason, metadataTokenArgs, ID_RE } from './dctr-lib.mjs'
 
-const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$/
 const FLAGS = new Map([['--epic', 'epic'], ['--phase', 'phase'], ['--owed', 'owed']])
 const usage = () => {
   console.error('usage: node dctr-token.mjs <round> <exit-count> <valve> [--epic <ID>] [--phase <name>] [--owed]' +

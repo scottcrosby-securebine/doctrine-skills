@@ -18,6 +18,8 @@ export const RESULT_TAIL = 2
 
 /** herdr requires `[a-z][a-z0-9_-]{0,31}`, unique among live agents. Anything else is rejected. */
 export const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
+/** doctrine-project's ID and phase-name pattern: short enough to publish as a sidebar token unchanged. */
+export const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$/
 
 /** `Explore` -> `explore`, `general-purpose` -> `general-purpose`. Empty input becomes `seat`. */
 export const slug = (role) =>
