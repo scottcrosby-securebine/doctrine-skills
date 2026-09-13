@@ -25,7 +25,7 @@ Until you rule on an item it binds nothing: no seat treats it as a constraint an
 
 ## How the work runs
 
-**Two tracked files.** The project lives in `docs/PROJECT.md`, and each epic in `docs/epics/<ID>.md`. Both are committed. The project file holds the end state, the never-becomes list, the epic roster, the current epic, every open issue's destination, a linked index of history, and the owner's rulings and exit-pass returns. An epic record holds what the epic is, its Done means, its member phases and issues, and its own rulings and returns. The exact format is [`skills/doctrine-project/formats.md`](../../skills/doctrine-project/formats.md). Run state for each phase stays where the hub puts it, private and out of version control.
+**Two tracked files.** The project lives in `docs/PROJECT.md`, and each epic in `docs/epics/<ID>.md`. Both are committed. The project file holds the end state, the never-becomes list, the epic roster, the current epic, a row and destination for each open item adoption took in, a linked index of history, and the owner's rulings and exit-pass returns. An epic record holds what the epic is, its Done means, its member phases and issues, and its own rulings and returns. The exact format is [`skills/doctrine-project/formats.md`](../../skills/doctrine-project/formats.md). Run state for each phase stays where the hub puts it, private and out of version control.
 
 **States.** An epic is Proposed, Not started, Open, Done, Dropped or Superseded. Your ruling on its Done means moves it from Proposed to Not started, and its first member phase opens it. It reaches Done only on an exit return from a context that did not build the work, with a PASS for every Done means item, and only a return that counts under [formats.md, "Entries"](../../skills/doctrine-project/formats.md#entries) moves it. A later regression against a Done means item reopens the epic. The project is Proposed until you rule its end state, then Ruled, and Done only when every epic on the roster is Done, Dropped or Superseded and a project exit return passes every end-state item.
 
@@ -33,11 +33,11 @@ Until you rule on an item it binds nothing: no seat treats it as a constraint an
 
 - You rule the end state.
 - Epic records are written only for live work that covers it.
-- Every open issue, and every open item in a markdown tracker, gets one destination: a member of an epic, out of scope, or the post-done backlog. You rule each one, and the project file records the ruling.
+- Every open item in a markdown tracker the repo uses, and every open issue read from its work-item tracker, gets one destination: a member of an epic, out of scope, or the post-done backlog. You rule each one, and the project file records the ruling and a row.
 - History is kept as one linked index. No record is written for a past epic and nothing is deleted.
 - A cutover step rewrites the instructions that route tracking somewhere else. Each cutover edit is put to you and ruled one at a time. Trackers another plugin generates are reported and never edited. Edits to `CLAUDE.md` or `AGENTS.md` are flagged separately. GitHub Projects boards are reported as a tracking surface the run could not read.
 
-It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or the README. Where none names one but the remote has open issues, it asks you whether those are the tracker. It also works with no tracker at all. Issue numbers are recorded as written and never looked up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
+It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` or the README. Where none names one but the remote has open issues, it asks you whether those are the tracker. Adoption still runs with no tracker, when you decline the remote's issues, or when the tracker cannot be read: no issue from it gets a row, and the report says whether the issues were read and declined or not read at all. Issue numbers are never invented, and the format check never looks them up. Both modes pick up after a crash where they stopped, detect a project file or an earlier adoption already in place, and allow one writer at a time.
 
 **The format check.** At every state change, and at the start of every session in a tracked repo, the orchestrator runs:
 
@@ -93,7 +93,7 @@ Nothing has to be installed. `superpowers:brainstorming` runs the interview wher
 - A reviewer handed a project file or epic record with a return or regression entry still in it.
 - A Done means item graded, or used as a constraint, before you ruled it.
 - A cutover edit made without your ruling on that edit, or a plugin-generated tracker edited.
-- An open issue left with no destination, or history rewritten or deleted during adoption.
+- An open issue or markdown-tracker item that adoption took in left with no destination, or history rewritten or deleted during adoption.
 - The current-epic pointer moved because a regression reopened an epic.
 - A state changed with no format check run after it.
 - Epic or phase tokens published by a seat instead of the session's orchestrator.
