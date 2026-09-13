@@ -130,7 +130,7 @@ The **current baseline** of a file is its latest `baseline` or `done-means-chang
 
 `Combined check: none` is legal only while an epic is `Proposed`, `Dropped` or `Superseded`.
 
-An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words give the line verbatim, not a description of it, since nothing else records what the owner approved, and its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
+An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. They may sit inside a sentence, and the `Combined check:` key itself need not appear, as the worked example below shows. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
 A return **counts** only when all three hold:
 
