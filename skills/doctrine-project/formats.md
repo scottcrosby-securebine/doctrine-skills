@@ -128,7 +128,7 @@ None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none v
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 
-A change to an epic's `Combined check:` line is recorded by a `baseline` ruling in that epic's record, whose quoted words give the new line and whose `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling and what it voids.
+A ruling that changes an epic's `Combined check:` line is a `baseline` ruling in that epic's record, whose quoted words give the new line and whose `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
 A return **counts** only when all three hold:
 
