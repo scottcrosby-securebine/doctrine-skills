@@ -59,7 +59,7 @@ An `## Open issues` row's Issue cell is the tracker id, or, for an open item rea
 # Epic <ID>: <title>
 State: Proposed | Not started | Open | Done | Dropped | Superseded
 Certification target: <commit sha> | none
-Combined check: <what runs> ; pass when <rule> | none, only while Proposed, Dropped or Superseded
+Combined check: <what runs> ; pass when <rule> | none
 
 ## What this is
 <prose>
@@ -128,7 +128,9 @@ None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none v
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 
-A ruling that changes an epic's `Combined check:` line is a `baseline` ruling in that epic's record, whose quoted words give the new line and whose `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
+`Combined check: none` is legal only while an epic is `Proposed`, `Dropped` or `Superseded`.
+
+An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words give the line verbatim, not a description of it, since nothing else records what the owner approved, and its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
 A return **counts** only when all three hold:
 
@@ -234,7 +236,7 @@ A command that writes one month of invoices as a CSV in the ledger's import form
 ### E1-R1 ruling, 2026-09-13T10:05:00Z
 Kind: baseline
 By: Dana
-> D1 is the Done means for E1. The combined check is the export test suite.
+> D1 is the Done means for E1. The combined check is `npm test -- export` run against the merged export and CLI phases ; pass when it exits 0 and prints no skipped test.
 
 ### E1-R2 ruling, 2026-09-13T10:06:00Z
 Kind: coverage
