@@ -343,7 +343,7 @@ const failedPass = [[PROJECT_PATH, 'State: Done\nCurrent', 'State: Ruled\nCurren
 const REOPENED_UNRULED = mutate(failedPass)
 const REOPENED_RULED = mutate([...failedPass,
   [PROJECT_PATH, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E3; contribute E1'],
-  [PROJECT_PATH, '- ES3: PASS, evidence: c:1\n', '- ES3: PASS, evidence: c:1\n\n### R3 ruling, 2026-09-11T11:00:00Z\nKind: done-means-change\nItems: ES2\nBy: owner\n> E3 is the satisfy epic for ES2\n\n### R4 ruling, 2026-09-11T11:01:00Z\nKind: impact\nItems: ES2\nBy: owner\n> ok\n']])
+  [PROJECT_PATH, '- ES3: PASS, evidence: c:1\n', '- ES3: PASS, evidence: c:1\n\n### R3 ruling, 2026-09-11T11:00:00Z\nKind: coverage\nItems: ES2\nBy: owner\n> E3 is the satisfy epic for ES2\n']])
 // Table rows in the other GFM forms: no leading or closing pipe, and up to three leading spaces.
 const GFM_ROWS = mutate([[PROJECT_PATH, '| E1 | Export | docs/epics/E1.md |', 'E1 | Export | docs/epics/E1.md'],
   [PROJECT_PATH, '| E2 | Import v1 | docs/epics/E2.md |', '   | E2 | Import v1 | docs/epics/E2.md'],
@@ -357,6 +357,8 @@ for (const [name, files, shape] of [
     (f) => /^- Coverage: satisfy E3; contribute E1$/m.test(f[PROJECT_PATH]) && /^State: Open$/m.test(f[E3]) && /^Item: D3$/m.test(f[E3]) && /^State: Superseded$/m.test(f['docs/epics/E2.md'])],
   ['table rows with no leading or closing pipe and up to three leading spaces', GFM_ROWS,
     (f) => /^E1 \| Export \| docs\/epics\/E1\.md$/m.test(f[PROJECT_PATH]) && /^ {3}\| E2 \| Import v1 \| docs\/epics\/E2\.md$/m.test(f[PROJECT_PATH]) && /^ {2}#12 \| member E1 \|$/m.test(f[PROJECT_PATH])],
+  ['a roster row whose Title cell carries an escaped pipe', mutate([[PROJECT_PATH, '| E1 | Export | docs/epics/E1.md |', '| E1 | Export \\| CSV | docs/epics/E1.md |']]),
+    (f) => f[PROJECT_PATH].includes('| E1 | Export \\| CSV | docs/epics/E1.md |')],
 ]) {
   clause(`known good — ${name} [3: the fixture has that shape]`, shape(files), 'fixture')
   const fs2 = run(files)
@@ -439,10 +441,10 @@ const CASES = [
   { name: 'coverage — a satisfy epic that is Dropped', rule: 'coverage', frag: 'is Dropped', at: P,
     edits: [['docs/epics/E2.md', 'State: Superseded', 'State: Dropped'], ['docs/epics/E2.md', 'Kind: supersede', 'Kind: drop']],
     defect: (f) => /^State: Dropped$/m.test(txt(f, 'docs/epics/E2.md')) && /satisfy E2/.test(txt(f, P)) },
-  { name: 'coverage — a Superseded satisfy epic whose successor is not Done (ER3)', rule: 'coverage', frag: 'successor chain does not end at a Done epic; the fix is an owner ruling naming the epic at the end of the chain as this item\'s satisfy epic', at: P,
+  { name: 'coverage — a Superseded satisfy epic whose successor is not Done (ER3)', rule: 'coverage', frag: 'successor chain does not end at a Done epic; the fix is a coverage ruling naming E3, the Open epic at the end of the chain, as this item\'s satisfy epic', at: P,
     edits: [['docs/epics/E3.md', 'State: Done', 'State: Open'], [P, 'State: Done\nCurrent', 'State: Ruled\nCurrent']],
     defect: (f) => /^State: Superseded$/m.test(txt(f, 'docs/epics/E2.md')) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) && /^State: Open$/m.test(txt(f, 'docs/epics/E3.md')) },
-  { name: 'coverage — a Superseded chain that loops never reaches Done', rule: 'coverage', frag: 'successor chain', at: P,
+  { name: 'coverage — a Superseded chain that loops never reaches Done', rule: 'coverage', frag: 'it loops back to E2, so nothing on it can reach Done and the fix is a new epic on the roster and a coverage ruling naming it', at: P,
     edits: [['docs/epics/E3.md', 'State: Done', 'State: Superseded'], ['docs/epics/E3.md', 'Kind: baseline', 'Kind: supersede\nSuccessor: E2'], [P, 'State: Done\nCurrent', 'State: Proposed\nCurrent']],
     defect: (f) => /^Successor: E2$/m.test(txt(f, 'docs/epics/E3.md')) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) },
   { name: 'coverage — project-level naming no project-level ruling that lists the item', rule: 'coverage', frag: 'project-level ruling', at: P,
@@ -511,9 +513,9 @@ const CASES = [
   { name: 'coverage — a project Coverage part whose keyword is outside the four', rule: 'coverage', frag: 'Coverage part "contibute E1"', at: P,
     edits: [[P, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E2; contibute E1']],
     defect: (f) => /^- Coverage: satisfy E2; contibute E1$/m.test(txt(f, P)) },
-  { name: 'entry — a ruling Kind outside the six', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
+  { name: 'entry — a ruling Kind outside the seven', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: impacts']],
-    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level'].includes('impacts') },
+    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage'].includes('impacts') },
   { name: 'entry — a return result outside PASS, FAIL, UNVERIFIED', rule: 'entry', frag: 'is "PASSED"', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', '- D3: PASS, evidence: tests/import.test.mjs:4', '- D3: PASSED, evidence: tests/import.test.mjs:4']],
     defect: (f) => /^- D3: PASSED, /m.test(txt(f, 'docs/epics/E3.md')) },
@@ -526,7 +528,7 @@ const CASES = [
   { name: 'reference — a regression Item naming the end-state ID, in an epic record whose done-means-change ruling names other items', rule: 'reference', frag: 'regression G2 Item names "ES1"', at: E1,
     edits: [[E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G2 regression, 2026-09-06T10:00:00Z\nItem: ES1\nFound by: project pass\n> export empty\n']],
     defect: (f) => { const t = txt(f, E1); return /^Item: ES1$/m.test(t) && !/^### ES1$/m.test(t) && /Kind: done-means-change\nItems: D1\n/.test(t) && !/^Items: .*\bES1\b/m.test(t) } },
-  { name: 'coverage — a Superseded satisfy epic\'s chain end reopened by a regression before the owner ruled it the satisfy epic', rule: 'coverage', frag: 'the fix is an owner ruling naming the epic at the end of the chain', at: P, edits: failedPass,
+  { name: 'coverage — a Superseded satisfy epic\'s chain end reopened by a regression before the owner ruled it the satisfy epic', rule: 'coverage', frag: 'the fix is a coverage ruling naming E3', at: P, edits: failedPass,
     defect: (f) => /^- Coverage: satisfy E2; contribute E1$/m.test(txt(f, P)) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) && /^State: Open$/m.test(txt(f, E3)) && /^Item: D3$/m.test(txt(f, E3)) },
   { name: 'evidence — a roster row with no closing pipe is read (a Done project with an Open epic)', rule: 'evidence', frag: 'epic E1 is Open', at: P,
     edits: [[P, '| E1 | Export | docs/epics/E1.md |', '| E1 | Export | docs/epics/E1.md'], [E1, 'State: Done', 'State: Open']],

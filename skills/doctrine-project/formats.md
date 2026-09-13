@@ -9,7 +9,7 @@ The reference for writing `docs/PROJECT.md` and `docs/epics/<ID>.md`. `node <plu
 - A list inside a value is separated by `, `.
 - "Latest" means last in file order.
 - Unknown extra sections are allowed and ignored. In `## End state`, `## Done means`, `## Epics`, `## Open issues`, `## Members` and `## Rulings and returns`, every non-blank line takes a form this file shows, and `check` reports any other line.
-- A table row may omit its leading and closing pipes and may be indented by up to three spaces.
+- A table row may omit its leading and closing pipes and may be indented by up to three spaces. `\|` inside a cell is a literal pipe.
 
 ## `docs/PROJECT.md`
 
@@ -94,8 +94,8 @@ An item's seven fields are its `###` ID and the six list lines.
 
 ```
 ### <entry ID> ruling, <ISO 8601 UTC time>
-Kind: baseline | done-means-change | impact | drop | supersede | project-level
-Items: <item IDs>            (done-means-change, impact, project-level)
+Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage
+Items: <item IDs>            (done-means-change, impact, project-level, coverage)
 Successor: <epic ID>         (supersede)
 By: <owner>
 > <the owner's words>
@@ -112,7 +112,9 @@ Found by: <check or pass>
 > <the failing result, quoted>
 ```
 
-A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An entry written before the ruling may then name a removed item and still resolve.
+A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An ID that is no longer an item then still resolves in an entry written before the ruling, in the ruling itself, and in an `impact` ruling. A return or regression written after the ruling must name a current item.
+
+A `coverage` ruling changes which epic satisfies an end-state item, never what the item means. Its Items name the end-state items whose `Coverage:` line changes. It is not a baseline, so it voids no return and needs no `impact` ruling.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 

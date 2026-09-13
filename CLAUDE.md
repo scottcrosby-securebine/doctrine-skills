@@ -27,6 +27,7 @@ node hooks/dctr-gate.selftest.mjs   # gate launcher: the check runs, its transcr
 node hooks/dctr-pane.selftest.mjs   # interactive launcher: every refusal trips AND calls herdr zero times, a valid session is not refused, the fixtures are proved defective without the checker, and BOTH script(1) invocations are asserted so the macOS argument shape is checked without a Mac
 node hooks/dctr-seat.teardown.selftest.mjs   # the seat hook's destructive paths, plus the one placement path that fails the same way: a close that FAILED keeps its record while one that answered `pane_not_found` (or `tab_not_found`, a different code) does not, a lookup that failed never becomes a close, an unreadable marker does not abandon the readable seats, a healthy teardown still removes everything, and a reservation that cannot be made stands down instead of spinning
 node hooks/dctr-project.selftest.mjs   # project format check and status: each rule trips on a broken fixture, a known-good project stays quiet, the fixtures are proved defective without the checker, and a failed read prints unknown
+node hooks/dctr-project.history.selftest.mjs   # project lifecycle histories: check after every step, legal steps clean, illegal steps named, and each fix a finding prescribes leaves zero findings
 node hooks/dctr-mutations.mjs       # reverts each named repair and FAILS if no clause notices — the check that answers whether the other checks pin anything
 python3 -m json.tool hooks/hooks.json
 ```

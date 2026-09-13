@@ -77,6 +77,11 @@ jobs:
         # and curl on PATH. Pure node, no network, no herdr server.
         run: node hooks/dctr-project.selftest.mjs
 
+      - name: project history-walk tamper test
+        # Drives projects through lifecycle sequences as doctrine-project's SKILL.md writes them and runs
+        # check after every step: legal steps clean, illegal steps named, and every prescribed fix clean.
+        run: node hooks/dctr-project.history.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.

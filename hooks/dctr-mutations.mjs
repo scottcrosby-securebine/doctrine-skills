@@ -37,14 +37,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 // inside the gate, which is the loudest quiet failure this harness has.
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
-  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-token.mjs', 'hooks.json']
+  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-token.mjs', 'hooks.json']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
  *  teardown, gate, was commented "cheapest first", and was not: every mutation only the gate suite
  *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim.
- *  Project placed on 2026-09-13 by measuring on one host: seat 0.07s, project 0.57s, gate 6.07s. */
-const SUITES = ['dctr-seat.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
+ *  Project placed on 2026-09-13 by measuring on one host: seat 0.07s, project 0.57s, gate 6.07s.
+ *  Project history placed the same day, measured on one host: history 0.04s, project 0.46s, seat 1.14s. */
+const SUITES = ['dctr-project.history.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -524,7 +525,7 @@ const MUTATIONS = [
   { name: 'project: a Dropped satisfy epic is accepted', file: 'dctr-project.mjs', clause: 'coverage — a satisfy epic that is Dropped [1: trips]',
     from: "if (stateOf(e) === 'Dropped') add", to: 'if (false) add' },
   { name: 'project: a Superseded satisfy epic covers before its successor is Done (ER3)', file: 'dctr-project.mjs', clause: 'coverage — a Superseded satisfy epic whose successor is not Done (ER3) [1: trips]',
-    from: "if (stateOf(e) === 'Superseded' && !chainEndsDone(e))", to: 'if (false)' },
+    from: "if (st !== 'Done') add(P, ln, 'coverage'", to: "if (false) add(P, ln, 'coverage'" },
   { name: 'project: any ruling with the ID satisfies project-level', file: 'dctr-project.mjs', clause: 'coverage — project-level naming no project-level ruling that lists the item [1: trips]',
     from: "rulingsOf(p, 'project-level').some(", to: 'p.entries.some(' },
   { name: 'project: an empty epic Coverage is accepted', file: 'dctr-project.mjs', clause: 'coverage — an epic item with an empty Coverage [1: trips]',
@@ -604,7 +605,7 @@ const MUTATIONS = [
   { name: 'project: a project Coverage part with an unknown keyword is dropped silently', file: 'dctr-project.mjs',
     clause: 'coverage — a project Coverage part whose keyword is outside the four [1: trips]',
     from: 'for (const u of c.unknown) add(', to: 'for (const u of []) add(' },
-  { name: 'project: a ruling Kind outside the six is accepted', file: 'dctr-project.mjs', clause: 'entry — a ruling Kind outside the six [1: trips]',
+  { name: 'project: a ruling Kind outside the six is accepted', file: 'dctr-project.mjs', clause: 'entry — a ruling Kind outside the seven [1: trips]',
     from: "if (e.type === 'ruling' && !KINDS.includes(kind(e))) add(", to: 'if (false) add(' },
   { name: 'project: a return result outside the three is accepted', file: 'dctr-project.mjs', clause: 'entry — a return result outside PASS, FAIL, UNVERIFIED [1: trips]',
     from: 'if (!RESULTS.includes(r.result)) add(', to: 'if (false) add(' },
@@ -631,17 +632,39 @@ const MUTATIONS = [
     from: 'if (r?.workspaceRoot === root && !codexTerminal(r.status)) out.push(', to: 'if (r) out.push(' },
   { name: 'project: the reference helper itself stops reporting', file: 'dctr-project.mjs',
     clause: 'reference — a return result for an item its file does not define [1: trips]',
-    from: 'if (!itemIds.has(id) && !changed.has(id)) add(', to: 'if (false) add(' },
+    from: 'if (!resolves) add(', to: 'if (false) add(' },
   { name: 'project: an absent Combined check is accepted (W1)', file: 'dctr-project.mjs',
     clause: 'evidence — an epic Not started with Combined check absent (W1) [1: trips]',
     from: "if (!cc || cc === 'none')", to: "if (cc === 'none')" },
   // Repairs of 2026-09-13, third round.
   { name: 'project: an ID a done-means-change ruling removed no longer resolves in older entries', file: 'dctr-project.mjs',
     clause: 'known good — an item removed by a done-means-change ruling after a return that named it [2: ZERO findings]',
-    from: 'if (!itemIds.has(id) && !changed.has(id)) add(', to: 'if (!itemIds.has(id)) add(' },
+    from: " || at.some((j) => j >= i) || (e.type === 'ruling' && kind(e) === 'impact' && at.length > 0)", to: '' },
   { name: 'project: the ER3 finding tells the orchestrator to wait for the successor to be Done', file: 'dctr-project.mjs',
     clause: "coverage — a Superseded satisfy epic's chain end reopened by a regression before the owner ruled it the satisfy epic [1: trips]",
-    from: "the fix is an owner ruling naming the epic at the end of the chain as this item's satisfy epic`)", to: 'rule the successor as the satisfy epic once it is Done`)' },
+    from: "the fix is a coverage ruling naming ${end}, the ${st} epic at the end of the chain, as this item's satisfy epic`", to: 'rule the successor as the satisfy epic once it is Done`' },
+  // Repairs of 2026-09-13, fourth round: each named clause is in hooks/dctr-project.history.selftest.mjs.
+  { name: 'project: a retired ID resolves in a regression written after the ruling that retired it (E1)', file: 'dctr-project.mjs',
+    clause: 'S4 illegal: a regression written after the split against the retired ID D1 [1: reference',
+    from: 'at.some((j) => j >= i)', to: 'at.length > 0' },
+  { name: 'project: an impact ruling naming a removed item no longer resolves', file: 'dctr-project.mjs',
+    clause: 'S3 the impact ruling that finding names (W3, ER7), listing the removed D2 [2: ZERO findings]',
+    from: " || (e.type === 'ruling' && kind(e) === 'impact' && at.length > 0)", to: '' },
+  { name: 'project: a chain ending at a Dropped epic prescribes reassignment to it (E2)', file: 'dctr-project.mjs',
+    clause: 'S6 owner drops the Done successor E2 (ER6) [1: coverage',
+    from: 'const fix = LIVE.includes(st)', to: 'const fix = true' },
+  { name: 'project: a looping chain is described as ending at an epic', file: 'dctr-project.mjs',
+    clause: 'S6b owner supersedes E1 by E2 and E2 back by E1 [1: coverage',
+    from: "st === 'Superseded' ? `it loops back to ${end}`", to: "false ? `it loops back to ${end}`" },
+  { name: 'project: coverage is not a ruling Kind', file: 'dctr-project.mjs',
+    clause: 'S5 the prescribed fix: a coverage ruling naming E2 [2: ZERO findings]',
+    from: "'project-level', 'coverage']\n", to: "'project-level']\n" },
+  { name: 'project: a coverage ruling needs no Items', file: 'dctr-project.mjs',
+    clause: 'S5 illegal: a coverage ruling with no Items [1: reference',
+    from: "['done-means-change', 'impact', 'project-level', 'coverage'].includes(kind(e))", to: "['done-means-change', 'impact', 'project-level'].includes(kind(e))" },
+  { name: 'project: an escaped pipe splits a table cell', file: 'dctr-project.mjs',
+    clause: 'known good — a roster row whose Title cell carries an escaped pipe [2: ZERO findings]',
+    from: '.split(/(?<!\\\\)\\|/)', to: ".split('|')" },
   { name: 'project: a table row with no closing pipe is not read', file: 'dctr-project.mjs',
     clause: 'evidence — a roster row with no closing pipe is read (a Done project with an Open epic) [1: trips]',
     from: 'const m = /^ {0,3}(?=\\S)(.*\\|.*)$/.exec(t)', to: 'const m = /^ {0,3}(?=\\S)(\\|.*\\|)$/.exec(t)' },

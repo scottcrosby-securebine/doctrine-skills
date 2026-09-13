@@ -23,8 +23,10 @@
 //     duplicate item or entry ID within one file, are findings);
 //   - the format of the time in an entry heading, beyond its being present;
 //   - which fields a ruling Kind requires (Successor), beyond what the named rules read;
-//   - whether an entry naming an ID that only a done-means-change ruling names was written before that
-//     ruling: any such ID resolves, so a return written after the item was removed still passes;
+//   - where an impact ruling sits: one naming an ID that any done-means-change ruling names resolves,
+//     wherever it is written;
+//   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
+//     their Coverage line changed: check keeps no history of the line;
 //   - which Done means items serve an end-state item;
 //   - lines before the first `##` other than the headers the rules read, lines in a section this file
 //     does not read, and a misspelled section heading, which is such a section;
@@ -39,8 +41,9 @@ export const PROJECT_PATH = 'docs/PROJECT.md'
 const PROJECT_STATES = ['Proposed', 'Ruled', 'Done']
 const EPIC_STATES = ['Proposed', 'Not started', 'Open', 'Done', 'Dropped', 'Superseded']
 const TERMINAL = ['Done', 'Dropped', 'Superseded']
+const LIVE = ['Proposed', 'Not started', 'Open']
 const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
-const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level']
+const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage']
 const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
 const OBLIGATIONS = ['satisfy', 'contribute', 'preserve']
 /** Section to the rule a malformed line in it reports under, and the forms it accepts. */
@@ -56,8 +59,10 @@ const LINE_FORMS = {
 // ---------------------------------------------------------------- parse
 
 const list = (v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [])
-/** A GFM table row: up to three leading spaces, at least one pipe, leading and closing pipes optional. */
-const cells = (t) => { const m = /^ {0,3}(?=\S)(.*\|.*)$/.exec(t); return m && m[1].replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()) }
+/** A GFM table row: up to three leading spaces, at least one pipe, leading and closing pipes optional,
+ *  and `\|` a literal pipe inside a cell. ponytail: `\\|` (an escaped backslash before a pipe) is read as
+ *  an escaped pipe; handle it if a real roster ever carries one. */
+const cells = (t) => { const m = /^ {0,3}(?=\S)(.*\|.*)$/.exec(t); return m && m[1].replace(/^\|/, '').replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|')) }
 
 /** Markdown to a model. Every value carries the 1-based line it came from. */
 export function parseDoc(text) {
@@ -229,10 +234,12 @@ export function check(model, exists) {
   }
 
   // end-state coverage
-  const chainEndsDone = (id) => {
+  /** The last epic on a Superseded epic's successor chain: a non-Superseded epic, an ID that is not a
+   *  readable roster epic, or, on a loop, a Superseded one. */
+  const chainEnd = (id) => {
     const visited = new Set()
     while (stateOf(id) === 'Superseded' && !visited.has(id)) { visited.add(id); id = rulingsOf(byId.get(id).doc, 'supersede').at(-1)?.fields.Successor?.value }
-    return stateOf(id) === 'Done'
+    return id
   }
   for (const it of p.items) {
     const cov = it.fields.Coverage, ln = cov?.line ?? it.line
@@ -245,7 +252,15 @@ export function check(model, exists) {
     for (const e of c.satisfy) {
       if (!rosterIds.has(e)) { add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is not on the roster`); continue }
       if (stateOf(e) === 'Dropped') add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Dropped`)
-      if (stateOf(e) === 'Superseded' && !chainEndsDone(e)) add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Superseded and its successor chain does not end at a Done epic; the fix is an owner ruling naming the epic at the end of the chain as this item's satisfy epic`)
+      if (stateOf(e) !== 'Superseded') continue
+      // A chain ending at an epic with an exit is fixed by reassigning the item to it; one ending where
+      // nothing can reach Done (Dropped, a loop, off the roster) needs a new epic (SKILL.md "Work nothing covers").
+      const end = chainEnd(e), st = stateOf(end)
+      const dead = st === 'Superseded' ? `it loops back to ${end}` : st ? `it ends at ${end}, which is ${st}` : `it ends at ${end ?? '(no Successor)'}, which is not a readable roster epic`
+      const fix = LIVE.includes(st)
+        ? `the fix is a coverage ruling naming ${end}, the ${st} epic at the end of the chain, as this item's satisfy epic`
+        : `${dead}, so nothing on it can reach Done and the fix is a new epic on the roster and a coverage ruling naming it as this item's satisfy epic`
+      if (st !== 'Done') add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Superseded and its successor chain does not end at a Done epic; ${fix}`)
     }
     if (c.projectLevel && !rulingsOf(p, 'project-level').some((r) => r.id === c.projectLevel && list(r.fields.Items?.value).includes(it.id))) {
       add(P, ln, 'coverage', `end-state item ${it.id} names ${c.projectLevel}, which is not a project-level ruling listing it`)
@@ -257,10 +272,16 @@ export function check(model, exists) {
   for (const { path: file, doc } of files) {
     const what = doc === p ? 'end-state item' : 'Done means item'
     const itemIds = new Set(), entryIds = new Set()
-    // An ID a done-means-change ruling names still resolves after that ruling removed or split its item,
-    // so a return or ruling from before the change stays valid history.
-    const changed = new Set(rulingsOf(doc, 'done-means-change').flatMap((e) => list(e.fields.Items?.value)))
-    const ref = (line, id, subject) => { if (!itemIds.has(id) && !changed.has(id)) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is neither an item in this file nor named by a done-means-change ruling in it`) }
+    // An ID that is no longer an item resolves in the entry at index i only when a done-means-change
+    // ruling naming it is that entry or comes after it, so history from before the change stays valid
+    // and a regression or return written after it must name a current item; or when the entry is an
+    // impact ruling, which W3 requires to list the done-means-change ruling's items.
+    const changedAt = (id) => doc.entries.flatMap((x, j) => (x.type === 'ruling' && kind(x) === 'done-means-change' && list(x.fields.Items?.value).includes(id) ? [j] : []))
+    const ref = (i, line, id, subject) => {
+      const at = changedAt(id), e = doc.entries[i]
+      const resolves = itemIds.has(id) || at.some((j) => j >= i) || (e.type === 'ruling' && kind(e) === 'impact' && at.length > 0)
+      if (!resolves) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is neither an item in this file nor named by a done-means-change ruling at or after that entry`)
+    }
     for (const m of doc.malformed) { const [rule, form] = LINE_FORMS[m.section]; add(file, m.line, rule, `## ${m.section} line ${JSON.stringify(m.text)} is not ${form}`) }
     for (const it of doc.items) {
       idCheck(file, it.line, `${what} ID`, it.id)
@@ -279,9 +300,9 @@ export function check(model, exists) {
       entryIds.add(e.id)
       if (e.type === null) add(file, e.line, 'entry', `heading of ${e.id} is not <entry ID> ruling|return|regression, <time>`)
       if (e.type === 'ruling' && !KINDS.includes(kind(e))) add(file, e.fields.Kind?.line ?? e.line, 'entry', `ruling ${e.id} Kind ${JSON.stringify(kind(e) ?? null)} is not one of ${KINDS.join(', ')}`)
-      if (e.type === 'regression') ref(e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
+      if (e.type === 'regression') ref(i, e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
       if (e.type === 'return') {
-        for (const r of e.results) ref(r.line, r.item, `return ${e.id} result`)
+        for (const r of e.results) ref(i, r.line, r.item, `return ${e.id} result`)
         const given = new Set()
         for (const r of e.results) { if (given.has(r.item)) add(file, r.line, 'entry', `return ${e.id} gives ${r.item} more than one result`); given.add(r.item) }
         for (const r of e.results) if (!RESULTS.includes(r.result)) add(file, r.line, 'entry', `return ${e.id} result for ${r.item} is ${JSON.stringify(r.result)}, not ${RESULTS.join(', ')}`)
@@ -290,10 +311,10 @@ export function check(model, exists) {
           add(file, b?.line ?? e.line, 'reference', `return ${e.id} Baseline ${b?.value || '(none)'} is not a baseline or done-means-change ruling in this file`)
         }
       }
-      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level'].includes(kind(e))) {
+      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level', 'coverage'].includes(kind(e))) {
         const ids = list(e.fields.Items?.value)
         if (!ids.length && kind(e) !== 'project-level') add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
-        for (const id of ids) ref(e.fields.Items.line, id, `${kind(e)} ruling ${e.id} Items`)
+        for (const id of ids) ref(i, e.fields.Items.line, id, `${kind(e)} ruling ${e.id} Items`)
       }
       if (e.type !== 'ruling' || kind(e) !== 'done-means-change') return
       const items = list(e.fields.Items?.value)
