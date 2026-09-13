@@ -88,7 +88,7 @@ An item's seven fields are its `###` ID and the six list lines.
 - **Outcome** names the value. "The page loads" names nothing, since an app that returns an empty body forever passes it.
 - **Type** is T1 behaviour (inputs, environment, observable outputs, rejection cases), T2 artifact property, T3 threshold with a pass line, or T4 owner judgement (the named authority, the question, the revision judged).
 - **Check** is what a context that did not build the work runs at the certification target.
-- **Control** shows the check can fail, for example the check run with the feature off. Where the Check is runnable, the control is shown failing at the revision the item is admitted at.
+- **Control** shows the check can fail, for example the check run with the feature off. Where the Check is runnable, the control is shown failing at the revision the item is admitted at. An item whose Check could not run at the revision it was admitted at carries, on its Control line, the words `not yet shown failing:` followed by what it needs to run, and the mark comes off the line only when the Control has been run and shown failing.
 - **Evidence** says what reference a return must cite: a `path:line`, a gate transcript under `Records:`, or a web quote with a retained copy.
 - **Coverage** is the W1 coverage map for that item. In the project file it names exactly one satisfy epic, or a `project-level` ruling. In an epic record it gives each serving phase one obligation.
 
