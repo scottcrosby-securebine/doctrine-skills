@@ -334,6 +334,9 @@ const REMOVED = mutate([[E1, '- D1: PASS, evidence: x\n', `- D1: PASS, evidence:
 const SPLIT = mutate([[E1, '### D1\n', '### D1a\n'],
   [E1, '- Coverage: export-core: satisfy, cli: contribute\n', '- Coverage: export-core: satisfy, cli: contribute\n\n### D1b\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: c\n- Evidence: e\n- Coverage: export-core: satisfy\n'],
   [E1, '- D1: PASS, evidence: x\n', '- D1: PASS, evidence: x\n' + laterE1('D1, D1a, D1b', '- D1a: PASS, evidence: x\n- D1b: PASS, evidence: x\n')]], EXAMPLE)
+// A return recorded after that split, graded on the baseline it was briefed on (E1-R1) or on the split itself (E1-R2).
+const lateReturn = (baseline) => mutate([[E1, '- D1b: PASS, evidence: x\n', `- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: ${baseline}\nRevision: abc123\nSeat: reviewer\n- D1: FAIL, evidence: x\n`]], SPLIT)
+const lateReturnShape = (baseline) => (f) => { const x = f[E1].indexOf('### E1-X3 return'), t = f[E1].slice(Math.max(0, x)); return x > f[E1].indexOf('### E1-R2 ruling') && t.includes(`\nBaseline: ${baseline}\n`) && /^- D1: FAIL/m.test(t) && !/^### D1$/m.test(f[E1]) }
 // A failed project pass on an item whose satisfy epic E2 is Superseded by the Done E3: the owner first
 // rules E3 as ES2's satisfy epic, then E3 is reopened by a regression (SKILL.md, exit passes step 5).
 const failedPass = [[PROJECT_PATH, 'State: Done\nCurrent', 'State: Ruled\nCurrent'],
@@ -353,6 +356,7 @@ for (const [name, files, shape] of [
     (f) => !/^### D2$/m.test(f[E1]) && /^- D2: FAIL/m.test(f[E1]) && /Kind: done-means-change\nItems: D2$/m.test(f[E1]) && f[E1].indexOf('- D2: FAIL') < f[E1].indexOf('### E1-R2 ruling')],
   ['an item split by a done-means-change ruling after a return that named it', SPLIT,
     (f) => !/^### D1$/m.test(f[E1]) && /^### D1a$/m.test(f[E1]) && /^### D1b$/m.test(f[E1]) && f[E1].indexOf('- D1: PASS') < f[E1].indexOf('### E1-R2 ruling') && /Items: D1, D1a, D1b$/m.test(f[E1])],
+  ['a return recorded after that split, on the baseline written before it, naming the retired ID', lateReturn('E1-R1'), lateReturnShape('E1-R1')],
   ['a Superseded satisfy epic\'s chain end reopened after the owner ruled it the satisfy epic', REOPENED_RULED,
     (f) => /^- Coverage: satisfy E3; contribute E1$/m.test(f[PROJECT_PATH]) && /^State: Open$/m.test(f[E3]) && /^Item: D3$/m.test(f[E3]) && /^State: Superseded$/m.test(f['docs/epics/E2.md'])],
   ['table rows with no leading or closing pipe and up to three leading spaces', GFM_ROWS,
@@ -569,6 +573,9 @@ const CASES = [
   { name: 'entry — a heading with no time after the comma', rule: 'entry', frag: 'heading of Z1', at: E3,
     edits: [[E3, '### Z1 return, 2026-09-08T10:00:00Z', '### Z1 return,']],
     defect: (f) => /^### Z1 return,$/m.test(txt(f, E3)) },
+  { name: 'reference — a return on the done-means-change baseline naming the ID that ruling retired', rule: 'reference', frag: 'return E1-X3 result names "D1"', at: E1, base: SPLIT,
+    edits: [[E1, '- D1b: PASS, evidence: x\n', '- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\n- D1: FAIL, evidence: x\n']],
+    defect: lateReturnShape('E1-R2') },
   { name: 'reference — an impact ruling with no Items', rule: 'reference', frag: 'impact ruling R3 has no Items', at: E1,
     edits: [[E1, 'Kind: impact\nItems: D1\n', 'Kind: impact\nItems:\n']],
     defect: (f) => /Kind: impact\nItems:\n/.test(txt(f, E1)) },

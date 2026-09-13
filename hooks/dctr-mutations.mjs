@@ -701,6 +701,10 @@ const MUTATIONS = [
   { name: 'project: only a done-means-change ruling needs Items, not an impact ruling', file: 'dctr-project.mjs',
     clause: 'reference — an impact ruling with no Items [1: trips]',
     from: "if (!ids.length && kind(e) !== 'project-level') add(", to: "if (!ids.length && kind(e) === 'done-means-change') add(" },
+  // Repair of 2026-09-13, fifth round (F4-1).
+  { name: 'project: a return graded on a baseline written before a done-means-change no longer resolves the ID it retired', file: 'dctr-project.mjs',
+    clause: 'S9 exit passes step 4: the return arrives and is recorded as the seat gave it, on the baseline it was briefed on [2: ZERO findings]',
+    from: ' || (graded >= 0 && at.some((j) => j > graded))', to: '' },
   { name: 'the token script calls herdr in a contained session', file: 'dctr-token.mjs',
     clause: 'clause 1bf — T-token: contained (DCTR_VIEW_REQUEST_DIR set, inside herdr, pane set) it stands down with exit 0 and calls herdr ZERO times',
     from: "(process.env.DCTR_VIEW_REQUEST_DIR ? 'contained session", to: "(false ? 'contained session" },

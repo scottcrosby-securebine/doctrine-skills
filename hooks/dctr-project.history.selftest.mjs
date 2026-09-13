@@ -198,5 +198,24 @@ walk('S8', S1_DONE, [
   { name: 'project Done', ops: [state(P, 'Done')] },
 ])
 
+// ---------------------------------------------------------------- S9 a return briefed before a Done means change lands
+walk('S9', S1_OPEN, [
+  { name: 'exit passes step 1: an epic exit pass opens on revision a2', ops: [hdr(E1, 'Certification target', 'a2')] },
+  { name: 'while the seat works, the owner splits D1 into D1a and D1b, with its impact ruling (ER7, W3)',
+    ops: [sub(E1, '### D1\n', '### D1a\n'), sub(E1, '## Members\n', item('D1b', 'p1: satisfy') + '## Members\n'),
+      rule(E1, 'E1-R2', 'done-means-change', 'Items: D1, D1a, D1b\n'), rule(E1, 'E1-R3', 'impact', 'Items: D1, D1a, D1b\n')] },
+  { name: 'exit passes step 4: the return arrives and is recorded as the seat gave it, on the baseline it was briefed on',
+    ops: [ret(E1, 'E1-X2', 'E1-R1', 'a2', ['D1: FAIL', 'D2: PASS'])] },
+  { name: 'illegal: E1 moved Done on that return', branch: true, want: ['evidence', E1, 'epic E1 is Done without a counting return'],
+    ops: [state(E1, 'Done')], shape: (f) => /^State: Done$/m.test(f[E1]) && /^Baseline: E1-R1$/m.test(f[E1].slice(Math.max(0, at(f[E1], '### E1-X2 return')))) && !/^Baseline: E1-R2$/m.test(f[E1]) },
+  { name: 'illegal: a regression written after the split against the retired ID D1', branch: true, want: ['reference', E1, 'regression E1-G1 Item names "D1"'],
+    ops: [reg(E1, 'E1-G1', 'D1')], shape: (f) => /^Item: D1$/m.test(f[E1]) && !/^### D1$/m.test(f[E1]) && at(f[E1], '### E1-G1 regression') > at(f[E1], '### E1-R2 ruling') },
+  { name: 'illegal: a return on the new baseline E1-R2 naming the retired ID D1', branch: true, want: ['reference', E1, 'return E1-X3 result names "D1"'],
+    ops: [ret(E1, 'E1-X3', 'E1-R2', 'a2', ['D1: PASS', 'D2: PASS'])],
+    shape: (f) => { const x = at(f[E1], '### E1-X3 return'), t = f[E1].slice(Math.max(0, x)); return x > at(f[E1], '### E1-R2 ruling') && /^Baseline: E1-R2$/m.test(t) && /^- D1: /m.test(t) && !/^### D1$/m.test(f[E1]) } },
+  { name: 'a new pass on the current baseline E1-R2 and revision a2, its return recorded', ops: [ret(E1, 'E1-X3', 'E1-R2', 'a2', ['D1a: PASS', 'D1b: PASS', 'D2: PASS'])] },
+  { name: 'E1 moved Done on it', ops: [state(E1, 'Done')] },
+])
+
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

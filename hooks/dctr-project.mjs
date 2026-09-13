@@ -274,12 +274,15 @@ export function check(model, exists) {
     const itemIds = new Set(), entryIds = new Set()
     // An ID that is no longer an item resolves in the entry at index i only when a done-means-change
     // ruling naming it is that entry or comes after it, so history from before the change stays valid
-    // and a regression or return written after it must name a current item; or when the entry is an
-    // impact ruling, which W3 requires to list the done-means-change ruling's items.
+    // and a regression written after it must name a current item; or when the entry is an impact ruling,
+    // which W3 requires to list the done-means-change ruling's items; or when the entry is a return whose
+    // Baseline was written before a ruling naming it, since that return graded the items as they stood
+    // under its own Baseline. Such a return never counts: its Baseline is not current.
     const changedAt = (id) => doc.entries.flatMap((x, j) => (x.type === 'ruling' && kind(x) === 'done-means-change' && list(x.fields.Items?.value).includes(id) ? [j] : []))
     const ref = (i, line, id, subject) => {
       const at = changedAt(id), e = doc.entries[i]
-      const resolves = itemIds.has(id) || at.some((j) => j >= i) || (e.type === 'ruling' && kind(e) === 'impact' && at.length > 0)
+      const graded = e.type === 'return' ? doc.entries.findIndex((x) => x.type === 'ruling' && x.id === e.fields.Baseline?.value && ['baseline', 'done-means-change'].includes(kind(x))) : -1
+      const resolves = itemIds.has(id) || at.some((j) => j >= i) || (e.type === 'ruling' && kind(e) === 'impact' && at.length > 0) || (graded >= 0 && at.some((j) => j > graded))
       if (!resolves) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is neither an item in this file nor named by a done-means-change ruling at or after that entry`)
     }
     for (const m of doc.malformed) { const [rule, form] = LINE_FORMS[m.section]; add(file, m.line, rule, `## ${m.section} line ${JSON.stringify(m.text)} is not ${form}`) }

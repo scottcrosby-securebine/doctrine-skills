@@ -112,7 +112,7 @@ Found by: <check or pass>
 > <the failing result, quoted>
 ```
 
-A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An ID that is no longer an item then still resolves in an entry written before the ruling, in the ruling itself, and in an `impact` ruling. A return or regression written after the ruling must name a current item.
+A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An ID that is no longer an item then still resolves in an entry written before the ruling, in the ruling itself, in an `impact` ruling, and in a return whose Baseline is a ruling written before it, because that return graded the items as they stood under its own Baseline. A regression written after the ruling must name a current item, and so must a return whose Baseline is that ruling or a later one.
 
 A `coverage` ruling changes which epic satisfies an end-state item, never what the item means. Its Items name the end-state items whose `Coverage:` line changes. It is not a baseline, so it voids no return and needs no `impact` ruling.
 
