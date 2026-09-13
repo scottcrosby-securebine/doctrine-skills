@@ -293,7 +293,7 @@ By: Dana
   'docs/epics/E1.md': `# Epic E1: CSV export
 State: Done
 Certification target: abc123
-Combined check: npm test -- export ; pass when it exits 0
+Combined check: \`npm test -- export\` run against the merged export and CLI phases ; pass when it exits 0 and prints no skipped test
 
 ## Done means
 ### D1
