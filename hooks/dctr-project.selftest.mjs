@@ -217,8 +217,8 @@ const run = (files) => check(build(files), existsIn(files))
 
 /** One broken variant: each [file, from, to] must occur exactly once, so a fixture can never silently
  *  equal the good project because its anchor moved. */
-const mutate = (edits) => {
-  const files = { ...GOOD }
+const mutate = (edits, base = GOOD) => {
+  const files = { ...base }
   for (const [file, from, to] of edits) {
     const hits = files[file].split(from).length - 1
     if (hits !== 1) throw new Error(`fixture anchor ${JSON.stringify(from)} occurs ${hits} times in ${file}`)
@@ -258,6 +258,71 @@ const mutate = (edits) => {
 const goodFindings = run(GOOD)
 clause('T-check good — the known-good project (Done, Done epic, Superseded epic with a Done successor, project-level item) has ZERO findings',
   goodFindings.length === 0, goodFindings.map(formatFinding).join(' | '))
+
+// A second known-good base: formats.md's worked example with E1 moved to Done on a counting return.
+// Kept apart from GOOD because its item IDs (ES1 in the project, D1 in the epic) are the shape of the
+// defect a regression recorded against the end-state item ID used to hide.
+const EXAMPLE = {
+  'docs/PROJECT.md': `# Project: invoice-export
+State: Ruled
+Current epic: E1
+Certification target: none
+Records: .doctrine/records
+
+## End state
+### ES1
+- Outcome: an accountant downloads last month's invoices as one CSV that their ledger imports without edits
+- Type: T1
+- Check: run the export on the fixture ledger and import the file
+- Control: the import on a CSV with one column removed exits non-zero
+- Evidence: the import transcript under .doctrine/records, cited as path:line
+- Coverage: satisfy E1
+
+## Epics
+| ID | Title | Record |
+|---|---|---|
+| E1 | CSV export | docs/epics/E1.md |
+
+## Rulings and returns
+### P-R1 ruling, 2026-09-13T10:00:00Z
+Kind: baseline
+By: Dana
+> Approve ES1 as the end state, satisfied by E1.
+`,
+  'docs/epics/E1.md': `# Epic E1: CSV export
+State: Done
+Certification target: abc123
+Combined check: npm test -- export
+
+## Done means
+### D1
+- Outcome: the export command writes a CSV that the ledger accepts for the fixture month
+- Type: T1
+- Check: run the export then the strict import
+- Control: the import rejects the fixture CSV with its date column removed
+- Evidence: the import transcript under .doctrine/records, cited as path:line
+- Coverage: export-core: satisfy, cli: contribute
+
+## Members
+- phase export-core: .doctrine/records/export-core.md
+- phase cli
+
+## Rulings and returns
+### E1-R1 ruling, 2026-09-13T10:05:00Z
+Kind: baseline
+By: Dana
+> D1 is the Done means for E1.
+
+### E1-X1 return, 2026-09-13T11:00:00Z
+Baseline: E1-R1
+Revision: abc123
+Seat: reviewer
+- D1: PASS, evidence: x
+`,
+}
+const exampleFindings = run(EXAMPLE)
+clause('T-check good — the Done worked example (end-state ES1, Done means D1) has ZERO findings',
+  exampleFindings.length === 0, exampleFindings.map(formatFinding).join(' | '))
 
 // ---------------------------------------------------------------- T-check, clauses 1 and 3 per rule
 // Each case: the edits, the rule and a message fragment only that branch prints, the path the
@@ -374,13 +439,38 @@ const CASES = [
   { name: 'id — an entry ID longer than 24 characters', rule: 'id', frag: 'entry ID', at: P,
     edits: [[P, '### R2 ruling', `### ${LONG} ruling`], [P, '- Coverage: project-level R2', `- Coverage: project-level ${LONG}`]],
     defect: (f) => new RegExp(`^### ${LONG} ruling`, 'm').test(txt(f, P)) && LONG.length > 24 },
+  { name: 'id — a duplicate item ID within one file', rule: 'id', frag: 'duplicate item ID', at: P,
+    edits: [[P, '### ES2\n', '### ES1\n']],
+    defect: (f) => (txt(f, P).match(/^### ES1$/gm) || []).length === 2 },
+  { name: 'id — a duplicate entry ID within one file', rule: 'id', frag: 'duplicate entry ID', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', '### Z1 return', '### R1 return']],
+    defect: (f) => (txt(f, 'docs/epics/E3.md').match(/^### R1 /gm) || []).length === 2 },
+  { name: 'evidence — an epic Done with no Done means item', rule: 'evidence', frag: 'no Done means item', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', '## Done means\n', '## Done means\n\n## Parked\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E3.md'); return /^State: Done$/m.test(t) && !/^### /m.test(t.slice(t.indexOf('## Done means'), t.indexOf('## Parked'))) } },
+  { name: 'reference — a regression recorded against the end-state item ID in the satisfy epic record', rule: 'reference', frag: 'regression E1-G1 Item names "ES1"', at: 'docs/epics/E1.md', base: EXAMPLE,
+    edits: [['docs/epics/E1.md', '- D1: PASS, evidence: x\n', '- D1: PASS, evidence: x\n\n### E1-G1 regression, 2026-09-13T12:00:00Z\nItem: ES1\nFound by: project pass\n> import failed\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^Item: ES1$/m.test(t) && !/^### ES1$/m.test(t) && t.indexOf('### E1-G1 regression') > t.indexOf('### E1-X1 return') } },
+  { name: 'reference — a return result for an item its file does not define', rule: 'reference', frag: 'return Z1 result names "D9"', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', '- D3: PASS, evidence: tests/import.test.mjs:4', '- D3: PASS, evidence: tests/import.test.mjs:4\n- D9: FAIL, evidence: x']],
+    defect: (f) => /^- D9: FAIL/m.test(txt(f, 'docs/epics/E3.md')) && !/^### D9$/m.test(txt(f, 'docs/epics/E3.md')) },
+  { name: 'reference — a ruling Items naming an item its file does not define', rule: 'reference', frag: 'impact ruling R3 Items names "D7"', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Kind: impact\nItems: D1', 'Kind: impact\nItems: D1, D7']],
+    defect: (f) => /^Items: D1, D7$/m.test(txt(f, 'docs/epics/E1.md')) && !/^### D7$/m.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'reference — a done-means-change ruling with no Items', rule: 'reference', frag: 'has no Items', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Kind: done-means-change\nItems: D1\n', 'Kind: done-means-change\nItems:\n']],
+    defect: (f) => /Kind: done-means-change\nItems:\n/.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'reference — a return Baseline naming a ruling that is not a baseline or done-means-change', rule: 'reference', frag: 'Baseline R3', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Baseline: R1', 'Baseline: R3']],
+    defect: (f) => /^Baseline: R3$/m.test(txt(f, 'docs/epics/E1.md')) && /### R3 ruling[^\n]*\nKind: impact/.test(txt(f, 'docs/epics/E1.md')) },
 ]
 
 for (const c of CASES) {
   let files
-  try { files = mutate(c.edits) } catch (e) { clause(`${c.name} — fixture builds`, false, e.message); continue }
+  const base = c.base ?? GOOD
+  try { files = mutate(c.edits, base) } catch (e) { clause(`${c.name} — fixture builds`, false, e.message); continue }
   // Clause 3 first and alone: the defect is in the text, with no checker code on the path.
-  clause(`${c.name} [3: the fixture carries the defect]`, c.defect(files) && !c.defect(GOOD), 'the fixture text does not carry the defect, or the good project does')
+  clause(`${c.name} [3: the fixture carries the defect]`, c.defect(files) && !c.defect(base), 'the fixture text does not carry the defect, or the good project does')
   const found = run(files)
   const hit = found.filter((f) => f.rule === c.rule && f.path === c.at && f.message.includes(c.frag))
   clause(`${c.name} [1: trips]`, hit.length > 0, `wanted ${c.rule} on ${c.at} containing ${JSON.stringify(c.frag)}; got ${found.map(formatFinding).join(' | ') || 'nothing'}`)

@@ -17,9 +17,10 @@
 //
 // WHAT `check` DOES NOT ENFORCE, stated so a clean run is not read as more:
 //   - whether a return's per-item results are honest, or the certification target is the right one;
-//   - uniqueness of item, entry or phase IDs (only a duplicate roster ID is a finding);
+//   - uniqueness of phase names, or of item and entry IDs across files (a duplicate roster ID, and a
+//     duplicate item or entry ID within one file, are findings);
 //   - the obligation word in an epic item's Coverage (`p1: sastify` is not a finding);
-//   - which fields a ruling Kind requires (Items, Successor), beyond what the named rules read.
+//   - which fields a ruling Kind requires (Successor), beyond what the named rules read.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -217,8 +218,12 @@ export function check(model, exists) {
   const files = filesOf(model, byId)
   for (const { path: file, doc } of files) {
     const what = doc === p ? 'end-state item' : 'Done means item'
+    const itemIds = new Set(), entryIds = new Set()
+    const ref = (line, id, subject) => { if (!itemIds.has(id)) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is not an item in this file`) }
     for (const it of doc.items) {
       idCheck(file, it.line, `${what} ID`, it.id)
+      if (itemIds.has(it.id)) add(file, it.line, 'id', `duplicate item ID ${it.id}`)
+      itemIds.add(it.id)
       for (const f of FIELDS) {
         const fv = it.fields[f]
         if (!fv || (f !== 'Coverage' && !fv.value)) add(file, it.line, 'item', `${what} ${it.id} is missing ${f}`)
@@ -228,6 +233,21 @@ export function check(model, exists) {
     }
     doc.entries.forEach((e, i) => {
       idCheck(file, e.line, 'entry ID', e.id)
+      if (entryIds.has(e.id)) add(file, e.line, 'id', `duplicate entry ID ${e.id}`)
+      entryIds.add(e.id)
+      if (e.type === 'regression') ref(e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
+      if (e.type === 'return') {
+        for (const r of e.results) ref(r.line, r.item, `return ${e.id} result`)
+        const b = e.fields.Baseline
+        if (!doc.entries.some((x) => x.type === 'ruling' && x.id === b?.value && ['baseline', 'done-means-change'].includes(kind(x)))) {
+          add(file, b?.line ?? e.line, 'reference', `return ${e.id} Baseline ${b?.value || '(none)'} is not a baseline or done-means-change ruling in this file`)
+        }
+      }
+      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level'].includes(kind(e))) {
+        const ids = list(e.fields.Items?.value)
+        if (!ids.length && kind(e) !== 'project-level') add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
+        for (const id of ids) ref(e.fields.Items.line, id, `${kind(e)} ruling ${e.id} Items`)
+      }
       if (e.type !== 'ruling' || kind(e) !== 'done-means-change') return
       const items = list(e.fields.Items?.value)
       const later = doc.entries.slice(i + 1).filter((x) => x.type === 'ruling' && kind(x) === 'impact')
@@ -240,6 +260,7 @@ export function check(model, exists) {
     const id = epicHeadingId(doc)
     const st = doc.headers.State, s = st?.value, sl = st?.line ?? doc.title?.line
     if (!EPIC_STATES.includes(s)) add(file, sl, 'state', `epic State ${JSON.stringify(s ?? null)} is not one of ${EPIC_STATES.join(', ')}`)
+    if (['Not started', 'Open', 'Done'].includes(s) && !doc.items.length) add(file, sl, 'evidence', `epic ${id} is ${s} with no Done means item`)
     if (['Not started', 'Open', 'Done'].includes(s) && !rulingsOf(doc, 'baseline').length) add(file, sl, 'evidence', `epic ${id} is ${s} with no baseline ruling`)
     if (['Open', 'Done'].includes(s) && !doc.phases.length) add(file, sl, 'evidence', `epic ${id} is ${s} with no phase member`)
     if (['Not started', 'Open', 'Done'].includes(s)) {

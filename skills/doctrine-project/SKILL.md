@@ -88,7 +88,7 @@ You open an epic exit pass when its member phases have exited. You open the proj
 2. **Dispatch.** The exit seat is handed the project file or epic record with its `## Rulings and returns` section removed, and its search scope excludes those sections in every tracked file, as doctrine step 4 excludes the record. The same exclusion applies to every phase reviewer and red team in an adopted repo. Past exit-pass results and run state never reach a seat.
 3. **Evidence.** The seat returns PASS, FAIL or UNVERIFIED per item, each with an evidence reference. Brief it that missing evidence is UNVERIFIED, never PASS. A `path:line` reference and a web quote held in a retained copy can both be checked offline. Checking that a live page still says what was quoted needs a fetch, which belongs in a separate manual check, never in `check`. A check that a quote is present does not show that the quote supports the claim.
 4. **Record.** You write the return entry. A return missing any item's result is a failed pass. Read what counts from `formats.md`.
-5. **A failed item.** For a failing end-state item with a satisfy epic, record a `regression` against the item in the satisfy epic's record and reopen that epic only (Done to Open). A failing item ruled `project-level` may be fixed by a phase outside any epic. The project exit pass then reruns.
+5. **A failed item.** For a failing end-state item with a satisfy epic, record a `regression` in the satisfy epic's record against each of that epic's Done means items that serve the failing end-state item, each by its own ID, and reopen that epic only (Done to Open). A failing item ruled `project-level` may be fixed by a phase outside any epic. The project exit pass then reruns.
 
 ### The sidebar
 
