@@ -15,14 +15,20 @@
 // Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines) are exported for
 // hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
 //
-// Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id.
+// Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id, members.
 //
 // WHAT `check` DOES NOT ENFORCE, stated so a clean run is not read as more:
 //   - whether a return's per-item results are honest, or the certification target is the right one;
 //   - uniqueness of phase names, or of item and entry IDs across files (a duplicate roster ID, and a
 //     duplicate item or entry ID within one file, are findings);
 //   - the format of the time in an entry heading, beyond its being present;
-//   - which fields a ruling Kind requires (Successor), beyond what the named rules read.
+//   - which fields a ruling Kind requires (Successor), beyond what the named rules read;
+//   - whether an entry naming an ID that only a done-means-change ruling names was written before that
+//     ruling: any such ID resolves, so a return written after the item was removed still passes;
+//   - which Done means items serve an end-state item;
+//   - lines before the first `##` other than the headers the rules read, lines in a section this file
+//     does not read, and a misspelled section heading, which is such a section;
+//   - a header, item field or entry field given twice: the last one is read.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -37,18 +43,30 @@ const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
 const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level']
 const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
 const OBLIGATIONS = ['satisfy', 'contribute', 'preserve']
+/** Section to the rule a malformed line in it reports under, and the forms it accepts. */
+const LINE_FORMS = {
+  'End state': ['item', '### <item ID> or, under an item, - <Outcome|Type|Check|Control|Evidence|Coverage>: <value>'],
+  'Done means': ['item', '### <item ID> or, under an item, - <Outcome|Type|Check|Control|Evidence|Coverage>: <value>'],
+  Epics: ['roster', 'a table row'],
+  'Open issues': ['issues', 'a table row'],
+  Members: ['members', '- phase <phase name>[: <record path>] or - issue <tracker id>'],
+  'Rulings and returns': ['entry', 'an entry heading, or under one a <Key>: <value> field, a > quoted line or a return result'],
+}
 
 // ---------------------------------------------------------------- parse
 
 const list = (v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [])
-const cells = (t) => t.slice(1, -1).split('|').map((c) => c.trim())
+/** A GFM table row: up to three leading spaces, at least one pipe, leading and closing pipes optional. */
+const cells = (t) => { const m = /^ {0,3}(?=\S)(.*\|.*)$/.exec(t); return m && m[1].replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()) }
 
 /** Markdown to a model. Every value carries the 1-based line it came from. */
 export function parseDoc(text) {
-  const doc = { title: null, headers: Object.create(null), items: [], roster: [], issues: [], phases: [], entries: [] }
+  const doc = { title: null, headers: Object.create(null), items: [], roster: [], issues: [], phases: [], entries: [], malformed: [] }
   let section = null, item = null, entry = null, lastRow = null
   String(text).split('\n').forEach((raw, i) => {
     const line = i + 1, t = raw.trimEnd()
+    // A non-blank line in a read section that takes none of that section's forms.
+    const odd = () => { if (t) doc.malformed.push({ section, text: t, line }) }
     const sec = /^## (.+)$/.exec(t)
     if (sec) { section = sec[1].trim(); item = entry = null; return }
     if (section === null) {
@@ -61,11 +79,13 @@ export function parseDoc(text) {
       const hd = /^### ?(.*)$/.exec(t)
       if (hd) { item = { id: hd[1].trim(), line, fields: Object.create(null) }; doc.items.push(item); return }
       const f = /^- ([A-Za-z]+):\s?(.*)$/.exec(t)
-      if (f && item) item.fields[f[1]] = { value: f[2].trim(), line }
+      if (f && item && FIELDS.includes(f[1])) item.fields[f[1]] = { value: f[2].trim(), line }
+      else odd()
       return
     }
-    if ((section === 'Epics' || section === 'Open issues') && /^\|.*\|$/.test(t)) {
+    if (section === 'Epics' || section === 'Open issues') {
       const c = cells(t), rows = section === 'Epics' ? doc.roster : doc.issues
+      if (!c) { odd(); return }
       // The header row is the row directly above the separator, by position: its text is never
       // compared, since `ID` and `Issue` are valid IDs.
       if (/^-+$/.test(c[0].replace(/:/g, ''))) { if (lastRow?.line === line - 1 && lastRow.rows === rows) rows.pop(); lastRow = null; return }
@@ -76,6 +96,7 @@ export function parseDoc(text) {
     if (section === 'Members') {
       const ph = /^- phase (.+?)(?::\s*.*)?$/.exec(t)
       if (ph) doc.phases.push({ name: ph[1].trim(), line })
+      else if (!/^- issue \S/.test(t)) odd()
       return
     }
     if (section === 'Rulings and returns') {
@@ -87,11 +108,11 @@ export function parseDoc(text) {
         doc.entries.push(entry)
         return
       }
-      if (!entry) return
-      const r = entry.type === 'return' && /^- ([^:\s]+):\s*([^,]*?)\s*(?:,\s*evidence:\s*(.*))?$/.exec(t)
+      const r = entry?.type === 'return' && /^- ([^:\s]+):\s*([^,]*?)\s*(?:,\s*evidence:\s*(.*))?$/.exec(t)
       if (r) { entry.results.push({ item: r[1], result: r[2], evidence: (r[3] ?? '').trim(), line }); return }
-      const f = /^([A-Za-z][A-Za-z ]*):\s?(.*)$/.exec(t)
+      const f = entry && /^([A-Za-z][A-Za-z ]*):\s?(.*)$/.exec(t)
       if (f) entry.fields[f[1]] = { value: f[2].trim(), line }
+      else if (!(entry && /^>/.test(t))) odd()
     }
   })
   return doc
@@ -133,11 +154,13 @@ const latestCounting = (doc) => doc.entries.filter((e) => e.type === 'return' &&
 const passesAll = (doc, ids) => { const e = latestCounting(doc); return Boolean(e) && ids.every((id) => e.results.some((r) => r.item === id && resultOf(r) === 'PASS')) }
 
 function projectCoverage(v) {
-  const out = { satisfy: [], projectLevel: null, unknown: [] }
+  const out = { satisfy: [], others: [], projectLevel: null, parts: 0, unknown: [] }
   for (const part of (v || '').split(';').map((s) => s.trim()).filter(Boolean)) {
     const m = /^(satisfy|contribute|preserve|project-level)\s+(\S.*)$/.exec(part)
     if (!m) out.unknown.push(part)
+    else out.parts++
     if (m?.[1] === 'satisfy') out.satisfy.push(...list(m[2]))
+    if (m?.[1] === 'contribute' || m?.[1] === 'preserve') out.others.push(...list(m[2]))
     if (m?.[1] === 'project-level') out.projectLevel = m[2].trim()
   }
   return out
@@ -217,10 +240,12 @@ export function check(model, exists) {
     for (const u of c.unknown) add(P, ln, 'coverage', `end-state item ${it.id} Coverage part ${JSON.stringify(u)} is not satisfy, contribute or preserve <epic IDs>, or project-level <ruling ID>`)
     if (!c.satisfy.length && !c.projectLevel) add(P, ln, 'coverage', `end-state item ${it.id} has no satisfy epic and no project-level ruling`)
     if (c.satisfy.length > 1) add(P, ln, 'coverage', `end-state item ${it.id} has more than one satisfy epic (${c.satisfy.join(', ')})`)
+    if (c.projectLevel && c.parts > 1) add(P, ln, 'coverage', `end-state item ${it.id} Coverage gives project-level with another part; project-level stands alone`)
+    for (const e of c.others) if (!rosterIds.has(e)) add(P, ln, 'coverage', `end-state item ${it.id} contribute or preserve epic ${e} is not on the roster`)
     for (const e of c.satisfy) {
       if (!rosterIds.has(e)) { add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is not on the roster`); continue }
       if (stateOf(e) === 'Dropped') add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Dropped`)
-      if (stateOf(e) === 'Superseded' && !chainEndsDone(e)) add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Superseded and its successor chain does not end at a Done epic; rule the successor as the satisfy epic once it is Done`)
+      if (stateOf(e) === 'Superseded' && !chainEndsDone(e)) add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Superseded and its successor chain does not end at a Done epic; the fix is an owner ruling naming the epic at the end of the chain as this item's satisfy epic`)
     }
     if (c.projectLevel && !rulingsOf(p, 'project-level').some((r) => r.id === c.projectLevel && list(r.fields.Items?.value).includes(it.id))) {
       add(P, ln, 'coverage', `end-state item ${it.id} names ${c.projectLevel}, which is not a project-level ruling listing it`)
@@ -232,7 +257,11 @@ export function check(model, exists) {
   for (const { path: file, doc } of files) {
     const what = doc === p ? 'end-state item' : 'Done means item'
     const itemIds = new Set(), entryIds = new Set()
-    const ref = (line, id, subject) => { if (!itemIds.has(id)) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is not an item in this file`) }
+    // An ID a done-means-change ruling names still resolves after that ruling removed or split its item,
+    // so a return or ruling from before the change stays valid history.
+    const changed = new Set(rulingsOf(doc, 'done-means-change').flatMap((e) => list(e.fields.Items?.value)))
+    const ref = (line, id, subject) => { if (!itemIds.has(id) && !changed.has(id)) add(file, line, 'reference', `${subject} names ${JSON.stringify(id ?? null)}, which is neither an item in this file nor named by a done-means-change ruling in it`) }
+    for (const m of doc.malformed) { const [rule, form] = LINE_FORMS[m.section]; add(file, m.line, rule, `## ${m.section} line ${JSON.stringify(m.text)} is not ${form}`) }
     for (const it of doc.items) {
       idCheck(file, it.line, `${what} ID`, it.id)
       if (itemIds.has(it.id)) add(file, it.line, 'id', `duplicate item ID ${it.id}`)
@@ -253,6 +282,8 @@ export function check(model, exists) {
       if (e.type === 'regression') ref(e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
       if (e.type === 'return') {
         for (const r of e.results) ref(r.line, r.item, `return ${e.id} result`)
+        const given = new Set()
+        for (const r of e.results) { if (given.has(r.item)) add(file, r.line, 'entry', `return ${e.id} gives ${r.item} more than one result`); given.add(r.item) }
         for (const r of e.results) if (!RESULTS.includes(r.result)) add(file, r.line, 'entry', `return ${e.id} result for ${r.item} is ${JSON.stringify(r.result)}, not ${RESULTS.join(', ')}`)
         const b = e.fields.Baseline
         if (!doc.entries.some((x) => x.type === 'ruling' && x.id === b?.value && ['baseline', 'done-means-change'].includes(kind(x)))) {

@@ -8,7 +8,8 @@ The reference for writing `docs/PROJECT.md` and `docs/epics/<ID>.md`. `node <plu
 - A header line is `Key: value` on its own line, before the first `##`.
 - A list inside a value is separated by `, `.
 - "Latest" means last in file order.
-- Unknown extra sections are allowed and ignored.
+- Unknown extra sections are allowed and ignored. In `## End state`, `## Done means`, `## Epics`, `## Open issues`, `## Members` and `## Rulings and returns`, every non-blank line takes a form this file shows, and `check` reports any other line.
+- A table row may omit its leading and closing pipes and may be indented by up to three spaces.
 
 ## `docs/PROJECT.md`
 
@@ -110,6 +111,8 @@ Item: <item ID>
 Found by: <check or pass>
 > <the failing result, quoted>
 ```
+
+A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An entry written before the ruling may then name a removed item and still resolve.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 

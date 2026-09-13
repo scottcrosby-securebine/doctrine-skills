@@ -325,6 +325,44 @@ const exampleFindings = run(EXAMPLE)
 clause('T-check good — the Done worked example (end-state ES1, Done means D1) has ZERO findings',
   exampleFindings.length === 0, exampleFindings.map(formatFinding).join(' | '))
 
+// Known-good histories: states a correct orchestrator reaches that an earlier revision of check refused.
+const E1 = 'docs/epics/E1.md', E3 = 'docs/epics/E3.md'
+const laterE1 = (dmcItems, results) => `\n### E1-R2 ruling, 2026-09-13T12:00:00Z\nKind: done-means-change\nItems: ${dmcItems}\nBy: Dana\n> change\n\n### E1-R3 ruling, 2026-09-13T12:01:00Z\nKind: impact\nItems: ${dmcItems}\nBy: Dana\n> impact accepted\n\n### E1-X2 return, 2026-09-13T13:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\n${results}`
+// An item removed by a done-means-change ruling after a return that named it.
+const REMOVED = mutate([[E1, '- D1: PASS, evidence: x\n', `- D1: PASS, evidence: x\n- D2: FAIL, evidence: y\n${laterE1('D2', '- D1: PASS, evidence: x\n')}`]], EXAMPLE)
+// An item split by a done-means-change ruling, whose Items name the old ID and both new ones.
+const SPLIT = mutate([[E1, '### D1\n', '### D1a\n'],
+  [E1, '- Coverage: export-core: satisfy, cli: contribute\n', '- Coverage: export-core: satisfy, cli: contribute\n\n### D1b\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: c\n- Evidence: e\n- Coverage: export-core: satisfy\n'],
+  [E1, '- D1: PASS, evidence: x\n', '- D1: PASS, evidence: x\n' + laterE1('D1, D1a, D1b', '- D1a: PASS, evidence: x\n- D1b: PASS, evidence: x\n')]], EXAMPLE)
+// A failed project pass on an item whose satisfy epic E2 is Superseded by the Done E3: the owner first
+// rules E3 as ES2's satisfy epic, then E3 is reopened by a regression (SKILL.md, exit passes step 5).
+const failedPass = [[PROJECT_PATH, 'State: Done\nCurrent', 'State: Ruled\nCurrent'],
+  [PROJECT_PATH, '- ES3: PASS, evidence: docs/PROJECT.md:78\n', '- ES3: PASS, evidence: docs/PROJECT.md:78\n\n### X2 return, 2026-09-11T10:00:00Z\nBaseline: R1\nRevision: abc123\nSeat: reviewer-z\n- ES1: PASS, evidence: a:1\n- ES2: FAIL, evidence: b:1\n- ES3: PASS, evidence: c:1\n'],
+  [E3, 'State: Done', 'State: Open'],
+  [E3, '- D3: PASS, evidence: tests/import.test.mjs:4\n', '- D3: PASS, evidence: tests/import.test.mjs:4\n\n### G1 regression, 2026-09-11T12:00:00Z\nItem: D3\nFound by: project pass X2\n> ES2 failed\n']]
+const REOPENED_UNRULED = mutate(failedPass)
+const REOPENED_RULED = mutate([...failedPass,
+  [PROJECT_PATH, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E3; contribute E1'],
+  [PROJECT_PATH, '- ES3: PASS, evidence: c:1\n', '- ES3: PASS, evidence: c:1\n\n### R3 ruling, 2026-09-11T11:00:00Z\nKind: done-means-change\nItems: ES2\nBy: owner\n> E3 is the satisfy epic for ES2\n\n### R4 ruling, 2026-09-11T11:01:00Z\nKind: impact\nItems: ES2\nBy: owner\n> ok\n']])
+// Table rows in the other GFM forms: no leading or closing pipe, and up to three leading spaces.
+const GFM_ROWS = mutate([[PROJECT_PATH, '| E1 | Export | docs/epics/E1.md |', 'E1 | Export | docs/epics/E1.md'],
+  [PROJECT_PATH, '| E2 | Import v1 | docs/epics/E2.md |', '   | E2 | Import v1 | docs/epics/E2.md'],
+  [PROJECT_PATH, '| #12 | member E1 |', '  #12 | member E1 |']])
+for (const [name, files, shape] of [
+  ['an item removed by a done-means-change ruling after a return that named it', REMOVED,
+    (f) => !/^### D2$/m.test(f[E1]) && /^- D2: FAIL/m.test(f[E1]) && /Kind: done-means-change\nItems: D2$/m.test(f[E1]) && f[E1].indexOf('- D2: FAIL') < f[E1].indexOf('### E1-R2 ruling')],
+  ['an item split by a done-means-change ruling after a return that named it', SPLIT,
+    (f) => !/^### D1$/m.test(f[E1]) && /^### D1a$/m.test(f[E1]) && /^### D1b$/m.test(f[E1]) && f[E1].indexOf('- D1: PASS') < f[E1].indexOf('### E1-R2 ruling') && /Items: D1, D1a, D1b$/m.test(f[E1])],
+  ['a Superseded satisfy epic\'s chain end reopened after the owner ruled it the satisfy epic', REOPENED_RULED,
+    (f) => /^- Coverage: satisfy E3; contribute E1$/m.test(f[PROJECT_PATH]) && /^State: Open$/m.test(f[E3]) && /^Item: D3$/m.test(f[E3]) && /^State: Superseded$/m.test(f['docs/epics/E2.md'])],
+  ['table rows with no leading or closing pipe and up to three leading spaces', GFM_ROWS,
+    (f) => /^E1 \| Export \| docs\/epics\/E1\.md$/m.test(f[PROJECT_PATH]) && /^ {3}\| E2 \| Import v1 \| docs\/epics\/E2\.md$/m.test(f[PROJECT_PATH]) && /^ {2}#12 \| member E1 \|$/m.test(f[PROJECT_PATH])],
+]) {
+  clause(`known good — ${name} [3: the fixture has that shape]`, shape(files), 'fixture')
+  const fs2 = run(files)
+  clause(`known good — ${name} [2: ZERO findings]`, fs2.length === 0, fs2.map(formatFinding).join(' | '))
+}
+
 // ---------------------------------------------------------------- T-check, clauses 1 and 3 per rule
 // Each case: the edits, the rule and a message fragment only that branch prints, the path the
 // finding must name, and a proof on the fixture TEXT (clause 3) that uses no checker code.
@@ -401,7 +439,7 @@ const CASES = [
   { name: 'coverage — a satisfy epic that is Dropped', rule: 'coverage', frag: 'is Dropped', at: P,
     edits: [['docs/epics/E2.md', 'State: Superseded', 'State: Dropped'], ['docs/epics/E2.md', 'Kind: supersede', 'Kind: drop']],
     defect: (f) => /^State: Dropped$/m.test(txt(f, 'docs/epics/E2.md')) && /satisfy E2/.test(txt(f, P)) },
-  { name: 'coverage — a Superseded satisfy epic whose successor is not Done (ER3)', rule: 'coverage', frag: 'successor chain', at: P,
+  { name: 'coverage — a Superseded satisfy epic whose successor is not Done (ER3)', rule: 'coverage', frag: 'successor chain does not end at a Done epic; the fix is an owner ruling naming the epic at the end of the chain as this item\'s satisfy epic', at: P,
     edits: [['docs/epics/E3.md', 'State: Done', 'State: Open'], [P, 'State: Done\nCurrent', 'State: Ruled\nCurrent']],
     defect: (f) => /^State: Superseded$/m.test(txt(f, 'docs/epics/E2.md')) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) && /^State: Open$/m.test(txt(f, 'docs/epics/E3.md')) },
   { name: 'coverage — a Superseded chain that loops never reaches Done', rule: 'coverage', frag: 'successor chain', at: P,
@@ -484,6 +522,54 @@ const CASES = [
     defect: (f) => /^### R3 rulling, /m.test(txt(f, 'docs/epics/E1.md')) },
   { name: 'roster — a record that exists and cannot be read', rule: 'roster', frag: 'could not be read', at: P, edits: [], nullify: ['docs/epics/E3.md'],
     defect: (f) => Object.hasOwn(f, 'docs/epics/E3.md') && f['docs/epics/E3.md'] === null && /\| E3 \| Import v2 \| docs\/epics\/E3\.md \|/.test(f[P]) },
+  // Repairs of 2026-09-13, third round.
+  { name: 'reference — a regression Item naming the end-state ID, in an epic record whose done-means-change ruling names other items', rule: 'reference', frag: 'regression G2 Item names "ES1"', at: E1,
+    edits: [[E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G2 regression, 2026-09-06T10:00:00Z\nItem: ES1\nFound by: project pass\n> export empty\n']],
+    defect: (f) => { const t = txt(f, E1); return /^Item: ES1$/m.test(t) && !/^### ES1$/m.test(t) && /Kind: done-means-change\nItems: D1\n/.test(t) && !/^Items: .*\bES1\b/m.test(t) } },
+  { name: 'coverage — a Superseded satisfy epic\'s chain end reopened by a regression before the owner ruled it the satisfy epic', rule: 'coverage', frag: 'the fix is an owner ruling naming the epic at the end of the chain', at: P, edits: failedPass,
+    defect: (f) => /^- Coverage: satisfy E2; contribute E1$/m.test(txt(f, P)) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) && /^State: Open$/m.test(txt(f, E3)) && /^Item: D3$/m.test(txt(f, E3)) },
+  { name: 'evidence — a roster row with no closing pipe is read (a Done project with an Open epic)', rule: 'evidence', frag: 'epic E1 is Open', at: P,
+    edits: [[P, '| E1 | Export | docs/epics/E1.md |', '| E1 | Export | docs/epics/E1.md'], [E1, 'State: Done', 'State: Open']],
+    defect: (f) => /^\| E1 \| Export \| docs\/epics\/E1\.md$/m.test(txt(f, P)) && /^State: Done$/m.test(txt(f, P)) && /^State: Open$/m.test(txt(f, E1)) },
+  { name: 'evidence — an indented roster row is read (a Done project with an Open epic)', rule: 'evidence', frag: 'epic E1 is Open', at: P,
+    edits: [[P, '| E1 | Export | docs/epics/E1.md |', '  | E1 | Export | docs/epics/E1.md |'], [E1, 'State: Done', 'State: Open']],
+    defect: (f) => /^ {2}\| E1 \| Export \| docs\/epics\/E1\.md \|$/m.test(txt(f, P)) && /^State: Done$/m.test(txt(f, P)) && /^State: Open$/m.test(txt(f, E1)) },
+  { name: 'issues — an issue row with no closing pipe is read', rule: 'issues', frag: 'issue #13 has Destination "wontfix"', at: P,
+    edits: [[P, '| #13 | out of scope |', '| #13 | wontfix']],
+    defect: (f) => /^\| #13 \| wontfix$/m.test(txt(f, P)) },
+  { name: 'roster — a line in ## Epics that is not a table row', rule: 'roster', frag: '## Epics line "E4 Export docs/epics/E4.md"', at: P,
+    edits: [[P, '| E3 | Import v2 | docs/epics/E3.md |\n', '| E3 | Import v2 | docs/epics/E3.md |\nE4 Export docs/epics/E4.md\n']],
+    defect: (f) => /^E4 Export docs\/epics\/E4\.md$/m.test(txt(f, P)) && !/^E4 .*\|/m.test(txt(f, P)) },
+  { name: 'issues — a line in ## Open issues that is not a table row', rule: 'issues', frag: '## Open issues line "    | #15 | wontfix |"', at: P,
+    edits: [[P, '| #14 | post-done backlog |\n', '| #14 | post-done backlog |\n    | #15 | wontfix |\n']],
+    defect: (f) => /^ {4}\| #15 \| wontfix \|$/m.test(txt(f, P)) },
+  { name: 'item — an indented field line in ## End state', rule: 'item', frag: '## End state line "  - Coverage: satisfy E9"', at: P,
+    edits: [[P, '- Coverage: satisfy E1\n', '- Coverage: satisfy E1\n  - Coverage: satisfy E9\n']],
+    defect: (f) => /^ {2}- Coverage: satisfy E9$/m.test(txt(f, P)) },
+  { name: 'item — a field outside the six in ## End state', rule: 'item', frag: '## End state line "- Note: x"', at: P,
+    edits: [[P, '- Coverage: satisfy E1\n', '- Coverage: satisfy E1\n- Note: x\n']],
+    defect: (f) => /^- Note: x$/m.test(txt(f, P)) && !['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage'].includes('Note') },
+  { name: 'members — a line in ## Members that is not a phase or an issue', rule: 'members', frag: '## Members line "-phase p9"', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2\n-phase p9\n']],
+    defect: (f) => /^-phase p9$/m.test(txt(f, E1)) },
+  { name: 'entry — an indented result line in a return', rule: 'entry', frag: '## Rulings and returns line "  - D3: FAIL, evidence: x"', at: E3,
+    edits: [[E3, '- D3: PASS, evidence: tests/import.test.mjs:4\n', '- D3: PASS, evidence: tests/import.test.mjs:4\n  - D3: FAIL, evidence: x\n']],
+    defect: (f) => /^ {2}- D3: FAIL, evidence: x$/m.test(txt(f, E3)) },
+  { name: 'entry — two results for one item in one return', rule: 'entry', frag: 'return X1 gives ES3 more than one result', at: P,
+    edits: [[P, '- ES3: PASS, evidence: docs/PROJECT.md:78\n', '- ES3: PASS, evidence: docs/PROJECT.md:78\n- ES3: FAIL, evidence: fail:1\n']],
+    defect: (f) => (txt(f, P).slice(txt(f, P).indexOf('### X1 return')).match(/^- ES3: /gm) || []).length === 2 },
+  { name: 'coverage — a Coverage giving both a satisfy epic and a project-level ruling', rule: 'coverage', frag: 'project-level stands alone', at: P,
+    edits: [[P, '- Coverage: project-level R2', '- Coverage: satisfy E3; project-level R2']],
+    defect: (f) => /^- Coverage: satisfy E3; project-level R2$/m.test(txt(f, P)) },
+  { name: 'coverage — a contribute epic not on the roster', rule: 'coverage', frag: 'contribute or preserve epic E99 is not on the roster', at: P,
+    edits: [[P, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E2; contribute E99']],
+    defect: (f) => /^- Coverage: satisfy E2; contribute E99$/m.test(txt(f, P)) && !/^\| E99 \|/m.test(txt(f, P)) },
+  { name: 'entry — a heading with no time after the comma', rule: 'entry', frag: 'heading of Z1', at: E3,
+    edits: [[E3, '### Z1 return, 2026-09-08T10:00:00Z', '### Z1 return,']],
+    defect: (f) => /^### Z1 return,$/m.test(txt(f, E3)) },
+  { name: 'reference — an impact ruling with no Items', rule: 'reference', frag: 'impact ruling R3 has no Items', at: E1,
+    edits: [[E1, 'Kind: impact\nItems: D1\n', 'Kind: impact\nItems:\n']],
+    defect: (f) => /Kind: impact\nItems:\n/.test(txt(f, E1)) },
 ]
 
 for (const c of CASES) {
