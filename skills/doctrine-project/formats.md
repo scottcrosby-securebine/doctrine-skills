@@ -187,6 +187,20 @@ Kind: coverage
 Items: ES1
 By: Dana
 > E1 satisfies ES1.
+
+### P-R3 ruling, 2026-09-13T10:02:00Z
+Kind: destination
+Issues: #12
+To: member E1
+By: Dana
+> #12 is part of the export work.
+
+### P-R4 ruling, 2026-09-13T10:03:00Z
+Kind: destination
+Issues: #15
+To: post-done backlog
+By: Dana
+> #15 waits until the export ships.
 ```
 
 `docs/epics/E1.md`:
