@@ -71,6 +71,17 @@ jobs:
         # removes everything. Drives the hook with a tripwire herdr; needs only node and bash.
         run: node hooks/dctr-seat.teardown.selftest.mjs
 
+      - name: project format check tamper test
+        # Three clauses per check rule in dctr-project.mjs over a known-good project and one-line
+        # broken variants, plus the status command's unknown-versus-none reads with tripwire herdr, gh
+        # and curl on PATH. Pure node, no network, no herdr server.
+        run: node hooks/dctr-project.selftest.mjs
+
+      - name: project history-walk tamper test
+        # Drives projects through lifecycle sequences as doctrine-project's SKILL.md writes them and runs
+        # check after every step: legal steps clean, illegal steps named, and every prescribed fix clean.
+        run: node hooks/dctr-project.history.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
