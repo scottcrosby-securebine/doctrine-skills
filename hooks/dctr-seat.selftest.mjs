@@ -12,6 +12,9 @@
 // catches a check which silently measures nothing.
 
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { SESSION_END_WAIT_MS } from './dctr-state.mjs'
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
@@ -257,6 +260,104 @@ clause('clause 1x — counter tokens are the exact call verified on 0.8.2, argum
   JSON.stringify(TOKEN_ARGS) === JSON.stringify(['pane', 'report-metadata', SESSION_PANE,
     '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--ttl-ms', String(TOKEN_TTL_MS)]),
   TOKEN_ARGS.join(' '))
+
+// T-token (doctrine-project spec section 7): `$epic`, `$phase` and the ruling-owed suffix ride the
+// same one call. Every expected argv is written out whole, for the reason 1x gives, and the
+// no-option case must stay byte-identical to 1x's.
+const TTL = String(TOKEN_TTL_MS)
+const TOKEN_OPTION_CASES = [
+  [['3', '1', '4'], {},
+    ['pane', 'report-metadata', SESSION_PANE, '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--ttl-ms', TTL]],
+  [['3', '1', '4', '--epic', 'E7'], { epic: 'E7' },
+    ['pane', 'report-metadata', SESSION_PANE, '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--token', 'epic=E7', '--ttl-ms', TTL]],
+  [['3', '1', '4', '--phase', 'code-token'], { phase: 'code-token' },
+    ['pane', 'report-metadata', SESSION_PANE, '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4', '--token', 'phase=code-token', '--ttl-ms', TTL]],
+  [['3', '1', '4', '--owed'], { owed: true },
+    ['pane', 'report-metadata', SESSION_PANE, '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4·owed', '--ttl-ms', TTL]],
+  [['3', '1', '4', '--owed', '--phase', 'code-token', '--epic', 'Abbbbbbbbbbbbbbbbbbbbbbb'], { epic: 'Abbbbbbbbbbbbbbbbbbbbbbb', phase: 'code-token', owed: true },
+    ['pane', 'report-metadata', SESSION_PANE, '--source', 'custom:doctrine', '--token', 'doctrine=r3·e1·v4·owed',
+      '--token', 'epic=Abbbbbbbbbbbbbbbbbbbbbbb', '--token', 'phase=code-token', '--ttl-ms', TTL]],
+]
+const sameArgv = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+clause('clause 1bc — T-token: each option set builds its exact argv, and no options builds 1x\'s argv',
+  TOKEN_OPTION_CASES.every(([, opts, want]) => sameArgv(metadataTokenArgs(SESSION_PANE, 3, 1, 4, opts), want)) &&
+  sameArgv(metadataTokenArgs(SESSION_PANE, 3, 1, 4, {}), TOKEN_ARGS),
+  TOKEN_OPTION_CASES.map(([, opts]) => metadataTokenArgs(SESSION_PANE, 3, 1, 4, opts).join(' ')).join(' | '))
+
+// The script itself, driven with a recording `herdr` first on PATH. The malformed cases run INSIDE a
+// herdr environment, so a script that validated after its stand-down test would reach herdr and trip.
+const TOKEN_SCRIPT = path.join(import.meta.dirname, 'dctr-token.mjs')
+const tokenTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-token-'))
+const tokenBin = path.join(tokenTmp, 'bin'); fs.mkdirSync(tokenBin)
+const herdrLog = path.join(tokenTmp, 'herdr-calls')
+fs.writeFileSync(path.join(tokenBin, 'herdr'),
+  `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(herdrLog)}\nprintf '%s\\n' '--END--' >> ${JSON.stringify(herdrLog)}\nexit "\${DCTR_FAKE_HERDR_EXIT:-0}"\n`)
+fs.chmodSync(path.join(tokenBin, 'herdr'), 0o755)
+const IN_HERDR = { HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w4W', HERDR_PANE_ID: SESSION_PANE }
+const runToken = (args, env = {}) => {
+  fs.rmSync(herdrLog, { force: true })
+  const r = spawnSync('node', [TOKEN_SCRIPT, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${tokenBin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_FAKE_HERDR_EXIT: '', ...env },
+  })
+  const calls = fs.existsSync(herdrLog)
+    ? fs.readFileSync(herdrLog, 'utf8').split('--END--\n').filter(Boolean).map((c) => c.slice(0, -1).split('\n'))
+    : []
+  return { code: r.status, out: `${r.stdout}${r.stderr}`, calls }
+}
+
+const ID_PATTERN_IN_TEST = /^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$/
+const BAD_VALUES = ['bad id', '-E7', 'x'.repeat(25), 'ph.ase', '', 'E7\n']
+const TOKEN_BAD_ARGS = [
+  ...BAD_VALUES.flatMap((v) => [['3', '1', '4', '--epic', v], ['3', '1', '4', '--phase', v]]),
+  ['3', '1', '4', '--epic'],
+  ['3', '1', '4', '--phase'],
+  ['3', '1', '4', '--epic', 'E7', '--epic', 'E8'],
+  ['3', '1', '4', '--phase', 'a', '--phase', 'a'],
+  ['3', '1', '4', '--owed', '--owed'],
+  ['3', '1', '4', '--bogus'],
+  ['3', '1', '4', '--epic=E7'],
+  ['3', '1', '4', '--owed', 'yes'],
+  ['3', '1', '4', 'constructor', 'E7'],
+  ['3', '1', 'x'],
+  ['3', '1'],
+  ['--epic', 'E7', '3', '1', '4'],
+]
+const badRuns = TOKEN_BAD_ARGS.map((a) => ({ a, ...runToken(a, IN_HERDR) }))
+clause('clause 1bd — T-token: every malformed call exits 1 with a usage line, before any herdr call',
+  badRuns.every((r) => r.code === 1 && /usage:/.test(r.out) && r.calls.length === 0),
+  JSON.stringify(badRuns.filter((r) => !(r.code === 1 && /usage:/.test(r.out) && r.calls.length === 0)).map((r) => [r.a, r.code, r.calls.length])))
+
+const goodRuns = TOKEN_OPTION_CASES.map(([args, , want]) => ({ want, ...runToken(args, IN_HERDR) }))
+clause('clause 2 — T-token: each well-formed call makes exactly one herdr call, with exactly its argv',
+  goodRuns.every((r) => r.code === 0 && r.calls.length === 1 && sameArgv(r.calls[0], r.want)),
+  JSON.stringify(goodRuns.map((r) => [r.code, r.calls])))
+
+const outside = runToken(['3', '1', '4', '--epic', 'E7', '--phase', 'code-token', '--owed'])
+const refused = runToken(['3', '1', '4', '--owed'], { ...IN_HERDR, DCTR_FAKE_HERDR_EXIT: '1' })
+clause('clause 1be — T-token: outside herdr it stands down with exit 0 and zero herdr calls; a herdr refusal is noted and exits 0',
+  outside.code === 0 && /standing down/.test(outside.out) && outside.calls.length === 0 &&
+  refused.code === 0 && /herdr refused/.test(refused.out) && refused.calls.length === 1,
+  JSON.stringify({ outside, refused }))
+fs.rmSync(tokenTmp, { recursive: true, force: true })
+
+// Third clause, without the script or the builder: the malformed fixtures really are malformed. The
+// values fail a pattern written here, the boundary value passes it, and each structural case really
+// has the shape its name claims.
+const FLAGS_IN_TEST = ['--epic', '--phase', '--owed']
+clause('clause 3x — T-token: the bad values fail the ID pattern, the good ones pass, and the structural cases carry their defect',
+  BAD_VALUES.every((v) => !ID_PATTERN_IN_TEST.test(v)) &&
+  ['E7', 'code-token', 'Abbbbbbbbbbbbbbbbbbbbbbb'].every((v) => ID_PATTERN_IN_TEST.test(v)) &&
+  'Abbbbbbbbbbbbbbbbbbbbbbb'.length === 24 &&
+  TOKEN_BAD_ARGS.slice(BAD_VALUES.length * 2).every((a) => {
+    const [p, rest] = [a.slice(0, 3), a.slice(3)]
+    const positionalBad = a.length < 3 || p.some((v) => !/^\d+$/.test(v))
+    const missingValue = ['--epic', '--phase'].includes(rest.at(-1))
+    const repeated = FLAGS_IN_TEST.some((f) => rest.filter((x) => x === f).length > 1)
+    const unknown = rest.some((x, i) => !FLAGS_IN_TEST.includes(x) && !['--epic', '--phase'].includes(rest[i - 1]))
+    return positionalBad || missingValue || repeated || unknown
+  }),
+  BAD_VALUES.filter((v) => ID_PATTERN_IN_TEST.test(v)).join(','))
 
 // F13 (QuoteBine, 2026-08-31): markers whose panes are gone must be dropped before placement, or
 // the split targets a dead pane and every later seat demotes to a tab. The layout fixture carries

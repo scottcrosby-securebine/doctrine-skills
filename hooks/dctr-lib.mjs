@@ -353,10 +353,15 @@ export async function mapPool(items, limit, fn) {
  * never by a hook: counters move when a gate pass completes, which is not a hook event, so a
  * hook-written token would show round 3 while the run is at round 5 — the stale-display failure
  * #16's D9 rejected. Dark by default: rendering needs `$doctrine` in the sidebar's rows config.
+ * `epic`, `phase` and `owed` (doctrine-project) add `$epic`, `$phase` and the `·owed` suffix to the
+ * same call; with none given the argv is unchanged. dctr-token.mjs validates the values.
  */
-export const metadataTokenArgs = (paneId, round, exitCount, valve) =>
+export const metadataTokenArgs = (paneId, round, exitCount, valve, { epic, phase, owed } = {}) =>
   ['pane', 'report-metadata', paneId, '--source', 'custom:doctrine',
-    '--token', `doctrine=r${round}·e${exitCount}·v${valve}`, '--ttl-ms', String(TOKEN_TTL_MS)]
+    '--token', `doctrine=r${round}·e${exitCount}·v${valve}${owed ? '·owed' : ''}`,
+    ...(epic ? ['--token', `epic=${epic}`] : []),
+    ...(phase ? ['--token', `phase=${phase}`] : []),
+    '--ttl-ms', String(TOKEN_TTL_MS)]
 
 /** Filename-safe token for an id: `w66:p18` -> `w66_p18`, an agent_id passes through unchanged.
  *  The contained hook names a request file by the subagent's `agent_id` (unique per seat, no herdr
