@@ -305,6 +305,29 @@ export const anchorCount = (text, from) => text.split(from).length - 1
  */
 export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')
 
+/**
+ * What one suite run told the mutation gate about the mutation it was given.
+ *
+ *   noticed  it exited non-zero AND printed a FAIL line: a clause went red.
+ *   clean    it exited 0: every clause held with the repair reverted.
+ *   silent   it exited non-zero and printed no FAIL line: the MUTATION killed it (an import-time
+ *            SyntaxError prints none), which is not a clause noticing anything.
+ *   error    it never rendered a verdict at all: the spawn itself failed (`code` is an errno string
+ *            such as EAGAIN, not an exit status) or a signal killed it (`code` is then null, which
+ *            is why one test on `code` covers both and there is no second test on `signal`; the
+ *            selftest's fixtures read a real SIGKILL and a real failed spawn to hold that). Says
+ *            NOTHING about the mutation either way.
+ *
+ * The last one is the split this function exists for. The gate read `error` as `silent` and `silent`
+ * as "the clause stayed green", so a run at eight workers beside live seats reported three repairs
+ * unpinned that a re-run on the same tree reported pinned (2026-09-13, o3-mutations.out against
+ * o3-mutations2.out). A harness that could not start a check must not file a verdict on it.
+ */
+export const suiteOutcome = ({ code, out }) =>
+  (typeof code !== 'number' ? 'error'
+    : code === 0 ? 'clean'
+      : /^ *FAIL /m.test(String(out ?? '')) ? 'noticed' : 'silent')
+
 export const TOKEN_TTL_MS = 3600000
 
 /** How often a running gate re-names its pane with elapsed time (user ruling, 2026-09-07: a long

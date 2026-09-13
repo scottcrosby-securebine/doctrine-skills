@@ -14,7 +14,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { SESSION_END_WAIT_MS } from './dctr-state.mjs'
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
@@ -24,7 +25,10 @@ import {
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
+  suiteOutcome,
 } from './dctr-lib.mjs'
+
+const execFileAsync = promisify(execFile)
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -124,6 +128,36 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
 clause('clause 1ax — and the two refusals are DISTINCT, so a runner cannot collapse "occurs twice" into "not there"',
   anchorVerdict(0) !== anchorVerdict(2),
   'a comparison of hits === 0 in place of hits !== 1 accepts duplicate anchors again, silently')
+
+{
+  // suiteOutcome, on the shapes a REAL child process produces, because the whole defect was an
+  // assumption about those shapes: the gate read `e.code ?? 1` and so turned a spawn that never
+  // started and a process a signal killed into "the suite ran, exited 1 and noticed nothing".
+  const runLike = async (file, args) => {
+    try { const { stdout } = await execFileAsync(file, args, { encoding: 'utf8' }); return { code: 0, out: String(stdout || '') } } catch (e) {
+      return { code: e.code, signal: e.signal, out: String(e.stdout || '') + String(e.stderr || '') }
+    }
+  }
+  const passed = await runLike('node', ['-e', 'console.log("PASS  a")'])
+  const failed = await runLike('node', ['-e', 'console.log("PASS  a");console.log("FAIL  b");process.exit(1)'])
+  const died = await runLike('node', ['-e', 'process.exit(1)'])
+  const killed = await runLike('node', ['-e', 'process.kill(process.pid, "SIGKILL")'])
+  const unspawnable = await runLike(path.join(os.tmpdir(), 'dctr-no-such-binary-8f2a'), [])
+
+  clause('clause 1bg — a suite that NEVER RAN is error, never a clause staying green: a signal kill and a failed spawn both',
+    suiteOutcome(killed) === 'error' && suiteOutcome(unspawnable) === 'error',
+    `${suiteOutcome(killed)} / ${suiteOutcome(unspawnable)} — at eight workers this read as three pinned repairs reported unpinned`)
+  clause('clause 2bg — and the three outcomes of a suite that DID run are unchanged: clean, noticed, silent',
+    suiteOutcome(passed) === 'clean' && suiteOutcome(failed) === 'noticed' && suiteOutcome(died) === 'silent',
+    `${suiteOutcome(passed)} / ${suiteOutcome(failed)} / ${suiteOutcome(died)}`)
+  clause('clause 3bg — the five fixtures really carry their shapes, read without calling suiteOutcome',
+    passed.code === 0 && !/FAIL /.test(passed.out) &&
+    failed.code === 1 && /FAIL /.test(failed.out) &&
+    died.code === 1 && !/FAIL /.test(died.out) &&
+    killed.signal === 'SIGKILL' && typeof killed.code !== 'number' &&
+    typeof unspawnable.code === 'string' && !unspawnable.signal,
+    JSON.stringify([passed.code, failed.code, died.code, killed.signal, killed.code, unspawnable.code]))
+}
 
 clause('clause 1p — stopAction answers `unknown` for a record it has not seen, never `close`',
   stopAction(FOREIGN_LIST.find((t) => t.tab_id === SEAT_TAB_ID)) === 'unknown',

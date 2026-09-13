@@ -27,7 +27,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount, anchorVerdict } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict, suiteOutcome } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
@@ -763,6 +763,13 @@ const MUTATIONS = [
     from: '  if (!key || Object.hasOwn(opts, key)) usage()', to: '  if (!key) usage()' },
   { name: 'flag lookup cannot reach inherited names', file: 'dctr-token.mjs', clause: 'T-token: every malformed call exits 1',
     from: '  const key = FLAGS.get(rest[i])', to: '  const key = Object.fromEntries(FLAGS)[rest[i]]' },
+  // Repair of 2026-09-13: a suite that never ran was read as a suite that noticed nothing.
+  { name: 'a suite that could not be run is read as one that stayed green', file: 'dctr-lib.mjs',
+    clause: 'clause 1bg — a suite that NEVER RAN is error, never a clause staying green',
+    from: "(typeof code !== 'number' ? 'error'", to: "(false ? 'error'" },
+  { name: 'a suite that died without a FAIL line is read as one that noticed', file: 'dctr-lib.mjs',
+    clause: 'clause 2bg — and the three outcomes of a suite that DID run are unchanged',
+    from: "? 'noticed' : 'silent')", to: "? 'noticed' : 'noticed')" },
   { name: 'the parsed options reach the builder', file: 'dctr-token.mjs', clause: 'T-token: each well-formed call makes exactly one herdr call',
     from: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve, opts)',
     to: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve)' },
@@ -790,28 +797,53 @@ const runSuite = async (dir, suite) => {
   try {
     const { stdout } = await execFileAsync('node', [path.join(dir, suite)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' } })
     return { code: 0, out: String(stdout || '') }
-  } catch (e) { return { code: e.code ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+  } catch (e) {
+    // `e.code ?? 1` used to be here, which turned a spawn that never started (`EAGAIN`) and a
+    // process a signal killed (`code` null) into the exit status 1 of a suite that ran. Both are
+    // carried through untouched now; `suiteOutcome` is what reads them.
+    return { code: e.code, signal: e.signal, out: String(e.stdout || '') + String(e.stderr || '') }
+  }
 }
 
 /** A mutation is caught when a CLAUSE goes red, which is not the same as the suite exiting non-zero.
  *  A mutation that leaves the file unparseable also exits non-zero, and counting that as "the clause
  *  noticed" certifies a pin the suite does not have — the same defect this harness exists to catch,
  *  one level up. Replacing a mutation's replacement text with `deliberately invalid javascript @@@`
- *  used to yield `all 15 repairs are pinned`. So require the suite to print a FAIL line: an
- *  import-time SyntaxError prints none, and a real clause failure always does. */
-const noticed = (r) => r.code !== 0 && /^ *FAIL /m.test(r.out)
-/** Sequential inside one mutation, so the cheapest suite still short-circuits the expensive ones.
- *  The parallelism is ACROSS mutations, where there is nothing to short-circuit. */
+ *  used to yield `all 15 repairs are pinned`. So a FAIL line is required, and a suite that never ran
+ *  at all is a third answer, not a quiet "no": see `suiteOutcome`.
+ *
+ *  Sequential inside one mutation, so the cheapest suite still short-circuits the expensive ones.
+ *  The parallelism is ACROSS mutations, where there is nothing to short-circuit.
+ *
+ *  A suite that could not run is retried ONCE before the mutation is given up as unjudgeable: what
+ *  produced this class was momentary load at eight workers, and one retry is what turns it back
+ *  into a verdict instead of a re-run of the whole gate. */
+const judge = async (dir, suite) => {
+  const first = await runSuite(dir, suite)
+  const outcome = suiteOutcome(first)
+  if (outcome !== 'error') return { res: first, outcome }
+  const again = await runSuite(dir, suite)
+  return { res: again, outcome: suiteOutcome(again) }
+}
+const whyUnrun = (res) => `could not be run (${res.signal || res.code})`
 const anySuiteNotices = async (dir) => {
-  for (const s of SUITES) if (noticed(await runSuite(dir, s))) return true
-  return false
+  for (const s of SUITES) {
+    const { res, outcome } = await judge(dir, s)
+    if (outcome === 'error') return { caught: false, error: `${s} ${whyUnrun(res)}` }
+    if (outcome === 'noticed') return { caught: true, error: null }
+  }
+  return { caught: false, error: null }
 }
 
 let failures = 0
+/** Mutations the run could not judge, because a suite never started or a signal killed it. Counted
+ *  apart from `failures`: "nothing pins this clause" and "this clause was never asked" are different
+ *  reports, and merging them is what sent an operator after three repairs that were pinned all along. */
+let errors = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
-const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, res: await runSuite(baseline, suite) }))
+const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, ...await judge(baseline, suite) }))
 const baselineShort = poolShortfall(baselineResults, SUITES.length)
 if (baselineShort) {
   console.log(`  FAIL the baseline pool produced ${SUITES.length - baselineShort} of ${SUITES.length} results`)
@@ -820,7 +852,12 @@ if (baselineShort) {
 for (const r of baselineResults) {
   // `r` can be undefined when the pool short-changed us, and the shortfall above has already been
   // counted; dereferencing it here died with a TypeError instead of printing the footer.
-  if (r && r.res.code !== 0) {
+  if (r && r.outcome === 'error') {
+    // Not "this suite fails": it never ran, twice. Saying it failed sends the operator into a suite
+    // that is fine, which is the same misreport the mutation loop's ERROR line exists to stop.
+    console.log(`  FAIL baseline ${r.suite} ${whyUnrun(r.res)}; nothing can be judged against a suite that did not run`)
+    failures += 1
+  } else if (r && r.res.code !== 0) {
     console.log(`  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything`)
     failures += 1
   }
@@ -857,7 +894,11 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
       : `  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}; replace() takes the first and the rest go unguarded`
   } else {
     fs.writeFileSync(target, before.replace(m.from, m.to))
-    if (!await anySuiteNotices(dir)) {
+    const v = await anySuiteNotices(dir)
+    if (v.error) {
+      errors += 1
+      results[idx] = `  ERROR ${m.name} — ${v.error}; this mutation was not judged either way`
+    } else if (!v.caught) {
       failures += 1
       results[idx] = `  FAIL ${m.name} — reverted, and the suite stayed green. Nothing pins "${m.clause}"`
     } else {
@@ -878,5 +919,11 @@ if (shortfall) {
 }
 
 fs.rmSync(work, { recursive: true, force: true })
-console.log(failures ? `\n${failures} FAILED` : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)
-process.exit(failures ? 1 : 0)
+// An unjudged mutation is still a red run — it certifies nothing about the clause it names — but it
+// is reported as its own number, so a reader can tell a repair nothing pins from a suite that never
+// started. Re-running the gate is the answer to the second one, and never to the first.
+const tail = errors ? ` (${errors} unjudged: a suite could not be run)` : ''
+console.log(failures || errors
+  ? `\n${failures} FAILED${tail}`
+  : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)
+process.exit(failures || errors ? 1 : 0)
