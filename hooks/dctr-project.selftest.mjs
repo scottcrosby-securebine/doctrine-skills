@@ -99,7 +99,7 @@ Seat: reviewer-a
   'docs/epics/E1.md': `# Epic E1: Export
 State: Done
 Certification target: def456
-Combined check: node tests/export-all.mjs
+Combined check: node tests/export-all.mjs ; pass when it exits 0
 
 ## What this is
 The export.
@@ -179,7 +179,7 @@ By: owner
   'docs/epics/E3.md': `# Epic E3: Import v2
 State: Done
 Certification target: 777bbb
-Combined check: node tests/import-all.mjs
+Combined check: node tests/import-all.mjs ; pass when it exits 0
 
 ## What this is
 The v2 import.
@@ -293,7 +293,7 @@ By: Dana
   'docs/epics/E1.md': `# Epic E1: CSV export
 State: Done
 Certification target: abc123
-Combined check: npm test -- export
+Combined check: npm test -- export ; pass when it exits 0
 
 ## Done means
 ### D1
@@ -375,6 +375,8 @@ for (const [name, files, shape] of [
 const P = 'docs/PROJECT.md'
 const txt = (files, f) => files[f]
 const LONG = 'R2' + 'a'.repeat(25)
+/** GOOD with one more ruling, R3, after the project return. */
+const addRuling = (body) => [[P, '- ES3: PASS, evidence: docs/PROJECT.md:78\n', `- ES3: PASS, evidence: docs/PROJECT.md:78\n\n### R3 ruling, 2026-09-11T10:00:00Z\n${body}By: owner\n> ruled\n`]]
 const CASES = [
   { name: 'state — a project State outside Proposed, Ruled, Done', rule: 'state', frag: 'project State', at: P,
     edits: [[P, 'State: Done\nCurrent', 'State: Archived\nCurrent']],
@@ -388,11 +390,11 @@ const CASES = [
   { name: 'evidence — an epic Open or Done with no phase member', rule: 'evidence', frag: 'no phase member', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', '- phase p3: docs/records/p3.md', '- issue #40']],
     defect: (f) => !/^- phase /m.test(txt(f, 'docs/epics/E3.md')) },
-  { name: 'evidence — an epic Done with Combined check none (W1)', rule: 'evidence', frag: 'Combined check', at: 'docs/epics/E3.md',
-    edits: [['docs/epics/E3.md', 'Combined check: node tests/import-all.mjs', 'Combined check: none']],
+  { name: 'evidence — an epic Done with Combined check none (W1)', rule: 'evidence', frag: 'Combined check none', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', 'Combined check: node tests/import-all.mjs ; pass when it exits 0', 'Combined check: none']],
     defect: (f) => /^Combined check: none$/m.test(txt(f, 'docs/epics/E3.md')) },
-  { name: 'evidence — an epic Not started with Combined check absent (W1)', rule: 'evidence', frag: 'Combined check', at: 'docs/epics/E3.md',
-    edits: [['docs/epics/E3.md', 'State: Done', 'State: Not started'], ['docs/epics/E3.md', 'Combined check: node tests/import-all.mjs\n', '']],
+  { name: 'evidence — an epic Not started with Combined check absent (W1)', rule: 'evidence', frag: 'Combined check absent', at: 'docs/epics/E3.md',
+    edits: [['docs/epics/E3.md', 'State: Done', 'State: Not started'], ['docs/epics/E3.md', 'Combined check: node tests/import-all.mjs ; pass when it exits 0\n', '']],
     defect: (f) => !/^Combined check:/m.test(txt(f, 'docs/epics/E3.md')) },
   { name: 'evidence — an epic Done whose only return is on a stale revision', rule: 'evidence', frag: 'counting return', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', 'Revision: 777bbb', 'Revision: 666ccc']],
@@ -517,9 +519,9 @@ const CASES = [
   { name: 'coverage — a project Coverage part whose keyword is outside the four', rule: 'coverage', frag: 'Coverage part "contibute E1"', at: P,
     edits: [[P, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E2; contibute E1']],
     defect: (f) => /^- Coverage: satisfy E2; contibute E1$/m.test(txt(f, P)) },
-  { name: 'entry — a ruling Kind outside the seven', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
+  { name: 'entry — a ruling Kind outside the ten', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: impacts']],
-    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage'].includes('impacts') },
+    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope'].includes('impacts') },
   { name: 'entry — a return result outside PASS, FAIL, UNVERIFIED', rule: 'entry', frag: 'is "PASSED"', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', '- D3: PASS, evidence: tests/import.test.mjs:4', '- D3: PASSED, evidence: tests/import.test.mjs:4']],
     defect: (f) => /^- D3: PASSED, /m.test(txt(f, 'docs/epics/E3.md')) },
@@ -579,6 +581,26 @@ const CASES = [
   { name: 'reference — an impact ruling with no Items', rule: 'reference', frag: 'impact ruling R3 has no Items', at: E1,
     edits: [[E1, 'Kind: impact\nItems: D1\n', 'Kind: impact\nItems:\n']],
     defect: (f) => /Kind: impact\nItems:\n/.test(txt(f, E1)) },
+  // Repairs of 2026-09-13, sixth round (DP1, DP2, DP17): each adds one ruling or changes one line of GOOD.
+  { name: 'reference — a destination ruling with no Issues', rule: 'reference', frag: 'destination ruling R3 has no Issues', at: P,
+    edits: addRuling('Kind: destination\nTo: member E1\n'), defect: (f) => /Kind: destination\nTo: member E1\nBy:/.test(txt(f, P)) },
+  { name: 'reference — a destination ruling with no To', rule: 'reference', frag: 'destination ruling R3 has no To', at: P,
+    edits: addRuling('Kind: destination\nIssues: #12\n'), defect: (f) => /Kind: destination\nIssues: #12\nBy:/.test(txt(f, P)) },
+  { name: 'reference — a cutover ruling with no Edit', rule: 'reference', frag: 'cutover ruling R3 has no Edit', at: P,
+    edits: addRuling('Kind: cutover\n'), defect: (f) => /Kind: cutover\nBy:/.test(txt(f, P)) },
+  { name: 'reference — a scope ruling with no Entries', rule: 'reference', frag: 'scope ruling R3 has no Entries', at: P,
+    edits: addRuling('Kind: scope\n'), defect: (f) => /Kind: scope\nBy:/.test(txt(f, P)) },
+  { name: 'issues — a destination ruling naming an issue that is not a row in Open issues', rule: 'issues', frag: 'destination ruling R3 names #99, which is not a row', at: P,
+    edits: addRuling('Kind: destination\nIssues: #99\nTo: out of scope\n'), defect: (f) => /^Issues: #99$/m.test(txt(f, P)) && !/^\| #99 \|/m.test(txt(f, P)) },
+  { name: 'issues — a destination ruling whose To is not the Destination its row carries', rule: 'issues', frag: 'destination ruling R3 gives #13 To "member E1"', at: P,
+    edits: addRuling('Kind: destination\nIssues: #13\nTo: member E1\n'), defect: (f) => /^Issues: #13\nTo: member E1$/m.test(txt(f, P)) && /^\| #13 \| out of scope \|$/m.test(txt(f, P)) },
+  { name: 'coverage — a Done epic whose Coverage names a phase that is not a phase member (DP2)', rule: 'coverage', frag: 'Done means item D1 Coverage names phase p2, which is not a - phase member of Done epic E1', at: E1,
+    edits: [[E1, '- phase p2\n', '']], defect: (f) => /^- Coverage: p1: satisfy, p2: preserve$/m.test(txt(f, E1)) && !/^- phase p2/m.test(txt(f, E1)) && /^State: Done$/m.test(txt(f, E1)) },
+  { name: 'coverage — a Done epic with a phase member no Coverage names (DP2)', rule: 'coverage', frag: 'phase member p4 of Done epic E3 is named in no', at: E3,
+    edits: [[E3, '- phase p3: docs/records/p3.md\n', '- phase p3: docs/records/p3.md\n- phase p4\n']], defect: (f) => /^- phase p4$/m.test(txt(f, E3)) && !/p4: /.test(txt(f, E3)) && /^State: Done$/m.test(txt(f, E3)) },
+  { name: 'evidence — a Done epic whose Combined check has no pass rule (DP17)', rule: 'evidence', frag: 'has no ; pass when', at: E3,
+    edits: [[E3, 'Combined check: node tests/import-all.mjs ; pass when it exits 0', 'Combined check: node tests/import-all.mjs']],
+    defect: (f) => /^Combined check: node tests\/import-all\.mjs$/m.test(txt(f, E3)) && !/; pass when /.test(txt(f, E3)) },
 ]
 
 for (const c of CASES) {

@@ -22,7 +22,11 @@
 //   - uniqueness of phase names, or of item and entry IDs across files (a duplicate roster ID, and a
 //     duplicate item or entry ID within one file, are findings);
 //   - the format of the time in an entry heading, beyond its being present;
-//   - which fields a ruling Kind requires (Successor), beyond what the named rules read;
+//   - which fields a ruling Kind requires (Successor, a cutover ruling's quoted new text), beyond what the
+//     named rules read;
+//   - that an open issue or tracker item has a destination ruling, or where one sits: only the project
+//     file's destination rulings are compared with its ## Open issues rows;
+//   - a planned phase name on an epic that is not yet Open;
 //   - where an impact ruling sits: one naming an ID that any done-means-change ruling names resolves,
 //     wherever it is written;
 //   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
@@ -43,7 +47,9 @@ const EPIC_STATES = ['Proposed', 'Not started', 'Open', 'Done', 'Dropped', 'Supe
 const TERMINAL = ['Done', 'Dropped', 'Superseded']
 const LIVE = ['Proposed', 'Not started', 'Open']
 const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
-const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage']
+const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope']
+/** The fields a ruling of these Kinds must carry, each non-empty. A Map, since a Kind is user text. */
+const REQUIRED = new Map([['destination', ['Issues', 'To']], ['cutover', ['Edit']], ['scope', ['Entries']]])
 const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
 const OBLIGATIONS = ['satisfy', 'contribute', 'preserve']
 /** Section to the rule a malformed line in it reports under, and the forms it accepts. */
@@ -233,6 +239,15 @@ export function check(model, exists) {
     else if (is.destination !== 'out of scope' && is.destination !== 'post-done backlog') add(P, is.line, 'issues', `issue ${is.issue} has Destination ${JSON.stringify(is.destination)}, not member <epic ID>, out of scope or post-done backlog`)
   }
 
+  // destination rulings: the latest one naming an ID gives the Destination that ID's row carries
+  const latestTo = new Map()
+  for (const e of rulingsOf(p, 'destination')) for (const id of list(e.fields.Issues?.value)) latestTo.set(id, e)
+  for (const [id, e] of latestTo) {
+    const row = p.issues.find((is) => is.issue === id), to = e.fields.To?.value
+    if (!row) add(P, e.fields.Issues.line, 'issues', `destination ruling ${e.id} names ${id}, which is not a row in ## Open issues`)
+    else if (to && row.destination !== to) add(P, e.fields.Issues.line, 'issues', `destination ruling ${e.id} gives ${id} To ${JSON.stringify(to)}, but its ## Open issues row says ${JSON.stringify(row.destination)}`)
+  }
+
   // end-state coverage
   /** The last epic on a Superseded epic's successor chain: a non-Superseded epic, an ID that is not a
    *  readable roster epic, or, on a loop, a Superseded one. */
@@ -262,7 +277,8 @@ export function check(model, exists) {
         : `${dead}, so nothing on it can reach Done and the fix is a new epic on the roster and a coverage ruling naming it as this item's satisfy epic`
       if (st !== 'Done') add(P, ln, 'coverage', `end-state item ${it.id} satisfy epic ${e} is Superseded and its successor chain does not end at a Done epic; ${fix}`)
     }
-    if (c.projectLevel && !rulingsOf(p, 'project-level').some((r) => r.id === c.projectLevel && list(r.fields.Items?.value).includes(it.id))) {
+    // On a Proposed project the project-level ruling may not be written yet.
+    if (c.projectLevel && ['Ruled', 'Done'].includes(ps?.value) && !rulingsOf(p, 'project-level').some((r) => r.id === c.projectLevel && list(r.fields.Items?.value).includes(it.id))) {
       add(P, ln, 'coverage', `end-state item ${it.id} names ${c.projectLevel}, which is not a project-level ruling listing it`)
     }
   }
@@ -303,6 +319,7 @@ export function check(model, exists) {
       entryIds.add(e.id)
       if (e.type === null) add(file, e.line, 'entry', `heading of ${e.id} is not <entry ID> ruling|return|regression, <time>`)
       if (e.type === 'ruling' && !KINDS.includes(kind(e))) add(file, e.fields.Kind?.line ?? e.line, 'entry', `ruling ${e.id} Kind ${JSON.stringify(kind(e) ?? null)} is not one of ${KINDS.join(', ')}`)
+      if (e.type === 'ruling') for (const k of REQUIRED.get(kind(e)) ?? []) if (!e.fields[k]?.value) add(file, e.fields[k]?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no ${k}`)
       if (e.type === 'regression') ref(i, e.fields.Item?.line ?? e.line, e.fields.Item?.value, `regression ${e.id} Item`)
       if (e.type === 'return') {
         for (const r of e.results) ref(i, r.line, r.item, `return ${e.id} result`)
@@ -337,6 +354,7 @@ export function check(model, exists) {
     if (['Not started', 'Open', 'Done'].includes(s)) {
       const cc = val(doc, 'Combined check')
       if (!cc || cc === 'none') add(file, sl, 'evidence', `epic ${id} is ${s} with Combined check ${cc ? 'none' : 'absent'} (W1)`)
+      else if (!/; pass when \S/.test(cc)) add(file, sl, 'evidence', `epic ${id} is ${s} and its Combined check has no ; pass when <rule> part (W1)`)
     }
     if (s === 'Done' && !passesAll(doc, doc.items.map((i) => i.id))) add(file, sl, 'evidence', `epic ${id} is Done without a counting return that has PASS for every Done means item`)
     if (s === 'Dropped' && !rulingsOf(doc, 'drop').length) add(file, sl, 'evidence', `epic ${id} is Dropped with no drop ruling`)
@@ -345,6 +363,19 @@ export function check(model, exists) {
       if (!rosterIds.has(succ)) add(file, sl, 'evidence', `epic ${id} is Superseded without a supersede ruling naming a Successor on the roster`)
     }
     for (const m of doc.phases) idCheck(file, m.line, 'phase name', m.name)
+    // From the time an epic opens, the phases its Coverage lines name and its phase members are one set.
+    if (['Open', 'Done'].includes(s)) {
+      const members = new Set(doc.phases.map((m) => m.name)), named = new Set()
+      for (const it of doc.items) {
+        for (const part of list(it.fields.Coverage?.value)) {
+          const ph = /^(.+?):/.exec(part)?.[1].trim()
+          if (!ph) continue
+          named.add(ph)
+          if (!members.has(ph)) add(file, it.fields.Coverage.line, 'coverage', `Done means item ${it.id} Coverage names phase ${ph}, which is not a - phase member of ${s} epic ${id}`)
+        }
+      }
+      for (const m of doc.phases) if (!named.has(m.name)) add(file, m.line, 'coverage', `phase member ${m.name} of ${s} epic ${id} is named in no Done means item's Coverage`)
+    }
     for (const it of doc.items) {
       const cov = it.fields.Coverage
       if (!cov) continue

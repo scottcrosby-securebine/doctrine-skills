@@ -40,7 +40,7 @@ Records: <path, relative to repo root>
 ## Open issues
 | Issue | Destination |
 |---|---|
-| <tracker id> | <one of: member <epic ID> / out of scope / post-done backlog> |
+| <tracker id or path:line> | <one of: member <epic ID> / out of scope / post-done backlog> |
 
 ## History
 - <link to a historical source>
@@ -51,13 +51,15 @@ Records: <path, relative to repo root>
 
 The roster carries no state. An epic's state lives only in its record.
 
+An `## Open issues` row's Issue cell is the tracker id, or, for an open item read from a markdown tracker, its `<path>:<line>`.
+
 ## `docs/epics/<ID>.md`
 
 ```
 # Epic <ID>: <title>
 State: Proposed | Not started | Open | Done | Dropped | Superseded
 Certification target: <commit sha> | none
-Combined check: <the named check covering seams between member phases> | none
+Combined check: <what runs> ; pass when <rule> | none
 
 ## What this is
 <prose>
@@ -86,7 +88,7 @@ An item's seven fields are its `###` ID and the six list lines.
 - **Outcome** names the value. "The page loads" names nothing, since an app that returns an empty body forever passes it.
 - **Type** is T1 behaviour (inputs, environment, observable outputs, rejection cases), T2 artifact property, T3 threshold with a pass line, or T4 owner judgement (the named authority, the question, the revision judged).
 - **Check** is what a context that did not build the work runs at the certification target.
-- **Control** shows the check can fail, for example the check run with the feature off.
+- **Control** shows the check can fail, for example the check run with the feature off. Where the Check is runnable, the control is shown failing at the revision the item is admitted at.
 - **Evidence** says what reference a return must cite: a `path:line`, a gate transcript under `Records:`, or a web quote with a retained copy.
 - **Coverage** is the W1 coverage map for that item. In the project file it names exactly one satisfy epic, or a `project-level` ruling. In an epic record it gives each serving phase one obligation.
 
@@ -94,9 +96,13 @@ An item's seven fields are its `###` ID and the six list lines.
 
 ```
 ### <entry ID> ruling, <ISO 8601 UTC time>
-Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage
+Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage | destination | cutover | scope
 Items: <item IDs>            (done-means-change, impact, project-level, coverage)
 Successor: <epic ID>         (supersede)
+Issues: <tracker ids>        (destination)
+To: <member <epic ID> | out of scope | post-done backlog>  (destination)
+Edit: <path>:<line>          (cutover)
+Entries: <never-becomes entries>  (scope)
 By: <owner>
 > <the owner's words>
 
@@ -114,7 +120,11 @@ Found by: <check or pass>
 
 A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An ID that is no longer an item then still resolves in an entry written before the ruling, in the ruling itself, in an `impact` ruling, and in a return whose Baseline is a ruling written before it, because that return graded the items as they stood under its own Baseline. A regression written after the ruling must name a current item, and so must a return whose Baseline is that ruling or a later one.
 
-A `coverage` ruling changes which epic satisfies an end-state item, never what the item means. Its Items name the end-state items whose `Coverage:` line changes. It is not a baseline, so it voids no return and needs no `impact` ruling.
+A `coverage` ruling records the coverage map (W1): the initial map the owner rules before the first phase, and every later change to it, such as which epic satisfies an end-state item or which phases serve a Done means item. It never changes what an item means. Its Items name the items whose `Coverage:` line it sets or changes: end-state items in the project file, Done means items in an epic record.
+
+Three Kinds record the owner's start and adoption rulings, each written in the project file. A `destination` ruling gives the tracker ids or `<path>:<line>` ids in `Issues:` the destination in `To:`, and each id must be a row in `## Open issues` whose Destination equals the `To:` of the latest `destination` ruling naming it. A `cutover` ruling names in `Edit:` the one instruction it changes, and its quoted `>` line holds the new text, or `(removed)`. A `scope` ruling names in `Entries:` the never-becomes entries it adds or strikes.
+
+None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 
@@ -170,7 +180,13 @@ Records: .doctrine/records
 ### P-R1 ruling, 2026-09-13T10:00:00Z
 Kind: baseline
 By: Dana
-> Approve ES1 as the end state, satisfied by E1.
+> Approve ES1 as the end state.
+
+### P-R2 ruling, 2026-09-13T10:01:00Z
+Kind: coverage
+Items: ES1
+By: Dana
+> E1 satisfies ES1.
 ```
 
 `docs/epics/E1.md`:
@@ -179,7 +195,7 @@ By: Dana
 # Epic E1: CSV export
 State: Open
 Certification target: none
-Combined check: `npm test -- export` run against the merged export and CLI phases
+Combined check: `npm test -- export` run against the merged export and CLI phases ; pass when it exits 0 and prints no skipped test
 
 ## What this is
 A command that writes one month of invoices as a CSV in the ledger's import format.
@@ -203,4 +219,11 @@ A command that writes one month of invoices as a CSV in the ledger's import form
 Kind: baseline
 By: Dana
 > D1 is the Done means for E1. The combined check is the export test suite.
+
+### E1-R2 ruling, 2026-09-13T10:06:00Z
+Kind: coverage
+Items: D1
+By: Dana
+> export-core satisfies D1 and cli contributes to it.
+> The combined check covers the seam between them.
 ```

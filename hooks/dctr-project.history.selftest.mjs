@@ -21,6 +21,8 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 
 const P = PROJECT_PATH, E1 = 'docs/epics/E1.md', E2 = 'docs/epics/E2.md', E3 = 'docs/epics/E3.md'
 const TIME = '2026-09-13T10:00:00Z'
+/** A Combined check with its pass rule, as formats.md writes the header (DP17). */
+const PASS_RULE = 'npm test ; pass when every item check exits 0'
 
 // ---------------------------------------------------------------- edits, each files -> new files
 const sub = (file, from, to) => (f) => {
@@ -80,7 +82,7 @@ const S1_OPEN = walk('S1', PROPOSED, [
   { name: 'illegal: E1 ruled Not started with Combined check none (W1)', branch: true, want: ['evidence', E1, 'Combined check none'],
     ops: [state(E1, 'Not started'), rule(E1, 'E1-R1', 'baseline')], shape: (f) => /^State: Not started$/m.test(f[E1]) && /^Combined check: none$/m.test(f[E1]) },
   { name: 'owner rules both baselines and the coverage map (W1)',
-    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), state(E1, 'Not started'), hdr(E1, 'Combined check', 'npm test'), rule(E1, 'E1-R1', 'baseline')] },
+    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline')] },
   { name: 'the first member phase opens E1 and the pointer moves',
     ops: [member(E1, 'p1: .doctrine/records/p1.md'), state(E1, 'Open'), hdr(P, 'Current epic', 'E1')] },
   { name: 'illegal: E1 moved Done with no return', branch: true, want: ['evidence', E1, 'without a counting return'],
@@ -136,7 +138,7 @@ walk('S4', S3_DONE, [
 // ---------------------------------------------------------------- S5 supersession, S6 dropped successor
 const S5_BOTH_OPEN = walk('S5', S1_OPEN, [
   { name: 'successor E2 proposed on the roster', ops: [row('E2'), put(E2, epic('E2', item('D3', 'p2: satisfy')))] },
-  { name: 'owner rules E2 baseline', ops: [state(E2, 'Not started'), hdr(E2, 'Combined check', 'npm test'), rule(E2, 'E2-R1', 'baseline')] },
+  { name: 'owner rules E2 baseline', ops: [state(E2, 'Not started'), hdr(E2, 'Combined check', PASS_RULE), rule(E2, 'E2-R1', 'baseline')] },
   { name: 'the first member phase opens E2 and the pointer moves', ops: [member(E2, 'p2'), state(E2, 'Open'), hdr(P, 'Current epic', 'E2')] },
 ])
 walk('S5', S5_BOTH_OPEN, [
@@ -215,6 +217,67 @@ walk('S9', S1_OPEN, [
     shape: (f) => { const x = at(f[E1], '### E1-X3 return'), t = f[E1].slice(Math.max(0, x)); return x > at(f[E1], '### E1-R2 ruling') && /^Baseline: E1-R2$/m.test(t) && /^- D1: /m.test(t) && !/^### D1$/m.test(f[E1]) } },
   { name: 'a new pass on the current baseline E1-R2 and revision a2, its return recorded', ops: [ret(E1, 'E1-X3', 'E1-R2', 'a2', ['D1a: PASS', 'D1b: PASS', 'D2: PASS'])] },
   { name: 'E1 moved Done on it', ops: [state(E1, 'Done')] },
+])
+
+// ---------------------------------------------------------------- S10 start mode (DP1-DP4, DP17)
+const START = {
+  [P]: `# Project: ledger\nState: Proposed\nCurrent epic: none\nCertification target: none\nRecords: .doctrine/records\n\n## End state\n${item('ES1', 'satisfy E1')}${item('ES2', 'project-level P-R2')}## Never becomes\n- a hosted service\n- a payment processor\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n| E1 | t | docs/epics/E1.md |\n\n## Rulings and returns\n`,
+  [E1]: epic('E1', item('D1', 'p1: satisfy, p2: contribute') + item('D2', 'p2: satisfy')),
+}
+const S10_NOT_STARTED = walk('S10', START, [
+  { name: 'start: the end state with a project-level item whose ruling is not yet written, never-becomes entries, and E1 with planned phases p1 and p2 proposed (DP3)', ops: [] },
+  { name: 'illegal: the project ruled with its project-level ruling never written', branch: true, want: ['coverage', P, 'end-state item ES2 names P-R2, which is not a project-level ruling listing it'],
+    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline')], shape: (f) => /^State: Ruled$/m.test(f[P]) && /^- Coverage: project-level P-R2$/m.test(f[P]) && !/^### P-R2 /m.test(f[P]) },
+  { name: 'owner rules the end state, the project-level ruling and the initial coverage map (W1), and strikes one never-becomes entry',
+    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), rule(P, 'P-R2', 'project-level', 'Items: ES2\n'), rule(P, 'P-R3', 'coverage', 'Items: ES1, ES2\n'),
+      sub(P, '- a payment processor\n', ''), rule(P, 'P-R4', 'scope', 'Entries: a payment processor\n')] },
+  { name: 'illegal: a scope ruling with no Entries', branch: true, want: ['reference', P, 'scope ruling P-R5 has no Entries'],
+    ops: [rule(P, 'P-R5', 'scope')], shape: (f) => /Kind: scope\nBy:/.test(f[P]) },
+  { name: 'illegal: E1 ruled Not started with a Combined check that has no pass rule', branch: true, want: ['evidence', E1, 'has no ; pass when'],
+    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', 'npm test'), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')],
+    shape: (f) => /^Combined check: npm test$/m.test(f[E1]) && !/; pass when /.test(f[E1]) },
+  { name: 'owner rules E1: its Done means, its coverage map naming planned phases p1 and p2, and its combined check with a pass rule (the start end state)',
+    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')] },
+])
+walk('S10', S10_NOT_STARTED, [
+  { name: 'illegal: E1 opened with only p1 recorded while its Coverage names planned phase p2', branch: true, want: ['coverage', E1, 'Done means item D1 Coverage names phase p2, which is not a - phase member'],
+    ops: [member(E1, 'p1: .doctrine/records/p1.md'), state(E1, 'Open')], shape: (f) => /^State: Open$/m.test(f[E1]) && /^- Coverage: p1: satisfy, p2: contribute$/m.test(f[E1]) && !/^- phase p2/m.test(f[E1]) },
+  { name: 'the first phase opens E1 under planned name p1, every planned phase is recorded as a member, and the pointer moves (DP2)',
+    ops: [member(E1, 'p2'), member(E1, 'p1: .doctrine/records/p1.md'), state(E1, 'Open'), hdr(P, 'Current epic', 'E1')] },
+  { name: 'illegal: phase p3 opened for E1 under a name no Coverage line names', branch: true, want: ['coverage', E1, 'phase member p3 of Open epic E1 is named in no'],
+    ops: [member(E1, 'p3')], shape: (f) => /^- phase p3$/m.test(f[E1]) && !/p3: /.test(f[E1]) },
+  { name: 'phase p3 added by a coverage ruling: D2 Coverage gains p3, and p3 is recorded as a member',
+    ops: [sub(E1, '- Coverage: p2: satisfy\n', '- Coverage: p2: satisfy, p3: contribute\n'), rule(E1, 'E1-R3', 'coverage', 'Items: D2\n'), member(E1, 'p3')] },
+  { name: 'illegal: a done-means-change removes D1, the only item p1 serves, and p1 stays a member', branch: true, want: ['coverage', E1, 'phase member p1 of Open epic E1 is named in no'],
+    ops: [sub(E1, item('D1', 'p1: satisfy, p2: contribute'), ''), rule(E1, 'E1-R4', 'done-means-change', 'Items: D1\n'), rule(E1, 'E1-R5', 'impact', 'Items: D1\n')],
+    shape: (f) => !/^### D1$/m.test(f[E1]) && /^- phase p1: /m.test(f[E1]) && !/p1: (satisfy|contribute|preserve)/.test(f[E1]),
+    then: [{ name: 'the matching change to Members: p1 leaves it', ops: sub(E1, '- phase p1: .doctrine/records/p1.md\n', '') }] },
+])
+
+// ---------------------------------------------------------------- S11 adoption (DP1, DP4, DP7)
+const ADOPT = {
+  [P]: `# Project: ledger\nState: Proposed\nCurrent epic: none\nCertification target: none\nRecords: .doctrine/records\n\n## End state\n${item('ES1', 'satisfy E1')}## Epics\n| ID | Title | Record |\n|---|---|---|\n| E1 | t | docs/epics/E1.md |\n\n## Open issues\n| Issue | Destination |\n|---|---|\n| #10 | member E1 |\n| PROGRESS.md:10 | post-done backlog |\n\n## History\n- PROGRESS.md\n\n## Rulings and returns\n`,
+  [E1]: epic('E1', item('D1', 'p1: satisfy')),
+}
+walk('S11', ADOPT, [
+  { name: 'adopt: the end state, E1 for live work, and a row for an open issue and for an open markdown tracker item by its path:line (DP7)', ops: [] },
+  { name: 'owner rules the end state, the coverage map and E1 (W1)',
+    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), rule(P, 'P-R2', 'coverage', 'Items: ES1\n'),
+      state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1\n')] },
+  { name: 'illegal: a destination ruling with no To', branch: true, want: ['reference', P, 'destination ruling P-R3 has no To'],
+    ops: [rule(P, 'P-R3', 'destination', 'Issues: #10\n')], shape: (f) => /Kind: destination\nIssues: #10\nBy:/.test(f[P]) },
+  { name: 'illegal: a destination ruling whose To is not the Destination its row carries', branch: true, want: ['issues', P, 'destination ruling P-R3 gives #10 To "out of scope"'],
+    ops: [rule(P, 'P-R3', 'destination', 'Issues: #10\nTo: out of scope\n')], shape: (f) => /^To: out of scope$/m.test(f[P]) && /^\| #10 \| member E1 \|$/m.test(f[P]) },
+  { name: 'illegal: a destination ruling naming an issue with no row', branch: true, want: ['issues', P, 'destination ruling P-R3 names #11, which is not a row'],
+    ops: [rule(P, 'P-R3', 'destination', 'Issues: #11\nTo: out of scope\n')], shape: (f) => /^Issues: #11$/m.test(f[P]) && !/^\| #11 \|/m.test(f[P]) },
+  { name: 'owner rules each destination: the open issue, and the markdown tracker item by its path:line (DP1, DP7)',
+    ops: [rule(P, 'P-R3', 'destination', 'Issues: #10\nTo: member E1\n'), rule(P, 'P-R4', 'destination', 'Issues: PROGRESS.md:10\nTo: post-done backlog\n')] },
+  { name: 'owner moves #10 out of scope by a later destination ruling, and its row follows',
+    ops: [sub(P, '| #10 | member E1 |', '| #10 | out of scope |'), rule(P, 'P-R5', 'destination', 'Issues: #10\nTo: out of scope\n')] },
+  { name: 'illegal: a cutover ruling with no Edit', branch: true, want: ['reference', P, 'cutover ruling P-R6 has no Edit'],
+    ops: [rule(P, 'P-R6', 'cutover')], shape: (f) => /Kind: cutover\nBy:/.test(f[P]) },
+  { name: 'owner rules the one cutover edit, removing CLAUDE.md:3 (the adopt end state)',
+    ops: [app(P, `\n### P-R6 ruling, ${TIME}\nKind: cutover\nEdit: CLAUDE.md:3\nBy: owner\n> (removed)\n`)] },
 ])
 
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')
