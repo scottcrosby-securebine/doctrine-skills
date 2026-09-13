@@ -81,6 +81,8 @@ Combined check: <what runs> ; pass when <rule> | none
 <entries, below>
 ```
 
+`Combined check: none` is legal only while an epic is `Proposed`, `Dropped` or `Superseded`. What the line holds otherwise, and which ruling carries it, are under "Entries" below.
+
 ## Item fields
 
 An item's seven fields are its `###` ID and the six list lines.
@@ -120,13 +122,15 @@ Found by: <check or pass>
 
 A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of an item it splits. An ID that is no longer an item then still resolves in an entry written before the ruling, in the ruling itself, in an `impact` ruling, and in a return whose Baseline is a ruling written before it, because that return graded the items as they stood under its own Baseline. A regression written after the ruling must name a current item, and so must a return whose Baseline is that ruling or a later one.
 
-A `coverage` ruling records the coverage map (W1): the initial map the owner rules before the first phase, and every later change to it, such as which epic satisfies an end-state item or which phases serve a Done means item. It never changes what an item means. Its Items name the items whose `Coverage:` line it sets or changes: end-state items in the project file, Done means items in an epic record.
+A `coverage` ruling records the coverage map (W1): the initial map the owner rules before the first phase, and every later change to it, such as which epic satisfies an end-state item or which phases serve a Done means item. It never changes what an item means, and it never carries an epic's `Combined check:` line or its pass rule, whose only ruling is the `baseline` ruling below, whatever else about the map changes with it. Its Items name the items whose `Coverage:` line it sets or changes: end-state items in the project file, Done means items in an epic record.
 
 Three Kinds record the owner's start and adoption rulings, each written in the project file. A `destination` ruling gives the tracker ids or `<path>:<line>` ids in `Issues:` the destination in `To:`, and each id must be a row in `## Open issues` whose Destination equals the `To:` of the latest `destination` ruling naming it. A `cutover` ruling names in `Edit:` the one instruction it changes, and its quoted `>` line holds the new text, or `(removed)`. A `scope` ruling names in `Entries:` the never-becomes entries it adds or strikes.
 
 None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
+
+An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. They may sit inside a sentence, and the `Combined check:` key itself need not appear, as the worked example below shows. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
 A return **counts** only when all three hold:
 
@@ -232,7 +236,7 @@ A command that writes one month of invoices as a CSV in the ledger's import form
 ### E1-R1 ruling, 2026-09-13T10:05:00Z
 Kind: baseline
 By: Dana
-> D1 is the Done means for E1. The combined check is the export test suite.
+> D1 is the Done means for E1. The combined check is `npm test -- export` run against the merged export and CLI phases ; pass when it exits 0 and prints no skipped test.
 
 ### E1-R2 ruling, 2026-09-13T10:06:00Z
 Kind: coverage

@@ -45,7 +45,7 @@ It finds the tracker in the repo's own instructions: `CLAUDE.md`, `AGENTS.md`, `
 node <plugin-root>/hooks/dctr-project.mjs check
 ```
 
-It reads the project file and every epic record offline and exits 0 with no findings, 1 with one finding per line, or 2 when `docs/PROJECT.md` is missing. Adopted repos get no CI step for it. A hand edit made between sessions is caught at the next session start. `node <plugin-root>/hooks/dctr-project.mjs status` prints the project, each end-state item's progress, the roster, the current epic, open phases, pending gate transcripts, and any return that no longer counts, labelled with its baseline and revision. Any field it cannot read prints `unknown`.
+It reads the project file and every epic record offline and exits 0 with no findings, 1 with one finding per line, or 2 when `docs/PROJECT.md` is missing. Adopted repos get no CI step for it. A hand edit made between sessions is caught at the next session start, so far as the file as it stands can show it: `check` keeps no history of any line, so an edit to a line whose rule reads only its current value, a Coverage or Combined check line, is not one of them. `node <plugin-root>/hooks/dctr-project.mjs status` prints the project, each end-state item's progress, the roster, the current epic, open phases, pending gate transcripts, and any return that no longer counts, labelled with its baseline and revision. Any field it cannot read prints `unknown`.
 
 **Watching it.** Inside herdr the orchestrator publishes `$epic` and `$phase` on its pane, and adds `·owed` to the `$doctrine` token while a ruling waits on you. [Watching a run](../watching-a-run.md) has the config row and the conditions under which it renders.
 
