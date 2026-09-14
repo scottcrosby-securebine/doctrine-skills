@@ -783,6 +783,12 @@ const MUTATIONS = [
   { name: 'project: only a Done epic\'s return needs a combined check result', file: 'dctr-project.mjs',
     clause: "entry — an OPEN epic's counting return with no Combined check result line [1: trips]",
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || s !== 'Done' || !counts(doc, e)) continue" },
+  // One mutation per condition of `counts`, so dropping any single one of the three goes red. Three
+  // rounds each found the next sibling of this predicate one at a time; this is the family closed.
+  { name: 'project: a return on a stale BASELINE is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return obsolete by baseline alone, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (e.fields.Revision?.value !== val(doc, 'Certification target') || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)))) continue" },
   { name: 'project: a return on an older REVISION is still held to the combined check rule', file: 'dctr-project.mjs',
     clause: 'known good — a return obsolete by revision alone, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
