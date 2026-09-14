@@ -129,6 +129,7 @@ By: owner
 Baseline: R1
 Revision: 000aaa
 Seat: reviewer-b
+Combined check result: PASS, evidence: tests/export.test.mjs:12
 - D1: PASS, evidence: tests/export.test.mjs:12
 
 ### R2 ruling, 2026-09-04T10:00:00Z
@@ -147,6 +148,7 @@ By: owner
 Baseline: R2
 Revision: def456
 Seat: reviewer-b
+Combined check result: PASS, evidence: tests/export.test.mjs:12
 - D1: PASS, evidence: tests/export.test.mjs:12
 `,
   'docs/epics/E2.md': `# Epic E2: Import v1
@@ -207,6 +209,7 @@ By: owner
 Baseline: R1
 Revision: 777bbb
 Seat: reviewer-c
+Combined check result: PASS, evidence: tests/import.test.mjs:4
 - D3: PASS, evidence: tests/import.test.mjs:4
 `,
 }
@@ -318,6 +321,7 @@ By: Dana
 Baseline: E1-R1
 Revision: abc123
 Seat: reviewer
+Combined check result: PASS, evidence: x
 - D1: PASS, evidence: x
 `,
 }
@@ -327,7 +331,7 @@ clause('T-check good — the Done worked example (end-state ES1, Done means D1) 
 
 // Known-good histories: states a correct orchestrator reaches that an earlier revision of check refused.
 const E1 = 'docs/epics/E1.md', E3 = 'docs/epics/E3.md'
-const laterE1 = (dmcItems, results) => `\n### E1-R2 ruling, 2026-09-13T12:00:00Z\nKind: done-means-change\nItems: ${dmcItems}\nBy: Dana\n> change\n\n### E1-R3 ruling, 2026-09-13T12:01:00Z\nKind: impact\nItems: ${dmcItems}\nBy: Dana\n> impact accepted\n\n### E1-X2 return, 2026-09-13T13:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\n${results}`
+const laterE1 = (dmcItems, results) => `\n### E1-R2 ruling, 2026-09-13T12:00:00Z\nKind: done-means-change\nItems: ${dmcItems}\nBy: Dana\n> change\n\n### E1-R3 ruling, 2026-09-13T12:01:00Z\nKind: impact\nItems: ${dmcItems}\nBy: Dana\n> impact accepted\n\n### E1-X2 return, 2026-09-13T13:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\nCombined check result: PASS, evidence: x\n${results}`
 // An item removed by a done-means-change ruling after a return that named it.
 const REMOVED = mutate([[E1, '- D1: PASS, evidence: x\n', `- D1: PASS, evidence: x\n- D2: FAIL, evidence: y\n${laterE1('D2', '- D1: PASS, evidence: x\n')}`]], EXAMPLE)
 // An item split by a done-means-change ruling, whose Items name the old ID and both new ones.
@@ -335,7 +339,7 @@ const SPLIT = mutate([[E1, '### D1\n', '### D1a\n'],
   [E1, '- Coverage: export-core: satisfy, cli: contribute\n', '- Coverage: export-core: satisfy, cli: contribute\n\n### D1b\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: c\n- Evidence: e\n- Coverage: export-core: satisfy\n'],
   [E1, '- D1: PASS, evidence: x\n', '- D1: PASS, evidence: x\n' + laterE1('D1, D1a, D1b', '- D1a: PASS, evidence: x\n- D1b: PASS, evidence: x\n')]], EXAMPLE)
 // A return recorded after that split, graded on the baseline it was briefed on (E1-R1) or on the split itself (E1-R2).
-const lateReturn = (baseline) => mutate([[E1, '- D1b: PASS, evidence: x\n', `- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: ${baseline}\nRevision: abc123\nSeat: reviewer\n- D1: FAIL, evidence: x\n`]], SPLIT)
+const lateReturn = (baseline) => mutate([[E1, '- D1b: PASS, evidence: x\n', `- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: ${baseline}\nRevision: abc123\nSeat: reviewer\nCombined check result: PASS, evidence: x\n- D1: FAIL, evidence: x\n`]], SPLIT)
 const lateReturnShape = (baseline) => (f) => { const x = f[E1].indexOf('### E1-X3 return'), t = f[E1].slice(Math.max(0, x)); return x > f[E1].indexOf('### E1-R2 ruling') && t.includes(`\nBaseline: ${baseline}\n`) && /^- D1: FAIL/m.test(t) && !/^### D1$/m.test(f[E1]) }
 // A failed project pass on an item whose satisfy epic E2 is Superseded by the Done E3: the owner first
 // rules E3 as ES2's satisfy epic, then E3 is reopened by a regression (SKILL.md, exit passes step 5).
@@ -363,6 +367,14 @@ for (const [name, files, shape] of [
     (f) => /^E1 \| Export \| docs\/epics\/E1\.md$/m.test(f[PROJECT_PATH]) && /^ {3}\| E2 \| Import v1 \| docs\/epics\/E2\.md$/m.test(f[PROJECT_PATH]) && /^ {2}#12 \| member E1 \|$/m.test(f[PROJECT_PATH])],
   ['a roster row whose Title cell carries an escaped pipe', mutate([[PROJECT_PATH, '| E1 | Export | docs/epics/E1.md |', '| E1 | Export \\| CSV | docs/epics/E1.md |']]),
     (f) => f[PROJECT_PATH].includes('| E1 | Export \\| CSV | docs/epics/E1.md |')],
+  // A `note` ruling after the counting return of a Done epic: legal, and it voids nothing. Written as
+  // a `baseline` ruling the same decision would become the current baseline and stop that return
+  // counting, which is the defect the Kind exists to prevent, so the epic staying Done with zero
+  // findings is the whole claim.
+  ['a note ruling written after the counting return of a Done epic', mutate([[E1,
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### R4 ruling, 2026-09-06T12:00:00Z\nKind: note\nBy: owner\n> shipped at the alarm with the slow-path defect open\n']]),
+    (f) => /Kind: note\n/.test(f[E1]) && f[E1].indexOf('Kind: note') > f[E1].indexOf('### Y1 return') && /^State: Done$/m.test(f[E1])],
 ]) {
   clause(`known good — ${name} [3: the fixture has that shape]`, shape(files), 'fixture')
   const fs2 = run(files)
@@ -507,6 +519,21 @@ const CASES = [
   { name: 'reference — a done-means-change ruling with no Items', rule: 'reference', frag: 'has no Items', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Kind: done-means-change\nItems: D1\n', 'Kind: done-means-change\nItems:\n']],
     defect: (f) => /Kind: done-means-change\nItems:\n/.test(txt(f, 'docs/epics/E1.md')) },
+  // The epic exit pass runs the epic's combined check and the return carries the result (owner ruling,
+  // 2026-09-14). Three branches: the line absent, the line unreadable, and a Done epic decided by a
+  // return that did not pass it.
+  { name: 'entry — an epic return with no Combined check result line', rule: 'entry', frag: 'return Y1 has no Combined check result line', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'), y1 = t.slice(t.indexOf('### Y1 return')); return y1.length > 0 && !/^Combined check result:/m.test(y1) && /^- D1: PASS/m.test(y1) } },
+  { name: 'entry — an epic return whose Combined check result is outside PASS, FAIL, UNVERIFIED', rule: 'entry', frag: 'Combined check result is "PASSED"', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASSED,']],
+    defect: (f) => /^Combined check result: PASSED, evidence: \S/m.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'evidence — a Done epic whose counting return did not pass the combined check', rule: 'evidence', frag: 'has Combined check result FAIL, not PASS', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: FAIL,']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^State: Done$/m.test(t) && /^Certification target: def456$/m.test(t) && /^Combined check result: FAIL, evidence: \S/m.test(t) && /^- D1: PASS/m.test(t) } },
+  { name: 'evidence — a Done epic whose combined check PASS carries no evidence reference', rule: 'evidence', frag: 'has Combined check result UNVERIFIED, not PASS', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence:\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^State: Done$/m.test(t) && /^Combined check result: PASS, evidence:$/m.test(t) && !/^Combined check result: PASS, evidence: \S/m.test(t.slice(t.indexOf('### Y1 return'))) } },
   { name: 'reference — a return Baseline naming a ruling that is not a baseline or done-means-change', rule: 'reference', frag: 'Baseline R3', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Baseline: R1', 'Baseline: R3']],
     defect: (f) => /^Baseline: R3$/m.test(txt(f, 'docs/epics/E1.md')) && /### R3 ruling[^\n]*\nKind: impact/.test(txt(f, 'docs/epics/E1.md')) },
@@ -519,9 +546,9 @@ const CASES = [
   { name: 'coverage — a project Coverage part whose keyword is outside the four', rule: 'coverage', frag: 'Coverage part "contibute E1"', at: P,
     edits: [[P, '- Coverage: satisfy E2; contribute E1', '- Coverage: satisfy E2; contibute E1']],
     defect: (f) => /^- Coverage: satisfy E2; contibute E1$/m.test(txt(f, P)) },
-  { name: 'entry — a ruling Kind outside the ten', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
+  { name: 'entry — a ruling Kind outside the eleven', rule: 'entry', frag: 'Kind "impacts"', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Kind: impact', 'Kind: impacts']],
-    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope'].includes('impacts') },
+    defect: (f) => /^Kind: impacts$/m.test(txt(f, 'docs/epics/E1.md')) && !['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope', 'note'].includes('impacts') },
   { name: 'entry — a return result outside PASS, FAIL, UNVERIFIED', rule: 'entry', frag: 'is "PASSED"', at: 'docs/epics/E3.md',
     edits: [['docs/epics/E3.md', '- D3: PASS, evidence: tests/import.test.mjs:4', '- D3: PASSED, evidence: tests/import.test.mjs:4']],
     defect: (f) => /^- D3: PASSED, /m.test(txt(f, 'docs/epics/E3.md')) },
@@ -532,7 +559,7 @@ const CASES = [
     defect: (f) => Object.hasOwn(f, 'docs/epics/E3.md') && f['docs/epics/E3.md'] === null && /\| E3 \| Import v2 \| docs\/epics\/E3\.md \|/.test(f[P]) },
   // Repairs of 2026-09-13, third round.
   { name: 'reference — a regression Item naming the end-state ID, in an epic record whose done-means-change ruling names other items', rule: 'reference', frag: 'regression G2 Item names "ES1"', at: E1,
-    edits: [[E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G2 regression, 2026-09-06T10:00:00Z\nItem: ES1\nFound by: project pass\n> export empty\n']],
+    edits: [[E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G2 regression, 2026-09-06T10:00:00Z\nItem: ES1\nFound by: project pass\n> export empty\n']],
     defect: (f) => { const t = txt(f, E1); return /^Item: ES1$/m.test(t) && !/^### ES1$/m.test(t) && /Kind: done-means-change\nItems: D1\n/.test(t) && !/^Items: .*\bES1\b/m.test(t) } },
   { name: 'coverage — a Superseded satisfy epic\'s chain end reopened by a regression before the owner ruled it the satisfy epic', rule: 'coverage', frag: 'the fix is a coverage ruling naming E3', at: P, edits: failedPass,
     defect: (f) => /^- Coverage: satisfy E2; contribute E1$/m.test(txt(f, P)) && /^Successor: E3$/m.test(txt(f, 'docs/epics/E2.md')) && /^State: Open$/m.test(txt(f, E3)) && /^Item: D3$/m.test(txt(f, E3)) },
@@ -576,7 +603,7 @@ const CASES = [
     edits: [[E3, '### Z1 return, 2026-09-08T10:00:00Z', '### Z1 return,']],
     defect: (f) => /^### Z1 return,$/m.test(txt(f, E3)) },
   { name: 'reference — a return on the done-means-change baseline naming the ID that ruling retired', rule: 'reference', frag: 'return E1-X3 result names "D1"', at: E1, base: SPLIT,
-    edits: [[E1, '- D1b: PASS, evidence: x\n', '- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\n- D1: FAIL, evidence: x\n']],
+    edits: [[E1, '- D1b: PASS, evidence: x\n', '- D1b: PASS, evidence: x\n\n### E1-X3 return, 2026-09-13T14:00:00Z\nBaseline: E1-R2\nRevision: abc123\nSeat: reviewer\nCombined check result: PASS, evidence: x\n- D1: FAIL, evidence: x\n']],
     defect: lateReturnShape('E1-R2') },
   { name: 'reference — an impact ruling with no Items', rule: 'reference', frag: 'impact ruling R3 has no Items', at: E1,
     edits: [[E1, 'Kind: impact\nItems: D1\n', 'Kind: impact\nItems:\n']],

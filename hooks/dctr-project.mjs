@@ -49,7 +49,11 @@ const EPIC_STATES = ['Proposed', 'Not started', 'Open', 'Done', 'Dropped', 'Supe
 const TERMINAL = ['Done', 'Dropped', 'Superseded']
 const LIVE = ['Proposed', 'Not started', 'Open']
 const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
-const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope']
+// `note` is the Kind for an owner decision that moves no state: an escalation ruled at an alarm, a
+// finding ruled closed. It exists because a drive's orchestrator had nowhere to put one, reached for
+// `baseline`, and voided a pass — a baseline ruling becomes the current baseline whatever it was
+// written for (owner ruling, 2026-09-14).
+const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope', 'note']
 /** The fields a ruling of these Kinds must carry, each non-empty. A Map, since a Kind is user text. */
 const REQUIRED = new Map([['destination', ['Issues', 'To']], ['cutover', ['Edit']], ['scope', ['Entries']]])
 const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
@@ -162,6 +166,16 @@ function counts(doc, ret) {
 
 /** A PASS with an empty evidence reference is UNVERIFIED. */
 const resultOf = (r) => (r.result === 'PASS' && !r.evidence ? 'UNVERIFIED' : r.result)
+/** An epic return's `Combined check result:` field, in the shape `resultOf` reads, or null when the
+ *  field is absent. The epic's combined check covers the seam BETWEEN its phases, which no single
+ *  phase's own gate covers, and the exit pass is the only context that spans them (owner ruling,
+ *  2026-09-14). A field with no recognisable result keeps the raw text so the finding can quote it. */
+const combinedOf = (e) => {
+  const f = e.fields['Combined check result']
+  if (!f) return null
+  const m = /^([A-Za-z]+)\s*(?:,\s*evidence:\s*(.*))?$/.exec(f.value)
+  return { result: m ? m[1] : f.value, evidence: (m?.[2] ?? '').trim(), line: f.line }
+}
 /** The latest counting return decides, never any earlier one that also counts. */
 const latestCounting = (doc) => doc.entries.filter((e) => e.type === 'return' && counts(doc, e)).at(-1) ?? null
 const passesAll = (doc, ids) => { const e = latestCounting(doc); return Boolean(e) && ids.every((id) => e.results.some((r) => r.item === id && resultOf(r) === 'PASS')) }
@@ -359,6 +373,21 @@ export function check(model, exists) {
       else if (!/; pass when \S/.test(cc)) add(file, sl, 'evidence', `epic ${id} is ${s} and its Combined check has no ; pass when <rule> part (W1)`)
     }
     if (s === 'Done' && !passesAll(doc, doc.items.map((i) => i.id))) add(file, sl, 'evidence', `epic ${id} is Done without a counting return that has PASS for every Done means item`)
+    // Every epic return carries the combined check's result, and a Done epic's deciding return carries
+    // a PASS. Without this an epic reached Done on a pass where the seam check its owner approved was
+    // never run: the return had no slot for a result that is no item's.
+    for (const e of doc.entries) {
+      if (e.type !== 'return') continue
+      const cr = combinedOf(e)
+      if (!cr) add(file, e.line, 'entry', `return ${e.id} has no Combined check result line`)
+      else if (!RESULTS.includes(cr.result)) add(file, cr.line, 'entry', `return ${e.id} Combined check result is ${JSON.stringify(cr.result)}, not ${RESULTS.join(', ')}`)
+    }
+    if (s === 'Done') {
+      const last = latestCounting(doc), cr = last && combinedOf(last)
+      if (last && (!cr || resultOf(cr) !== 'PASS')) {
+        add(file, cr?.line ?? last.line, 'evidence', `epic ${id} is Done and its counting return ${last.id} has Combined check result ${cr ? resultOf(cr) : '(none)'}, not PASS`)
+      }
+    }
     if (s === 'Dropped' && !rulingsOf(doc, 'drop').length) add(file, sl, 'evidence', `epic ${id} is Dropped with no drop ruling`)
     if (s === 'Superseded') {
       const succ = rulingsOf(doc, 'supersede').at(-1)?.fields.Successor?.value

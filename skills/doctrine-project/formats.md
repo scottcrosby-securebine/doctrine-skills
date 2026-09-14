@@ -98,7 +98,7 @@ An item's seven fields are its `###` ID and the six list lines.
 
 ```
 ### <entry ID> ruling, <ISO 8601 UTC time>
-Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage | destination | cutover | scope
+Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage | destination | cutover | scope | note
 Items: <item IDs>            (done-means-change, impact, project-level, coverage)
 Successor: <epic ID>         (supersede)
 Issues: <tracker ids or path:line ids>   (destination)
@@ -112,6 +112,7 @@ By: <owner>
 Baseline: <ruling entry ID>
 Revision: <commit sha>
 Seat: <handle of a context that did not build the work>
+Combined check result: PASS | FAIL | UNVERIFIED, evidence: <reference>   (epic records)
 - <item ID>: PASS | FAIL | UNVERIFIED, evidence: <reference>
 
 ### <entry ID> regression, <ISO 8601 UTC time>
@@ -126,17 +127,21 @@ A `coverage` ruling records the coverage map (W1): the initial map the owner rul
 
 Three Kinds record the owner's start and adoption rulings, each written in the project file. A `destination` ruling gives the tracker ids or `<path>:<line>` ids in `Issues:` the destination in `To:`, and each id must be a row in `## Open issues` whose Destination equals the `To:` of the latest `destination` ruling naming it. A `cutover` ruling names in `Edit:` the one instruction it changes, and its quoted `>` line holds the new text, or `(removed)`. A `scope` ruling names in `Entries:` the never-becomes entries it adds or strikes.
 
-None of `coverage`, `destination`, `cutover` or `scope` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
+A `note` ruling records an owner decision that moves no state: an escalation ruled when a phase's alarm fires, a finding the owner rules closed, an approval worth keeping that changes no item, no line and no map. Its fields are the common ones and nothing else. It exists so that such a decision has somewhere to go: written as a `baseline` ruling it would become the current baseline and stop the epic's own returns counting, which is a pass voided by bookkeeping.
+
+None of `coverage`, `destination`, `cutover`, `scope` or `note` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
 
 The **current baseline** of a file is its latest `baseline` or `done-means-change` ruling.
 
-An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. They may sit inside a sentence, and the `Combined check:` key itself need not appear, as the worked example below shows. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
+An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. The test is containment, not a delimiter: the epic's `Combined check:` line, from what runs through the pass rule, appears inside the ruling's quote as an unbroken run of the same characters, a trailing period aside. Whatever leads into it is the owner's own prose and carries no approval, so the `Combined check:` key itself need not appear, as the worked example below shows. Nothing marks where the approved words begin, and nothing needs to: the line under test is what you search for. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
 A return **counts** only when all three hold:
 
 - its Baseline is the current baseline;
 - its Revision equals the file's `Certification target:`;
 - no `regression` entry against one of its items comes after it in the file.
+
+An epic return also carries `Combined check result:`, which is the result of running that epic's `Combined check:` line at the return's Revision. It is no item, so no `Coverage:` line and no `done-means-change` ruling reaches it, and it is read only from the return that decides: an epic is `Done` only when the latest counting return carries `PASS` there as well as for every Done means item. A `PASS` with an empty evidence reference is `UNVERIFIED` here too. A project return carries no such line, the project file having no combined check.
 
 When more than one return counts, the latest counting return decides, and an earlier one that also counts is ignored. A PASS with an empty evidence reference counts as UNVERIFIED. A return that does not count stays in the file, and `status` labels it obsolete with its baseline and revision.
 
