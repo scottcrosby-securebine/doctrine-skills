@@ -783,6 +783,10 @@ const MUTATIONS = [
   { name: 'project: only a Done epic\'s return needs a combined check result', file: 'dctr-project.mjs',
     clause: "entry — an OPEN epic's counting return with no Combined check result line [1: trips]",
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || s !== 'Done' || !counts(doc, e)) continue" },
+  { name: 'project: a return on an older REVISION is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return obsolete by revision alone, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (e.fields.Baseline?.value !== currentBaseline(doc) || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)))) continue" },
   { name: 'project: a stale BASELINE alone excuses a return from the combined check rule', file: 'dctr-project.mjs',
     clause: 'known good — a return obsolete by a later regression alone, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || e.fields.Baseline?.value !== currentBaseline(doc)) continue" },
@@ -875,7 +879,13 @@ const judge = async (dir, suite) => {
   const again = await runSuite(dir, suite)
   return { res: again, outcome: suiteOutcome(again) }
 }
-const whyUnrun = (res) => `rendered no verdict (${res.signal || res.code}), twice`
+/** Why a suite gave no verdict, with the first line it did print. A deterministic `SyntaxError` from a
+ *  mutation's own replacement text and a killed process both land here, and only that line separates
+ *  them once the copy is gone. */
+const whyUnrun = (res) => {
+  const first = String(res.out || '').split('\n').map((l) => l.trim()).find(Boolean)
+  return `rendered no verdict (${res.signal || res.code}), twice${first ? `: ${first.slice(0, 160)}` : ''}`
+}
 const anySuiteNotices = async (dir) => {
   for (const s of SUITES) {
     const { res, outcome } = await judge(dir, s)
@@ -973,9 +983,12 @@ if (shortfall) {
 
 fs.rmSync(work, { recursive: true, force: true })
 // An unjudged mutation is still a red run — it certifies nothing about the clause it names — but it
-// is reported as its own number, so a reader can tell a repair nothing pins from a suite that never
-// started. Re-running the gate is the answer to the second one, and never to the first.
-const tail = errors ? ` (${errors} unjudged: a suite rendered no verdict)` : ''
+// is reported as its own number, so a reader can tell a repair nothing pins from a suite that gave no
+// verdict. The second has two causes and they take opposite actions: a machine that killed the suite
+// (re-run the gate) and a mutation whose replacement text does not parse (fix the mutation). The
+// ERROR line carries the suite's first output line so the reader can tell which, since the copy it
+// happened in is deleted below.
+const tail = errors ? ` (${errors} unjudged: no verdict; see each ERROR line for why)` : ''
 console.log(failures || errors
   ? `\n${failures} FAILED${tail}`
   : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)

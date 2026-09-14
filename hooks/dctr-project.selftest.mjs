@@ -389,6 +389,14 @@ for (const [name, files, shape] of [
     [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n'],
     [E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G9 regression, 2026-09-07T10:00:00Z\nItem: D1\nFound by: exit pass\n> seam broke\n']]),
     (f) => { const t = f[E1], y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && !/Combined check result:/.test(y1) && /^Baseline: R2$/m.test(y1) && /^Revision: def456$/m.test(y1) && /^Certification target: def456$/m.test(t) && t.indexOf('### G9 regression') > t.indexOf('### Y1 return') }],
+  // The third way a return stops counting, isolated like the other two: its Baseline is still current
+  // and no regression follows it, but a pass has opened on a NEWER revision. A skip condition missing
+  // the revision test alone passes every other fixture here.
+  ['a return obsolete by revision alone, with no Combined check result line', mutate([
+    [PROJECT_PATH, 'State: Done', 'State: Ruled'], [E1, 'State: Done', 'State: Open'],
+    [E1, 'Certification target: def456', 'Certification target: 999zzz'],
+    [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n']]),
+    (f) => { const t = f[E1], y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && /^Certification target: 999zzz$/m.test(t) && /^Baseline: R2$/m.test(y1) && /^Revision: def456$/m.test(y1) && !/Combined check result:/.test(y1) && !/ regression,/.test(t) }],
   ['a later return that does not count, carrying a FAILED combined check, under a Done epic', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y3 return, 2026-09-09T10:00:00Z\nBaseline: R1\nRevision: 000aaa\nSeat: reviewer-e\nCombined check result: FAIL, evidence: tests/seam.test.mjs:3\n- D1: PASS, evidence: tests/export.test.mjs:12\n']]),
