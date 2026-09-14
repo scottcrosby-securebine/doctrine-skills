@@ -71,7 +71,7 @@ The agent drafts three end-state items from the README and `PROGRESS.md`, and as
 
 It proposes a destination for each open issue: two members of `IMPORT`, one out of scope, one post-done backlog. You accept three and move the fourth. `PROGRESS.md` goes into the history index unchanged. The cutover finds one line in `CLAUDE.md` telling agents to update `PROGRESS.md`. That edit is flagged as an instruction-file change and put to you, and you approve it. The format check exits 0.
 
-Weeks later a `doctrine-code` phase closes the last member of `IMPORT`. An exit pass from a fresh context returns PASS with evidence for every Done means item at the recorded certification target, and the epic moves to Done.
+Weeks later a `doctrine-code` phase closes the last member of `IMPORT`. An exit pass from a fresh context runs the epic's combined check and returns PASS with evidence for it and for every Done means item at the recorded certification target, and the epic moves to Done.
 
 ## How to invoke it
 

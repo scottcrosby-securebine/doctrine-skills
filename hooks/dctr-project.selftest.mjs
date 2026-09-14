@@ -123,7 +123,7 @@ The export.
 Kind: baseline
 Items: D1
 By: owner
-> approved
+> approved: the combined check is node tests/export-all.mjs ; pass when it exits 0.
 
 ### Y0 return, 2026-09-03T10:00:00Z
 Baseline: R1
@@ -203,7 +203,7 @@ The v2 import.
 Kind: baseline
 Items: D3
 By: owner
-> approved
+> approved: the combined check is node tests/import-all.mjs ; pass when it exits 0.
 
 ### Z1 return, 2026-09-08T10:00:00Z
 Baseline: R1
@@ -557,9 +557,6 @@ const CASES = [
   { name: 'evidence — a Done epic whose counting return did not pass the combined check', rule: 'evidence', frag: 'has Combined check result FAIL, not PASS', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: FAIL,']],
     defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^State: Done$/m.test(t) && /^Certification target: def456$/m.test(t) && /^Combined check result: FAIL, evidence: \S/m.test(t) && /^- D1: PASS/m.test(t) } },
-  // Two returns that both count, the later one failing the combined check. Without this the fixture
-  // had a single counting return, where "the latest counting return decides" and "any counting return
-  // decides" are the same sentence and a swap between them is invisible.
   // A LIVE pass, on an epic that is not Done: the missing-line and bad-result cases above both sat on
   // a Done epic, so a validator narrowed to Done epics passed every one of them.
   { name: 'entry — an OPEN epic\'s counting return with no Combined check result line', rule: 'entry', frag: 'return Y1 has no Combined check result line', at: 'docs/epics/E1.md',
@@ -569,6 +566,9 @@ const CASES = [
   { name: 'reference — a note ruling whose Items name an item its file does not define', rule: 'reference', frag: 'note ruling R5 Items names "D9"', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', '### R3 ruling, 2026-09-04T11:00:00Z', '### R5 ruling, 2026-09-04T10:30:00Z\nKind: note\nItems: D9\nBy: owner\n> a finding ruled closed\n\n### R3 ruling, 2026-09-04T11:00:00Z']],
     defect: (f) => /Kind: note\nItems: D9\n/.test(txt(f, 'docs/epics/E1.md')) && !/^### D9$/m.test(txt(f, 'docs/epics/E1.md')) },
+  // Two returns that both count, the later one failing the combined check. Without this the fixture
+  // had a single counting return, where "the latest counting return decides" and "any counting return
+  // decides" are the same sentence and a swap between them is invisible.
   { name: 'evidence — a later counting return whose combined check FAILED decides, though an earlier counting one passed it', rule: 'evidence', frag: 'counting return Y2 has Combined check result FAIL, not PASS', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y2 return, 2026-09-05T11:00:00Z\nBaseline: R2\nRevision: def456\nSeat: reviewer-d\nCombined check result: FAIL, evidence: tests/seam.test.mjs:3\n- D1: PASS, evidence: tests/export.test.mjs:12\n']],
     defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return t.indexOf('### Y2 return') > t.indexOf('### Y1 return') && (t.match(/^Baseline: R2$/gm) || []).length === 2 && (t.match(/^Revision: def456$/gm) || []).length === 2 && /^Combined check result: FAIL, evidence: \S/m.test(t) && !/ regression,/.test(t) && /^State: Done$/m.test(t) } },
@@ -668,7 +668,7 @@ const CASES = [
     edits: [[E3, '- phase p3: docs/records/p3.md\n', '- phase p3: docs/records/p3.md\n- phase p4\n']], defect: (f) => /^- phase p4$/m.test(txt(f, E3)) && !/p4: /.test(txt(f, E3)) && /^State: Done$/m.test(txt(f, E3)) },
   { name: 'evidence — a Done epic whose Combined check has no pass rule (DP17)', rule: 'evidence', frag: 'has no ; pass when', at: E3,
     edits: [[E3, 'Combined check: node tests/import-all.mjs ; pass when it exits 0', 'Combined check: node tests/import-all.mjs']],
-    defect: (f) => /^Combined check: node tests\/import-all\.mjs$/m.test(txt(f, E3)) && !/; pass when /.test(txt(f, E3)) },
+    defect: (f) => /^Combined check: node tests\/import-all\.mjs$/m.test(txt(f, E3)) && !/^Combined check:.*; pass when /m.test(txt(f, E3)) },
 ]
 
 for (const c of CASES) {
