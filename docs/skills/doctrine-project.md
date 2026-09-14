@@ -27,7 +27,7 @@ Until you rule on an item it binds nothing: no seat treats it as a constraint an
 
 **Two tracked files.** The project lives in `docs/PROJECT.md`, and each epic in `docs/epics/<ID>.md`. Both are committed. The project file holds the end state, the never-becomes list, the epic roster, the current epic, a row and destination for each open item adoption took in, a linked index of history, and the owner's rulings and exit-pass returns. An epic record holds what the epic is, its Done means, its member phases and issues, and its own rulings and returns. The exact format is [`skills/doctrine-project/formats.md`](../../skills/doctrine-project/formats.md). Run state for each phase stays where the hub puts it, private and out of version control.
 
-**States.** An epic is Proposed, Not started, Open, Done, Dropped or Superseded. Your ruling on its Done means moves it from Proposed to Not started, and its first member phase opens it. It reaches Done only on an exit return from a context that did not build the work, with a PASS for every Done means item, and only a return that counts under [formats.md, "Entries"](../../skills/doctrine-project/formats.md#entries) moves it. A later regression against a Done means item reopens the epic. The project is Proposed until you rule its end state, then Ruled, and Done only when every epic on the roster is Done, Dropped or Superseded and a project exit return passes every end-state item.
+**States.** An epic is Proposed, Not started, Open, Done, Dropped or Superseded. Your ruling on its Done means moves it from Proposed to Not started, and that same ruling also approves the epic's first `Combined check:` line, which is what an exit pass runs across its member phases. Its first member phase opens it. It reaches Done only on an exit return from a context that did not build the work, with a PASS for every Done means item and a PASS for the combined check that return ran, and only a return that counts under [formats.md, "Entries"](../../skills/doctrine-project/formats.md#entries) moves it. A later regression against a Done means item reopens the epic. The project is Proposed until you rule its end state, then Ruled, and Done only when every epic on the roster is Done, Dropped or Superseded and a project exit return passes every end-state item.
 
 **Adopting a repo.** Adoption looks forward, not back:
 
@@ -71,7 +71,7 @@ The agent drafts three end-state items from the README and `PROGRESS.md`, and as
 
 It proposes a destination for each open issue: two members of `IMPORT`, one out of scope, one post-done backlog. You accept three and move the fourth. `PROGRESS.md` goes into the history index unchanged. The cutover finds one line in `CLAUDE.md` telling agents to update `PROGRESS.md`. That edit is flagged as an instruction-file change and put to you, and you approve it. The format check exits 0.
 
-Weeks later a `doctrine-code` phase closes the last member of `IMPORT`. An exit pass from a fresh context returns PASS with evidence for every Done means item at the recorded certification target, and the epic moves to Done.
+Weeks later a `doctrine-code` phase closes the last member of `IMPORT`. An exit pass from a fresh context runs the epic's combined check and returns PASS with evidence for it and for every Done means item at the recorded certification target, and the epic moves to Done.
 
 ## How to invoke it
 

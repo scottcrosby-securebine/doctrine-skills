@@ -559,7 +559,7 @@ const MUTATIONS = [
   { name: 'project: a ruling Items naming an undefined item is accepted', file: 'dctr-project.mjs', clause: 'reference — a ruling Items naming an item its file does not define [1: trips]',
     from: 'for (const id of ids) ref(', to: 'for (const id of []) ref(' },
   { name: 'project: a done-means-change or impact ruling with no Items is accepted', file: 'dctr-project.mjs', clause: 'reference — a done-means-change ruling with no Items [1: trips]',
-    from: "if (!ids.length && kind(e) !== 'project-level') add(", to: 'if (false) add(' },
+    from: "if (!ids.length && !['project-level', 'note'].includes(kind(e))) add(", to: 'if (false) add(' },
   { name: 'project: a return Baseline may name any ruling', file: 'dctr-project.mjs', clause: 'reference — a return Baseline naming a ruling that is not a baseline or done-means-change [1: trips]',
     from: "x.id === b?.value && ['baseline', 'done-means-change'].includes(kind(x))", to: 'x.id === b?.value' },
   { name: 'project: findings exit 0', file: 'dctr-project.mjs', clause: 'CLI check — a broken tree exits 1 with a <path>:<line>: <rule>: <message> line',
@@ -605,7 +605,7 @@ const MUTATIONS = [
   { name: 'project: a project Coverage part with an unknown keyword is dropped silently', file: 'dctr-project.mjs',
     clause: 'coverage — a project Coverage part whose keyword is outside the four [1: trips]',
     from: 'for (const u of c.unknown) add(', to: 'for (const u of []) add(' },
-  { name: 'project: a ruling Kind outside the ten is accepted', file: 'dctr-project.mjs', clause: 'entry — a ruling Kind outside the ten [1: trips]',
+  { name: 'project: a ruling Kind outside the eleven is accepted', file: 'dctr-project.mjs', clause: 'entry — a ruling Kind outside the eleven [1: trips]',
     from: "if (e.type === 'ruling' && !KINDS.includes(kind(e))) add(", to: 'if (false) add(' },
   { name: 'project: a return result outside the three is accepted', file: 'dctr-project.mjs', clause: 'entry — a return result outside PASS, FAIL, UNVERIFIED [1: trips]',
     from: 'if (!RESULTS.includes(r.result)) add(', to: 'if (false) add(' },
@@ -661,7 +661,7 @@ const MUTATIONS = [
     from: "'project-level', 'coverage', 'destination'", to: "'project-level', 'destination'" },
   { name: 'project: a coverage ruling needs no Items', file: 'dctr-project.mjs',
     clause: 'S5 illegal: a coverage ruling with no Items [1: reference',
-    from: "['done-means-change', 'impact', 'project-level', 'coverage'].includes(kind(e))", to: "['done-means-change', 'impact', 'project-level'].includes(kind(e))" },
+    from: "['done-means-change', 'impact', 'project-level', 'coverage', 'note'].includes(kind(e))", to: "['done-means-change', 'impact', 'project-level', 'note'].includes(kind(e))" },
   { name: 'project: an escaped pipe splits a table cell', file: 'dctr-project.mjs',
     clause: 'known good — a roster row whose Title cell carries an escaped pipe [2: ZERO findings]',
     from: '.split(/(?<!\\\\)\\|/)', to: ".split('|')" },
@@ -700,7 +700,7 @@ const MUTATIONS = [
     from: ',\\s*\\S.*$/.exec(t)', to: ',\\s*.*$/.exec(t)' },
   { name: 'project: only a done-means-change ruling needs Items, not an impact ruling', file: 'dctr-project.mjs',
     clause: 'reference — an impact ruling with no Items [1: trips]',
-    from: "if (!ids.length && kind(e) !== 'project-level') add(", to: "if (!ids.length && kind(e) === 'done-means-change') add(" },
+    from: "if (!ids.length && !['project-level', 'note'].includes(kind(e))) add(", to: "if (!ids.length && kind(e) === 'done-means-change') add(" },
   // Repair of 2026-09-13, fifth round (F4-1).
   { name: 'project: a return graded on a baseline written before a done-means-change no longer resolves the ID it retired', file: 'dctr-project.mjs',
     clause: 'S9 exit passes step 4: the return arrives and is recorded as the seat gave it, on the baseline it was briefed on [2: ZERO findings]',
@@ -714,7 +714,7 @@ const MUTATIONS = [
     from: "'destination', 'cutover', ", to: "'destination', " },
   { name: 'project: scope is not a ruling Kind (DP1)', file: 'dctr-project.mjs',
     clause: 'S10 owner rules the end state, the project-level ruling and the initial coverage map (W1), and strikes one never-becomes entry [2: ZERO findings]',
-    from: "'cutover', 'scope']", to: "'cutover']" },
+    from: "'cutover', 'scope', 'note']", to: "'cutover', 'note']" },
   { name: 'project: a destination ruling needs no Issues (DP1)', file: 'dctr-project.mjs', clause: 'reference — a destination ruling with no Issues [1: trips]',
     from: "['destination', ['Issues', 'To']]", to: "['destination', ['To']]" },
   { name: 'project: a destination ruling needs no To (DP1)', file: 'dctr-project.mjs', clause: 'reference — a destination ruling with no To [1: trips]',
@@ -763,6 +763,69 @@ const MUTATIONS = [
     from: '  if (!key || Object.hasOwn(opts, key)) usage()', to: '  if (!key) usage()' },
   { name: 'flag lookup cannot reach inherited names', file: 'dctr-token.mjs', clause: 'T-token: every malformed call exits 1',
     from: '  const key = FLAGS.get(rest[i])', to: '  const key = Object.fromEntries(FLAGS)[rest[i]]' },
+  // Repairs of 2026-09-14 (A3 punch list): the epic exit pass's combined check result, and the `note` Kind.
+  { name: 'project: an epic return with no combined check result is accepted', file: 'dctr-project.mjs',
+    clause: 'entry — an epic return with no Combined check result line [1: trips]',
+    from: "if (!cr) add(file, e.line, 'entry', `return ${e.id} has no Combined check result line`)", to: 'if (!cr) continue' },
+  { name: 'project: an epic return\'s combined check result is not checked against the three', file: 'dctr-project.mjs',
+    clause: 'entry — an epic return whose Combined check result is outside PASS, FAIL, UNVERIFIED [1: trips]',
+    from: "      else if (!RESULTS.includes(cr.result)) add(file, cr.line, 'entry', `return ${e.id} Combined check result is ${JSON.stringify(cr.result)}, not ${RESULTS.join(', ')}`)\n", to: '' },
+  { name: 'project: a Done epic needs no PASS on its combined check', file: 'dctr-project.mjs',
+    clause: 'evidence — a Done epic whose counting return did not pass the combined check [1: trips]',
+    from: "      if (last && (!cr || resultOf(cr) !== 'PASS')) {", to: '      if (false) {' },
+  { name: 'project: an empty evidence reference still passes the combined check', file: 'dctr-project.mjs',
+    clause: 'evidence — a Done epic whose combined check PASS carries no evidence reference [1: trips]',
+    from: "      if (last && (!cr || resultOf(cr) !== 'PASS')) {", to: "      if (last && (!cr || cr.result !== 'PASS')) {" },
+  { name: 'project: the combined check rule reaches returns that no longer count', file: 'dctr-project.mjs',
+    clause: 'known good — an obsolete return with no Combined check result line, under a counting one that has it [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return') continue" },
+  // Three SIBLINGS of the mutations below, each a narrowing that the first set of fixtures passed.
+  { name: 'project: only a Done epic\'s return needs a combined check result', file: 'dctr-project.mjs',
+    clause: "entry — an OPEN epic's counting return with no Combined check result line [1: trips]",
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || s !== 'Done' || !counts(doc, e)) continue" },
+  // `counts` has FOUR conditions — the `Certification target: none` guard, the current baseline, the
+  // revision, and no later regression — and each of the four below drops exactly one of them, so
+  // narrowing the predicate any single way goes red here. Four rounds of review found these one at a
+  // time, each after a repair had called the family closed, and a fifth broke the counter that replaced
+  // the enumeration. These four mutations pin the four conditions by name; `T-counts` in
+  // dctr-project.selftest.mjs catches the narrowings its rows' values fail, which is more than a count
+  // of exits could see and is still not every narrowing — its comment in dctr-project.mjs says what it
+  // is blind to. Neither is a completeness proof, and nothing here claims to be one.
+  { name: 'project: a return whose epic has no certification target is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return whose epic has no certification target, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); return e.fields.Baseline?.value !== currentBaseline(doc) || e.fields.Revision?.value !== t || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)) })()) continue" },
+  { name: 'project: a return on a stale BASELINE is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return obsolete by baseline alone, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); const gone = !t || t === 'none'; return gone || e.fields.Revision?.value !== t || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)) })()) continue" },
+  { name: 'project: a return on an older REVISION is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return obsolete by revision alone, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); const gone = !t || t === 'none'; return gone || e.fields.Baseline?.value !== currentBaseline(doc) || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)) })()) continue" },
+  { name: 'project: a later REGRESSION no longer takes a return out of the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return obsolete by a later regression alone, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); const gone = !t || t === 'none'; return gone || e.fields.Baseline?.value !== currentBaseline(doc) || e.fields.Revision?.value !== t })()) continue" },
+  { name: 'project: the LATEST return decides the combined check, counting or not', file: 'dctr-project.mjs',
+    clause: 'known good — a later return that does not count, carrying a FAILED combined check, under a Done epic [2: ZERO findings]',
+    from: '      const last = latestCounting(doc), cr = last && combinedOf(last)',
+    to: "      const last = doc.entries.filter((x) => x.type === 'return').at(-1), cr = last && combinedOf(last)" },
+  { name: 'project: the FIRST counting return decides the combined check, not the latest', file: 'dctr-project.mjs',
+    clause: 'evidence — a later counting return whose combined check FAILED decides, though an earlier counting one passed it [1: trips]',
+    from: '      const last = latestCounting(doc), cr = last && combinedOf(last)',
+    to: "      const last = doc.entries.filter((x) => x.type === 'return' && counts(doc, x))[0], cr = last && combinedOf(last)" },
+  { name: 'project: an Open epic must also pass the combined check', file: 'dctr-project.mjs',
+    clause: 'known good — an Open epic whose counting return records a FAILED combined check [2: ZERO findings]',
+    from: "    if (s === 'Done') {\n      const last = latestCounting(doc), cr = last && combinedOf(last)", to: "    if (['Open', 'Done'].includes(s)) {\n      const last = latestCounting(doc), cr = last && combinedOf(last)" },
+  { name: 'project: a note ruling is required to carry Items', file: 'dctr-project.mjs',
+    clause: 'known good — a note ruling written after the counting return of a Done epic [2: ZERO findings]',
+    from: "if (!ids.length && !['project-level', 'note'].includes(kind(e))) add(", to: "if (!ids.length && kind(e) !== 'project-level') add(" },
+  { name: 'project: a note ruling may name an item nothing defines', file: 'dctr-project.mjs',
+    clause: 'reference — a note ruling whose Items name an item its file does not define [1: trips]',
+    from: "'project-level', 'coverage', 'note'].includes(kind(e))", to: "'project-level', 'coverage'].includes(kind(e))" },
+  { name: 'project: note is not a ruling Kind', file: 'dctr-project.mjs',
+    clause: 'known good — a note ruling written after the counting return of a Done epic [2: ZERO findings]',
+    from: "'cutover', 'scope', 'note']", to: "'cutover', 'scope']" },
   // Repair of 2026-09-13: a suite that never ran was read as a suite that noticed nothing.
   { name: 'a suite that could not be run is read as one that stayed green', file: 'dctr-lib.mjs',
     clause: 'clause 1bg — a suite that NEVER RAN is error, never a clause staying green',
@@ -818,18 +881,34 @@ const runSuite = async (dir, suite) => {
  *  A suite that could not run is retried ONCE before the mutation is given up as unjudgeable: what
  *  produced this class was momentary load at eight workers, and one retry is what turns it back
  *  into a verdict instead of a re-run of the whole gate. */
+/** `silent` is retried beside `error`, and for the same reason. A suite that exits non-zero without
+ *  printing a FAIL line rendered no verdict, and the two things that produce that are a mutation that
+ *  broke the file at load and a suite the machine killed part-way — which print the same nothing. On
+ *  2026-09-14 this gate reported `a return result outside the three is accepted — reverted, and the
+ *  suite stayed green` while that same mutation, run alone on the same tree, made its clause red on
+ *  the first try. One retry is what separates the two, and a second silence is reported as unjudged
+ *  rather than as a repair nothing pins. */
 const judge = async (dir, suite) => {
   const first = await runSuite(dir, suite)
   const outcome = suiteOutcome(first)
-  if (outcome !== 'error') return { res: first, outcome }
+  if (outcome !== 'error' && outcome !== 'silent') return { res: first, outcome }
   const again = await runSuite(dir, suite)
   return { res: again, outcome: suiteOutcome(again) }
 }
-const whyUnrun = (res) => `could not be run (${res.signal || res.code})`
+/** Why a suite gave no verdict, with the first line it did print. A deterministic `SyntaxError` from a
+ *  mutation's own replacement text and a killed process both land here, and only that line separates
+ *  them once the copy is gone. */
+const whyUnrun = (res) => {
+  const first = String(res.out || '').split('\n').map((l) => l.trim()).find(Boolean)
+  return `rendered no verdict (${res.signal || res.code}), twice${first ? `: ${first.slice(0, 160)}` : ''}`
+}
 const anySuiteNotices = async (dir) => {
   for (const s of SUITES) {
     const { res, outcome } = await judge(dir, s)
-    if (outcome === 'error') return { caught: false, error: `${s} ${whyUnrun(res)}` }
+    // A suite still silent after its retry is unjudged, not a green suite: the mutation may have
+    // broken the file at load, in which case the mutation is what needs fixing, and either way no
+    // clause was asked. Saying "nothing pins this" would name the wrong defect.
+    if (outcome === 'error' || outcome === 'silent') return { caught: false, error: `${s} ${whyUnrun(res)}` }
     if (outcome === 'noticed') return { caught: true, error: null }
   }
   return { caught: false, error: null }
@@ -920,9 +999,12 @@ if (shortfall) {
 
 fs.rmSync(work, { recursive: true, force: true })
 // An unjudged mutation is still a red run — it certifies nothing about the clause it names — but it
-// is reported as its own number, so a reader can tell a repair nothing pins from a suite that never
-// started. Re-running the gate is the answer to the second one, and never to the first.
-const tail = errors ? ` (${errors} unjudged: a suite could not be run)` : ''
+// is reported as its own number, so a reader can tell a repair nothing pins from a suite that gave no
+// verdict. The second has two causes and they take opposite actions: a machine that killed the suite
+// (re-run the gate) and a mutation whose replacement text does not parse (fix the mutation). The
+// ERROR line carries the suite's first output line so the reader can tell which, since the copy it
+// happened in is deleted below.
+const tail = errors ? ` (${errors} unjudged: no verdict; see each ERROR line for why)` : ''
 console.log(failures || errors
   ? `\n${failures} FAILED${tail}`
   : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)

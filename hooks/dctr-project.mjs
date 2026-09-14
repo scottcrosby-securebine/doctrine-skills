@@ -49,7 +49,11 @@ const EPIC_STATES = ['Proposed', 'Not started', 'Open', 'Done', 'Dropped', 'Supe
 const TERMINAL = ['Done', 'Dropped', 'Superseded']
 const LIVE = ['Proposed', 'Not started', 'Open']
 const FIELDS = ['Outcome', 'Type', 'Check', 'Control', 'Evidence', 'Coverage']
-const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope']
+// `note` is the Kind for an owner decision that moves no state: an escalation ruled at an alarm, a
+// finding ruled closed. It exists because a drive's orchestrator had nowhere to put one, reached for
+// `baseline`, and voided a pass — a baseline ruling becomes the current baseline whatever it was
+// written for (owner ruling, 2026-09-14).
+const KINDS = ['baseline', 'done-means-change', 'impact', 'drop', 'supersede', 'project-level', 'coverage', 'destination', 'cutover', 'scope', 'note']
 /** The fields a ruling of these Kinds must carry, each non-empty. A Map, since a Kind is user text. */
 const REQUIRED = new Map([['destination', ['Issues', 'To']], ['cutover', ['Edit']], ['scope', ['Entries']]])
 const RESULTS = ['PASS', 'FAIL', 'UNVERIFIED']
@@ -149,8 +153,24 @@ const epicHeadingId = (doc) => /^Epic (\S+?):/.exec(doc.title?.text ?? '')?.[1] 
 /** The latest `baseline` or `done-means-change` ruling. */
 const currentBaseline = (doc) => doc.entries.filter((e) => e.type === 'ruling' && ['baseline', 'done-means-change'].includes(kind(e))).at(-1)?.id ?? null
 
-/** A return counts when its Baseline is current, its Revision is the certification target, and no
- *  regression against one of its items comes after it (ER8, ER9). */
+/** A return counts when the file has a certification target that is not `none`, its Baseline is
+ *  current, its Revision is that target, and no regression against one of its items comes after it
+ *  (ER8, ER9). Those four conditions are `formats.md`'s definition of a counting return and this
+ *  function is the whole of it.
+ *
+ *  Every way a return can stop counting is a way the combined-check rule can be narrowed with no suite
+ *  noticing, and this repo's own review found the first four ONE AT A TIME, each after a repair had
+ *  called the family closed. `T-counts` in `dctr-project.selftest.mjs` is the regression test that came
+ *  out of that: a table that fixes an epic record, changes one thing per row, and asserts for each row
+ *  whether the return counts.
+ *
+ *  It is a regression test and NOT a completeness proof, and three attempts at a completeness proof
+ *  were broken here before that sentence was written. The table is blind to any condition every value
+ *  it happens to use already satisfies — `target.length < 6` passes it, because both targets in the
+ *  table are six characters, and so does a bound on how many items a return grades or how many
+ *  regressions follow it, because no row varies those counts on a COUNTING return. Varying a field is
+ *  not covering it. So: adding a condition here means adding a row whose values FAIL that condition,
+ *  and if you cannot write such a row, the condition is unguarded and belongs in a comment saying so. */
 function counts(doc, ret) {
   const target = val(doc, 'Certification target')
   if (!target || target === 'none') return false
@@ -162,6 +182,16 @@ function counts(doc, ret) {
 
 /** A PASS with an empty evidence reference is UNVERIFIED. */
 const resultOf = (r) => (r.result === 'PASS' && !r.evidence ? 'UNVERIFIED' : r.result)
+/** An epic return's `Combined check result:` field, in the shape `resultOf` reads, or null when the
+ *  field is absent. The epic's combined check covers the seam BETWEEN its phases, which no single
+ *  phase's own gate covers, and the exit pass is the only context that spans them (owner ruling,
+ *  2026-09-14). A field with no recognisable result keeps the raw text so the finding can quote it. */
+const combinedOf = (e) => {
+  const f = e.fields['Combined check result']
+  if (!f) return null
+  const m = /^([A-Za-z]+)\s*(?:,\s*evidence:\s*(.*))?$/.exec(f.value)
+  return { result: m ? m[1] : f.value, evidence: (m?.[2] ?? '').trim(), line: f.line }
+}
 /** The latest counting return decides, never any earlier one that also counts. */
 const latestCounting = (doc) => doc.entries.filter((e) => e.type === 'return' && counts(doc, e)).at(-1) ?? null
 const passesAll = (doc, ids) => { const e = latestCounting(doc); return Boolean(e) && ids.every((id) => e.results.some((r) => r.item === id && resultOf(r) === 'PASS')) }
@@ -333,9 +363,12 @@ export function check(model, exists) {
           add(file, b?.line ?? e.line, 'reference', `return ${e.id} Baseline ${b?.value || '(none)'} is not a baseline or done-means-change ruling in this file`)
         }
       }
-      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level', 'coverage'].includes(kind(e))) {
+      // `note` is here for the second half only: its Items are optional (it binds nothing), but where
+      // it names items they must resolve, since a decision recorded against an ID nobody defines
+      // records nothing.
+      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level', 'coverage', 'note'].includes(kind(e))) {
         const ids = list(e.fields.Items?.value)
-        if (!ids.length && kind(e) !== 'project-level') add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
+        if (!ids.length && !['project-level', 'note'].includes(kind(e))) add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
         for (const id of ids) ref(i, e.fields.Items.line, id, `${kind(e)} ruling ${e.id} Items`)
       }
       if (e.type !== 'ruling' || kind(e) !== 'done-means-change') return
@@ -359,6 +392,25 @@ export function check(model, exists) {
       else if (!/; pass when \S/.test(cc)) add(file, sl, 'evidence', `epic ${id} is ${s} and its Combined check has no ; pass when <rule> part (W1)`)
     }
     if (s === 'Done' && !passesAll(doc, doc.items.map((i) => i.id))) add(file, sl, 'evidence', `epic ${id} is Done without a counting return that has PASS for every Done means item`)
+    // Every epic return carries the combined check's result, and a Done epic's deciding return carries
+    // a PASS. Without this an epic reached Done on a pass where the seam check its owner approved was
+    // never run: the return had no slot for a result that is no item's.
+    for (const e of doc.entries) {
+      // Only a return that COUNTS. A return that no longer counts is history, written under whatever
+      // law held when its seat gave it, and a repo adopted before this rule would otherwise carry one
+      // unclearable finding per old return: the orchestrator's only ways out are inventing a result
+      // nobody ran or deleting history, and SKILL.md tells it to clear findings before writing state.
+      if (e.type !== 'return' || !counts(doc, e)) continue
+      const cr = combinedOf(e)
+      if (!cr) add(file, e.line, 'entry', `return ${e.id} has no Combined check result line`)
+      else if (!RESULTS.includes(cr.result)) add(file, cr.line, 'entry', `return ${e.id} Combined check result is ${JSON.stringify(cr.result)}, not ${RESULTS.join(', ')}`)
+    }
+    if (s === 'Done') {
+      const last = latestCounting(doc), cr = last && combinedOf(last)
+      if (last && (!cr || resultOf(cr) !== 'PASS')) {
+        add(file, cr?.line ?? last.line, 'evidence', `epic ${id} is Done and its counting return ${last.id} has Combined check result ${cr ? resultOf(cr) : '(none)'}, not PASS`)
+      }
+    }
     if (s === 'Dropped' && !rulingsOf(doc, 'drop').length) add(file, sl, 'evidence', `epic ${id} is Dropped with no drop ruling`)
     if (s === 'Superseded') {
       const succ = rulingsOf(doc, 'supersede').at(-1)?.fields.Successor?.value
