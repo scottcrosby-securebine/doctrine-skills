@@ -380,6 +380,19 @@ for (const [name, files, shape] of [
   ['an Open epic whose counting return records a FAILED combined check', mutate([[PROJECT_PATH, 'State: Done', 'State: Ruled'], [E1, 'State: Done', 'State: Open'],
     [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: FAIL,']]),
     (f) => /^State: Open$/m.test(f[E1]) && /^State: Ruled$/m.test(f[PROJECT_PATH]) && /^Combined check result: FAIL, evidence: \S/m.test(f[E1])],
+  // Two more boundaries, each a SIBLING of one already pinned: the fixtures above varied one thing at
+  // a time, so an implementation wrong in a neighbouring way passed them. Here a return stops counting
+  // by REGRESSION alone, with its Baseline and Revision both still current, and a return that never
+  // counted sits AFTER the one that does.
+  ['a return obsolete by a later regression alone, with no Combined check result line', mutate([
+    [PROJECT_PATH, 'State: Done', 'State: Ruled'], [E1, 'State: Done', 'State: Open'],
+    [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n'],
+    [E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G9 regression, 2026-09-07T10:00:00Z\nItem: D1\nFound by: exit pass\n> seam broke\n']]),
+    (f) => { const t = f[E1], y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && !/Combined check result:/.test(y1) && /^Baseline: R2$/m.test(y1) && /^Revision: def456$/m.test(y1) && /^Certification target: def456$/m.test(t) && t.indexOf('### G9 regression') > t.indexOf('### Y1 return') }],
+  ['a later return that does not count, carrying a FAILED combined check, under a Done epic', mutate([[E1,
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y3 return, 2026-09-09T10:00:00Z\nBaseline: R1\nRevision: 000aaa\nSeat: reviewer-e\nCombined check result: FAIL, evidence: tests/seam.test.mjs:3\n- D1: PASS, evidence: tests/export.test.mjs:12\n']]),
+    (f) => { const t = f[E1]; return /^State: Done$/m.test(t) && t.indexOf('### Y3 return') > t.indexOf('### Y1 return') && /^Combined check result: FAIL/m.test(t) && /^Certification target: def456$/m.test(t) && /### Y3 return[\s\S]*?^Revision: 000aaa$/m.test(t) }],
   ['a note ruling whose Items name a live item', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### R5 ruling, 2026-09-06T13:00:00Z\nKind: note\nItems: D1\nBy: owner\n> the slow-path finding on D1 is closed\n']]),
@@ -547,6 +560,12 @@ const CASES = [
   // Two returns that both count, the later one failing the combined check. Without this the fixture
   // had a single counting return, where "the latest counting return decides" and "any counting return
   // decides" are the same sentence and a swap between them is invisible.
+  // A LIVE pass, on an epic that is not Done: the missing-line and bad-result cases above both sat on
+  // a Done epic, so a validator narrowed to Done epics passed every one of them.
+  { name: 'entry — an OPEN epic\'s counting return with no Combined check result line', rule: 'entry', frag: 'return Y1 has no Combined check result line', at: 'docs/epics/E1.md',
+    edits: [[P, 'State: Done', 'State: Ruled'], ['docs/epics/E1.md', 'State: Done', 'State: Open'],
+      ['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'), y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && !/^Combined check result:/m.test(y1) && /^Certification target: def456$/m.test(t) && /^Revision: def456$/m.test(y1) } },
   { name: 'reference — a note ruling whose Items name an item its file does not define', rule: 'reference', frag: 'note ruling R5 Items names "D9"', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', '### R3 ruling, 2026-09-04T11:00:00Z', '### R5 ruling, 2026-09-04T10:30:00Z\nKind: note\nItems: D9\nBy: owner\n> a finding ruled closed\n\n### R3 ruling, 2026-09-04T11:00:00Z']],
     defect: (f) => /Kind: note\nItems: D9\n/.test(txt(f, 'docs/epics/E1.md')) && !/^### D9$/m.test(txt(f, 'docs/epics/E1.md')) },
