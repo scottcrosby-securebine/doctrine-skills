@@ -23,6 +23,9 @@ const P = PROJECT_PATH, E1 = 'docs/epics/E1.md', E2 = 'docs/epics/E2.md', E3 = '
 const TIME = '2026-09-13T10:00:00Z'
 /** A Combined check with its pass rule, as formats.md writes the header (DP17). */
 const PASS_RULE = 'npm test ; pass when every item check exits 0'
+/** An owner's words that CONTAIN the line they rule, which is the containment test formats.md states
+ *  for every baseline ruling that rules a Combined check line. The lead-in is free prose. */
+const RULED = (line) => `the Done means above, and the combined check is ${line}.`
 
 // ---------------------------------------------------------------- edits, each files -> new files
 const sub = (file, from, to) => (f) => {
@@ -38,9 +41,10 @@ const hdr = (file, key, value) => (f) => {
 const state = (file, s) => hdr(file, 'State', s)
 const put = (file, text) => (f) => ({ ...f, [file]: text })
 const app = (file, text) => (f) => ({ ...f, [file]: f[file] + text })
-// `quote` is the owner's words. A baseline ruling that changes an epic's Combined check line must
-// CONTAIN that line, which formats.md calls the containment test, so a step that changes the line
-// passes the new line here rather than leaving the specimen saying "ruled".
+// `quote` is the owner's words. EVERY baseline ruling that rules an epic's Combined check line must
+// CONTAIN that line, the FIRST one included: formats.md's containment test says "either way". So each
+// step that rules a line passes it here, and a specimen quoted "ruled" beside a Combined check line
+// would teach a maintainer to write a line no ruling approves.
 const rule = (file, id, kind, rest = '', quote = 'ruled') => app(file, `\n### ${id} ruling, ${TIME}\nKind: ${kind}\n${rest}By: owner\n> ${quote}\n`)
 // An EPIC return carries the combined check's result and a project return does not: the project file
 // has no combined check. `combined` lets a step record a return whose seam check did not pass.
@@ -87,7 +91,7 @@ const S1_OPEN = walk('S1', PROPOSED, [
   { name: 'illegal: E1 ruled Not started with Combined check none (W1)', branch: true, want: ['evidence', E1, 'Combined check none'],
     ops: [state(E1, 'Not started'), rule(E1, 'E1-R1', 'baseline')], shape: (f) => /^State: Not started$/m.test(f[E1]) && /^Combined check: none$/m.test(f[E1]) },
   { name: 'owner rules both baselines and the coverage map (W1)',
-    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline')] },
+    ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline', '', RULED(PASS_RULE))] },
   { name: 'the first member phase opens E1 and the pointer moves',
     ops: [member(E1, 'p1: .doctrine/records/p1.md'), state(E1, 'Open'), hdr(P, 'Current epic', 'E1')] },
   { name: 'illegal: E1 moved Done with no return', branch: true, want: ['evidence', E1, 'without a counting return'],
@@ -143,7 +147,7 @@ walk('S4', S3_DONE, [
 // ---------------------------------------------------------------- S5 supersession, S6 dropped successor
 const S5_BOTH_OPEN = walk('S5', S1_OPEN, [
   { name: 'successor E2 proposed on the roster', ops: [row('E2'), put(E2, epic('E2', item('D3', 'p2: satisfy')))] },
-  { name: 'owner rules E2 baseline', ops: [state(E2, 'Not started'), hdr(E2, 'Combined check', PASS_RULE), rule(E2, 'E2-R1', 'baseline')] },
+  { name: 'owner rules E2 baseline', ops: [state(E2, 'Not started'), hdr(E2, 'Combined check', PASS_RULE), rule(E2, 'E2-R1', 'baseline', '', RULED(PASS_RULE))] },
   { name: 'the first member phase opens E2 and the pointer moves', ops: [member(E2, 'p2'), state(E2, 'Open'), hdr(P, 'Current epic', 'E2')] },
 ])
 walk('S5', S5_BOTH_OPEN, [
@@ -239,10 +243,10 @@ const S10_NOT_STARTED = walk('S10', START, [
   { name: 'illegal: a scope ruling with no Entries', branch: true, want: ['reference', P, 'scope ruling P-R5 has no Entries'],
     ops: [rule(P, 'P-R5', 'scope')], shape: (f) => /Kind: scope\nBy:/.test(f[P]) },
   { name: 'illegal: E1 ruled Not started with a Combined check that has no pass rule', branch: true, want: ['evidence', E1, 'has no ; pass when'],
-    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', 'npm test'), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')],
+    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', 'npm test'), rule(E1, 'E1-R1', 'baseline', '', RULED('npm test')), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')],
     shape: (f) => /^Combined check: npm test$/m.test(f[E1]) && !/; pass when /.test(f[E1]) },
   { name: 'owner rules E1: its Done means, its coverage map naming planned phases p1 and p2, and its combined check with a pass rule (the start end state)',
-    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')] },
+    ops: [state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline', '', RULED(PASS_RULE)), rule(E1, 'E1-R2', 'coverage', 'Items: D1, D2\n')] },
 ])
 walk('S10', S10_NOT_STARTED, [
   { name: 'illegal: E1 opened with only p1 recorded while its Coverage names planned phase p2', branch: true, want: ['coverage', E1, 'Done means item D1 Coverage names phase p2, which is not a - phase member'],
@@ -268,7 +272,7 @@ walk('S11', ADOPT, [
   { name: 'adopt: the end state, E1 for live work, and a row for an open issue and for an open markdown tracker item by its path:line (DP7)', ops: [] },
   { name: 'owner rules the end state, the coverage map and E1 (W1)',
     ops: [state(P, 'Ruled'), rule(P, 'P-R1', 'baseline'), rule(P, 'P-R2', 'coverage', 'Items: ES1\n'),
-      state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline'), rule(E1, 'E1-R2', 'coverage', 'Items: D1\n')] },
+      state(E1, 'Not started'), hdr(E1, 'Combined check', PASS_RULE), rule(E1, 'E1-R1', 'baseline', '', RULED(PASS_RULE)), rule(E1, 'E1-R2', 'coverage', 'Items: D1\n')] },
   { name: 'illegal: a destination ruling with no To', branch: true, want: ['reference', P, 'destination ruling P-R3 has no To'],
     ops: [rule(P, 'P-R3', 'destination', 'Issues: #10\n')], shape: (f) => /Kind: destination\nIssues: #10\nBy:/.test(f[P]) },
   { name: 'illegal: a destination ruling whose To is not the Destination its row carries', branch: true, want: ['issues', P, 'destination ruling P-R3 gives #10 To "out of scope"'],
