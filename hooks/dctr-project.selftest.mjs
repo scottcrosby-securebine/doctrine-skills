@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH, COUNTS_CONDITIONS } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -398,9 +398,9 @@ for (const [name, files, shape] of [
     'docs/epics/E2.md', 'State: Superseded\nCertification target: none\n', 'State: Superseded\n'],
     ['docs/epics/E2.md', '> replaced by v2\n', '> replaced by v2\n\n### R2 ruling, 2026-09-02T10:00:00Z\nKind: baseline\nItems: D2\nBy: owner\n> approved: the combined check is none.\n\n### Z9 return, 2026-09-03T10:00:00Z\nBaseline: R2\nSeat: reviewer-g\n- D2: PASS, evidence: tests/import.test.mjs:1\n']]),
     (f) => { const t = f['docs/epics/E2.md'], z9 = t.slice(t.indexOf('### Z9 return')); return !/^Certification target:/m.test(t) && /^Baseline: R2$/m.test(z9) && !/^Revision:/m.test(z9) && !/Combined check result:/.test(z9) && /### R2 ruling[^\n]*\nKind: baseline/.test(t) }],
-  // All four of `counts`'s conditions now have a fixture isolating them, so no implementation dropping
-  // any one of them passes this suite, and the arity clause at the end of this file catches a fifth
-  // condition added without its own. This one: the Revision is the current target and no
+  // All four of `counts`'s conditions have a fixture isolating them, so no implementation dropping any
+  // one of them passes this suite, and `T-counts` at the end of this file catches a narrowing of any
+  // other shape. This one: the Revision is the current target and no
   // regression follows, and only the stale Baseline takes the return out of the rule's reach.
   ['a return obsolete by baseline alone, with no Combined check result line', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
@@ -879,30 +879,69 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('codex [1: through status, an unreadable jobs directory prints codex jobs: unknown]', sl.includes('codex jobs: unknown'), sl.join(' / '))
 }
 
-// ---------------------------------------------------------------- the counts() arity guard
-// The class fix, not another instance of it. Every way a return can stop counting is a way the
-// combined-check rule can be narrowed with no suite noticing, and this repo found the first four one
-// at a time, each after a repair had called the family closed. This clause fires when `counts` grows
-// or loses an exit without COUNTS_CONDITIONS moving with it, and the constant's own comment says what
-// to write when it does: a known-good fixture isolating the new condition, and a mutation dropping
-// only it.
+// ---------------------------------------------------------------- T-counts, the counting table
+// The class guard for `counts`, and the second attempt at one: the first counted the function's exits,
+// which a red team broke in three shapes an arity counter cannot tell apart (a new statement, a
+// disjunct folded into an existing test, a conjunct on the final expression). This varies BEHAVIOUR
+// instead. One epic record, one return with no `Combined check result:` line, and each row changes one
+// thing and says whether the return still counts. The finding "has no Combined check result line"
+// appears exactly when it does, so each row is an assertion about `counts` read through what check
+// reports. A narrowing anywhere in this space flips a row whatever shape it takes.
 {
-  const src = fs.readFileSync(new URL('./dctr-project.mjs', import.meta.url), 'utf8')
-  const body = (t) => t.slice(t.indexOf('function counts('), t.indexOf('\n}', t.indexOf('function counts(')))
-  const exits = (t) => (body(t).match(/\n  return /g) || []).length + (body(t).match(/return false/g) || []).length
-  // A counts() with one more way out than the constant knows about, built here rather than by editing
-  // the real file, so this clause needs no mutation of its own to be shown able to fail.
-  const GROWN = src.replace('  if (ret.fields.Revision?.value !== target) return false',
-    '  if (ret.fields.Revision?.value !== target) return false\n  if (ret.fields.Seat?.value === undefined) return false')
-  clause('clause 1cg — counts() has exactly COUNTS_CONDITIONS ways out, so a condition added without its fixture and mutation is loud',
-    exits(src) === COUNTS_CONDITIONS, `${exits(src)} exits against COUNTS_CONDITIONS=${COUNTS_CONDITIONS}`)
-  clause('clause 2cg — and the count is of THIS function, not of the file: a grown counts() disagrees with the constant',
-    exits(GROWN) === COUNTS_CONDITIONS + 1 && exits(GROWN) !== COUNTS_CONDITIONS,
-    `grown: ${exits(GROWN)}`)
-  clause('clause 3cg — the grown fixture really carries one more exit than the real one, read without the counter',
-    /Seat\?\.value === undefined\) return false/.test(GROWN) && !/Seat\?\.value === undefined/.test(src) &&
-    GROWN.length > src.length && body(GROWN).includes('return false') && body(src).includes('return false'),
-    'fixture')
+  const epic = ({ target = 'Certification target: aaa111\n', rulings = '', ret = '', extra = '', state = 'Open', check = 'Combined check: npm test ; pass when it exits 0\n' }) =>
+    `# Epic E9: T-counts\nState: ${state}\n${target}${check}\n## What this is\nt.\n\n## Done means\n### D9\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: p9: satisfy\n\n## Members\n- phase p9\n\n## Rulings and returns\n### E9-R1 ruling, 2026-09-14T10:00:00Z\nKind: baseline\nItems: D9\nBy: owner\n> approved: the combined check is npm test ; pass when it exits 0.\n${rulings}${ret}${extra}`
+  const RET = (fields, results = '- D9: PASS, evidence: e\n') => `\n### E9-X1 return, 2026-09-14T11:00:00Z\n${fields}Seat: reviewer\n${results}`
+  const PROJ = `# Project: t\nState: Ruled\nCurrent epic: E9\nCertification target: none\nRecords: .doctrine/records\n\n## End state\n### ES9\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: satisfy E9\n\n## Never becomes\n- nothing\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n| E9 | T-counts | docs/epics/E9.md |\n\n## Open issues\n| Issue | Destination |\n|---|---|\n\n## History\n- none\n\n## Rulings and returns\n### P-R1 ruling, 2026-09-14T09:00:00Z\nKind: baseline\nItems: ES9\nBy: owner\n> approved\n`
+  const DMC = '\n### E9-R2 ruling, 2026-09-14T10:30:00Z\nKind: done-means-change\nItems: D9\nBy: owner\n> changed\n\n### E9-R3 ruling, 2026-09-14T10:31:00Z\nKind: impact\nItems: D9\nBy: owner\n> impact accepted\n'
+  const REG = (item) => `\n### E9-G1 regression, 2026-09-14T12:00:00Z\nItem: ${item}\nFound by: exit pass\n> broke\n`
+  const counted = (files) => {
+    const model = modelFrom(files[PROJECT_PATH], (rel) => (Object.hasOwn(files, rel) ? files[rel] : null))
+    return check(model, (rel) => Object.hasOwn(files, rel)).some((f) => f.message.includes('has no Combined check result line'))
+  }
+  // Each row: what it changes from the row above's baseline shape, and whether the return counts.
+  const ROWS = [
+    ['target aaa111, baseline current, revision aaa111, no regression', {}, true],
+    ['no Certification target header at all', { target: '' }, false],
+    ['Certification target: none, revision none', { target: 'Certification target: none\n', ret: RET('Baseline: E9-R1\nRevision: none\n') }, false],
+    ['revision does not equal the target', { ret: RET('Baseline: E9-R1\nRevision: zzz999\n') }, false],
+    ['no Revision field at all', { ret: RET('Baseline: E9-R1\n') }, false],
+    ['baseline is not the current one', { rulings: DMC, ret: RET('Baseline: E9-R1\nRevision: aaa111\n') }, false],
+    ['baseline IS the current one after a done-means-change', { rulings: DMC, ret: RET('Baseline: E9-R2\nRevision: aaa111\n') }, true],
+    ['a regression against the return\'s item comes after it', { extra: REG('D9') }, false],
+    ['a regression against the return\'s item comes BEFORE it', { rulings: REG('D9'), ret: RET('Baseline: E9-R1\nRevision: aaa111\n') }, true],
+    ['a later regression names an item the return does not', { extra: REG('D8') }, true],
+    ['two later regressions, only the FIRST against the return\'s item', { extra: REG('D9') + REG('D8') }, false],
+    ['the return grades two items and a later regression names one', { ret: RET('Baseline: E9-R1\nRevision: aaa111\n', '- D9: PASS, evidence: e\n- D8: PASS, evidence: e\n'), extra: REG('D9') }, false],
+    ['the return grades no item at all', { ret: RET('Baseline: E9-R1\nRevision: aaa111\n', '') }, true],
+    // Counting turns on those four conditions and on NOTHING ELSE the record carries, so every other
+    // header gets a row that must not move the answer. Without these, a narrowing keyed on a field the
+    // table does not vary passes it, which is how a red team broke the previous guard twice, both times
+    // by reading `State`.
+    ['epic State Done, everything else unchanged', { state: 'Done' }, true],
+    ['epic State Dropped, everything else unchanged', { state: 'Dropped' }, true],
+    ['epic State Superseded, everything else unchanged', { state: 'Superseded' }, true],
+    ['epic State Not started, everything else unchanged', { state: 'Not started' }, true],
+    ['Combined check: none, everything else unchanged', { check: 'Combined check: none\n' }, true],
+  ]
+  let wrong = []
+  for (const [name, over, want] of ROWS) {
+    const files = { [PROJECT_PATH]: PROJ, 'docs/epics/E9.md': epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }) }
+    const got = counted(files)
+    if (got !== want) wrong.push(`${name}: counts=${got}, want ${want}`)
+  }
+  clause('clause 1ct — T-counts: every row of the counting table agrees with formats.md, so a narrowing anywhere in that space flips one',
+    wrong.length === 0, wrong.join(' | '))
+  // Clause 2: the table is not all-true or all-false, which a table asserting nothing would be.
+  clause('clause 2ct — and the table discriminates: it holds both counting and non-counting rows',
+    ROWS.some(([, , w]) => w) && ROWS.some(([, , w]) => !w) && ROWS.length >= 12,
+    `${ROWS.filter(([, , w]) => w).length} counting, ${ROWS.filter(([, , w]) => !w).length} not, ${ROWS.length} rows`)
+  // Clause 3: the fixtures really differ as their names say, read WITHOUT calling check.
+  const base = epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n') })
+  const built = ROWS.map(([, over]) => epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }))
+  clause('clause 3ct — each row really builds a different record, and the base one carries the shape the table starts from',
+    new Set(built).size === ROWS.length && /^Certification target: aaa111$/m.test(base) && /^Baseline: E9-R1$/m.test(base) &&
+    /^Revision: aaa111$/m.test(base) && !/Combined check result:/.test(base) && !/ regression,/.test(base),
+    `${new Set(built).size} distinct of ${ROWS.length}`)
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

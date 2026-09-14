@@ -153,17 +153,23 @@ const epicHeadingId = (doc) => /^Epic (\S+?):/.exec(doc.title?.text ?? '')?.[1] 
 /** The latest `baseline` or `done-means-change` ruling. */
 const currentBaseline = (doc) => doc.entries.filter((e) => e.type === 'ruling' && ['baseline', 'done-means-change'].includes(kind(e))).at(-1)?.id ?? null
 
-/** How many ways a return can stop counting. Every one of them needs a known-good fixture isolating
- *  it and a mutation that drops only it, because each is a way the combined-check rule can be
- *  narrowed without any suite noticing: four rounds of this repo's own review found the first four one
- *  at a time, each after a repair had declared the family closed. `dctr-project.selftest.mjs` asserts
- *  that `counts` has exactly this many exits, so adding a condition here without its fixture and
- *  mutation turns that clause red and says what to write. */
-export const COUNTS_CONDITIONS = 4
-
-/** A return counts when its Baseline is current, its Revision is the certification target, and no
- *  regression against one of its items comes after it (ER8, ER9). Each `return false` is one of
- *  COUNTS_CONDITIONS above; adding one is a change that needs a fixture and a mutation with it. */
+/** A return counts when the file has a certification target that is not `none`, its Baseline is
+ *  current, its Revision is that target, and no regression against one of its items comes after it
+ *  (ER8, ER9). Those four conditions are `formats.md`'s definition of a counting return and this
+ *  function is the whole of it.
+ *
+ *  Every way a return can stop counting is a way the combined-check rule can be narrowed with no suite
+ *  noticing, and four rounds of this repo's own review found the first four ONE AT A TIME, each after a
+ *  repair had called the family closed. What guards it now is `T-counts` in `dctr-project.selftest.mjs`:
+ *  a table that fixes an epic record and varies one thing at a time across the space those four
+ *  conditions range over, asserting for each row whether the return counts. A narrowing anywhere in
+ *  that space flips a row, whether it is a new statement, a disjunct folded into an existing test, or
+ *  a conjunct on the final expression — the three shapes an arity counter could not tell apart, which
+ *  is how an earlier revision of this comment came to claim a guarantee it did not have.
+ *
+ *  What the table cannot do is see a condition on a field it does not vary. Reading a NEW field here
+ *  needs a new row with it, and that is the change this comment asks you to make rather than a promise
+ *  it makes on your behalf. */
 function counts(doc, ret) {
   const target = val(doc, 'Certification target')
   if (!target || target === 'none') return false

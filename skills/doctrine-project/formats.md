@@ -135,11 +135,14 @@ The **current baseline** of a file is its latest `baseline` or `done-means-chang
 
 An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. The test is containment, not a delimiter: the epic's `Combined check:` line, from what runs through the pass rule, appears inside the ruling's quote as an unbroken run of the same characters, a trailing period aside. Whatever leads into it is the owner's own prose and carries no approval, so the `Combined check:` key itself need not appear, as the worked example below shows. Nothing marks where the approved words begin, and nothing needs to: the line under test is what you search for. Containment is a property of the ruling when it is written, not a standing invariant of the line: a later repair that needs no ruling, which SKILL.md's "A Combined check change" defines, leaves the line no longer contained in any quote, and that is correct and not a missing ruling. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
-A return **counts** only when all three hold:
+A return **counts** only when all four hold:
 
+- the file has a `Certification target:` and it is not `none`;
 - its Baseline is the current baseline;
-- its Revision equals the file's `Certification target:`;
+- its Revision equals that `Certification target:`;
 - no `regression` entry against one of its items comes after it in the file.
+
+The first is why setting `Certification target:` to `none` stops every return in a file from counting, which is the move SKILL.md's "A record written before the combined check result" prescribes for an epic that can take no fresh pass.
 
 An epic return that counts also carries `Combined check result:`, which is the result of running that epic's `Combined check:` line at the return's Revision. It is no item, so no `Coverage:` line and no `done-means-change` ruling reaches it, and it is read only from the return that decides: an epic is `Done` only when the latest counting return carries `PASS` there as well as for every Done means item. A `PASS` with an empty evidence reference is `UNVERIFIED` here too. A project return carries no such line, the project file having no combined check. A return that has stopped counting is history and is read as its seat wrote it, so a record's older returns stay unchanged. Its **deciding** return is a different matter: that one still counts, so a record written before this line existed is reported against it, the missing line always and the epic's `Done` being unevidenced where the epic is `Done`. SKILL.md, "A record written before the combined check result", says what each case needs. Never write the line into a return a seat already gave: that invents a result nobody ran, which exit passes step 4 forbids.
 

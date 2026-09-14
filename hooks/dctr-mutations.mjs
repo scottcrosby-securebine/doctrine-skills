@@ -785,10 +785,12 @@ const MUTATIONS = [
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || s !== 'Done' || !counts(doc, e)) continue" },
   // `counts` has FOUR conditions — the `Certification target: none` guard, the current baseline, the
   // revision, and no later regression — and each of the four below drops exactly one of them, so
-  // narrowing the predicate any single way goes red. Four rounds of review found these one at a time,
-  // each after a repair had called the family closed, which is why `COUNTS_CONDITIONS` in
-  // dctr-project.mjs now pins the ARITY: a fifth condition added there without a fixture and a
-  // mutation here turns a clause red and says what to write.
+  // narrowing the predicate any single way goes red here. Four rounds of review found these one at a
+  // time, each after a repair had called the family closed, and a fifth broke the counter that replaced
+  // the enumeration. What guards the family now is `T-counts` in dctr-project.selftest.mjs, a table over
+  // the predicate's BEHAVIOUR: these four mutations pin the four conditions by name, and the table
+  // catches a narrowing of any shape, including one folded into an existing test, which no count of
+  // this list or of that function's exits can see.
   { name: 'project: a return whose epic has no certification target is still held to the combined check rule', file: 'dctr-project.mjs',
     clause: 'known good — a return whose epic has no certification target, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
