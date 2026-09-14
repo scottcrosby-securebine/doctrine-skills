@@ -347,9 +347,12 @@ export function check(model, exists) {
           add(file, b?.line ?? e.line, 'reference', `return ${e.id} Baseline ${b?.value || '(none)'} is not a baseline or done-means-change ruling in this file`)
         }
       }
-      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level', 'coverage'].includes(kind(e))) {
+      // `note` is here for the second half only: its Items are optional (it binds nothing), but where
+      // it names items they must resolve, since a decision recorded against an ID nobody defines
+      // records nothing.
+      if (e.type === 'ruling' && ['done-means-change', 'impact', 'project-level', 'coverage', 'note'].includes(kind(e))) {
         const ids = list(e.fields.Items?.value)
-        if (!ids.length && kind(e) !== 'project-level') add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
+        if (!ids.length && !['project-level', 'note'].includes(kind(e))) add(file, e.fields.Items?.line ?? e.line, 'reference', `${kind(e)} ruling ${e.id} has no Items`)
         for (const id of ids) ref(i, e.fields.Items.line, id, `${kind(e)} ruling ${e.id} Items`)
       }
       if (e.type !== 'ruling' || kind(e) !== 'done-means-change') return
@@ -377,7 +380,11 @@ export function check(model, exists) {
     // a PASS. Without this an epic reached Done on a pass where the seam check its owner approved was
     // never run: the return had no slot for a result that is no item's.
     for (const e of doc.entries) {
-      if (e.type !== 'return') continue
+      // Only a return that COUNTS. A return that no longer counts is history, written under whatever
+      // law held when its seat gave it, and a repo adopted before this rule would otherwise carry one
+      // unclearable finding per old return: the orchestrator's only ways out are inventing a result
+      // nobody ran or deleting history, and SKILL.md tells it to clear findings before writing state.
+      if (e.type !== 'return' || !counts(doc, e)) continue
       const cr = combinedOf(e)
       if (!cr) add(file, e.line, 'entry', `return ${e.id} has no Combined check result line`)
       else if (!RESULTS.includes(cr.result)) add(file, cr.line, 'entry', `return ${e.id} Combined check result is ${JSON.stringify(cr.result)}, not ${RESULTS.join(', ')}`)

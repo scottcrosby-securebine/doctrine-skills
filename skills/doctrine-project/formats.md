@@ -99,7 +99,7 @@ An item's seven fields are its `###` ID and the six list lines.
 ```
 ### <entry ID> ruling, <ISO 8601 UTC time>
 Kind: baseline | done-means-change | impact | drop | supersede | project-level | coverage | destination | cutover | scope | note
-Items: <item IDs>            (done-means-change, impact, project-level, coverage)
+Items: <item IDs>            (done-means-change, impact, project-level, coverage; optional on note)
 Successor: <epic ID>         (supersede)
 Issues: <tracker ids or path:line ids>   (destination)
 To: <member <epic ID> | out of scope | post-done backlog>  (destination)
@@ -127,7 +127,7 @@ A `coverage` ruling records the coverage map (W1): the initial map the owner rul
 
 Three Kinds record the owner's start and adoption rulings, each written in the project file. A `destination` ruling gives the tracker ids or `<path>:<line>` ids in `Issues:` the destination in `To:`, and each id must be a row in `## Open issues` whose Destination equals the `To:` of the latest `destination` ruling naming it. A `cutover` ruling names in `Edit:` the one instruction it changes, and its quoted `>` line holds the new text, or `(removed)`. A `scope` ruling names in `Entries:` the never-becomes entries it adds or strikes.
 
-A `note` ruling records an owner decision that moves no state: an escalation ruled when a phase's alarm fires, a finding the owner rules closed, an approval worth keeping that changes no item, no line and no map. Its fields are the common ones and nothing else. It exists so that such a decision has somewhere to go: written as a `baseline` ruling it would become the current baseline and stop the epic's own returns counting, which is a pass voided by bookkeeping.
+A `note` ruling records an owner decision that moves no state: an escalation ruled when a phase's alarm fires, a finding the owner rules closed, an approval worth keeping that changes no item, no line and no map. It requires no field beyond the common ones. Its `Items:` is optional, and where it carries one, those IDs must resolve like any other ruling's, since a decision recorded against an ID nothing defines records nothing; naming them binds nothing either way. It exists so that such a decision has somewhere to go: written as a `baseline` ruling it would become the current baseline and stop the epic's own returns counting, which is a pass voided by bookkeeping.
 
 None of `coverage`, `destination`, `cutover`, `scope` or `note` is a baseline, so none voids a return, and a `coverage` ruling needs no `impact` ruling.
 
@@ -141,7 +141,7 @@ A return **counts** only when all three hold:
 - its Revision equals the file's `Certification target:`;
 - no `regression` entry against one of its items comes after it in the file.
 
-An epic return also carries `Combined check result:`, which is the result of running that epic's `Combined check:` line at the return's Revision. It is no item, so no `Coverage:` line and no `done-means-change` ruling reaches it, and it is read only from the return that decides: an epic is `Done` only when the latest counting return carries `PASS` there as well as for every Done means item. A `PASS` with an empty evidence reference is `UNVERIFIED` here too. A project return carries no such line, the project file having no combined check.
+An epic return that counts also carries `Combined check result:`, which is the result of running that epic's `Combined check:` line at the return's Revision. It is no item, so no `Coverage:` line and no `done-means-change` ruling reaches it, and it is read only from the return that decides: an epic is `Done` only when the latest counting return carries `PASS` there as well as for every Done means item. A `PASS` with an empty evidence reference is `UNVERIFIED` here too. A project return carries no such line, the project file having no combined check. A return that has stopped counting is history and is read as its seat wrote it, so a record written before this line existed keeps its old returns unchanged; what the epic needs to reach `Done` again is a fresh pass, which carries the line like any other.
 
 When more than one return counts, the latest counting return decides, and an earlier one that also counts is ignored. A PASS with an empty evidence reference counts as UNVERIFIED. A return that does not count stays in the file, and `status` labels it obsolete with its baseline and revision.
 

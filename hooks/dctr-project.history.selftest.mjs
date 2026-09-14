@@ -38,7 +38,10 @@ const hdr = (file, key, value) => (f) => {
 const state = (file, s) => hdr(file, 'State', s)
 const put = (file, text) => (f) => ({ ...f, [file]: text })
 const app = (file, text) => (f) => ({ ...f, [file]: f[file] + text })
-const rule = (file, id, kind, rest = '') => app(file, `\n### ${id} ruling, ${TIME}\nKind: ${kind}\n${rest}By: owner\n> ruled\n`)
+// `quote` is the owner's words. A baseline ruling that changes an epic's Combined check line must
+// CONTAIN that line, which formats.md calls the containment test, so a step that changes the line
+// passes the new line here rather than leaving the specimen saying "ruled".
+const rule = (file, id, kind, rest = '', quote = 'ruled') => app(file, `\n### ${id} ruling, ${TIME}\nKind: ${kind}\n${rest}By: owner\n> ${quote}\n`)
 // An EPIC return carries the combined check's result and a project return does not: the project file
 // has no combined check. `combined` lets a step record a return whose seam check did not pass.
 const ret = (file, id, baseline, rev, results, combined = 'PASS') => app(file, `\n### ${id} return, ${TIME}\nBaseline: ${baseline}\nRevision: ${rev}\nSeat: reviewer\n${file === P ? '' : `Combined check result: ${combined}, evidence: path:1\n`}${results.map((r) => `- ${r}, evidence: path:1\n`).join('')}`)
@@ -295,7 +298,7 @@ walk('S12', S1_DONE, [
     ops: [rule(E1, 'E1-R2', 'baseline')],
     shape: (f) => /### E1-R2 ruling/.test(f[E1]) && /Kind: baseline/.test(f[E1].slice(at(f[E1], '### E1-R2 ruling'))) && /^State: Done$/m.test(f[E1]) && at(f[E1], '### E1-R2 ruling') > at(f[E1], '### E1-X1 return') },
   { name: 'a real change to what the check runs: the ruling, the new line and E1 back to Open',
-    ops: [state(P, 'Ruled'), rule(E1, 'E1-R2', 'baseline'), hdr(E1, 'Combined check', SECOND_RULE), state(E1, 'Open')] },
+    ops: [state(P, 'Ruled'), rule(E1, 'E1-R2', 'baseline', '', `the combined check is now ${SECOND_RULE}.`), hdr(E1, 'Combined check', SECOND_RULE), state(E1, 'Open')] },
   { name: 'illegal: E1 moved Done again on the return written before that ruling', branch: true,
     want: ['evidence', E1, 'epic E1 is Done without a counting return'],
     ops: [state(E1, 'Done')], shape: (f) => /^State: Done$/m.test(f[E1]) && !/^Baseline: E1-R2$/m.test(f[E1]) },

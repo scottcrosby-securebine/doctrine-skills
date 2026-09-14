@@ -371,6 +371,19 @@ for (const [name, files, shape] of [
   // a `baseline` ruling the same decision would become the current baseline and stop that return
   // counting, which is the defect the Kind exists to prevent, so the epic staying Done with zero
   // findings is the whole claim.
+  // Three boundaries a red team found unpinned: the rule reaches only returns that COUNT, it decides
+  // only in Done, and a note ruling may name items.
+  ['an obsolete return with no Combined check result line, under a counting one that has it', mutate([[E1,
+    '### Y0 return, 2026-09-03T10:00:00Z\nBaseline: R1\nRevision: 000aaa\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n',
+    '### Y0 return, 2026-09-03T10:00:00Z\nBaseline: R1\nRevision: 000aaa\nSeat: reviewer-b\n']]),
+    (f) => { const t = f[E1], y0 = t.slice(t.indexOf('### Y0 return'), t.indexOf('### R2 ruling')); return !/Combined check result:/.test(y0) && /^Certification target: def456$/m.test(t) && /Combined check result: PASS/.test(t.slice(t.indexOf('### Y1 return'))) }],
+  ['an Open epic whose counting return records a FAILED combined check', mutate([[PROJECT_PATH, 'State: Done', 'State: Ruled'], [E1, 'State: Done', 'State: Open'],
+    [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: FAIL,']]),
+    (f) => /^State: Open$/m.test(f[E1]) && /^State: Ruled$/m.test(f[PROJECT_PATH]) && /^Combined check result: FAIL, evidence: \S/m.test(f[E1])],
+  ['a note ruling whose Items name a live item', mutate([[E1,
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
+    'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### R5 ruling, 2026-09-06T13:00:00Z\nKind: note\nItems: D1\nBy: owner\n> the slow-path finding on D1 is closed\n']]),
+    (f) => /Kind: note\nItems: D1\n/.test(f[E1]) && /^### D1$/m.test(f[E1])],
   ['a note ruling written after the counting return of a Done epic', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### R4 ruling, 2026-09-06T12:00:00Z\nKind: note\nBy: owner\n> shipped at the alarm with the slow-path defect open\n']]),
@@ -531,6 +544,15 @@ const CASES = [
   { name: 'evidence — a Done epic whose counting return did not pass the combined check', rule: 'evidence', frag: 'has Combined check result FAIL, not PASS', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS,', 'Revision: def456\nSeat: reviewer-b\nCombined check result: FAIL,']],
     defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^State: Done$/m.test(t) && /^Certification target: def456$/m.test(t) && /^Combined check result: FAIL, evidence: \S/m.test(t) && /^- D1: PASS/m.test(t) } },
+  // Two returns that both count, the later one failing the combined check. Without this the fixture
+  // had a single counting return, where "the latest counting return decides" and "any counting return
+  // decides" are the same sentence and a swap between them is invisible.
+  { name: 'reference — a note ruling whose Items name an item its file does not define', rule: 'reference', frag: 'note ruling R5 Items names "D9"', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', '### R3 ruling, 2026-09-04T11:00:00Z', '### R5 ruling, 2026-09-04T10:30:00Z\nKind: note\nItems: D9\nBy: owner\n> a finding ruled closed\n\n### R3 ruling, 2026-09-04T11:00:00Z']],
+    defect: (f) => /Kind: note\nItems: D9\n/.test(txt(f, 'docs/epics/E1.md')) && !/^### D9$/m.test(txt(f, 'docs/epics/E1.md')) },
+  { name: 'evidence — a later counting return whose combined check FAILED decides, though an earlier counting one passed it', rule: 'evidence', frag: 'counting return Y2 has Combined check result FAIL, not PASS', at: 'docs/epics/E1.md',
+    edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y2 return, 2026-09-05T11:00:00Z\nBaseline: R2\nRevision: def456\nSeat: reviewer-d\nCombined check result: FAIL, evidence: tests/seam.test.mjs:3\n- D1: PASS, evidence: tests/export.test.mjs:12\n']],
+    defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return t.indexOf('### Y2 return') > t.indexOf('### Y1 return') && (t.match(/^Baseline: R2$/gm) || []).length === 2 && (t.match(/^Revision: def456$/gm) || []).length === 2 && /^Combined check result: FAIL, evidence: \S/m.test(t) && !/ regression,/.test(t) && /^State: Done$/m.test(t) } },
   { name: 'evidence — a Done epic whose combined check PASS carries no evidence reference', rule: 'evidence', frag: 'has Combined check result UNVERIFIED, not PASS', at: 'docs/epics/E1.md',
     edits: [['docs/epics/E1.md', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence:\n']],
     defect: (f) => { const t = txt(f, 'docs/epics/E1.md'); return /^State: Done$/m.test(t) && /^Combined check result: PASS, evidence:$/m.test(t) && !/^Combined check result: PASS, evidence: \S/m.test(t.slice(t.indexOf('### Y1 return'))) } },

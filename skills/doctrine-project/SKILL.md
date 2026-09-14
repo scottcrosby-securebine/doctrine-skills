@@ -81,7 +81,7 @@ Every item has the seven fields `formats.md` defines. Before any item goes to th
 
 - **W1.** The coverage map is ruled before the first phase opens, by a `coverage` ruling. It names, for each end-state item, exactly one satisfy epic, or a `project-level` ruling. For each epic it names the planned member phases, in its Done means items' `Coverage:` lines, and, for the seams between them, the epic's combined check, whose own line and pass rule are ruled by the epic's `baseline` ruling and not by this one, as `formats.md` says. A phase opened for the epic takes one of those names, or comes with a `coverage` ruling that adds it. When the epic opens, record every phase its `Coverage:` lines name under `## Members`. From then on those names and the `- phase` members stay one set: a change to either comes with the matching change to the other.
 - **W2.** Each phase serving an item carries exactly one obligation toward it: satisfy, contribute (named partial evidence), or preserve. Doctrine step 1 carries a phase's served items and their obligations into its anchor.
-- **W3.** A change to what a Done means item means needs an `impact` ruling from the owner listing the same items the `done-means-change` ruling lists, since the owner is the one who accepts that the evidence behind those items is now stale.
+- **W3.** The `impact` ruling "A Done means change" above requires, since the owner is the one who accepts that the evidence behind the changed items is now stale.
 
 ### Exit passes
 
