@@ -27,7 +27,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount, anchorVerdict, suiteOutcome } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
@@ -274,6 +274,19 @@ const MUTATIONS = [
   { name: 'the gate REFUSES a duplicated anchor rather than applying it', file: 'dctr-lib.mjs', clause: 'the gate applies an anchor that occurs exactly once',
     from: "export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')",
     to: "export const anchorVerdict = (hits) => (hits === 0 ? 'missing' : 'apply')" },
+  // The progress line's whole job is naming the item that is holding the output back. Naming the
+  // newest instead still prints a plausible line, with a small elapsed time, which reads as a gate
+  // that keeps restarting its work — worse than the silence it replaced.
+  { name: 'the progress line names the oldest item in flight, not the newest', file: 'dctr-lib.mjs', clause: 'clause 1at — progressLine names the OLDEST item in flight',
+    from: 'const oldest = running.reduce((a, b) => (b.started < a.started ? b : a))',
+    to: 'const oldest = running.reduce((a, b) => (b.started > a.started ? b : a))' },
+  // Reverting the filter ENTIRELY throws inside the reduce on the fixture's null, and a suite that
+  // dies at module scope prints no FAIL line at all — `suiteOutcome` reads that as silent, so the
+  // gate reports the mutation unjudged and the clause is pinned by nothing. The mutation has to leave
+  // the suite able to render a verdict, so it drops only the half that reads `started`.
+  { name: 'the progress line drops a torn in-flight entry instead of printing it', file: 'dctr-lib.mjs', clause: 'clause 1av — progressLine ignores a torn entry',
+    from: 'const running = [...inflight].filter((x) => x && Number.isFinite(x.started))',
+    to: 'const running = [...inflight].filter(Boolean)' },
   { name: 'stopAction collapses an unobserved record into close', file: 'dctr-lib.mjs', clause: 'stopAction answers `unknown` for a record it has not seen',
     from: "  if (typeof rec?.focused !== 'boolean') return 'unknown'",
     to: "  if (typeof rec?.focused !== 'boolean') return 'close'" },
@@ -854,6 +867,32 @@ const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
   ? Math.max(1, Math.floor(ENV_JOBS))
   : Math.min(8, os.availableParallelism?.() ?? 4)
 
+/**
+ * What is running right now, and the ticker that says so (issue #62).
+ *
+ * The results below are released in INPUT order, so a slow early item holds every finished line
+ * behind it and the pane shows nothing for as long as that item takes. Scott watched exactly that and
+ * read a working gate as broken. The elapsed counter the launcher puts in the pane's TITLE was the
+ * only live signal, and it is not in the stream the reader is reading.
+ *
+ * Progress goes to stdout, which means it lands in the transcript as well as the pane: the launcher
+ * mirrors both streams to both places, so there is no pane-only channel to use. That is why these
+ * lines carry a `·` and never the `ok`/`FAIL`/`ERROR` shapes a reader greps for. Result ORDER is what
+ * this file promises to keep stable, never the transcript's bytes.
+ */
+const inflight = new Map()
+const ticking = (settled, total) => {
+  const t = setInterval(() => {
+    console.log(progressLine(settled(), total, inflight.values(), Date.now()))
+  }, Number(process.env.DCTR_ELAPSED_MS) || ELAPSED_MS)
+  t.unref()
+  return () => clearInterval(t)
+}
+const track = async (key, label, fn) => {
+  inflight.set(key, { label, started: Date.now() })
+  try { return await fn() } finally { inflight.delete(key) }
+}
+
 /** A mutation is caught if ANY suite notices it. Running all of them is what lets one harness cover
  *  the launcher and the seat hook's teardown without deciding in advance which suite owns which line. */
 const runSuite = async (dir, suite) => {
@@ -922,7 +961,18 @@ let errors = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
 for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
-const baselineResults = await mapPool(SUITES, JOBS, async (suite) => ({ suite, ...await judge(baseline, suite) }))
+// The baseline pool is the FIRST silence, not the mutation loop: it runs every suite once, including
+// the ~19s one, and printed nothing at all until it was done.
+console.log(`running ${SUITES.length} suites against the baseline, then ${MUTATIONS.length} mutations ${JOBS} at a time`)
+let baselineDone = 0
+const stopBaselineTicker = ticking(() => baselineDone, SUITES.length)
+const baselineResults = await mapPool(SUITES, JOBS, async (suite) =>
+  track(suite, suite, async () => {
+    const r = { suite, ...await judge(baseline, suite) }
+    baselineDone += 1
+    return r
+  }))
+stopBaselineTicker()
 const baselineShort = poolShortfall(baselineResults, SUITES.length)
 if (baselineShort) {
   console.log(`  FAIL the baseline pool produced ${SUITES.length - baselineShort} of ${SUITES.length} results`)
@@ -958,7 +1008,11 @@ const results = new Array(MUTATIONS.length)
 let cursor = 0
 const drain = () => { while (cursor < results.length && results[cursor] !== undefined) console.log(results[cursor++]) }
 
-await mapPool(MUTATIONS, JOBS, async (m, idx) => {
+// Settled, not drained: what the reader needs to know is how much work is DONE, and the drain cursor
+// reports zero for as long as mutation 000 is still running however many have finished behind it.
+const stopTicker = ticking(() => MUTATIONS.length - poolShortfall(results, MUTATIONS.length), MUTATIONS.length)
+
+await mapPool(MUTATIONS, JOBS, async (m, idx) => track(idx, String(idx).padStart(3, '0'), async () => {
   const dir = path.join(work, String(idx).padStart(3, '0') + '-' + m.name.replace(/[^a-z]+/gi, '-'))
   fs.mkdirSync(dir)
   for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(dir, f))
@@ -985,7 +1039,8 @@ await mapPool(MUTATIONS, JOBS, async (m, idx) => {
     }
   }
   drain()
-})
+}))
+stopTicker()
 
 // The gate's guard against its own machinery. A pool that silently ran nothing would leave every
 // slot undefined and this file would still print "all N repairs are pinned" and exit 0 — a red team
