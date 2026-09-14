@@ -389,8 +389,9 @@ for (const [name, files, shape] of [
     [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n'],
     [E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G9 regression, 2026-09-07T10:00:00Z\nItem: D1\nFound by: exit pass\n> seam broke\n']]),
     (f) => { const t = f[E1], y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && !/Combined check result:/.test(y1) && /^Baseline: R2$/m.test(y1) && /^Revision: def456$/m.test(y1) && /^Certification target: def456$/m.test(t) && t.indexOf('### G9 regression') > t.indexOf('### Y1 return') }],
-  // `counts` has three conditions and each now has its own fixture isolating it, so no implementation
-  // that drops one of them passes this suite. This one: the Revision is the current target and no
+  // Three of `counts`'s four conditions have a fixture isolating them, so no implementation dropping
+  // one of those three passes this suite. The fourth, its `Certification target: none` guard, has no
+  // fixture and no mutation: see the note in dctr-mutations.mjs. This one: the Revision is the current target and no
   // regression follows, and only the stale Baseline takes the return out of the rule's reach.
   ['a return obsolete by baseline alone, with no Combined check result line', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
