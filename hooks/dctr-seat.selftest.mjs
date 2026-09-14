@@ -25,7 +25,7 @@ import {
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
-  suiteOutcome,
+  suiteOutcome, progressLine,
 } from './dctr-lib.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -657,6 +657,37 @@ clause('clause 1ao — elapsedLabel prints seconds under a minute and zero-padde
 clause('clause 1ap — elapsedLabel never prints a negative age, so a clock that moves backwards reads 0s',
   elapsedLabel('gate', -1) === 'gate · 0s elapsed' && elapsedLabel('gate', 0) === 'gate · 0s elapsed',
   elapsedLabel('gate', -1))
+
+// progressLine (issue #62). The signal a reader needs while an input-ordered pool is releasing
+// nothing is which item is holding the line back and for how long; the settled count beside it moves
+// independently, since workers keep finishing behind the blocked item.
+{
+  const now = 1_000_000
+  const TWO = [{ label: '001', started: now - 130000 }, { label: '007', started: now - 5000 }]
+  const two = progressLine(0, 252, TWO, now)
+  clause('clause 1at — progressLine names the OLDEST item in flight, not the newest, since that is the one holding the line back',
+    two === '  · 0/252 settled, 2 running, oldest 001 · 2m10s elapsed', two)
+
+  const idle = progressLine(47, 252, [], now)
+  clause('clause 1au — with nothing in flight progressLine says so rather than naming an item it does not have',
+    idle === '  · 47/252 settled, none running', idle)
+
+  // A worker that died between its start and its finish leaves a slot behind. Reading it as an item
+  // would print `oldest undefined · NaNs elapsed`, which is how a progress signal becomes the thing
+  // the reader has to debug.
+  const torn = progressLine(1, 3, [{ label: 'x', started: now - 1000 }, null, { label: 'y' }], now)
+  clause('clause 1av — progressLine ignores a torn entry rather than printing it as an item',
+    torn === '  · 1/3 settled, 1 running, oldest x · 1s elapsed', torn)
+
+  // CLAUDE.md's third clause: the fixture really carries what 1at asserts, established without
+  // calling progressLine at all. Read off TWO itself rather than re-typed, since re-typed numbers
+  // stay true after an edit to the fixture makes the ordering clause stop discriminating — which is
+  // the failure this clause exists to catch, and this clause had it.
+  const [first, second] = TWO
+  clause('clause 3z — the two-item fixture really holds two DIFFERENT ages, oldest first, so clause 1at discriminates',
+    first.started < second.started && first.label !== second.label && TWO.length === 2,
+    `${first.label} at ${now - first.started}ms vs ${second.label} at ${now - second.started}ms`)
+}
 
 clause('clause 1as — anchorCount counts occurrences, so the gate can require exactly one and not merely presence',
   anchorCount('a b a', 'a') === 2 && anchorCount('a b a', 'b') === 1 && anchorCount('a b a', 'z') === 0 &&

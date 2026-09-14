@@ -330,9 +330,10 @@ export const suiteOutcome = ({ code, out }) =>
 
 export const TOKEN_TTL_MS = 3600000
 
-/** How often a running gate re-names its pane with elapsed time (user ruling, 2026-09-07: a long
- *  gate must show where it is). Overridden by DCTR_ELAPSED_MS so a fixture asserts a condition
- *  instead of sleeping on the production interval. */
+/** How often a long run reports where it is (user ruling, 2026-09-07: a long gate must show where it
+ *  is). Two users: the launcher re-names its pane with elapsed time, and the mutation gate prints a
+ *  progress line. Overridden by DCTR_ELAPSED_MS so a fixture asserts a condition instead of sleeping
+ *  on the production interval. */
 export const ELAPSED_MS = 10000
 
 /** A running gate's pane name: the launcher's label plus elapsed time. Elapsed counts UP rather
@@ -341,6 +342,27 @@ export const ELAPSED_MS = 10000
 export const elapsedLabel = (label, ms) => {
   const s = Math.max(0, Math.floor(ms / 1000))
   return `${label} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`} elapsed`
+}
+
+/**
+ * One progress line for a pool that releases its results in input order (issue #62).
+ *
+ * Such a pool is silent for as long as its slowest EARLY item takes, however much work is finishing
+ * behind that item, so its pane shows one line for minutes and reads as hung. What distinguishes
+ * working from hung is WHICH items are in flight and for how long: the mutation gate's slowest suite
+ * sleeps on real timing waits at 0% CPU, so a process list cannot tell you either. The settled count
+ * beside it is a different number and is worth printing for that reason: it rises as workers finish
+ * behind the blocked item, while nothing at all is released.
+ *
+ * `inflight` is whatever is running now, each with the clock time it started. The oldest is the one
+ * worth naming, since it is the item holding the line back.
+ */
+export const progressLine = (settled, total, inflight, now) => {
+  const running = [...inflight].filter((x) => x && Number.isFinite(x.started))
+  const head = `  · ${settled}/${total} settled`
+  if (!running.length) return `${head}, none running`
+  const oldest = running.reduce((a, b) => (b.started < a.started ? b : a))
+  return `${head}, ${running.length} running, oldest ${elapsedLabel(oldest.label, now - oldest.started)}`
 }
 
 /** The codex watcher's two intervals: how often it drains the job's log, and how often it re-reads
