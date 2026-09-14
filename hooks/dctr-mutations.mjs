@@ -861,18 +861,28 @@ const runSuite = async (dir, suite) => {
  *  A suite that could not run is retried ONCE before the mutation is given up as unjudgeable: what
  *  produced this class was momentary load at eight workers, and one retry is what turns it back
  *  into a verdict instead of a re-run of the whole gate. */
+/** `silent` is retried beside `error`, and for the same reason. A suite that exits non-zero without
+ *  printing a FAIL line rendered no verdict, and the two things that produce that are a mutation that
+ *  broke the file at load and a suite the machine killed part-way — which print the same nothing. On
+ *  2026-09-14 this gate reported `a return result outside the three is accepted — reverted, and the
+ *  suite stayed green` while that same mutation, run alone on the same tree, made its clause red on
+ *  the first try. One retry is what separates the two, and a second silence is reported as unjudged
+ *  rather than as a repair nothing pins. */
 const judge = async (dir, suite) => {
   const first = await runSuite(dir, suite)
   const outcome = suiteOutcome(first)
-  if (outcome !== 'error') return { res: first, outcome }
+  if (outcome !== 'error' && outcome !== 'silent') return { res: first, outcome }
   const again = await runSuite(dir, suite)
   return { res: again, outcome: suiteOutcome(again) }
 }
-const whyUnrun = (res) => `could not be run (${res.signal || res.code})`
+const whyUnrun = (res) => `rendered no verdict (${res.signal || res.code}), twice`
 const anySuiteNotices = async (dir) => {
   for (const s of SUITES) {
     const { res, outcome } = await judge(dir, s)
-    if (outcome === 'error') return { caught: false, error: `${s} ${whyUnrun(res)}` }
+    // A suite still silent after its retry is unjudged, not a green suite: the mutation may have
+    // broken the file at load, in which case the mutation is what needs fixing, and either way no
+    // clause was asked. Saying "nothing pins this" would name the wrong defect.
+    if (outcome === 'error' || outcome === 'silent') return { caught: false, error: `${s} ${whyUnrun(res)}` }
     if (outcome === 'noticed') return { caught: true, error: null }
   }
   return { caught: false, error: null }
@@ -965,7 +975,7 @@ fs.rmSync(work, { recursive: true, force: true })
 // An unjudged mutation is still a red run — it certifies nothing about the clause it names — but it
 // is reported as its own number, so a reader can tell a repair nothing pins from a suite that never
 // started. Re-running the gate is the answer to the second one, and never to the first.
-const tail = errors ? ` (${errors} unjudged: a suite could not be run)` : ''
+const tail = errors ? ` (${errors} unjudged: a suite rendered no verdict)` : ''
 console.log(failures || errors
   ? `\n${failures} FAILED${tail}`
   : `\nall ${MUTATIONS.length} repairs are pinned by a clause that goes red without them`)
