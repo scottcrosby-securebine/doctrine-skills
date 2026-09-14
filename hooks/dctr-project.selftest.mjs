@@ -395,7 +395,11 @@ for (const [name, files, shape] of [
   ['a return obsolete by baseline alone, with no Combined check result line', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y4 return, 2026-09-09T12:00:00Z\nBaseline: R1\nRevision: def456\nSeat: reviewer-f\n- D1: PASS, evidence: tests/export.test.mjs:12\n']]),
-    (f) => { const t = f[E1], y4 = t.slice(t.indexOf('### Y4 return')); return /^State: Done$/m.test(t) && /^Certification target: def456$/m.test(t) && /^Baseline: R1$/m.test(y4) && /^Revision: def456$/m.test(y4) && !/Combined check result:/.test(y4) && !/ regression,/.test(t) }],
+    (f) => { const t = f[E1], y4 = t.slice(t.indexOf('### Y4 return')); const later = t.slice(t.indexOf('### R1 ruling'))
+      // R1 is NOT the current baseline, which is the whole property this fixture isolates: a later
+      // done-means-change ruling stands after it, so `currentBaseline` is R2 and Y4's Baseline is stale.
+      const stale = /### R2 ruling[^]*?Kind: done-means-change/.test(later) && later.indexOf('### R2 ruling') > later.indexOf('### R1 ruling')
+      return /^State: Done$/m.test(t) && /^Certification target: def456$/m.test(t) && /^Baseline: R1$/m.test(y4) && /^Revision: def456$/m.test(y4) && stale && !/Combined check result:/.test(y4) && !/ regression,/.test(t) }],
   // The third way a return stops counting, isolated like the other two: its Baseline is still current
   // and no regression follows it, but a pass has opened on a NEWER revision. A skip condition missing
   // the revision test alone passes every other fixture here.

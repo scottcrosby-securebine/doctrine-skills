@@ -793,7 +793,7 @@ const MUTATIONS = [
     clause: 'known good — a return obsolete by revision alone, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
     to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); const gone = !t || t === 'none'; return gone || e.fields.Baseline?.value !== currentBaseline(doc) || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)) })()) continue" },
-  { name: 'project: a stale BASELINE alone excuses a return from the combined check rule', file: 'dctr-project.mjs',
+  { name: 'project: a later REGRESSION no longer takes a return out of the combined check rule', file: 'dctr-project.mjs',
     clause: 'known good — a return obsolete by a later regression alone, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); const gone = !t || t === 'none'; return gone || e.fields.Baseline?.value !== currentBaseline(doc) || e.fields.Revision?.value !== t })()) continue" },
   { name: 'project: the LATEST return decides the combined check, counting or not', file: 'dctr-project.mjs',
