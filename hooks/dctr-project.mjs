@@ -159,17 +159,18 @@ const currentBaseline = (doc) => doc.entries.filter((e) => e.type === 'ruling' &
  *  function is the whole of it.
  *
  *  Every way a return can stop counting is a way the combined-check rule can be narrowed with no suite
- *  noticing, and four rounds of this repo's own review found the first four ONE AT A TIME, each after a
- *  repair had called the family closed. What guards it now is `T-counts` in `dctr-project.selftest.mjs`:
- *  a table that fixes an epic record and varies one thing at a time across the space those four
- *  conditions range over, asserting for each row whether the return counts. A narrowing anywhere in
- *  that space flips a row, whether it is a new statement, a disjunct folded into an existing test, or
- *  a conjunct on the final expression — the three shapes an arity counter could not tell apart, which
- *  is how an earlier revision of this comment came to claim a guarantee it did not have.
+ *  noticing, and this repo's own review found the first four ONE AT A TIME, each after a repair had
+ *  called the family closed. `T-counts` in `dctr-project.selftest.mjs` is the regression test that came
+ *  out of that: a table that fixes an epic record, changes one thing per row, and asserts for each row
+ *  whether the return counts.
  *
- *  What the table cannot do is see a condition on a field it does not vary. Reading a NEW field here
- *  needs a new row with it, and that is the change this comment asks you to make rather than a promise
- *  it makes on your behalf. */
+ *  It is a regression test and NOT a completeness proof, and three attempts at a completeness proof
+ *  were broken here before that sentence was written. The table is blind to any condition every value
+ *  it happens to use already satisfies — `target.length < 6` passes it, because both targets in the
+ *  table are six characters, and so does a bound on how many items a return grades or how many
+ *  regressions follow it, because no row varies those counts on a COUNTING return. Varying a field is
+ *  not covering it. So: adding a condition here means adding a row whose values FAIL that condition,
+ *  and if you cannot write such a row, the condition is unguarded and belongs in a comment saying so. */
 function counts(doc, ret) {
   const target = val(doc, 'Certification target')
   if (!target || target === 'none') return false

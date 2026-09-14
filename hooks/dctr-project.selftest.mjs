@@ -886,14 +886,16 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
 // instead. One epic record, one return with no `Combined check result:` line, and each row changes one
 // thing and says whether the return still counts. The finding "has no Combined check result line"
 // appears exactly when it does, so each row is an assertion about `counts` read through what check
-// reports. A narrowing anywhere in this space flips a row whatever shape it takes.
+// reports. Each row pins the behaviour its values exercise and nothing more: see the comment above
+// `counts` in dctr-project.mjs for what that leaves uncovered, and for the rule that a new condition
+// needs a row whose values FAIL it.
 {
   const epic = ({ target = 'Certification target: aaa111\n', rulings = '', ret = '', extra = '', state = 'Open', check = 'Combined check: npm test ; pass when it exits 0\n' }) =>
-    `# Epic E9: T-counts\nState: ${state}\n${target}${check}\n## What this is\nt.\n\n## Done means\n### D9\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: p9: satisfy\n\n## Members\n- phase p9\n\n## Rulings and returns\n### E9-R1 ruling, 2026-09-14T10:00:00Z\nKind: baseline\nItems: D9\nBy: owner\n> approved: the combined check is npm test ; pass when it exits 0.\n${rulings}${ret}${extra}`
+    `# Epic E9: T-counts\nState: ${state}\n${target}${check}\n## What this is\nt.\n\n## Done means\n### D9\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: p9: satisfy\n\n### D8\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: p9: satisfy\n\n## Members\n- phase p9\n\n## Rulings and returns\n### E9-R1 ruling, 2026-09-14T10:00:00Z\nKind: baseline\nItems: D9\nBy: owner\n> approved: the combined check is npm test ; pass when it exits 0.\n${rulings}${ret}${extra}`
   const RET = (fields, results = '- D9: PASS, evidence: e\n') => `\n### E9-X1 return, 2026-09-14T11:00:00Z\n${fields}Seat: reviewer\n${results}`
   const PROJ = `# Project: t\nState: Ruled\nCurrent epic: E9\nCertification target: none\nRecords: .doctrine/records\n\n## End state\n### ES9\n- Outcome: o\n- Type: T1\n- Check: c\n- Control: k\n- Evidence: e\n- Coverage: satisfy E9\n\n## Never becomes\n- nothing\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n| E9 | T-counts | docs/epics/E9.md |\n\n## Open issues\n| Issue | Destination |\n|---|---|\n\n## History\n- none\n\n## Rulings and returns\n### P-R1 ruling, 2026-09-14T09:00:00Z\nKind: baseline\nItems: ES9\nBy: owner\n> approved\n`
   const DMC = '\n### E9-R2 ruling, 2026-09-14T10:30:00Z\nKind: done-means-change\nItems: D9\nBy: owner\n> changed\n\n### E9-R3 ruling, 2026-09-14T10:31:00Z\nKind: impact\nItems: D9\nBy: owner\n> impact accepted\n'
-  const REG = (item) => `\n### E9-G1 regression, 2026-09-14T12:00:00Z\nItem: ${item}\nFound by: exit pass\n> broke\n`
+  const REG = (item, id = 'E9-G1') => `\n### ${id} regression, 2026-09-14T12:00:00Z\nItem: ${item}\nFound by: exit pass\n> broke\n`
   const counted = (files) => {
     const model = modelFrom(files[PROJECT_PATH], (rel) => (Object.hasOwn(files, rel) ? files[rel] : null))
     return check(model, (rel) => Object.hasOwn(files, rel)).some((f) => f.message.includes('has no Combined check result line'))
@@ -901,6 +903,9 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   // Each row: what it changes from the row above's baseline shape, and whether the return counts.
   const ROWS = [
     ['target aaa111, baseline current, revision aaa111, no regression', {}, true],
+    // Row 2 does not pin the `!target` half on its own: with no target, the revision test would reject
+    // this return anyway. The known-good fixture 'a return whose epic has no certification target' is
+    // what pins it, and row 3 is what pins `=== 'none'`.
     ['no Certification target header at all', { target: '' }, false],
     ['Certification target: none, revision none', { target: 'Certification target: none\n', ret: RET('Baseline: E9-R1\nRevision: none\n') }, false],
     ['revision does not equal the target', { ret: RET('Baseline: E9-R1\nRevision: zzz999\n') }, false],
@@ -910,7 +915,7 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     ['a regression against the return\'s item comes after it', { extra: REG('D9') }, false],
     ['a regression against the return\'s item comes BEFORE it', { rulings: REG('D9'), ret: RET('Baseline: E9-R1\nRevision: aaa111\n') }, true],
     ['a later regression names an item the return does not', { extra: REG('D8') }, true],
-    ['two later regressions, only the FIRST against the return\'s item', { extra: REG('D9') + REG('D8') }, false],
+    ['two later regressions, only the FIRST against the return\'s item', { extra: REG('D9') + REG('D8', 'E9-G2') }, false],
     ['the return grades two items and a later regression names one', { ret: RET('Baseline: E9-R1\nRevision: aaa111\n', '- D9: PASS, evidence: e\n- D8: PASS, evidence: e\n'), extra: REG('D9') }, false],
     ['the return grades no item at all', { ret: RET('Baseline: E9-R1\nRevision: aaa111\n', '') }, true],
     // Counting turns on those four conditions and on NOTHING ELSE the record carries, so every other
@@ -929,19 +934,33 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     const got = counted(files)
     if (got !== want) wrong.push(`${name}: counts=${got}, want ${want}`)
   }
-  clause('clause 1ct — T-counts: every row of the counting table agrees with formats.md, so a narrowing anywhere in that space flips one',
+  clause('clause 1ct — T-counts: every row of the counting table agrees with formats.md, and a narrowing its values fail flips one',
     wrong.length === 0, wrong.join(' | '))
   // Clause 2: the table is not all-true or all-false, which a table asserting nothing would be.
   clause('clause 2ct — and the table discriminates: it holds both counting and non-counting rows',
     ROWS.some(([, , w]) => w) && ROWS.some(([, , w]) => !w) && ROWS.length >= 12,
     `${ROWS.filter(([, , w]) => w).length} counting, ${ROWS.filter(([, , w]) => !w).length} not, ${ROWS.length} rows`)
-  // Clause 3: the fixtures really differ as their names say, read WITHOUT calling check.
-  const base = epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n') })
-  const built = ROWS.map(([, over]) => epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }))
-  clause('clause 3ct — each row really builds a different record, and the base one carries the shape the table starts from',
-    new Set(built).size === ROWS.length && /^Certification target: aaa111$/m.test(base) && /^Baseline: E9-R1$/m.test(base) &&
-    /^Revision: aaa111$/m.test(base) && !/Combined check result:/.test(base) && !/ regression,/.test(base),
-    `${new Set(built).size} distinct of ${ROWS.length}`)
+  // Clause 3: each row's record really PARSES as the row's name says, read with the parser and without
+  // calling check. Distinct strings are not enough: a red team broke the previous version of this
+  // clause by quoting a whole regression into prose, where the text differs, the record parses to no
+  // regression at all, and the row silently stopped testing its boundary.
+  const parsedRows = ROWS.map(([name, over]) => {
+    const d = parseDoc(epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }))
+    return { name, regs: d.entries.filter((e) => e.type === 'regression').length, rets: d.entries.filter((e) => e.type === 'return').length, ids: new Set(d.entries.map((e) => e.id)).size, entries: d.entries.length }
+  })
+  const named = (n) => parsedRows.find((r) => r.name === n)
+  const badParse = parsedRows.filter((r) => r.rets !== 1 || r.ids !== r.entries)
+  clause('clause 3ct — every row PARSES to one return and to entries with distinct IDs, read with the parser and not with check',
+    badParse.length === 0, badParse.map((r) => `${r.name}: ${r.rets} returns, ${r.entries - r.ids} duplicate ids`).join(' | '))
+  clause('clause 4ct — and the rows that say "regression" really parse to that many, which a quoted-out one would not',
+    named('a regression against the return\'s item comes after it').regs === 1 &&
+    named('a regression against the return\'s item comes BEFORE it').regs === 1 &&
+    named('two later regressions, only the FIRST against the return\'s item').regs === 2 &&
+    named('target aaa111, baseline current, revision aaa111, no regression').regs === 0,
+    parsedRows.map((r) => `${r.regs}`).join(''))
+  clause('clause 5ct — each row builds a distinct record, so no two rows are the same test wearing two names',
+    new Set(ROWS.map(([, over]) => epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }))).size === ROWS.length,
+    `${new Set(ROWS.map(([, over]) => epic({ ret: RET('Baseline: E9-R1\nRevision: aaa111\n'), ...over }))).size} distinct of ${ROWS.length}`)
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })
