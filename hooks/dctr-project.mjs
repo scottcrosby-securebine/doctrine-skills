@@ -153,8 +153,17 @@ const epicHeadingId = (doc) => /^Epic (\S+?):/.exec(doc.title?.text ?? '')?.[1] 
 /** The latest `baseline` or `done-means-change` ruling. */
 const currentBaseline = (doc) => doc.entries.filter((e) => e.type === 'ruling' && ['baseline', 'done-means-change'].includes(kind(e))).at(-1)?.id ?? null
 
+/** How many ways a return can stop counting. Every one of them needs a known-good fixture isolating
+ *  it and a mutation that drops only it, because each is a way the combined-check rule can be
+ *  narrowed without any suite noticing: four rounds of this repo's own review found the first four one
+ *  at a time, each after a repair had declared the family closed. `dctr-project.selftest.mjs` asserts
+ *  that `counts` has exactly this many exits, so adding a condition here without its fixture and
+ *  mutation turns that clause red and says what to write. */
+export const COUNTS_CONDITIONS = 4
+
 /** A return counts when its Baseline is current, its Revision is the certification target, and no
- *  regression against one of its items comes after it (ER8, ER9). */
+ *  regression against one of its items comes after it (ER8, ER9). Each `return false` is one of
+ *  COUNTS_CONDITIONS above; adding one is a change that needs a fixture and a mutation with it. */
 function counts(doc, ret) {
   const target = val(doc, 'Certification target')
   if (!target || target === 'none') return false

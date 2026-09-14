@@ -783,13 +783,16 @@ const MUTATIONS = [
   { name: 'project: only a Done epic\'s return needs a combined check result', file: 'dctr-project.mjs',
     clause: "entry — an OPEN epic's counting return with no Combined check result line [1: trips]",
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue", to: "      if (e.type !== 'return' || s !== 'Done' || !counts(doc, e)) continue" },
-  // `counts` has FOUR conditions: the `Certification target: none` guard, the current baseline, the
-  // revision, and no later regression. The three below isolate the last three, one each, so dropping
-  // any one of those alone goes red. The GUARD is not isolated by any of them: a mutation dropping it
-  // alone leaves the suite green, because no fixture carries an epic with no certification target and
-  // a return with no revision, which is a document `check` accepts clean today. That is a missing
-  // fixture, not a dead branch, and it is on the punch list. Three rounds found the other three one at
-  // a time, which is why this comment now says what is pinned rather than that the family is closed.
+  // `counts` has FOUR conditions — the `Certification target: none` guard, the current baseline, the
+  // revision, and no later regression — and each of the four below drops exactly one of them, so
+  // narrowing the predicate any single way goes red. Four rounds of review found these one at a time,
+  // each after a repair had called the family closed, which is why `COUNTS_CONDITIONS` in
+  // dctr-project.mjs now pins the ARITY: a fifth condition added there without a fixture and a
+  // mutation here turns a clause red and says what to write.
+  { name: 'project: a return whose epic has no certification target is still held to the combined check rule', file: 'dctr-project.mjs',
+    clause: 'known good — a return whose epic has no certification target, with no Combined check result line [2: ZERO findings]',
+    from: "      if (e.type !== 'return' || !counts(doc, e)) continue",
+    to: "      if (e.type !== 'return' || (() => { const t = val(doc, 'Certification target'); return e.fields.Baseline?.value !== currentBaseline(doc) || e.fields.Revision?.value !== t || doc.entries.slice(doc.entries.indexOf(e) + 1).some((x) => x.type === 'regression' && e.results.some((r) => r.item === x.fields.Item?.value)) })()) continue" },
   { name: 'project: a return on a stale BASELINE is still held to the combined check rule', file: 'dctr-project.mjs',
     clause: 'known good — a return obsolete by baseline alone, with no Combined check result line [2: ZERO findings]',
     from: "      if (e.type !== 'return' || !counts(doc, e)) continue",

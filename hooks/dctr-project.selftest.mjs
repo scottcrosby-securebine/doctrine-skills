@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH, COUNTS_CONDITIONS } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -389,9 +389,18 @@ for (const [name, files, shape] of [
     [E1, 'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n'],
     [E1, 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n', 'Revision: def456\nSeat: reviewer-b\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### G9 regression, 2026-09-07T10:00:00Z\nItem: D1\nFound by: exit pass\n> seam broke\n']]),
     (f) => { const t = f[E1], y1 = t.slice(t.indexOf('### Y1 return')); return /^State: Open$/m.test(t) && !/Combined check result:/.test(y1) && /^Baseline: R2$/m.test(y1) && /^Revision: def456$/m.test(y1) && /^Certification target: def456$/m.test(t) && t.indexOf('### G9 regression') > t.indexOf('### Y1 return') }],
-  // Three of `counts`'s four conditions have a fixture isolating them, so no implementation dropping
-  // one of those three passes this suite. The fourth, its `Certification target: none` guard, has no
-  // fixture and no mutation: see the note in dctr-mutations.mjs. This one: the Revision is the current target and no
+  // The FOURTH condition of `counts`, its `!target || target === 'none'` guard, isolated: an epic with
+  // no `Certification target:` header at all and a return with no `Revision:` field. Without the guard
+  // those two undefineds compare equal, the return counts, and its missing combined line is reported —
+  // a finding nothing can clear, which is what the guard exists to prevent. Every other condition here
+  // is satisfied, so the guard is the only thing holding it.
+  ['a return whose epic has no certification target, with no Combined check result line', mutate([[
+    'docs/epics/E2.md', 'State: Superseded\nCertification target: none\n', 'State: Superseded\n'],
+    ['docs/epics/E2.md', '> replaced by v2\n', '> replaced by v2\n\n### R2 ruling, 2026-09-02T10:00:00Z\nKind: baseline\nItems: D2\nBy: owner\n> approved: the combined check is none.\n\n### Z9 return, 2026-09-03T10:00:00Z\nBaseline: R2\nSeat: reviewer-g\n- D2: PASS, evidence: tests/import.test.mjs:1\n']]),
+    (f) => { const t = f['docs/epics/E2.md'], z9 = t.slice(t.indexOf('### Z9 return')); return !/^Certification target:/m.test(t) && /^Baseline: R2$/m.test(z9) && !/^Revision:/m.test(z9) && !/Combined check result:/.test(z9) && /### R2 ruling[^\n]*\nKind: baseline/.test(t) }],
+  // All four of `counts`'s conditions now have a fixture isolating them, so no implementation dropping
+  // any one of them passes this suite, and the arity clause at the end of this file catches a fifth
+  // condition added without its own. This one: the Revision is the current target and no
   // regression follows, and only the stale Baseline takes the return out of the rule's reach.
   ['a return obsolete by baseline alone, with no Combined check result line', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
@@ -868,6 +877,32 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     !fs.existsSync(path.join(healthy, 'good-2', 'jobs')) && path.basename(good) === 'good', 'fixture')
   const sl = statusLines(build(GOOD), { records: () => null, seats: () => null, codex: () => readCodex(good, jobsIsFile) })
   clause('codex [1: through status, an unreadable jobs directory prints codex jobs: unknown]', sl.includes('codex jobs: unknown'), sl.join(' / '))
+}
+
+// ---------------------------------------------------------------- the counts() arity guard
+// The class fix, not another instance of it. Every way a return can stop counting is a way the
+// combined-check rule can be narrowed with no suite noticing, and this repo found the first four one
+// at a time, each after a repair had called the family closed. This clause fires when `counts` grows
+// or loses an exit without COUNTS_CONDITIONS moving with it, and the constant's own comment says what
+// to write when it does: a known-good fixture isolating the new condition, and a mutation dropping
+// only it.
+{
+  const src = fs.readFileSync(new URL('./dctr-project.mjs', import.meta.url), 'utf8')
+  const body = (t) => t.slice(t.indexOf('function counts('), t.indexOf('\n}', t.indexOf('function counts(')))
+  const exits = (t) => (body(t).match(/\n  return /g) || []).length + (body(t).match(/return false/g) || []).length
+  // A counts() with one more way out than the constant knows about, built here rather than by editing
+  // the real file, so this clause needs no mutation of its own to be shown able to fail.
+  const GROWN = src.replace('  if (ret.fields.Revision?.value !== target) return false',
+    '  if (ret.fields.Revision?.value !== target) return false\n  if (ret.fields.Seat?.value === undefined) return false')
+  clause('clause 1cg — counts() has exactly COUNTS_CONDITIONS ways out, so a condition added without its fixture and mutation is loud',
+    exits(src) === COUNTS_CONDITIONS, `${exits(src)} exits against COUNTS_CONDITIONS=${COUNTS_CONDITIONS}`)
+  clause('clause 2cg — and the count is of THIS function, not of the file: a grown counts() disagrees with the constant',
+    exits(GROWN) === COUNTS_CONDITIONS + 1 && exits(GROWN) !== COUNTS_CONDITIONS,
+    `grown: ${exits(GROWN)}`)
+  clause('clause 3cg — the grown fixture really carries one more exit than the real one, read without the counter',
+    /Seat\?\.value === undefined\) return false/.test(GROWN) && !/Seat\?\.value === undefined/.test(src) &&
+    GROWN.length > src.length && body(GROWN).includes('return false') && body(src).includes('return false'),
+    'fixture')
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })
