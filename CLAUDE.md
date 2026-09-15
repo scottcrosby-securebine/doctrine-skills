@@ -245,3 +245,4 @@ always evidence about the day it was written, never a description of how anythin
 - SKILL.md frontmatter `description:` follows the "Use when …" trigger-phrase style; it is what makes the skill fire, so write it for matching, not marketing.
 - Wrappers end with a short "Red flags" section: concrete failure modes, not generic advice.
 - Push to the remote only when explicitly told to.
+- Project and epic tracking for this repo lives in the private companion repo `scottcrosby-securebine/doctrine-skills-project`, not here, so rulings and returns never ship in the plugin tree. A phase in this repo follows `doctrine-project`'s lifecycle procedure against that repo's `docs/PROJECT.md`, and runs `check` and `status` from its root.

@@ -1,6 +1,6 @@
 # Known issues
 
-Defects known to the maintainers and not yet fixed. **GitHub issues are the tracker**; this file
+Defects known to the maintainers and not yet fixed. Defects are filed as GitHub issues, and each one gets its epic or backlog destination in the private companion project named in CLAUDE.md; this file
 exists so the list survives in the repo rather than only on one machine, and so an installer reading
 the hooks can tell a known defect from a surprise.
 
