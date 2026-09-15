@@ -751,7 +751,7 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     while (!lwOut.includes(marker) && Date.now() < until) await new Promise((r) => setTimeout(r, 5))
     return lwOut.includes(marker)
   }
-  const OFF_BEAT_MS = 2100   // just past where a PRODUCTION poll would land, see below
+  const OFF_BEAT_MS = 3000   // midway between two PRODUCTION polls, counted from the watcher's first, see below
   // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
   // watcher start AFTER the flip and exit on its own first poll, passing at any interval.
   //
@@ -760,16 +760,20 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   // (dctr-seat.mjs), so both drains can come from the pump with no record read anywhere between
   // them — a red team produced a schedule passing at 249ms with the injected interval ignored.
   //
-  // What the clause can actually prove is timing, so prove timing. A watcher on the PRODUCTION
-  // 2000ms interval polls at 2000, 4000, ...; flipping at ~2100ms after start puts the next such
-  // poll ~1900ms away, well outside the 500ms bound. A watcher honouring the injected 25ms interval
-  // notices within one interval wherever the flip lands. The bound is what discriminates, and the
-  // off-beat offset is what stops a production-interval poll landing on the flip by luck.
+  // What the clause can actually prove is timing, so prove timing, on the WATCHER's clock. Its first
+  // poll runs synchronously at startup and is the first thing to drain the log, so the moment that
+  // output arrives is the watcher's own time zero, and a watcher on the PRODUCTION 2000ms interval
+  // then polls at 2000, 4000, .... Counting from this process's spawn call instead let the watcher's
+  // boot latency slide a production poll to just after the flip, inside the bound. Flipping 3000ms
+  // after the first poll puts the nearest production poll ~1000ms away on either side, twice the
+  // 500ms bound. A watcher honouring the injected 25ms interval notices within one interval wherever
+  // the flip lands. The bound is what discriminates, and the off-beat offset is what stops a
+  // production-interval poll landing on the flip by luck.
   const latencyLog = path.join(jobs, 'task-latency.log')
-  const lwStarted = Date.now()
   const ready = await drained('codex output for task-latency')
+  const firstPoll = Date.now()
   if (ready) {
-    const untilOffBeat = lwStarted + OFF_BEAT_MS
+    const untilOffBeat = firstPoll + OFF_BEAT_MS
     while (Date.now() < untilOffBeat) await new Promise((r) => setTimeout(r, 10))
   }
   const flipped = Date.now()
@@ -778,13 +782,12 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const lwCode = await lwExit
   clearTimeout(lwBound)
   const latency = Date.now() - flipped
-  // Deterministic in BOTH directions, which a bare latency bound is not. The flip lands immediately
-  // after the watcher's first poll, so the next poll is a full interval away: ~25ms as injected,
-  // ~2000ms if the injection is ignored. 500ms sits an order of magnitude above the first and a
-  // factor of four below the second, which is the margin that survives 8-way parallel load.
+  // Deterministic in BOTH directions, which a bare latency bound is not. The next poll after the flip
+  // is ~25ms away as injected and ~1000ms away if the injection is ignored. 500ms sits an order of
+  // magnitude above the first and a factor of two below the second.
   check('the injected poll interval is HONOURED: a job turning terminal right after a poll is noticed within one INJECTED interval, not one production interval',
     ready && lwCode === 0 && latency < 500,
-    `ready ${ready}, exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 2000ms`)
+    `ready ${ready}, exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 1000ms`)
 
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs
