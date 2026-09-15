@@ -201,6 +201,21 @@ clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher w
   split.startsWith('pane split ') && cwdArgs().length === 1 && cwdArgs()[0] === HERE && callLine(/^pane run w1:pS /).includes('--run'),
   `split: ${split}; cwd args: ${JSON.stringify(cwdArgs())}; run: ${callLine(/^pane run /)}`)
 
+// The CONTAINED posture, on the one environment that separates it: inside herdr with a pane and a
+// session set, which clause 1d just proved takes the pane path. Every other pane-path environment in
+// this file clears DCTR_VIEW_REQUEST_DIR, and the detached ones never reach the pane path whatever it
+// holds, so a launcher that stopped reading it split a host pane from a container with every clause green. Clause 1d is this fixture's proof that the stand-down is the
+// only thing keeping it off the pane path.
+fs.writeFileSync(calls, '')
+const outC = path.join(tmp, 'contained.out')
+const saidC = execFileSync('node', [script, 'contained gate', outC, '--', 'bash', '-c', 'echo ran contained'],
+  { env: paneEnv({ DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') }), encoding: 'utf8' })
+const tC = waitDone(outC)
+const containedCalls = fs.readFileSync(calls, 'utf8')
+clause('clause 1y — a contained session (DCTR_VIEW_REQUEST_DIR set, inside herdr, pane and session set) runs the check detached and calls herdr ZERO times',
+  saidC.includes('contained session') && verdict(outC) === exitLine(0) && tC.includes('ran contained') && containedCalls === '',
+  `launcher: ${saidC.trim()}; verdict ${JSON.stringify(verdict(outC))}; herdr calls: ${JSON.stringify(containedCalls)}`)
+
 fs.writeFileSync(calls, ''); fs.writeFileSync(cwds, '')
 execFileSync('node', [script, 'tab gate', path.join(tmp, 'tab.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_LAYOUT_FAILS: '1' }), encoding: 'utf8' })
 const create = callLine(/^tab create /)

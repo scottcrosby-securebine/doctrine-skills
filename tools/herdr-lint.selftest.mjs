@@ -117,13 +117,15 @@ clause('clause 2c: a selftest and the mutation DATA file are out of scope, by na
 // ---------------------------------------------------------------- clause 3: the fixture really is broken
 // No linter is called here. The broken and repaired forms are executed against a stub herdr that
 // answers the way a real one can: a reply carrying `result` but no `pane` at all.
+//
+// The forms are COMPILED FROM THE FIXTURE TEXT, never re-typed beside it. A hand copy proves the copy
+// is broken, so a fixture that lost its defect left clauses 3a-3c green while clause 1a went on
+// asserting that the checker reports a defect the fixture no longer carried.
+const load = (src, name, ...deps) => new Function(...deps, `${src.replace(/^import .*$/m, '')}\nreturn ${name}`)
+const askFrom = (src) => (reply) => load(src, 'askPane', 'herdr', 'isPaneNotFound')(() => reply, () => false)('p1')
 const stubReplyWithoutPane = { result: {} }
-const brokenAsk = (reply) => (reply.result.pane ? 'live' : 'gone')
-const fixedAsk = (reply) => {
-  const r = reply.result
-  if (r && typeof r === 'object' && 'pane' in r) return r.pane ? 'live' : 'gone'
-  return 'unknowable'
-}
+const brokenAsk = askFrom(BROKEN_E2)
+const fixedAsk = askFrom(FIXED)
 clause('clause 3a: the broken form really answers "gone" for a reply that answered nothing — proved without the checker',
   brokenAsk(stubReplyWithoutPane) === 'gone',
   `got ${brokenAsk(stubReplyWithoutPane)}`)
@@ -142,7 +144,13 @@ clause('clause 3c: both still agree on a reply that DOES carry a pane, so 3a is 
 const throwsTransport = () => { throw new Error('no route to server') }
 const answersPane = () => ({ result: { pane: { pane_id: 'p1' } } })
 const isNotFoundStub = () => false   // a transport error carries no not-found code
-const brokenSweep = (call) => { let rec; try { rec = call().result.pane } catch { rec = null } ; return rec ? 'kept' : 'destroyed' }
+// The broken form is compiled from BROKEN_E1 for the reason given above clause 3a. The separated
+// form has no fixture text of its own to compile.
+const brokenSweep = (call) => {
+  let destroyed = false
+  load(BROKEN_E1, 'sweep', 'herdr', 'destroy')(call, () => { destroyed = true })('p1')
+  return destroyed ? 'destroyed' : 'kept'
+}
 const fixedSweep = (call) => {
   let rec, gone = false
   try { rec = call().result.pane } catch (e) { gone = isNotFoundStub(e) }
