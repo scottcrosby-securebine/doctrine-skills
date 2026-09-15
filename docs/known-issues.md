@@ -9,10 +9,7 @@ per CLAUDE.md, internal review history does not ship.
 
 ## Open
 
-| Item | Site | What happens | Issue |
-|---|---|---|---|
-| Off-beat offset read from the wrong clock | `hooks/dctr-seat.teardown.selftest.mjs`, the latency-watcher clause | The offset is measured from the parent's clock at spawn instead of the watcher's own poll beat, so the clause stops discriminating a production-interval watcher from an injected-interval one when boot latency stretches. Instrument only | [#37](https://github.com/scottcrosby-securebine/doctrine-skills/issues/37) |
-| Third clause certifies a hand-copy | `tools/herdr-lint.selftest.mjs`, clauses 3a/3b/3c | They prove two hand-written functions differ on an empty reply. The checker runs against the `BROKEN_E2` fixture, which nothing ties to them, so the fixture can lose its defect while the clauses stay green. Instrument only | [#37](https://github.com/scottcrosby-securebine/doctrine-skills/issues/37) |
+None open.
 
 ## Settled, with the evidence
 
