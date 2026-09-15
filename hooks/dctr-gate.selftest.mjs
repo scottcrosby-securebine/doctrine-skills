@@ -202,9 +202,9 @@ clause('clause 1d: the pane path splits with --cwd set to the cwd the launcher w
   `split: ${split}; cwd args: ${JSON.stringify(cwdArgs())}; run: ${callLine(/^pane run /)}`)
 
 // The CONTAINED posture, on the one environment that separates it: inside herdr with a pane and a
-// session set, which clause 1d just proved takes the pane path. Every other environment in this file
-// leaves DCTR_VIEW_REQUEST_DIR empty, so a launcher that stopped reading it split a host pane from a
-// container with every clause green. Clause 1d is this fixture's proof that the stand-down is the
+// session set, which clause 1d just proved takes the pane path. Every other pane-path environment in
+// this file clears DCTR_VIEW_REQUEST_DIR, and the detached ones never reach the pane path whatever it
+// holds, so a launcher that stopped reading it split a host pane from a container with every clause green. Clause 1d is this fixture's proof that the stand-down is the
 // only thing keeping it off the pane path.
 fs.writeFileSync(calls, '')
 const outC = path.join(tmp, 'contained.out')
