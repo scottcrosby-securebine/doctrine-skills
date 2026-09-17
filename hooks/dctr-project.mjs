@@ -503,8 +503,10 @@ export function statusLines(model, readers) {
 /** Each `.md` under Records whose last state line is Open or Blocked, named by its first heading (its
  *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. A
  *  state line starts with `state:` after an optional `- ` and an optional `**`, the two forms run
- *  records use. Throws when Records or a result file is absent or unreadable, which prints unknown. */
-const STATE_LINE = /^(?:-\s*)?(?:\*\*)?state:\s*/i
+ *  records use. */
+const STATE_LINE = /^(?:-\s+)?(?:\*\*)?state:\s*/i
+/** Throws, printed unknown, when Records is absent or unreadable or a result file that exists cannot
+ *  be read. A transcript with no result file is a pending gate, never a failed read. */
 export function readRecords(root, records) {
   if (!records || records === 'none') throw new Error('no Records path')
   const dir = path.join(root, records)
@@ -513,27 +515,28 @@ export function readRecords(root, records) {
   for (const n of names) {
     const rel = path.join(records, n), abs = path.join(dir, n)
     if (n.endsWith('.md')) {
-      const lines = fs.readFileSync(abs, 'utf8').split('\n').map((l) => l.trim())
-      const last = lines.filter((l) => STATE_LINE.test(l)).at(-1)
+      const raw = fs.readFileSync(abs, 'utf8').split('\n')
+      const last = raw.map((l) => l.trim()).filter((l) => STATE_LINE.test(l)).at(-1)
       if (last && /^(Open|Blocked)\b/i.test(last.replace(STATE_LINE, ''))) {
-        open.push({ name: lines.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '') || rel, line: last })
+        open.push({ name: raw.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: last })
       }
     }
     if (n.endsWith('.out')) {
-      gates.push(`${rel}: ${fs.existsSync(`${abs}.result`) ? fs.readFileSync(`${abs}.result`, 'utf8').split('\n')[0].trim() || 'unknown' : 'pending'}`)
+      gates.push(`${rel}: ${fs.existsSync(`${abs}.result`) ? fs.readFileSync(`${abs}.result`, 'utf8').split('\n')[0].trim() : 'pending'}`)
     }
   }
   return { open, gates }
 }
 
 /** The repo whose seats and codex jobs status reads: the project file's optional `Tracks:` path,
- *  resolved against the tracking root, or the tracking root itself without one. Throws, printed
- *  unknown, when the named path is not a directory: a wrong path must never read as zero seats. */
+ *  resolved against the tracking root, or the tracking root itself without one, with symlinks
+ *  resolved, since herdr and codex record real paths and the readers compare against them. Throws,
+ *  printed unknown, when the path is missing or not a directory: a wrong path must never read as zero
+ *  seats. */
 export function trackedRoot(root, model) {
   const t = val(model.project, 'Tracks')
-  if (!t) return root
-  const dir = path.resolve(root, t)
-  if (!fs.statSync(dir).isDirectory()) throw new Error(`Tracks: ${t} is not a directory`)
+  const dir = fs.realpathSync(t ? path.resolve(root, t) : root)
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`${t || root} is not a directory`)
   return dir
 }
 
