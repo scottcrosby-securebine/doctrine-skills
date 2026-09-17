@@ -479,9 +479,9 @@ export function statusLines(model, readers) {
   out.push(`current epic: ${val(p, 'Current epic') || 'unknown'}`)
 
   const rec = ask(readers.records)
-  block('open records', rec && rec.open.map((r) => `${r.path}: ${r.line}`))
-  block('pending gates', rec && rec.pending)
-  if (rec) out.push('  (pending covers only .out transcripts under Records with no sibling .out.result)')
+  block('open records', rec && rec.open.map((r) => `${r.name}: ${r.line}`))
+  block('gates', rec && rec.gates)
+  if (rec) out.push('  (gates covers only .out transcripts under Records; pending means no sibling .out.result)')
 
   // Built only from the records it resolved, so one roster line it could not read or resolve makes the
   // whole list unknown: a return in that record would be missing from it.
@@ -500,22 +500,44 @@ export function statusLines(model, readers) {
 
 // ---------------------------------------------------------------- readers (the only I/O)
 
-/** Each `.md` under Records whose last `state:` line is Open or Blocked, and each `.out` with no
- *  sibling `.out.result`. Throws when Records is absent or unreadable, which prints unknown. */
-function readRecords(root, records) {
+/** Each `.md` under Records whose last state line is Open or Blocked, named by its first heading (its
+ *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. A
+ *  state line starts with `state:` after an optional `- ` and an optional `**`, the two forms run
+ *  records use. */
+const STATE_LINE = /^(?:-\s+)?(?:\*\*)?state:\s*/i
+/** Throws, printed unknown, when Records is absent or unreadable or a result file that exists cannot
+ *  be read. A transcript with no result file is a pending gate, never a failed read. */
+export function readRecords(root, records) {
   if (!records || records === 'none') throw new Error('no Records path')
   const dir = path.join(root, records)
   const names = fs.readdirSync(dir, { recursive: true }).map(String).sort()
-  const open = [], pending = []
+  const open = [], gates = []
   for (const n of names) {
     const rel = path.join(records, n), abs = path.join(dir, n)
     if (n.endsWith('.md')) {
-      const last = fs.readFileSync(abs, 'utf8').split('\n').filter((l) => /^state:/i.test(l.trim())).at(-1)?.trim()
-      if (last && /^state:\s*(Open|Blocked)\b/i.test(last)) open.push({ path: rel, line: last })
+      const raw = fs.readFileSync(abs, 'utf8').split('\n')
+      const last = raw.map((l) => l.trim()).filter((l) => STATE_LINE.test(l)).at(-1)
+      if (last && /^(Open|Blocked)\b/i.test(last.replace(STATE_LINE, ''))) {
+        open.push({ name: raw.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: last })
+      }
     }
-    if (n.endsWith('.out') && !fs.existsSync(`${abs}.result`)) pending.push(rel)
+    if (n.endsWith('.out')) {
+      gates.push(`${rel}: ${fs.existsSync(`${abs}.result`) ? fs.readFileSync(`${abs}.result`, 'utf8').split('\n')[0].trim() : 'pending'}`)
+    }
   }
-  return { open, pending }
+  return { open, gates }
+}
+
+/** The repo whose seats and codex jobs status reads: the project file's optional `Tracks:` path,
+ *  resolved against the tracking root, or the tracking root itself without one, with symlinks
+ *  resolved, since herdr and codex record real paths and the readers compare against them. Throws,
+ *  printed unknown, when the path is missing or not a directory: a wrong path must never read as zero
+ *  seats. */
+export function trackedRoot(root, model) {
+  const t = val(model.project, 'Tracks')
+  const dir = fs.realpathSync(t ? path.resolve(root, t) : root)
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`${t || root} is not a directory`)
+  return dir
 }
 
 /** Panes in `herdr api snapshot` whose cwd is inside the repo root. Null, printed unknown, outside
@@ -572,8 +594,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   }
   const lines = statusLines(model, {
     records: () => readRecords(root, val(model.project, 'Records')),
-    seats: () => readSeats(root),
-    codex: () => readCodex(root),
+    seats: () => readSeats(trackedRoot(root, model)),
+    codex: () => readCodex(trackedRoot(root, model)),
   })
   console.log(lines.join('\n'))
 }

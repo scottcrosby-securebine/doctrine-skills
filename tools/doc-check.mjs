@@ -395,7 +395,8 @@ function checkEchoes(sources) {
   for (const src of sources) {
     for (const s of sentences(prose(src.text).replace(ATTRIBUTED, CUT))) {
       const claim = comparable(s)
-      if (claim.split(' ').length < ECHO_MIN_WORDS) continue
+      // A CUT is where a fenced line or a comment was, never a word: a fenced block is not a claim.
+      if (claim.split(' ').filter((w) => w !== CUT).length < ECHO_MIN_WORDS) continue
       if (!placesByClaim.has(claim)) placesByClaim.set(claim, [])
       placesByClaim.get(claim).push(src.name)
     }

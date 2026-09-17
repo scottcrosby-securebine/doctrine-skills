@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, PROJECT_PATH } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, readRecords, trackedRoot, PROJECT_PATH } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -735,7 +735,7 @@ for (const to of ['ID', 'Issue', 'constructor']) {
 {
   const model = build(GOOD)
   const readers = {
-    records: () => ({ open: [{ path: 'docs/records/p3.md', line: 'state: Open' }], pending: ['docs/records/gate1.out'] }),
+    records: () => ({ open: [{ name: 'docs/records/p3.md', line: 'state: Open' }], gates: ['docs/records/gate1.out: pending'] }),
     seats: () => ['wA9:p56 working general-purpose · 1'],
     codex: () => ['job-7 running'],
   }
@@ -747,7 +747,7 @@ for (const to of ['ID', 'Issue', 'constructor']) {
   clause('T-status 2 — the roster with each State, then the current epic, in spec order',
     lines.includes('  E3 Done') && at('current epic: E3') > at('  E3 Done') && at('  E3 Done') > at('  ES3:'),
     lines.join('\n'))
-  clause('T-status 3 — open records and pending gates from the reader, after the current epic',
+  clause('T-status 3 — open records and gates from the reader, after the current epic',
     at('docs/records/p3.md: state: Open') > at('current epic') && at('docs/records/gate1.out') > at('docs/records/p3.md'),
     lines.join('\n'))
   clause('T-status 4 — a return that does not count is labelled obsolete with its baseline and revision (ER9), and a counting one is not',
@@ -763,12 +763,12 @@ for (const to of ['ID', 'Issue', 'constructor']) {
   const lines2 = (m, r) => { try { return statusLines(m, r) } catch (e) { return [`statusLines threw: ${e.message}`] } }
   const down = lines2(model, failing)
   clause('T-status 6 — every reader that throws or returns null prints unknown, never a guess',
-    down.includes('open records: unknown') && down.includes('pending gates: unknown') && down.includes('live seats: unknown') && down.includes('codex jobs: unknown') &&
+    down.includes('open records: unknown') && down.includes('gates: unknown') && down.includes('live seats: unknown') && down.includes('codex jobs: unknown') &&
     !down.some((l) => /\(none\)/.test(l) && /seats|codex|records|gates/.test(l)),
     down.join('\n'))
   clause('T-status 6b — and an empty answer is not unknown: a reader that returns nothing prints none',
-    lines2(model, { records: () => ({ open: [], pending: [] }), seats: () => [], codex: () => [] }).filter((l) => l === '  (none)').length === 4,
-    lines2(model, { records: () => ({ open: [], pending: [] }), seats: () => [], codex: () => [] }).join('\n'))
+    lines2(model, { records: () => ({ open: [], gates: [] }), seats: () => [], codex: () => [] }).filter((l) => l === '  (none)').length === 4,
+    lines2(model, { records: () => ({ open: [], gates: [] }), seats: () => [], codex: () => [] }).join('\n'))
 
   const missing = { ...GOOD }; delete missing['docs/epics/E2.md']
   const m2 = lines2(build(missing), failing)
@@ -834,9 +834,9 @@ clause('CLI check — made no gh, curl or herdr call', !fs.existsSync(trip('gh')
 
 const rStatus = cli('status', good)
 const st = rStatus.stdout.split('\n')
-clause('CLI status — exits 0 on the good tree and reads records: last state line Open listed, a Shipped one not, a .out with no .result pending, one with a .result not',
+clause('CLI status — exits 0 on the good tree and reads records: last state line Open listed, a Shipped one not, a .out with no .result pending, one with a .result by its first line',
   rStatus.status === 0 && st.includes('  docs/records/p3.md: state: Open') && !st.some((l) => l.includes('p1.md')) &&
-  st.includes('  docs/records/gate1.out') && !st.some((l) => l.includes('gate2.out')),
+  st.includes('  docs/records/gate1.out: pending') && st.includes('  docs/records/gate2.out: exit=0'),
   `status ${rStatus.status}: ${rStatus.stdout}${rStatus.stderr}`)
 clause('CLI status — HERDR_ENV unset prints live seats: unknown, and a missing codex state dir prints codex jobs: unknown',
   st.includes('live seats: unknown') && st.includes('codex jobs: unknown'), rStatus.stdout)
@@ -877,6 +877,68 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     !fs.existsSync(path.join(healthy, 'good-2', 'jobs')) && path.basename(good) === 'good', 'fixture')
   const sl = statusLines(build(GOOD), { records: () => null, seats: () => null, codex: () => readCodex(good, jobsIsFile) })
   clause('codex [1: through status, an unreadable jobs directory prints codex jobs: unknown]', sl.includes('codex jobs: unknown'), sl.join(' / '))
+}
+
+// ---------------------------------------------------------------- readRecords: headings, both state-line forms, every gate
+{
+  const root = path.join(tmp, 'records'); const rel = 'recs'
+  writeTree(root, {
+    'recs/alpha.md': '    # an indented line is not a heading\n# Phase alpha\n\nState: Blocked\nnotes\n## Later heading\nState: Open\n-State: Exited\n',
+    'recs/beta.md': '# Phase beta\n\n- **State: Open.** waiting on a ruling\n',
+    'recs/done.md': '# Phase done\n\n- **State: Open.**\n- **State: Exited.** certified\n',
+    'recs/bare.md': 'state: Open\n',
+    'recs/blocked.md': '# Phase blocked\n\nState: Open\nState: Blocked\n',
+    'recs/g-empty.out': 'z', 'recs/g-empty.out.result': '\nexit=4\n',
+    'recs/g-pending.out': 'x', 'recs/g-red.out': 'y', 'recs/g-red.out.result': 'exit=3\ncapture=incomplete\n',
+  })
+  const rec = readRecords(root, rel)
+  const open = rec.open.map((r) => `${r.name}: ${r.line}`)
+  clause('records [1: an open record is named by its first heading, the bold list form of a state line is read, and a dash with no space is not a state line]',
+    open.includes('Phase alpha: State: Open') && open.includes('Phase beta: - **State: Open.** waiting on a ruling'), JSON.stringify(open))
+  clause('records [2: a record whose LAST state line is Exited is not open, in the bold form too, one ending Blocked is, and one with no heading keeps its path]',
+    !open.some((l) => l.includes('Phase done')) && open.includes('Phase blocked: State: Blocked') && open.includes(`${path.join(rel, 'bare.md')}: state: Open`), JSON.stringify(open))
+  clause('records [1: every gate prints, pending or with the first line of its result file, an empty first line included]',
+    JSON.stringify(rec.gates) === JSON.stringify([`${path.join(rel, 'g-empty.out')}: `, `${path.join(rel, 'g-pending.out')}: pending`, `${path.join(rel, 'g-red.out')}: exit=3`]), JSON.stringify(rec.gates))
+  clause('records [3: the fixture carries both state-line forms, a closed record and both kinds of gate on disk]',
+    /^- \*\*State: Open\.\*\*/m.test(fs.readFileSync(path.join(root, 'recs/beta.md'), 'utf8')) && /^ +# /.test(fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8')) && fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8').trimEnd().endsWith('-State: Exited') && fs.readFileSync(path.join(root, 'recs/done.md'), 'utf8').trimEnd().endsWith('certified') &&
+    !fs.existsSync(path.join(root, 'recs/g-pending.out.result')) && fs.readFileSync(path.join(root, 'recs/g-red.out.result'), 'utf8').startsWith('exit=3'), 'fixture')
+  fs.rmSync(path.join(root, 'recs/g-red.out.result')); fs.mkdirSync(path.join(root, 'recs/g-red.out.result'))
+  let threw = false; try { readRecords(root, rel) } catch { threw = true }
+  clause('records [1: a result file that cannot be read throws, printed unknown, never pending]', threw, 'readRecords answered')
+  const sl = statusLines(build(GOOD), { records: () => rec, seats: () => null, codex: () => null })
+  clause('records [1: through status, the block is labelled gates and an open phase prints by its heading]',
+    sl.includes('gates:') && sl.includes(`  ${path.join(rel, 'g-red.out')}: exit=3`) && sl.includes('  Phase alpha: State: Open'), sl.join(' / '))
+}
+
+// ---------------------------------------------------------------- Tracks: seats and codex jobs are read for the repo the project tracks
+{
+  const withTracks = (v) => build(mutate([[P, 'Records: docs/records', `Records: docs/records\nTracks: ${v}`]]))
+  const real = fs.realpathSync(tmp), code = path.join(real, 'code'); fs.mkdirSync(code); fs.symlinkSync(code, path.join(real, 'codelink'))
+  const goodReal = fs.realpathSync(good)
+  const answer = (m, root) => { try { return trackedRoot(root, m) } catch (e) { return `threw ${e.code || e.name}` } }
+  clause('tracks [1: a relative Tracks path resolves against the tracking root, an absolute one stands, and a symlinked one resolves to the real path herdr and codex record]',
+    answer(withTracks('../code'), good) === code && answer(withTracks(code), good) === code && answer(withTracks('../codelink'), good) === code, `${answer(withTracks('../code'), good)} ${answer(withTracks(code), good)}`)
+  clause('tracks [2: with no Tracks line the tracked root is the tracking root]', answer(build(GOOD), good) === goodReal, String(answer(build(GOOD), good)))
+  const bad = ['../nowhere', P].map((v) => String(answer(withTracks(v), good)))
+  clause('tracks [1: a Tracks path that is missing, or is a file, throws, printed unknown]', bad.every((a) => a.startsWith('threw')), bad.join(' '))
+  clause('tracks [3: the fixtures are what they claim]', fs.statSync(code).isDirectory() && fs.lstatSync(path.join(real, 'codelink')).isSymbolicLink() && !fs.existsSync(path.join(tmp, 'nowhere')) && fs.statSync(path.join(good, P)).isFile() && !/^Tracks:/m.test(GOOD[P]), 'fixture')
+  // The codex half end to end: a job for the code root is listed only when the project names it.
+  const sd = path.join(tmp, 'codex-tracks'); const j = path.join(sd, 'code-1', 'jobs'); fs.mkdirSync(j, { recursive: true })
+  fs.writeFileSync(path.join(j, 'a.json'), JSON.stringify({ id: 'job-code', status: 'queued', workspaceRoot: code }))
+  clause('tracks [1: a job whose workspaceRoot is the code root is listed for the tracked root, and not for the tracking root]',
+    JSON.stringify(readCodex(answer(withTracks('../code'), good), sd)) === JSON.stringify(['job-code queued']) && readCodex(good, sd).length === 0, 'readCodex')
+  // The CLI wiring: a tracking tree that names the code root, a HOME holding that job, and a herdr that
+  // answers one pane in each root. Status must list the code root's job and pane and not the other pane.
+  const tracking = path.join(tmp, 'tracking'); writeTree(tracking, mutate([[P, 'Records: docs/records', 'Records: docs/records\nTracks: ../codelink']]))
+  const home2 = path.join(tmp, 'home2'); const j2 = path.join(home2, '.claude', 'plugins', 'data', 'codex-openai-codex', 'state', 'code-1', 'jobs'); fs.mkdirSync(j2, { recursive: true })
+  fs.writeFileSync(path.join(j2, 'a.json'), JSON.stringify({ id: 'job-code', status: 'queued', workspaceRoot: code }))
+  const bin2 = path.join(tmp, 'bin2'); fs.mkdirSync(bin2)
+  const snap = { result: { snapshot: { panes: [{ pane_id: 'w1:pC', cwd: code, agent_status: 'idle', label: 'in-code' }, { pane_id: 'w1:pT', cwd: tracking, agent_status: 'idle', label: 'in-tracking' }] } } }
+  fs.writeFileSync(path.join(bin2, 'herdr'), `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify(snap)}\nJSON\n`); fs.chmodSync(path.join(bin2, 'herdr'), 0o755)
+  const r = spawnSync('node', [script, 'status', tracking], { env: { ...env, PATH: `${bin2}:${process.env.PATH}`, HOME: home2, HERDR_ENV: '1' }, encoding: 'utf8' })
+  const out = r.stdout.split('\n')
+  clause('tracks [1: CLI status reads live seats and codex jobs for the Tracks root, not the tracking root]',
+    out.includes('  w1:pC idle in-code') && !out.some((l) => l.includes('w1:pT')) && out.includes('  job-code queued'), r.stdout + r.stderr)
 }
 
 // ---------------------------------------------------------------- T-counts, the counting table

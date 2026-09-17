@@ -55,6 +55,11 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   echoed['alpha-one']._note = line; echoed['beta-two']._note = line
   const echo = run(echoed, [])
   clause('clause 1c — the same claim in two places trips', echo.length === 1 && echo[0].startsWith('echo:'), JSON.stringify(echo))
+  // Two fenced blocks of the same length are not a claim said twice: each fenced line comes out as a
+  // CUT, so a block of ECHO_MIN_WORDS lines or more used to read as one long "sentence" of nothing.
+  const fence = (word) => ['Intro.', '', '```', ...Array.from({ length: ECHO_MIN_WORDS + 5 }, (_, i) => `${word} ${i}`), '```', ''].join('\n')
+  const fences = run(clone(), [{ name: 'a.md', text: fence('one') }, { name: 'b.md', text: fence('two') }])
+  clause('clause 2fence — two fenced blocks of equal length are not an echo', fences.length === 0, JSON.stringify(fences))
 
   const deadSource = 'The rule that used to live here has since been reworded and no longer reads as it did.'
   const deadCite = '`src.md`\'s "a rule that was deleted from its source and left cited over here" vs the other half of the pair.'

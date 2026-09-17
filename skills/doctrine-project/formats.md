@@ -19,6 +19,7 @@ State: Proposed | Ruled | Done
 Current epic: <epic ID> | none
 Certification target: <commit sha> | none
 Records: <path, relative to repo root>
+Tracks: <optional path, relative to repo root or absolute>
 
 ## End state
 ### <item ID>
@@ -50,6 +51,8 @@ Records: <path, relative to repo root>
 ```
 
 The roster carries no state. An epic's state lives only in its record.
+
+`Tracks:` is optional, for a project whose tracking files live in one repo and whose work happens in another. It names the repo the project tracks, and `status` reads live seats and codex jobs for that repo. Without the line, `status` reads them for the repo that holds the project file. Open phases and gates always come from `Records:`. `check` does not read it, since the path differs from host to host.
 
 An `## Open issues` row's Issue cell is the tracker id, or, for an open item read from a markdown tracker, its `<path>:<line>`. A row is never removed: when its issue or item closes the row stays, so every `destination` ruling keeps the row it names.
 
