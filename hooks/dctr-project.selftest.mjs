@@ -887,16 +887,18 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     'recs/beta.md': '# Phase beta\n\n- **State: Open.** waiting on a ruling\n',
     'recs/done.md': '# Phase done\n\n- **State: Open.**\n- **State: Exited.** certified\n',
     'recs/bare.md': 'state: Open\n',
+    'recs/blocked.md': '# Phase blocked\n\nState: Open\nState: Blocked\n',
+    'recs/g-empty.out': 'z', 'recs/g-empty.out.result': '\nexit=4\n',
     'recs/g-pending.out': 'x', 'recs/g-red.out': 'y', 'recs/g-red.out.result': 'exit=3\ncapture=incomplete\n',
   })
   const rec = readRecords(root, rel)
   const open = rec.open.map((r) => `${r.name}: ${r.line}`)
   clause('records [1: an open record is named by its first heading, the bold list form of a state line is read, and a dash with no space is not a state line]',
     open.includes('Phase alpha: State: Open') && open.includes('Phase beta: - **State: Open.** waiting on a ruling'), JSON.stringify(open))
-  clause('records [2: a record whose LAST state line is Exited is not open, in the bold form too, and one with no heading keeps its path]',
-    !open.some((l) => l.includes('Phase done')) && open.includes(`${path.join(rel, 'bare.md')}: state: Open`), JSON.stringify(open))
-  clause('records [1: every gate prints, pending or with the first line of its result file]',
-    JSON.stringify(rec.gates) === JSON.stringify([`${path.join(rel, 'g-pending.out')}: pending`, `${path.join(rel, 'g-red.out')}: exit=3`]), JSON.stringify(rec.gates))
+  clause('records [2: a record whose LAST state line is Exited is not open, in the bold form too, one ending Blocked is, and one with no heading keeps its path]',
+    !open.some((l) => l.includes('Phase done')) && open.includes('Phase blocked: State: Blocked') && open.includes(`${path.join(rel, 'bare.md')}: state: Open`), JSON.stringify(open))
+  clause('records [1: every gate prints, pending or with the first line of its result file, an empty first line included]',
+    JSON.stringify(rec.gates) === JSON.stringify([`${path.join(rel, 'g-empty.out')}: `, `${path.join(rel, 'g-pending.out')}: pending`, `${path.join(rel, 'g-red.out')}: exit=3`]), JSON.stringify(rec.gates))
   clause('records [3: the fixture carries both state-line forms, a closed record and both kinds of gate on disk]',
     /^- \*\*State: Open\.\*\*/m.test(fs.readFileSync(path.join(root, 'recs/beta.md'), 'utf8')) && /^ +# /.test(fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8')) && fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8').trimEnd().endsWith('-State: Exited') && fs.readFileSync(path.join(root, 'recs/done.md'), 'utf8').trimEnd().endsWith('certified') &&
     !fs.existsSync(path.join(root, 'recs/g-pending.out.result')) && fs.readFileSync(path.join(root, 'recs/g-red.out.result'), 'utf8').startsWith('exit=3'), 'fixture')

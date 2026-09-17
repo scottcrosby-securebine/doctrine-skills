@@ -19,7 +19,7 @@ State: Proposed | Ruled | Done
 Current epic: <epic ID> | none
 Certification target: <commit sha> | none
 Records: <path, relative to repo root>
-Tracks: <optional: the repo this project tracks>
+Tracks: <optional path, relative to repo root or absolute>
 
 ## End state
 ### <item ID>
