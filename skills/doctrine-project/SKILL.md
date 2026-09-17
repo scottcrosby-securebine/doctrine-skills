@@ -45,7 +45,7 @@ Run `node <plugin-root>/hooks/dctr-project.mjs check` as your first action in su
 
 `node <plugin-root>/hooks/dctr-project.mjs status` is read-only and prints the project's progress view. It prints `unknown` for any source it cannot read. Read an `unknown` as "could not look", never as "nothing there". A return it labels obsolete is history, never current evidence.
 
-Name every gate transcript written under `Records:` with the extension `.out`, so its `.out.result` sibling is found. `status` detects pending gates only by that convention.
+Name every gate transcript written under `Records:` with the extension `.out`, so its `.out.result` sibling is found. `status` finds gates only by that convention.
 
 ### States and who moves them
 
