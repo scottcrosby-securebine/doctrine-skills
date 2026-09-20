@@ -67,7 +67,7 @@ The review reads `git diff <fixed-point>...HEAD`. An empty diff fails it, and an
 
 **The record.** The wrapper is silent on where it lives, so the hub's default applies: beside the work in the target repo, excluded from version control and from every reviewer's diff and search, its path named in the report. The requirements file is handed to reviewers by path, so run state goes in a separate file.
 
-**Exit.** The hub's, unchanged: one clean pass of the full gate on one identified revision (or of the smaller gate, for work shown to have small reach), no blocking finding open from any earlier pass, and the real-environment run on record. The round alarm fires at every multiple of 4 rounds that found a blocker, and the time alarm at two hours without a round closing, unless your anchor sets other figures. A phase ends in one of five states, and only Exited is clean.
+**Exit.** The hub's, unchanged: one clean pass of the full gate on one identified revision (or of the smaller gate, where you chose it), no blocking finding open from any earlier pass, and the real-environment run on record. The round alarm fires at every multiple of 4 rounds that found a blocker, and the time alarm at two hours without a round closing, unless your anchor sets other figures. A phase ends in one of five states, and only Exited is clean.
 
 Where a dependency is missing, the slot is filled from the hub's Fallbacks table, the substitution is recorded, and the exit statement names it. The Requirements section below lists each one.
 

@@ -68,7 +68,7 @@ You type: `with the doctrine: /api/records returns 500 when a record has no owne
 
 **Step 1.** The agent asks one direction question: empty as `null` or as an empty string, since callers are aimed differently by the answer. You say `null`. The record opens at `.doctrine/record.md` beside the work, gitignored, and its first part holds your request and your answer verbatim. You gave no figures, so the anchor records the round alarm at 4 and the time budget at two hours.
 
-**Step 2.** One phase. The agent searches for callers of the record serializer and finds the JSON endpoint and a CSV export that share it, so the change has reach and earns the full gate. One builder seat runs in its own worktree.
+**Step 2.** One phase. The agent searches for callers of the record serializer and finds the JSON endpoint and a CSV export that share it, so the change has reach: the agent proposes the full gate with those two consumers as its evidence, and you take it. One builder seat runs in its own worktree.
 
 **Step 3.** The agent reads `package.json`: `"test": "vitest"` is watch mode, so it runs `vitest run` and records the substitution, then `eslint .` because the README lists lint as a gate. Both exit 0. It starts the dev server, requests a record with no owner over the wire, and pastes the response into the record as the real-environment run.
 

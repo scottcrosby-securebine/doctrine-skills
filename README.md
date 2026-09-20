@@ -212,7 +212,8 @@ open.
 
 More time and more tokens than a single pass, so point it at work where being wrong is expensive. No
 mode skips the gate, though `doctrine-gauntlet` asks which of its two modes you want and the hub
-scales the gate down for work shown to have small reach. No token figures appear here: the runs behind
+proposes a smaller gate, with its reach evidence, for work shown to have small reach, which you
+choose or decline. No token figures appear here: the runs behind
 this page did not measure them, and an unsourced number is what this page argues against.
 
 ## Built on other people's work
