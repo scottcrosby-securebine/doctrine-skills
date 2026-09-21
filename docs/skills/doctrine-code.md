@@ -41,7 +41,7 @@ The wrapper maps its flow onto the hub's steps like this.
 
 **Phases and waves** (doctrine step 2): the plan is split into phases, and independent slices run as parallel waves under the hub's isolation rule. Disjoint files are the floor, not the bar. Two agents on separate component files sharing one `.next` directory and one dev port both keep answering 200 while the second build overwrites the first, so each mutating seat gets its own worktree, output directory and port, with dependencies hardlinked rather than symlinked.
 
-**Phase exit** (doctrine steps 3 to 6): native checks, then `matts-code-review`, then the red team, then the simplification review, then the loop to the hub's exit condition. Work the agent shows to have small reach takes the hub's smaller gate instead, native checks and the red team with any blocking finding repaired and re-reviewed, and the record names the gate, the reach evidence that admitted it and the revision that evidence was bound to. The next section says what fills each of those slots.
+**Phase exit** (doctrine steps 3 to 6): native checks, then `matts-code-review`, then the red team, then the simplification review, then the loop to the hub's exit condition. The agent proposes a gate to you rather than taking one, whatever its reach search found; where you choose the hub's smaller gate it is native checks and the red team with any blocking finding repaired and re-reviewed, with the record naming the gate, the reach evidence, the revision that evidence was bound to, and your choice. The next section says what fills each of those slots.
 
 **Delivery** (doctrine step 7): commit, then push and open a PR only where your repo's norm says to or you have said to. Where nothing documents a norm, the agent commits locally and asks. The agent reads that norm before wave 1, not after the commits exist, because what a gate pass reads must already be committed on the branch it reviews.
 
@@ -67,7 +67,7 @@ The review reads `git diff <fixed-point>...HEAD`. An empty diff fails it, and an
 
 **The record.** The wrapper is silent on where it lives, so the hub's default applies: beside the work in the target repo, excluded from version control and from every reviewer's diff and search, its path named in the report. The requirements file is handed to reviewers by path, so run state goes in a separate file.
 
-**Exit.** The hub's, unchanged: one clean pass of the full gate on one identified revision (or of the smaller gate, for work shown to have small reach), no blocking finding open from any earlier pass, and the real-environment run on record. The round alarm fires at every multiple of 4 rounds that found a blocker, and the time alarm at two hours without a round closing, unless your anchor sets other figures. A phase ends in one of five states, and only Exited is clean.
+**Exit.** The hub's, unchanged: one clean pass of the full gate on one identified revision (or of the smaller gate, where you chose it), no blocking finding open from any earlier pass, and the real-environment run on record. The round alarm fires at every multiple of 4 rounds that found a blocker, and the time alarm at two hours without a round closing, unless your anchor sets other figures. A phase ends in one of five states, and only Exited is clean.
 
 Where a dependency is missing, the slot is filled from the hub's Fallbacks table, the substitution is recorded, and the exit statement names it. The Requirements section below lists each one.
 
