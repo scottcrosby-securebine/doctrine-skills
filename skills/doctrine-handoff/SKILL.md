@@ -53,16 +53,21 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 1. **State in one paragraph**: where the work stands, what is live, the immediate next step.
 2. **Where this sits in the plan.** In a tracked repo: the project file's path, the epic, each Done
    means item in play with its obligation exactly as the epic record states it (satisfy, contribute
-   or preserve), the phase and its record's path, and the GitHub issues this work touches. In a repo
-   with no project file: the GitHub issues this work touches, or that none do.
+   or preserve), the phase and its record's path, and the GitHub issues this work touches, each with
+   the plan item it serves or "none". A plan item here is a Done means item, never the phase or the
+   epic that holds it. In a repo with no project file: the GitHub issues this work
+   touches, or that none do.
 3. **Read these, in this order**: each by repo path, never "the newest file in a directory". Every
    path must exist.
-4. **What is open**, grouped under the plan item or issue each serves, one line per item, each
-   pointing at where the detail lives: an issue, the record's line, a spec section. Every task
-   and issue this handoff names appears here by its name or number, under the plan item or issue it
-   serves, or under its own heading when it serves none. That includes an issue already closed or
-   merged, which appears with its status. Carry the detail here: the reasoning, the dead ends, what
-   was tried and why it failed. This is what survives the clear.
+4. **Work by plan item**: one heading for each plan item or issue this work serves, and one heading,
+   "Serves no plan item", for whatever serves none. Every task and issue this handoff names appears
+   under exactly one of them by its name or number, one line each, with its status and a pointer to
+   where the detail lives: an issue, the record's line, a spec section. The heading is the item it
+   serves, and an issue section 2 ties to an item goes under that item. Neither its status nor what
+   kind of problem the line records moves it: an issue closed or merged, a discrepancy between the
+   record and the tree, and a check still owed all stay under the item served. Carry the detail
+   here: the reasoning, the dead ends, what was tried and why it failed. This is what survives the
+   clear.
 5. **Do this first**: exactly one action, the first the next session takes, in one sentence with one
    thing to do. Two things joined by "then", "and" or "before" are two actions, and so is an action
    and its precondition: the precondition is the first action. Everything else due goes in section 4.
