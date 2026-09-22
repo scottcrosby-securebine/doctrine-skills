@@ -99,7 +99,6 @@ Nothing has to be installed. Each external skill this wrapper names has a fallba
 - ponytail, for the simplicity lens and the step 6 review. Without it: a manual YAGNI and dead-code read that reports and changes nothing for the lens, and `/simplify` or a manual pass for step 6.
 - The OpenAI codex plugin, for the different-model red team. Without it: a fresh-context subagent prompted to refute, and the report names it as a same-model substitute.
 - superpowers, for parallel dispatch and worktrees. Without it: parallel Agent tool calls.
-- session-memory, for handoffs. Without it: the agent writes the handoff itself.
 
 Install commands and the full list are in [`docs/requirements.md`](../requirements.md). To watch the finders and reviewers while they run, see [watching a run](../watching-a-run.md).
 

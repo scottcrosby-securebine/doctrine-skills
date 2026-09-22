@@ -231,10 +231,9 @@ Radiant, for parallel dispatch and worktree isolation;
 what nobody asked for;
 [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely),
 Strunk's rules as a skill, by Josh Thomas via softaworks; [OpenAI's codex
-plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team;
-[session-memory](https://github.com/scottcrosby-securebine/session-memory-commands) for handoffs
-between sessions; and the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose
-method `doctrine-gauntlet` builds on. One exception to invoking by name: you install Matt Pocock's
+plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team; and the
+[gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose method
+`doctrine-gauntlet` builds on. One exception to invoking by name: you install Matt Pocock's
 `code-review` yourself as a renamed `matts-code-review` copy, because the original name collides with
 Claude Code's own `/code-review`. This plugin does not bundle it.
 
@@ -246,7 +245,7 @@ needs a browser, and without one its harness refuses to run rather than report a
 Neither degrades into a weaker version of itself.
 
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
-plugin, ponytail, writing-clearly-and-concisely, session-memory, Claude Code's `deep-research`
+plugin, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
 `doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.

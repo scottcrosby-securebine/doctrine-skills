@@ -91,7 +91,6 @@ Nothing must be installed for this skill to run. Each named dependency has a fal
 - The OpenAI codex plugin: the different-model red team. Without it, a same-model fresh context, named as such in the report.
 - superpowers: parallel dispatch and worktrees for the probe wave. Without it, parallel Agent tool calls with each prompt assembled in full.
 - ponytail: the simplification review. Without it, `/simplify` or a manual YAGNI pass.
-- session-memory: handoffs between sessions. Without it, the agent writes the handoff itself.
 - `doctrine-pane` and herdr (0.8.2 or later): the interactive session on a remote host, only when you ask for one. Without them, the step runs non-interactively and is recorded as not run.
 
 Install commands are in [docs/requirements.md](../requirements.md). Watching the probe wave and the seats as they run needs herdr: [watching a run](../watching-a-run.md).

@@ -93,7 +93,6 @@ Nothing has to be installed. Each named dependency has a fallback, and the repor
 - Claude Code's `deep-research` workflow, engine 1. Built into Claude Code on hosts that carry it, nothing to install; it is a workflow, not a skill, so it does not show in a skills list. Without it: a fan-out of parallel web-search agents with per-claim adversarial verification.
 - OpenAI's codex plugin with the Codex CLI logged in, engine 2 and the hub's different-model red team. `/codex:setup` verifies it. Without it: a fresh-context subagent with web access as engine 2, with the report noting reduced engine diversity, and a fresh-context subagent prompted to refute, with the verify-from-source rule in its brief, as the red team.
 - superpowers, for parallel dispatch. Without it: parallel Agent tool calls, each prompt assembled rather than summarised.
-- session-memory, for handoffs between sessions. Without it: the run writes the handoff itself.
 - herdr, optional, gives every subagent a live pane you can read while it works. Nothing depends on it. See [watching a run](../watching-a-run.md).
 
 The install commands and what each absence means are in [docs/requirements.md](../requirements.md). The hub's page, [doctrine.md](doctrine.md), has the full Fallbacks table.
