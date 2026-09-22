@@ -24,12 +24,13 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
   `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` present answers the second. Doing
   this before any move keeps an untracked handoff from being committed there; a handoff already
   tracked stays tracked.
-- **Memory file.** `ls` the root. When there is no `SESSION_MEMORY.md` but there is one other memory
+- **Memory file.** `ls` the root, and keep the current memory file's text as it stands now, before any
+  move or write: step 5 hands it to the red team as the previous file. When there is no `SESSION_MEMORY.md` but there is one other memory
   file (`SESSION_MEMORY-<x>.md`, `session-memory.md`, and the like), `git mv` it (plain `mv` when
   untracked) to `SESSION_MEMORY.md`. When there are several, ask which one is current and stop until
   answered.
-- **Handoffs.** A handoff is a markdown file whose first line is `supersedes: <path|none>`, or the file
-  a memory file's kickoff names. When any sit outside `docs/handoffs/`, move each there with `git mv`
+- **Handoffs.** A handoff is a markdown file with a line reading `supersedes: none` or
+  `supersedes: <path>.md` among its first five lines, or the file a memory file's kickoff names. When any sit outside `docs/handoffs/`, move each there with `git mv`
   (plain `mv` when untracked), keeping its name; when that name is taken there, append `-2`, `-3`.
   Then rewrite every path reference that pointed at an old location, in every handoff under
   `docs/handoffs/` and in the memory file, so every `supersedes:` chain and the kickoff resolve.
@@ -42,7 +43,7 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
 Run the batch in `doctrine-resume` step 2, with its rules for a `gh` error, an empty workflow list, an
 empty `conclusion` and a green build that is not a deploy. Record the **tracked-only** dirty count it
 takes. Add `gh issue list --state open --limit 200 --json number --jq 'length'` for the count, and
-pull titles only for the few you will name.
+pull titles only for the few you will name; when `gh` errors, record that rather than a count.
 
 ## 2. Carry forward
 
@@ -124,11 +125,12 @@ Before verifying, dispatch one fresh-context subagent that did not write the fil
 return: a seat whose return is only an acknowledgement has checked nothing. It is read-only:
 it reports and never edits. Hand it, pasted in full, never as paths:
 
-- the memory file you wrote, the previous memory file (`git show HEAD:SESSION_MEMORY.md`, or none), and
+- the memory file you wrote, the previous memory file as step 0 kept it (or that there was none), and
   the handoff this run wrote, if any
 - step 1's output, and the last state line of the record the handoff names, with its line number
 - the plan: in a repo a doctrine project file tracks, the epic record the handoff's plan section names;
-  otherwise the open issues this work touches (`gh issue view <N>`), or that none do
+  otherwise the open issues this work touches (`gh issue view <N>`), or that none do; when `gh` errors,
+  say so and hand the seat the issue numbers the files name
 - a list of what this session did: its commits, the files it changed, the decisions it made
 
 Ask it two things, and only these. **Correctness**: which line in either file, each Gotcha included, does the
@@ -157,15 +159,15 @@ several-fold, which is why the `grep -v '^??'` is there.
 
 Then land it locally. Name only what this run wrote, edited or moved: drop any path
 `git check-ignore -q <path>` matches and any file you did not touch, and name `.gitignore` only when
-`git diff -- .gitignore` shows your line and nothing else, or the file is untracked and holds nothing
+`git diff HEAD -- .gitignore` shows your line and nothing else, or the file is untracked and holds nothing
 but your line. A pathspec commit takes the worktree file whole, so someone else's edit there would
-land under your message; leave it and say so. A `git mv` has already staged its move, so
-`git add` takes only the new paths, while the commit names both the old and the new path of each move. If nothing remains, say the files are local and
-ignored, and stop.
+land under your message; leave it and say so. A `git mv` has already staged its move, so add nothing for it. A plain `mv` of an untracked file
+needs `git add` of its new path only. The commit's pathspec names every new path, and the old path
+only of a `git mv`, since git never knew an untracked file's old path.
 
 ```bash
-git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of moves>    # new files: a pathspec commit sees only tracked paths
-git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <old and new paths of moves>
+git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of plain mv moves>    # new files: a pathspec commit sees only tracked paths
+git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of all moves> <old paths of git mv moves>
 git status -sb               # [ahead N] is expected: nothing here pushes
 ```
 
