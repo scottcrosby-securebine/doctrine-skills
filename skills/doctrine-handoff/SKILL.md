@@ -37,7 +37,7 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 
 **Header lines**, above section 1:
 
-- `supersedes: <path>`: the handoff the memory file's kickoff names, else `none`. Never the newest
+- `supersedes: <path>`: the current handoff as `doctrine-backup` step 3 defines it, else `none`. Never the newest
   file in the directory, which on a clone is any of them.
 - Then whatever header lines the skill that owns the work requires. A doctrine phase's are given in
   doctrine step 5; carry them in full, including its `invoke doctrine:doctrine first` line while the
@@ -72,10 +72,6 @@ Rules, each one a failure found in a live repo:
 - **No scratchpad path and no plugin-cache version path** (`~/.claude/plugins/cache/<x>/1.53.0/...`):
   the first dies on a bounce, the second on the next version bump, and both were found dead in
   committed files.
-- **Public repo, or a repo an installer's tooling copies whole**: add `docs/handoffs/` to `.gitignore`
-  and say so in the report. `gh repo view --json visibility --jq .visibility` answers the first, and
-  when `gh` errors (no remote, not authenticated) treat the repo as public;
-  `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` present answers the second.
 
 ## 4. Finish with a backup
 

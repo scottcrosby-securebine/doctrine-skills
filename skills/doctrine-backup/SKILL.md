@@ -28,7 +28,12 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
   the path references that pointed at the old locations, so every `supersedes:` chain and the
   kickoff resolve. Change nothing else in their bodies, and move nothing that is not a handoff: run
   records, plans and notes stay where they are, even in the same directory.
-- Say what you moved. When nothing differs, say nothing.
+- **Public repo, or a repo an installer's tooling copies whole**: `docs/handoffs/` is in `.gitignore`;
+  add it when it is not. `gh repo view --json visibility --jq .visibility` answers the first, and when
+  `gh` errors (no remote, not authenticated) treat the repo as public; `.claude-plugin/plugin.json` or
+  `.claude-plugin/marketplace.json` present answers the second. Do this before moving anything, so a
+  moved handoff is never committed where it should be ignored.
+- Say what you moved or ignored. When nothing differs, say nothing.
 
 ## 1. Gather state
 
@@ -42,7 +47,7 @@ pull titles only for the few you will name.
 Before writing, take from the existing file:
 
 - **Every Gotcha still true.** They are the highest-value lines in the file and nothing in step 1 can
-  regenerate them. Add this session's; delete only one you can show is wrong. The file holds three;
+  regenerate them. Add this session's. Check each against the code and the repo: one they contradict is wrong and is deleted, not carried as unverified. The file holds three;
   when more than three are true, the three that save the next session the most stay and the rest go
   into the handoff this run writes. When this run writes none, run `doctrine-handoff` steps 1 to 3 to write one, then continue here.
   A true Gotcha is never dropped.
@@ -84,8 +89,10 @@ doctrine-resume read this section by name and report its absence as a lost hando
 The kickoff's first line is machine-shaped; `doctrine-resume` §1b says what the loaders do with it.
 
 - **`handoff:`** names the current handoff: the file `doctrine-handoff` wrote this run, else the one
-  the previous kickoff named. When the previous kickoff had no machine-shaped first line and no
-  handoff was written, write `handoff: none`, which means no handoff has ever been named.
+  the previous kickoff named. When no kickoff names one (no memory file, or a kickoff with no
+  machine-shaped first line), the current handoff is the one in `docs/handoffs/` that no other
+  handoff's `supersedes:` names; when more than one qualifies, read them and ask the user which is
+  current rather than guess. Only when `docs/handoffs/` holds none, write `handoff: none`.
 - **`state:`** is `open` when a doctrine phase is open, meaning the last state line of the record
   the current handoff's header names reads *Open* or *Blocked*, and `none` otherwise, including
   ordinary unfinished work and a repo with no doctrine at all. Read it from that record now, never
@@ -120,8 +127,8 @@ it reports and never edits. Hand it, pasted in full, never as paths:
 - in a repo a doctrine project file tracks, the epic record the handoff's plan section names
 - a list of what this session did: its commits, the files it changed, the decisions it made
 
-Ask it two things, and only these. **Correctness**: which line in either file does the repo, the
-record or the list contradict? **Completeness**: which part of this session's work, or of the plan
+Ask it two things, and only these. **Correctness**: which line in either file, each Gotcha included, does the
+code, the repo, the record or the list contradict? **Completeness**: which part of this session's work, or of the plan
 items in play, is missing from the handoff, and which unshipped work is missing from the memory
 file? Require each finding to quote the line or name the gap and cite its evidence.
 
