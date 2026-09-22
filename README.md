@@ -1,6 +1,6 @@
 # Doctrine Skills
 
-Ten skills for Claude Code that put an agent's work through a real gate: every check your project
+Fourteen skills for Claude Code that put an agent's work through a real gate: every check your project
 documents, an adversary that did not write the code, and a loop that does not exit until one full
 pass comes back clean.
 
@@ -193,7 +193,7 @@ have not answered, or close a prose job with a list of what it did not fix. The 
 the line always does is distinguish a clean pass from an ending without one, and name what is still
 open.
 
-## The ten skills
+## The fourteen skills
 
 | Skill | Use it for |
 |---|---|
@@ -207,6 +207,10 @@ open.
 | [`doctrine-gauntlet`](docs/skills/doctrine-gauntlet.md) | Web design, judged on the rendered page. |
 | [`doctrine-project`](docs/skills/doctrine-project.md) | Starting or adopting a repo's project and epic tracking, with a checkable meaning of done. |
 | [`doctrine-pane`](docs/skills/doctrine-pane.md) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
+| [`doctrine-backup`](skills/doctrine-backup/SKILL.md) | Saving the session's memory file for the next session, red-teamed before it is done. |
+| [`doctrine-handoff`](skills/doctrine-handoff/SKILL.md) | A detailed handoff under `docs/handoffs/`, tied to the plan, so nothing is lost across a cleared session. |
+| [`doctrine-resume`](skills/doctrine-resume/SKILL.md) | Picking up where the last session left off: state, handoff, drift. |
+| [`doctrine-primer`](skills/doctrine-primer/SKILL.md) | A cold start: everything `doctrine-resume` restores, plus a tour of the project. |
 
 ## What it costs
 
@@ -227,22 +231,21 @@ Radiant, for parallel dispatch and worktree isolation;
 what nobody asked for;
 [writing-clearly-and-concisely](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely),
 Strunk's rules as a skill, by Josh Thomas via softaworks; [OpenAI's codex
-plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team;
-[session-memory](https://github.com/scottcrosby-securebine/session-memory-commands) for handoffs
-between sessions; and the [gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose
-method `doctrine-gauntlet` builds on. One exception to invoking by name: you install Matt Pocock's
+plugin](https://github.com/openai/codex-plugin-cc) for the different-model red team; and the
+[gauntlet loop](https://somethingbig.ai/gauntlet-loop) by Matt Shumer, whose method
+`doctrine-gauntlet` builds on. One exception to invoking by name: you install Matt Pocock's
 `code-review` yourself as a renamed `matts-code-review` copy, because the original name collides with
 Claude Code's own `/code-review`. This plugin does not bundle it.
 
 ## Requirements
 
-**Eight of the ten skills need nothing installed.** `doctrine-gauntlet` judges rendered pages, so it
+**Twelve of the fourteen skills need nothing installed.** `doctrine-gauntlet` judges rendered pages, so it
 needs a browser, and without one its harness refuses to run rather than report a pass.
 `doctrine-pane` needs [herdr](https://herdr.dev) 0.8.2 or later, and outside herdr it refuses.
 Neither degrades into a weaker version of itself.
 
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
-plugin, ponytail, writing-clearly-and-concisely, session-memory, Claude Code's `deep-research`
+plugin, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
 `doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.

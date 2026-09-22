@@ -123,7 +123,6 @@ Nothing must be installed; eight of the ten skills, this one included, run with 
 | Matt's `diagnosing-bugs` | Inline: reproduce first, regression test before the fix |
 | Matt's `implement` / `improve-codebase-architecture` | Read `~/.claude/skills/<name>/SKILL.md` if present, otherwise the wrapper's inline fallback |
 | superpowers | Parallel Agent tool calls, each prompt assembled rather than summarized; the seat pastes its checks and the agent re-runs them; brainstorming becomes an interview with you |
-| session-memory plugin | The agent writes the handoff itself |
 
 `matts-code-review` is Matt Pocock's `code-review` installed by you under a new name, because the original collides with Claude Code's own `/code-review`; this plugin does not bundle it. A seat whose tool is installed but fails is retried once in the round and once more in a later round, then substituted for the rest of the phase, with the retries recorded.
 

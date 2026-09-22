@@ -117,7 +117,6 @@ Nothing has to be installed. The wrapper names these external skills, each with 
 - The OpenAI codex plugin, for the red team. Without it, a fresh-context subagent prompted to refute, and the report says a same-model adversary filled the slot.
 - superpowers, for parallel dispatch. Without it, parallel Agent tool calls, each prompt assembled in full, with check output pasted before any wave is called done.
 - ponytail, for the simplification review. Without it, `/simplify` or a manual YAGNI pass.
-- session-memory, for a handoff between sessions. Without it, the run writes the handoff itself per the hub.
 
 The full install list with what each is for is in [`docs/requirements.md`](../requirements.md). Watching the seats work as they run needs herdr and is described in [watching-a-run](../watching-a-run.md).
 

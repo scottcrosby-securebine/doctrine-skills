@@ -61,8 +61,3 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 - **Claude Design**, on a claude.ai login. A gauntlet run with a bound Design project can push finished sections for you to watch in the Design pane as the run goes. A Design project is a rendering, never a design-system binding.
 
   Without it: git is the source of record either way, and the run says the sync was skipped and delivers from the repo.
-
-- [session-memory](https://github.com/scottcrosby-securebine/session-memory-commands): `/BackupMemory`, `/LoadMemory`, `/primer`. The hub's step 5 names the backup command as the writer of a phase's handoff document and the loaders as what acts on its first line.
-
-  Without it: the hub says where to write the handoff yourself and what its header lines carry, and the handoff carries an `invoke doctrine:doctrine first` header line, since no loader is there to do it by rule.
-

@@ -123,7 +123,6 @@ Nothing here needs to be installed for the wrapper to run. Each external skill i
 - **superpowers**: for brainstorming, parallel dispatch and worktrees. Without it, the agent interviews you itself, dispatches parallel Agent tool calls, and uses `git worktree add`.
 - **codex plugin**: the different-model red team. Without it, a fresh-context subagent prompted to refute the work, and the report names it as same-model.
 - **ponytail**: without it, `/simplify` or a manual YAGNI pass.
-- **session-memory**: for handoffs. Without it, the agent writes the handoff itself.
 - **herdr**: optional, for watching the seats in panes. See [watching a run](../watching-a-run.md).
 
 ## Red flags
