@@ -58,10 +58,14 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 3. **Read these, in this order**: each by repo path, never "the newest file in a directory". Every
    path must exist.
 4. **What is open**, grouped under the plan item or issue each serves, one line per item, each
-   pointing at where the detail lives: an issue, the record's line, a spec section. Carry the detail
-   here: the reasoning, the dead ends, what was tried and why it failed. This is what survives the
-   clear.
-5. **Do this first**: the single next action.
+   pointing at where the detail lives: an issue, the record's line, a spec section. Every task
+   and issue this handoff names appears here by its name or number, under the plan item or issue it
+   serves, or under its own heading when it serves none. That includes an issue already closed or
+   merged, which appears with its status. Carry the detail here: the reasoning, the dead ends, what
+   was tried and why it failed. This is what survives the clear.
+5. **Do this first**: exactly one action, the first the next session takes, in one sentence with one
+   thing to do. Two things joined by "then", "and" or "before" are two actions, and so is an action
+   and its precondition: the precondition is the first action. Everything else due goes in section 4.
 6. **Gotchas this phase produced**: the ones the memory file will not carry, including any true
    Gotcha its cap moved here.
 7. **Suggested skills**: which to invoke, and which first.
