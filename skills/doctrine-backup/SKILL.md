@@ -18,21 +18,23 @@ correctness: a line the repo, the record or this session shows is wrong.
 The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every handoff under
 `docs/handoffs/`. Before anything else, bring a repo that differs to it:
 
+- **Ignore first.** In a public repo, or one an installer's tooling copies whole, `docs/handoffs/` is
+  in `.gitignore`; add it when it is not. `gh repo view --json visibility --jq .visibility` answers
+  the first, and when `gh` errors (no remote, not authenticated) treat the repo as public;
+  `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` present answers the second. Doing
+  this before any move keeps an untracked handoff from being committed there; a handoff already
+  tracked stays tracked.
 - **Memory file.** `ls` the root. When there is no `SESSION_MEMORY.md` but there is one other memory
   file (`SESSION_MEMORY-<x>.md`, `session-memory.md`, and the like), `git mv` it (plain `mv` when
   untracked) to `SESSION_MEMORY.md`. When there are several, ask which one is current and stop until
   answered.
-- **Handoffs.** A handoff is a file carrying a `supersedes:` header line, or one a memory file's
-  kickoff names. When any sit outside `docs/handoffs/`, move each there with `git mv` (plain `mv`
-  when untracked), keeping its name, then rewrite, in the moved files and in the memory file, only
-  the path references that pointed at the old locations, so every `supersedes:` chain and the
-  kickoff resolve. Change nothing else in their bodies, and move nothing that is not a handoff: run
-  records, plans and notes stay where they are, even in the same directory.
-- **Public repo, or a repo an installer's tooling copies whole**: `docs/handoffs/` is in `.gitignore`;
-  add it when it is not. `gh repo view --json visibility --jq .visibility` answers the first, and when
-  `gh` errors (no remote, not authenticated) treat the repo as public; `.claude-plugin/plugin.json` or
-  `.claude-plugin/marketplace.json` present answers the second. Do this before moving anything, so a
-  moved handoff is never committed where it should be ignored.
+- **Handoffs.** A handoff is a markdown file whose first line is `supersedes: <path|none>`, or the file
+  a memory file's kickoff names. When any sit outside `docs/handoffs/`, move each there with `git mv`
+  (plain `mv` when untracked), keeping its name; when that name is taken there, append `-2`, `-3`.
+  Then rewrite every path reference that pointed at an old location, in every handoff under
+  `docs/handoffs/` and in the memory file, so every `supersedes:` chain and the kickoff resolve.
+  Change nothing else in their bodies, and move nothing that is not a handoff: run records, plans and
+  notes stay where they are, even in the same directory.
 - Say what you moved or ignored. When nothing differs, say nothing.
 
 ## 1. Gather state
@@ -49,7 +51,7 @@ Before writing, take from the existing file:
 - **Every Gotcha still true.** They are the highest-value lines in the file and nothing in step 1 can
   regenerate them. Add this session's. Check each against the code and the repo: one they contradict is wrong and is deleted, not carried as unverified. The file holds three;
   when more than three are true, the three that save the next session the most stay and the rest go
-  into the handoff this run writes. When this run writes none, run `doctrine-handoff` steps 1 to 3 to write one, then continue here.
+  into the handoff this run writes, appended to its Gotchas section when it is already written. When this run writes none, run `doctrine-handoff` steps 1 to 3 to write one, then continue here.
   A true Gotcha is never dropped.
 - **Every 🔴 row you cannot disprove with a command**, whether or not a phase owns it. "Merged but
   undeployed" survives a green build and a merged PR: only an actual deploy clears it.
@@ -118,19 +120,21 @@ lives in the issue and the handoff; history lives in git. Point at them.
 
 ## 5. Red-team, then fix
 
-Before verifying, dispatch one seat that did not write the files: `codex:codex-rescue` through the
-Agent tool where it is in your subagent list, otherwise a fresh-context subagent. It is read-only:
+Before verifying, dispatch one fresh-context subagent that did not write the files, and wait for its
+return: a seat whose return is only an acknowledgement has checked nothing. It is read-only:
 it reports and never edits. Hand it, pasted in full, never as paths:
 
-- the memory file you wrote, and the handoff this run wrote, if any
+- the memory file you wrote, the previous memory file (`git show HEAD:SESSION_MEMORY.md`, or none), and
+  the handoff this run wrote, if any
 - step 1's output, and the last state line of the record the handoff names, with its line number
-- in a repo a doctrine project file tracks, the epic record the handoff's plan section names
+- the plan: in a repo a doctrine project file tracks, the epic record the handoff's plan section names;
+  otherwise the open issues this work touches (`gh issue view <N>`), or that none do
 - a list of what this session did: its commits, the files it changed, the decisions it made
 
 Ask it two things, and only these. **Correctness**: which line in either file, each Gotcha included, does the
 code, the repo, the record or the list contradict? **Completeness**: which part of this session's work, or of the plan
-items in play, is missing from the handoff, and which unshipped work is missing from the memory
-file? Require each finding to quote the line or name the gap and cite its evidence.
+items in play, is missing from the handoff, and which unshipped work, or which context the previous memory file
+held that is still true and now sits nowhere, is missing from the memory file? Require each finding to quote the line or name the gap and cite its evidence.
 
 Verify each finding against the source, then fix what it shows and nothing else: no rewording, no
 trimming, no removal of detail the next session can use. Say what the seat found and what you fixed,
@@ -155,12 +159,13 @@ Then land it locally. Name only what this run wrote, edited or moved: drop any p
 `git check-ignore -q <path>` matches and any file you did not touch, and name `.gitignore` only when
 `git diff -- .gitignore` shows your line and nothing else, or the file is untracked and holds nothing
 but your line. A pathspec commit takes the worktree file whole, so someone else's edit there would
-land under your message; leave it and say so. If nothing remains, say the files are local and
+land under your message; leave it and say so. A `git mv` has already staged its move, so
+`git add` takes only the new paths, while the commit names both the old and the new path of each move. If nothing remains, say the files are local and
 ignored, and stop.
 
 ```bash
-git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <moved paths>    # new files: a pathspec commit sees only tracked paths
-git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <moved paths>
+git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of moves>    # new files: a pathspec commit sees only tracked paths
+git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <old and new paths of moves>
 git status -sb               # [ahead N] is expected: nothing here pushes
 ```
 

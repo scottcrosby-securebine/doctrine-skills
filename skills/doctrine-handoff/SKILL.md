@@ -37,7 +37,8 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 
 **Header lines**, above section 1:
 
-- `supersedes: <path>`: the current handoff as `doctrine-backup` step 3 defines it, else `none`. Never the newest
+- `supersedes: <path>`: resolved before you create this file, the current handoff as `doctrine-backup`
+  step 3 defines it, else `none`. It is never this file. Never the newest
   file in the directory, which on a clone is any of them.
 - Then whatever header lines the skill that owns the work requires. A doctrine phase's are given in
   doctrine step 5; carry them in full, including its `invoke doctrine:doctrine first` line while the

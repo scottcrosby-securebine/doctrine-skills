@@ -18,10 +18,11 @@ issue-tracking and session-completion norms live. Read it if present.
 Run `doctrine-resume` steps 1 to 4 as written there: read the memory file, act on the kickoff's first
 line, check drift, hydrate Active Work, and produce its report. Put that report at the very top of
 your reply, ahead of everything else; the kickoff in it is a live instruction from the prior session,
-not history. Those steps are written there once and not restated here.
+not history. Where it finds drift, offer its step 5 resync. Those steps are written there once and not restated here.
 
 Where `doctrine-resume` would stop because no memory file exists, do not stop: say there is none,
-offer `doctrine-backup` at session end, and continue to step 2. Where the file exists but its
+offer `doctrine-backup` at session end, run `doctrine-resume` step 2's batch anyway for the
+branch, dirty work, PRs and build, and continue to step 2. Where the file exists but its
 `## Next Session Kickoff` is absent, say so plainly: `doctrine-backup` is contracted to write it, so
 its absence means the last handoff was lost.
 
