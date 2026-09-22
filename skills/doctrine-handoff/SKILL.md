@@ -58,10 +58,10 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 3. **Read these, in this order**: each by repo path, never "the newest file in a directory". Every
    path must exist.
 4. **What is open**, grouped under the plan item or issue each serves, one line per item, each
-   pointing at where the detail lives: an issue, the record's line, a spec section. Every issue
-   section 2 names appears here, under the item it serves, or under its own heading when it serves
-   none. Carry the detail here: the reasoning, the dead ends, what was tried and why it failed. This
-   is what survives the clear.
+   pointing at where the detail lives: an issue, the record's line, a spec section. Every task
+   and issue this handoff names appears here, under the item it serves, or under its own heading
+   when it serves none. Carry the detail here: the reasoning, the dead ends, what was tried and why
+   it failed. This is what survives the clear.
 5. **Do this first**: exactly one action, the first the next session takes. When several are due,
    name the first here and leave the rest in section 4.
 6. **Gotchas this phase produced**: the ones the memory file will not carry, including any true
