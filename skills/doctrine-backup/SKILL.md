@@ -164,10 +164,10 @@ but your line. A pathspec commit takes the worktree file whole, so someone else'
 land under your message; leave it and say so. A `git mv` has already staged its move, so add nothing for it. A plain `mv` of an untracked file
 needs `git add` of its new path only. The commit's pathspec names every new path, and the old path
 only of a `git mv`, since git never knew an untracked file's old path, and every handoff step 0
-rewrote in place. If nothing remains to name, say the files are local and ignored, and stop.
+rewrote in place. If nothing remains to name, say which files are ignored and which you left for their owner, and stop.
 
 ```bash
-git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of plain mv moves>    # new files: a pathspec commit sees only tracked paths
+git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of plain mv moves> <handoffs rewritten in place>    # new files: a pathspec commit sees only tracked paths
 git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of all moves> <old paths of git mv moves> <handoffs rewritten in place>
 git status -sb               # [ahead N] is expected: nothing here pushes
 ```
