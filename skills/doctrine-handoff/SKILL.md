@@ -62,8 +62,9 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
    and issue this handoff names appears here, under the item it serves, or under its own heading
    when it serves none. Carry the detail here: the reasoning, the dead ends, what was tried and why
    it failed. This is what survives the clear.
-5. **Do this first**: exactly one action, the first the next session takes. When several are due,
-   name the first here and leave the rest in section 4.
+5. **Do this first**: exactly one action, the first the next session takes, in one sentence with one
+   thing to do. Two things joined by "then", "and" or "before" are two actions, and so is an action
+   and its precondition: the precondition is the first action. Everything else due goes in section 4.
 6. **Gotchas this phase produced**: the ones the memory file will not carry, including any true
    Gotcha its cap moved here.
 7. **Suggested skills**: which to invoke, and which first.
