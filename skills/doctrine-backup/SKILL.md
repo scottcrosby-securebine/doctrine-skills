@@ -42,8 +42,8 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
 
 Run the batch in `doctrine-resume` step 2, with its rules for a `gh` error, an empty workflow list, an
 empty `conclusion` and a green build that is not a deploy. Record the **tracked-only** dirty count it
-takes. Add `gh issue list --state open --limit 200 --json number --jq 'length'` for the count, and
-pull titles only for the few you will name; when `gh` errors, record that rather than a count.
+takes. Add `gh issue list --state open --limit 200 --json number --jq 'length'` for the count, written as
+"200+" when it returns 200, since the limit caps the fetch, and pull titles only for the few you will name; when `gh` errors, record that rather than a count.
 
 ## 2. Carry forward
 
@@ -163,11 +163,12 @@ Then land it locally. Name only what this run wrote, edited or moved: drop any p
 but your line. A pathspec commit takes the worktree file whole, so someone else's edit there would
 land under your message; leave it and say so. A `git mv` has already staged its move, so add nothing for it. A plain `mv` of an untracked file
 needs `git add` of its new path only. The commit's pathspec names every new path, and the old path
-only of a `git mv`, since git never knew an untracked file's old path.
+only of a `git mv`, since git never knew an untracked file's old path, and every handoff step 0
+rewrote in place. If nothing remains to name, say the files are local and ignored, and stop.
 
 ```bash
 git add -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of plain mv moves>    # new files: a pathspec commit sees only tracked paths
-git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of all moves> <old paths of git mv moves>
+git commit -m "docs(session): <what changed>" -- SESSION_MEMORY.md docs/handoffs/<file>.md .gitignore <new paths of all moves> <old paths of git mv moves> <handoffs rewritten in place>
 git status -sb               # [ahead N] is expected: nothing here pushes
 ```
 

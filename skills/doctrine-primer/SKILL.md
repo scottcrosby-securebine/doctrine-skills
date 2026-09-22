@@ -32,7 +32,8 @@ Discover the project's shape; never assume `src/`. Batch these, then read what t
 
 - `ls` the root, then `ls` the two or three real source directories it shows
 - `command -v tree` before reaching for a tree; on many hosts it is absent
-- `gh issue list --state open --limit 200 --json number --jq 'length'` for the count. Only pull titles
+- `gh issue list --state open --limit 200 --json number --jq 'length'` for the count, written as "200+"
+  when it returns 200, since the limit caps the fetch. Only pull titles
   for the handful the kickoff names: some repos carry thousands of open issues.
 
 Then read `README.md` if it exists, and any `docs/` index: the root README is usually the product, the
