@@ -54,7 +54,8 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 2. **Where this sits in the plan.** In a tracked repo: the project file's path, the epic, each Done
    means item in play with its obligation exactly as the epic record states it (satisfy, contribute
    or preserve), the phase and its record's path, and the GitHub issues this work touches, each with
-   the plan item it serves or "none". In a repo with no project file: the GitHub issues this work
+   the plan item it serves or "none". A plan item here is a Done means item, never the phase or the
+   epic that holds it. In a repo with no project file: the GitHub issues this work
    touches, or that none do.
 3. **Read these, in this order**: each by repo path, never "the newest file in a directory". Every
    path must exist.
