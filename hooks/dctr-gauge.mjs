@@ -11,12 +11,13 @@
 //
 // A seat's batch stands down before anything is read or written (E8-D21). It always exits 0 and calls no herdr
 // and nothing on the network (SC1). Every reason it stood down goes to stderr and the session's hook.log. The
-// decisions are pure, in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads and writes around them.
+// decisions are pure, in dctr-lib.mjs and dctr-record.mjs; this file holds the reads and writes around them and the
+// facts read straight off the record and the latch that those decisions take as input.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  gaugeSkip, followKickoff, autoCycleOn, readUsage, resolveTier, gaugeStep, gaugeContext, HANDOFF_COST_TOKENS,
+  gaugeSkip, followKickoff, autoCycleOn, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
 } from './dctr-lib.mjs'
 import { hookLog, stateDir, standDown, writeMarker } from './dctr-state.mjs'
 import { readBridge } from './dctr-bridge.mjs'
@@ -65,17 +66,15 @@ try {
 
   const latchFile = path.join(stateDir(sessionId), 'gauge.json')
   let latch = null
-  try { latch = JSON.parse(fs.readFileSync(latchFile, 'utf8')) } catch { /* no latch yet: a fresh session */ }
-  if (latch?.session_id !== sessionId) latch = null
+  try { latch = ownLatch(JSON.parse(fs.readFileSync(latchFile, 'utf8')), sessionId) } catch { /* no latch yet: a fresh session */ }
   const window = readBridge(sessionId)?.window ?? null
   const reading = readTranscript(payload.transcript_path, latch?.lastUuid ?? null)
 
-  // The floor is the session's first reading plus the handoff cost (SC5); on the first batch that reading is this one.
-  const firstUsed = latch?.firstUsed ?? (reading.unknown ? null : reading.used)
+  const firstUsed = firstUsedOf(latch, reading)
   const resolved = resolveTier({ tierText: cycle.tier, window, firstUsed, handoffCost: HANDOFF_COST_TOKENS })
   // The record's own warned line for this session counts as warned, so a latch write that failed never repeats it.
   const warnedInRecord = record.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId)
-  const stepped = gaugeStep({ latch, reading, tier: resolved.tier, tierText: resolved.tierText, window, sessionId, warnedInRecord })
+  const stepped = gaugeStep({ latch, reading, tier: resolved.tier, tierText: resolved.tierText, sessionId, warnedInRecord })
   const facts = [...resolved.errors, ...stepped.facts]
 
   if (stepped.warn) {

@@ -2,7 +2,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { wrapperValue, parseRecord } from './dctr-record.mjs'
 
-// Shared decisions for doctrine's herdr seat visibility (issue #17).
+// Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
+// (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
 //
 // Everything here is a pure function of a hook payload plus observed state. No herdr, no
 // filesystem, no clock. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
@@ -760,9 +761,15 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
  * carries an `auto-cycle: warned` line for this session id; it counts as warned whatever the latch says, so a latch
  * write that failed never produces a second warning or a second line. Pure: the caller writes the latch it returns.
  */
+/** The latch as this session's own, or null: a latch left by another session id in the same directory is nobody's. */
+export const ownLatch = (latch, sessionId) => (latch && latch.session_id === sessionId ? latch : null)
+
+/** The session's first reading (SC5): the latch's where it has one, else this batch's reading, else null while unknown. */
+export const firstUsedOf = (latch, reading) => latch?.firstUsed ?? (reading?.unknown ? null : reading?.used ?? null)
+
 export function gaugeStep({ latch, reading, tier, tierText, sessionId, warnedInRecord = false }) {
-  const l = latch && latch.session_id === sessionId ? { ...latch }
-    : { session_id: sessionId, firstUsed: null, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }
+  const own = ownLatch(latch, sessionId)
+  const l = own ? { ...own } : { session_id: sessionId, firstUsed: null, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }
   if (warnedInRecord) l.warned = true
   const facts = []
   let crossed = false, label = null
@@ -773,7 +780,7 @@ export function gaugeStep({ latch, reading, tier, tierText, sessionId, warnedInR
   } else {
     l.unknownRun = 0
     l.lastUuid = reading.uuid
-    if (l.firstUsed === null) l.firstUsed = reading.used
+    l.firstUsed = firstUsedOf(l, reading)
     if (tier !== null && tier !== undefined && reading.used >= tier) { crossed = true; label = tierText }
   }
   const warn = crossed && !l.warned

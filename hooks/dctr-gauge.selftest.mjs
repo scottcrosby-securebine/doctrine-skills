@@ -43,6 +43,7 @@ const lines = (...ls) => ls.join('\n') + '\n'
 
 const REPEAT = lines(user(), entry(50000, { uuid: 'r1' }), entry(50000, { uuid: 'r2' }), entry(50000, { uuid: 'r3' }))
 const APIERR = lines(entry(70000, { uuid: 'real' }), user(), entry(90000, { uuid: 'err', apiError: true }))
+const APIERR0 = lines(entry(70000, { uuid: 'real-z' }), user(), entry(0, { uuid: 'err-z', apiError: true }))
 const ZERO = lines(entry(70000, { uuid: 'real0' }), entry(0, { uuid: 'zero' }))
 const SIDE = lines(entry(30000, { uuid: 'main' }), entry(90000, { uuid: 'side', side: true }))
 const TRUNC = lines(user(), entry(60000, { uuid: 't1' }).slice(0, 80))
@@ -77,6 +78,8 @@ clause('clause 1g — readUsage: repeated-usage entries of one response are read
   ru(REPEAT).used === 50000 && ru(REPEAT).uuid === 'r3' && typeof ru(REPEAT).at === 'string', JSON.stringify(ru(REPEAT)))
 clause('clause 1h — readUsage: an API-error entry with nonzero usage after a real one reports the real one',
   ru(APIERR).used === 70000 && ru(APIERR).uuid === 'real', JSON.stringify(ru(APIERR)))
+clause('clause 1h2 — readUsage: an API-error entry with zero usage after a real one reports the real one (E8-D10)',
+  ru(APIERR0).used === 70000 && ru(APIERR0).uuid === 'real-z', JSON.stringify(ru(APIERR0)))
 clause('clause 1i — readUsage: a zero-total entry and a sidechain entry are skipped',
   ru(ZERO).used === 70000 && ru(SIDE).used === 30000, `${JSON.stringify(ru(ZERO))} ${JSON.stringify(ru(SIDE))}`)
 
@@ -215,14 +218,16 @@ clause('clause 2d — a seat\'s batch past the tier on an unwarned parent: nothi
   /gauge skipped — \S/.test(s1.err) && isWarning(admitted) && warnedLines(par).length === 1,
   `s1 ${s1.out} ${s1.err} s2 ${s2.out} admitted ${admitted.out}`)
 
-const next = fixture('next')
+// The same record and the same transcript path as sess-1, whose warned line the record already carries: a new
+// session id starts its own latch and warns in its own right, and the record then holds one line per session.
 bridge('sess-2')
-write(next.transcript, lines(entry(10000)))
-run(next, 'sess-2')
-fs.appendFileSync(next.transcript, lines(user(), entry(125000)))
-const n2 = run(next, 'sess-2')
-clause('clause 2e — a new session id warns once in its own right, beside the first session\'s line (E8-D4)',
-  isWarning(n2) && warnedLines(next).length === 1 && warnedLines(next)[0] === '- auto-cycle: warned sess-2 120000', `out ${n2.out} err ${n2.err}`)
+write(main.transcript, lines(entry(10000)))
+run(main, 'sess-2')
+fs.appendFileSync(main.transcript, lines(user(), entry(125000)))
+const n2 = run(main, 'sess-2')
+clause('clause 2e — a new session id on a record already carrying the first session\'s warned line warns once in its own right, and the record holds one line per session (E8-D4)',
+  isWarning(n2) && JSON.stringify(warnedLines(main)) === JSON.stringify(['- auto-cycle: warned sess-1 120000', '- auto-cycle: warned sess-2 120000']) && latchOf('sess-2')?.warned === true,
+  `out ${n2.out} err ${n2.err} lines ${JSON.stringify(warnedLines(main))}`)
 
 // auto-cycle off, and the other stand-downs.
 const off = fixture('off', { cycle: ['- auto-cycle: on cap 10 tier 1000', '- auto-cycle: off'] })
@@ -270,7 +275,7 @@ fs.appendFileSync(low.transcript, lines(entry(floor - 1)))
 const lb = run(low, 'sess-l')
 fs.appendFileSync(low.transcript, lines(entry(floor + 1)))
 const lc = run(low, 'sess-l')
-clause('clause 2m — a tier below the floor: the named error, no warning under the floor, the warning at it, the warned line naming the floor (E8-D11)',
+clause('clause 2m — a tier below the floor: the named error, no warning under the floor, the warning above it, the warned line naming the floor (E8-D11)',
   la.ctx.includes(`tier 1000 below the floor ${floor}, raised to the floor`) && !isWarning(la) && !isWarning(lb) && isWarning(lc) &&
   lc.ctx.includes(`tier 1000 below the floor ${floor}`) && warnedLines(low)[0] === `- auto-cycle: warned sess-l ${floor}`,
   `${la.out} | ${lb.out} | ${lc.out}`)
@@ -312,7 +317,7 @@ try { fs.accessSync(ro.recordAbs, fs.constants.W_OK) } catch { roBlocked = true 
 const rob = run(ro, 'sess-ro')
 fs.chmodSync(ro.recordAbs, 0o644)
 clause('clause 2q — a record that cannot be appended to: the warning still goes out and a fact names the failure (SC9)',
-  roBlocked && isWarning(rob) && /warned line could not be appended to \S+ \(EACCES\)/.test(rob.ctx) && warnedLines(ro).length === 0,
+  roBlocked && isWarning(rob) && /warned line could not be appended to .+ \(EACCES\)/.test(rob.ctx) && warnedLines(ro).length === 0,
   `blocked ${roBlocked} out ${rob.out} err ${rob.err}`)
 
 // E8-D4: the record's own warned line for this session holds when the latch write failed.
@@ -329,7 +334,7 @@ fs.appendFileSync(lro.transcript, lines(user(), entry(140000)))
 const lrc = run(lro, 'sess-lro')
 fs.chmodSync(stateDir('sess-lro'), 0o755)
 clause('clause 2r — a latch write that failed: the next batch past the tier reads the record\'s warned line, so no second warning and no second line (E8-D4)',
-  lroBlocked && isWarning(lrb) && /latch \S+ could not be written/.test(lrb.ctx) && lroLatch?.warned === false &&
+  lroBlocked && isWarning(lrb) && /latch .+ could not be written/.test(lrb.ctx) && lroLatch?.warned === false &&
   !isWarning(lrc) && warnedLines(lro).length === 1,
   `blocked ${lroBlocked} latch ${JSON.stringify(lroLatch)} b ${lrb.out} c ${lrc.out} lines ${JSON.stringify(warnedLines(lro))}`)
 
@@ -342,6 +347,15 @@ fs.appendFileSync(big.transcript, lines(user(), entry(130000, { uuid: 'before-bi
 const bgb = run(big, 'sess-big')
 clause('clause 2s — a 600 KB tool result after the last usage entry: the entry is still read and the crossing warns (E8-D10)',
   isWarning(bgb) && bgb.ctx.includes('130000') && latchOf('sess-big')?.lastUuid === 'before-big', `out ${bgb.out.slice(0, 400)} err ${bgb.err}`)
+
+const huge = fixture('huge-tail', { cycle: ['- auto-cycle: on cap 10 tier 120000'] })
+bridge('sess-huge'); write(huge.transcript, lines(entry(10000)))
+run(huge, 'sess-huge')
+const HUGE_RESULT = JSON.stringify({ type: 'user', uuid: 'huge', isSidechain: false, message: { role: 'user', content: [{ type: 'tool_result', content: 'y'.repeat(2200 * 1024) }] } })
+fs.appendFileSync(huge.transcript, lines(user(), entry(130000, { uuid: 'before-huge' }), HUGE_RESULT))
+const hgb = run(huge, 'sess-huge')
+clause('clause 2s2 — a tool result past the second chunk after the last usage entry: the whole file is read, the entry found and the crossing warns (E8-D10)',
+  isWarning(hgb) && hgb.ctx.includes('130000') && latchOf('sess-huge')?.lastUuid === 'before-huge', `out ${hgb.out.slice(0, 400)} err ${hgb.err}`)
 
 clause('clause 2p — the tripwire herdr on PATH never fired across every run (SC1)', !fs.existsSync(tripwire), 'the gauge exec\'d herdr')
 
@@ -362,7 +376,7 @@ clause('clause 3c — without the gauge: each truncated line fails to parse, and
 const lastOnOff = (f) => fs.readFileSync(f.recordAbs, 'utf8').split('\n').filter((l) => /^- auto-cycle: (on|off)\b/.test(l)).at(-1) || null
 clause('clause 3d — without the gauge: the off fixture ends on off after an on line, the none fixture has no line, the others end on on',
   lastOnOff(off) === '- auto-cycle: off' && /auto-cycle: on/.test(fs.readFileSync(off.recordAbs, 'utf8')) && lastOnOff(none) === null &&
-  [main, next, exited, unk, mal, hi, low].every((f) => /^- auto-cycle: on /.test(lastOnOff(f))) &&
+  [main, exited, unk, mal, hi, low].every((f) => /^- auto-cycle: on /.test(lastOnOff(f))) &&
   !fs.existsSync(path.join(noMem.proj, 'SESSION_MEMORY.md')) && /State: Exited/.test(fs.readFileSync(exited.recordAbs, 'utf8')),
   'a record fixture does not carry the auto-cycle or state line its clause relies on')
 clause('clause 3e — without the gauge: the unknown fixture has no transcript, no-bridge has no bridge file, other-bridge names another session',
@@ -376,11 +390,19 @@ clause('clause 3f — without the gauge: the floor fixtures\' on lines carry a t
     return onTier(low) === '1000' && onTier(lowEq) === '1000' && Number(onTier(low)) < fl && fl === floor && eu[0] === lu[0] &&
       JSON.stringify(lu) === JSON.stringify([lu[0], fl - 1, fl + 1]) && JSON.stringify(eu) === JSON.stringify([eu[0], fl - 1, fl]) })(),
   `low ${onTier(low)} ${JSON.stringify(usages(low))} low-eq ${onTier(lowEq)} ${JSON.stringify(usages(lowEq))}`)
+clause('clause 3b2 — without the gauge: the zero-usage API-error fixture ends in an entry flagged isApiErrorMessage whose three input counts total zero, after a real one (E8-D10)',
+  (() => { const es = parsed(APIERR0).filter((e) => e?.type === 'assistant'); return es.length === 2 && es[1].isApiErrorMessage === true && tot(es[1]) === 0 && tot(es[0]) === 70000 })(),
+  'APIERR0 does not carry a zero-usage API-error entry after a real one')
 clause('clause 3h — without the gauge: the big-tail transcript\'s last 512 KB holds no assistant entry with usage, and the whole file does',
   (() => { const buf = fs.readFileSync(big.transcript); const t = buf.subarray(buf.length - 512 * 1024).toString('utf8')
     const has = (x) => parsed(x).some((e) => e?.type === 'assistant' && e.message?.usage)
     return !has(t.slice(t.indexOf('\n') + 1)) && has(buf.toString('utf8')) })(),
   'the big-tail fixture does not push its last usage entry out of the first chunk')
+clause('clause 3h2 — without the gauge: the huge-tail transcript\'s last 2 MB holds no assistant entry with usage, and the whole file does',
+  (() => { const buf = fs.readFileSync(huge.transcript); const t = buf.subarray(buf.length - 2 * 1024 * 1024).toString('utf8')
+    const has = (x) => parsed(x).some((e) => e?.type === 'assistant' && e.message?.usage)
+    return !has(t.slice(t.indexOf('\n') + 1)) && has(buf.toString('utf8')) })(),
+  'the huge-tail fixture does not push its last usage entry out of the second chunk')
 clause('clause 3g — without the gauge: bridgeFile is the session\'s state dir plus bridge.json (SC6)',
   bridgeFile('sess-x') === path.join(stateDir('sess-x'), 'bridge.json'), bridgeFile('sess-x'))
 
