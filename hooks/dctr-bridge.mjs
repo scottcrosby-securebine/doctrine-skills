@@ -46,12 +46,13 @@ export function bridgeRecord(stdinJson) {
 
 const shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`
 
-/** settings with statusLine pointed at the copy. An existing command is wrapped as one quoted
- *  argument, so a compound command (`a; b`, `a && b`) runs whole inside the bridge with its stdin.
+/** settings with statusLine pointed at the copy. The copy's path and an existing command are each
+ *  single-quoted for sh, so a config dir holding `$`, `"`, backticks or spaces reaches the copy as
+ *  named, and a compound command (`a; b`, `a && b`) runs whole inside the bridge with its stdin.
  *  With no statusLine the command is the bare `--` form, which records and prints nothing (SC11);
  *  no arguments at all is the usage error. */
 export function installStatusLine(settings, copyPath) {
-  const self = `node "${copyPath}"`
+  const self = `node ${shQuote(copyPath)}`
   const sl = settings.statusLine
   if (sl === undefined || sl === null) return { ...settings, statusLine: { type: 'command', command: `${self} --` } }
   if (sl.type !== 'command') throw new Error(`statusLine type ${JSON.stringify(sl.type)} is not "command"; only a command statusLine can be wrapped`)

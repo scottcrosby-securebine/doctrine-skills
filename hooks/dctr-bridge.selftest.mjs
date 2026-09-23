@@ -28,6 +28,7 @@ const stdinFor = (id, extra = {}) => JSON.stringify({ session_id: id, model: { d
 // compound command whose second half echoes the first byte of stdin: everything a re-encoding or an
 // unquoted wrap loses, since unquoted the bridge takes stdin and the second half runs outside it.
 const INNER = `printf '\\033[1;32mline one\\033[0m\\n'; head -c 1; printf 'line two \\377\\n  tail'; exit 3`
+const shQ = (s) => `'${s.replace(/'/g, `'\\''`)}'`
 const sh = (cmd, input, e = env) => spawnSync('sh', ['-c', cmd], { input, env: e })
 const cli = (args, extraEnv = {}, input = '') => spawnSync('node', [bridge, ...args], { input, env: { ...env, ...extraEnv }, encoding: 'utf8' })
 
@@ -98,15 +99,15 @@ const cNone = cfg('none'), cNoSl = cfg('no-sl', { theme: 'dark' }), cCmd = cfg('
 const rNone = cli(['install'], { CLAUDE_CONFIG_DIR: cNone }), rNoSl = cli(['install'], { CLAUDE_CONFIG_DIR: cNoSl }), rCmd = cli(['install'], { CLAUDE_CONFIG_DIR: cCmd })
 const sameBytes = (d) => fs.existsSync(copyOf(d)) && Buffer.compare(fs.readFileSync(copyOf(d)), fs.readFileSync(bridge)) === 0
 clause('clause 2g — install with no settings.json writes the copy and a statusline that runs only the copy, prints nothing and records the session',
-  rNone.status === 0 && sameBytes(cNone) && JSON.stringify(settingsOf(cNone)) === JSON.stringify({ statusLine: { type: 'command', command: `node "${copyOf(cNone)}" --` } }) &&
+  rNone.status === 0 && sameBytes(cNone) && JSON.stringify(settingsOf(cNone)) === JSON.stringify({ statusLine: { type: 'command', command: `node ${shQ(copyOf(cNone))} --` } }) &&
   sh(settingsOf(cNone).statusLine.command, stdinFor('bare-1')).stdout.length === 0 && readBridge('bare-1')?.window === 200000,
   `code ${rNone.status} out ${rNone.stdout} err ${rNone.stderr}`)
 clause('clause 2h — install over settings with no statusline adds one and keeps every other key',
-  rNoSl.status === 0 && sameBytes(cNoSl) && settingsOf(cNoSl).theme === 'dark' && settingsOf(cNoSl).statusLine.command === `node "${copyOf(cNoSl)}" --`,
+  rNoSl.status === 0 && sameBytes(cNoSl) && settingsOf(cNoSl).theme === 'dark' && settingsOf(cNoSl).statusLine.command === `node ${shQ(copyOf(cNoSl))} --`,
   `code ${rNoSl.status} out ${rNoSl.stdout} err ${rNoSl.stderr}`)
 const wrappedCmd = settingsOf(cCmd).statusLine
 clause('clause 2i — install over a command statusline wraps it, keeps refreshInterval, padding and every other key, and the wrap still prints the original output',
-  rCmd.status === 0 && sameBytes(cCmd) && wrappedCmd.command.startsWith(`node "${copyOf(cCmd)}" -- `) && wrappedCmd.refreshInterval === 5 && wrappedCmd.padding === 0 &&
+  rCmd.status === 0 && sameBytes(cCmd) && wrappedCmd.command.startsWith(`node ${shQ(copyOf(cCmd))} -- `) && wrappedCmd.refreshInterval === 5 && wrappedCmd.padding === 0 &&
   settingsOf(cCmd).theme === 'dark' && JSON.stringify(settingsOf(cCmd).hooks) === '{"Stop":[]}' &&
   sh(wrappedCmd.command, stdinFor('inst-1')).stdout.toString() === 'HI THERE\n' && readBridge('inst-1')?.session_id === 'inst-1',
   `code ${rCmd.status} settings ${JSON.stringify(settingsOf(cCmd))} err ${rCmd.stderr}`)
@@ -125,6 +126,16 @@ const home = path.join(tmp, 'home'); fs.mkdirSync(home)
 const envNoCfg = { HOME: home }; const rHome = spawnSync('node', [bridge, 'install'], { env: (({ CLAUDE_CONFIG_DIR, ...e }) => ({ ...e, ...envNoCfg }))(env), encoding: 'utf8' })
 clause('clause 2m — without CLAUDE_CONFIG_DIR the install goes to ~/.claude',
   rHome.status === 0 && sameBytes(path.join(home, '.claude')), `code ${rHome.status} err ${rHome.stderr}`)
+
+// A config dir whose path the shell would expand or split: `$X`, a double quote, a backtick and a space.
+const cHost = cfg('host $X "q" `b` sp', { statusLine: { type: 'command', command: INNER } })
+const rHost = cli(['install'], { CLAUDE_CONFIG_DIR: cHost })
+const hostRun = rHost.status === 0 ? sh(settingsOf(cHost).statusLine.command, stdinFor('host-1'), { ...env, X: 'expanded' }) : null
+const rHostAgain = cli(['install'], { CLAUDE_CONFIG_DIR: cHost })
+clause('clause 2n — install into a config dir whose path holds $X, a double quote, a backtick and a space: the installed statusLine run through sh -c records the session, passes the inner output through, and a second install does not wrap it twice',
+  rHost.status === 0 && sameBytes(cHost) && hostRun && Buffer.compare(direct.stdout, hostRun.stdout) === 0 && hostRun.status === 3 &&
+  readBridge('host-1')?.session_id === 'host-1' && rHostAgain.status === 0 && /no change/.test(rHostAgain.stdout),
+  `install ${rHost.status} ${rHost.stderr} run ${hostRun && JSON.stringify(hostRun.stdout.toString('latin1'))}/${hostRun?.status} err ${hostRun?.stderr} again ${rHostAgain.stdout}`)
 
 // ---------------------------------------------------------------- clause 1: what must trip
 
@@ -175,6 +186,10 @@ clause('clause 3c — without the reader: the other-session fixture names sessio
 clause('clause 3d — without the installer: the command fixture has a statusline with refreshInterval, and the unsupported one a non-command type',
   EXISTING.statusLine.type === 'command' && EXISTING.statusLine.refreshInterval === 5 && UNSUP.statusLine.type !== 'command' &&
   !fs.existsSync(path.join(cNone, 'x')) && fs.statSync(blocker).isFile(), 'fixtures lack their property')
+const naive = sh(`node "${copyOf(cHost)}" -- true`, stdinFor('naive-1'), { ...env, X: 'expanded' })
+clause('clause 3f — without the installer: the hostile config dir exists as named, and a double-quoted path to it does not reach the copy',
+  fs.existsSync(copyOf(cHost)) && cHost.includes('$X') && cHost.includes('"') && cHost.includes('`') && cHost.includes(' ') &&
+  naive.status !== 0 && readBridge('naive-1') === null, `naive ${naive.status} ${naive.stderr}`)
 const tornFile = path.join(tmp, 'torn.json'); fs.writeFileSync(tornFile, '{"ok":1}')
 const fd = fs.openSync(tornFile, 'w'); const between = fs.readFileSync(tornFile, 'utf8'); fs.closeSync(fd)
 let tornParses = true; try { JSON.parse(between) } catch { tornParses = false }
