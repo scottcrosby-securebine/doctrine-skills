@@ -80,7 +80,7 @@ whenever the kickoff names a handoff that exists on disk.
 
 **Interrupted backup.** The backup that should have carried the current
 handoff never landed when the memory file is tracked and `git diff HEAD --
-<memory file>` changes its kickoff `handoff:` line, or it is untracked and not
+<memory file>` changes the handoff path on its kickoff line, or it is untracked and not
 ignored (`git ls-files --others --exclude-standard -- <memory file>` lists it),
 or a handoff under `docs/handoffs/` names the kickoff's handoff in its
 `supersedes:` line (the crash fell between `doctrine-handoff` steps 3 and 4, and
@@ -106,8 +106,8 @@ Settle whether it already ran before anyone takes it:
   to the record read above (the newer handoff's in the interrupted case),
   placed as `doctrine-backup`'s rule "Under auto-cycle, a question pauses the
   run" places its line, say `first action: ambiguous, paused` in the
-  Handoff line, and end the turn after step 4's report. Where that rule finds no
-  record, append nothing and ask the user whether it ran.
+  Handoff line, and end the turn after step 4's report. With no record read
+  above, append nothing and ask the user whether it ran.
 - Otherwise it is due, and the Handoff line says `first action: due`.
 
 ## 2. Check drift
@@ -194,8 +194,9 @@ In step 1b's interrupted case, do not ask: run `doctrine-backup` steps 3 to 6 on
 the handoff step 1b found interrupted, treated there as the handoff this run
 wrote, so the kickoff names it, with step 2's batch as its step 1 output, its
 step 2 run only where the kickoff line is unchanged (the crash fell before the
-memory file was rewritten), and `git show HEAD:<memory file>` as the previous
-memory file its step 5 hands the red team. That backup was already asked for,
+memory file was rewritten), and as the previous memory file its step 5 hands the
+red team `git show HEAD:<memory file>` where HEAD holds it, else the file as it
+stands on disk where the kickoff line is unchanged, else none. That backup was already asked for,
 and its commit lands the handoff and the memory file together. Do not run
 `doctrine-handoff`.
 
