@@ -753,6 +753,12 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
   return { tier, tierText: label, errors }
 }
 
+/** The latch as this session's own, or null: a latch left by another session id in the same directory is nobody's. */
+export const ownLatch = (latch, sessionId) => (latch && latch.session_id === sessionId ? latch : null)
+
+/** The session's first reading (SC5): the latch's where it has one, else this batch's reading, else null while unknown. */
+export const firstUsedOf = (latch, reading) => latch?.firstUsed ?? (reading?.unknown ? null : reading?.used ?? null)
+
 /**
  * One batch's decision (E8-D4, E8-D10, SC2, SC7, SC10). The latch is per session id: another id's latch is
  * replaced by a fresh one. A good reading records the first reading and the entry seen, resets the unknown run,
@@ -761,12 +767,6 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
  * carries an `auto-cycle: warned` line for this session id; it counts as warned whatever the latch says, so a latch
  * write that failed never produces a second warning or a second line. Pure: the caller writes the latch it returns.
  */
-/** The latch as this session's own, or null: a latch left by another session id in the same directory is nobody's. */
-export const ownLatch = (latch, sessionId) => (latch && latch.session_id === sessionId ? latch : null)
-
-/** The session's first reading (SC5): the latch's where it has one, else this batch's reading, else null while unknown. */
-export const firstUsedOf = (latch, reading) => latch?.firstUsed ?? (reading?.unknown ? null : reading?.used ?? null)
-
 export function gaugeStep({ latch, reading, tier, tierText, sessionId, warnedInRecord = false }) {
   const own = ownLatch(latch, sessionId)
   const l = own ? { ...own } : { session_id: sessionId, firstUsed: null, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }

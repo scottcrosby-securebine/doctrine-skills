@@ -1091,6 +1091,10 @@ const MUTATIONS = [
     clause: "clause 2s2",
     from: "const TAIL_CHUNKS = [512 * 1024, 2 * 1024 * 1024, Infinity]",
     to: "const TAIL_CHUNKS = [512 * 1024, 2 * 1024 * 1024]" },
+  { name: "the record-warned check ignores which session the warned line names (NB3)", file: "dctr-gauge.mjs",
+    clause: "clause 2e",
+    from: " && e.session === sessionId)",
+    to: ")" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

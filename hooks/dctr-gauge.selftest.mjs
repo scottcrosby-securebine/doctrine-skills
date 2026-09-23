@@ -111,7 +111,7 @@ clause('clause 1n — resolveTier: an unknown window is an error; a token tier s
   JSON.stringify([rt('120000', null), rt('60%', null)]))
 
 const reading = (used, uuid) => ({ used, uuid, at: '2026-09-23T12:00:00Z' })
-const step = (latch, rd, sessionId = 's1', tier = 100000) => gaugeStep({ latch, reading: rd, tier, tierText: String(tier), window: W, sessionId })
+const step = (latch, rd, sessionId = 's1', tier = 100000) => gaugeStep({ latch, reading: rd, tier, tierText: String(tier), sessionId })
 const a = step(null, reading(10000, 'a'))
 const b = step(a.latch, reading(110000, 'b'))
 const c = step(b.latch, reading(150000, 'c'))
@@ -134,7 +134,7 @@ clause('clause 1r — gaugeStep: a good reading resets the unknown run (SC10)',
   g1.latch.unknownRun === 0 && step(step(g1.latch, { unknown: 'missing' }).latch, { unknown: 'missing' }).warn === false,
   JSON.stringify(g1))
 clause('clause 1s — gaugeStep: an unresolved tier never warns on a reading',
-  !gaugeStep({ latch: null, reading: reading(190000, 'x'), tier: null, tierText: '12k', window: W, sessionId: 's' }).warn, 'warned with no tier')
+  !gaugeStep({ latch: null, reading: reading(190000, 'x'), tier: null, tierText: '12k', sessionId: 's' }).warn, 'warned with no tier')
 
 const ctx = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, tierText: '120000', facts: ['window unknown'] })
 const ctxLong = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, tierText: '120000', facts: ['y'.repeat(3000)] })
