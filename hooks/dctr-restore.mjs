@@ -14,20 +14,11 @@
 // in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads around them.
 
 import fs from 'node:fs'
-import path from 'node:path'
-import { restoreSkip, kickoffHandoff, handoffHeader, resolveRecordPath, restoreContext, restoreState, PREFIX } from './dctr-lib.mjs'
-import { parseRecord } from './dctr-record.mjs'
-import { hookLog } from './dctr-state.mjs'
+import { restoreSkip, followKickoff, restoreContext } from './dctr-lib.mjs'
+import { hookLog, standDown } from './dctr-state.mjs'
 
 let sessionId = null
-const stand_down = (why) => {
-  hookLog(sessionId, `SessionStart restore skipped — ${why}`)
-  process.stderr.write(`${PREFIX}: restore skipped — ${why}\n`)
-  process.exit(0)
-}
-const read = (file, what) => {
-  try { return fs.readFileSync(file, 'utf8') } catch (e) { stand_down(`could not read the ${what} ${file} (${e.code || e.message})`) }
-}
+const stand_down = standDown('SessionStart', 'restore', () => sessionId)
 
 try {
   let payload
@@ -38,19 +29,9 @@ try {
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || payload.cwd
   if (!projectDir) stand_down('no CLAUDE_PROJECT_DIR and no cwd in the payload')
-
-  const memory = read(path.join(projectDir, 'SESSION_MEMORY.md'), 'memory file')
-  const handoffRef = kickoffHandoff(memory)
-  if (!handoffRef) stand_down('the kickoff names no handoff')
-  const handoffPath = path.resolve(projectDir, handoffRef)
-  const header = handoffHeader(read(handoffPath, 'handoff'))
-  if (!header.record) stand_down(`the handoff ${handoffPath} names no record`)
-
-  const recordPath = resolveRecordPath(header.record, projectDir, fs.existsSync)
-  if (!recordPath) stand_down(`the record ${header.record} named by ${handoffPath} was not found`)
-  const record = parseRecord(read(recordPath, 'record'))
-  const state = restoreState(record.state?.value)
-  if (!state) stand_down(`the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked`)
+  const chain = followKickoff({ projectDir, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
+  if (chain.why) stand_down(chain.why)
+  const { header, handoffPath, recordPath, record, state } = chain
 
   const additionalContext = restoreContext({
     phase: header.phase, state, stateLine: record.state.raw, recordPath,

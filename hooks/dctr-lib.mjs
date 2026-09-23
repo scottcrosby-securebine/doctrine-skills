@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { wrapperValue } from './dctr-record.mjs'
+import { wrapperValue, parseRecord } from './dctr-record.mjs'
 
 // Shared decisions for doctrine's herdr seat visibility (issue #17).
 //
@@ -621,6 +621,36 @@ export function resolveRecordPath(ref, projectDir, exists) {
   return tries.find((p) => exists(p)) || null
 }
 
+/**
+ * The kickoff chain the restore hook and the gauge both follow (Q1): SESSION_MEMORY.md in the project dir, its
+ * kickoff `handoff:` line, that handoff's `record:` header line, the record, and the record's last state line,
+ * which must read Open or Blocked. `read(file)` returns a file's text or throws, `exists(file)` says whether a path
+ * exists; both are injected so this stays pure. Returns `{ handoffPath, header, recordPath, record, state }`, or
+ * `{ why }` naming where the chain stopped, which the caller reports as its stand-down reason.
+ */
+export function followKickoff({ projectDir, read, exists }) {
+  const load = (file, what) => {
+    try { return { text: read(file) } } catch (e) { return { why: `could not read the ${what} ${file} (${e.code || e.message})` } }
+  }
+  const memory = load(path.join(projectDir, 'SESSION_MEMORY.md'), 'memory file')
+  if (memory.why) return memory
+  const handoffRef = kickoffHandoff(memory.text)
+  if (!handoffRef) return { why: 'the kickoff names no handoff' }
+  const handoffPath = path.resolve(projectDir, handoffRef)
+  const handoff = load(handoffPath, 'handoff')
+  if (handoff.why) return handoff
+  const header = handoffHeader(handoff.text)
+  if (!header.record) return { why: `the handoff ${handoffPath} names no record` }
+  const recordPath = resolveRecordPath(header.record, projectDir, exists)
+  if (!recordPath) return { why: `the record ${header.record} named by ${handoffPath} was not found` }
+  const loaded = load(recordPath, 'record')
+  if (loaded.why) return loaded
+  const record = parseRecord(loaded.text)
+  const state = restoreState(record.state?.value)
+  if (!state) return { why: `the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked` }
+  return { handoffPath, header, recordPath, record, state }
+}
+
 /** The restore hook's text is under this many characters, far inside the harness's 10,000 cap. */
 export const RESTORE_MAX = 2000
 
@@ -690,7 +720,7 @@ export const HANDOFF_COST_TOKENS = 40000
  * The tier the gauge warns at (E8-D11): `<n>` tokens, `<n>%` of the window, or `default`, which is 60% of it
  * (SC4). `tierText` in the result is the tier as resolved, which the warned line carries (SC9): the percent as
  * written, `60%` for the default, the number for a token tier or a raised floor. Every error is named, and the
- * caller reports each on every batch. A tier below the floor, the session's first reading plus `handoffCost`
+ * caller reports each on every batch. The 90% check reads the tier after any floor raise. A tier below the floor, the session's first reading plus `handoffCost`
  * (SC5), is raised to the floor; an unknown window leaves a percent or default tier unresolved (SC3).
  */
 export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
@@ -709,7 +739,6 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
     errors.push(`malformed tier "${text}"`)
     return { tier: null, tierText: text, errors }
   }
-  if (win && (pct !== undefined ? Number(pct) > 90 : tier > win * 0.9)) errors.push('tier above 90% of the window')
   if (tier !== null && Number.isFinite(firstUsed)) {
     const floor = firstUsed + handoffCost
     if (tier < floor) {
@@ -718,6 +747,8 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
       label = String(floor)
     }
   }
+  // Read after the floor raise, so a floor above 90% of the window is reported too.
+  if (win && tier !== null && tier > win * 0.9) errors.push('tier above 90% of the window')
   return { tier, tierText: label, errors }
 }
 
@@ -725,11 +756,14 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
  * One batch's decision (E8-D4, E8-D10, SC2, SC7, SC10). The latch is per session id: another id's latch is
  * replaced by a fresh one. A good reading records the first reading and the entry seen, resets the unknown run,
  * and warns the first time used tokens reach the tier. An unknown reading is a fact, and the third in a row warns
- * with `unknown`. Once warned, a session never warns again. Pure: the caller writes the latch it returns.
+ * with `unknown`. Once warned, a session never warns again. `warnedInRecord` is true when the record already
+ * carries an `auto-cycle: warned` line for this session id; it counts as warned whatever the latch says, so a latch
+ * write that failed never produces a second warning or a second line. Pure: the caller writes the latch it returns.
  */
-export function gaugeStep({ latch, reading, tier, tierText, sessionId }) {
+export function gaugeStep({ latch, reading, tier, tierText, sessionId, warnedInRecord = false }) {
   const l = latch && latch.session_id === sessionId ? { ...latch }
     : { session_id: sessionId, firstUsed: null, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }
+  if (warnedInRecord) l.warned = true
   const facts = []
   let crossed = false, label = null
   if (reading.unknown) {
@@ -751,20 +785,24 @@ export function gaugeStep({ latch, reading, tier, tierText, sessionId }) {
 export const GAUGE_MAX = 1000
 
 /**
- * The additionalContext the gauge hands the main session (SC8): with `warn`, the reading, the window, the percent
- * where known and the tier as resolved, then the four steps E8-D12 names, one sentence each; then every fact.
- * Facts, never orders. Over GAUGE_MAX the facts are cut first, so the warning survives whole.
+ * The additionalContext the gauge hands the main session (SC8): with `warn`, the reading, the window (or unknown),
+ * the percent where known and the tier as resolved, then the actions doctrine step 5 states for the warning, one
+ * sentence each and pointing at step 5 as their source, both ready-line placements included (E8-D12, SC14); then
+ * every fact. Facts, never orders. Over GAUGE_MAX the facts are cut first, so the warning survives whole.
  */
 export function gaugeContext({ warn = false, used, window, tier, tierText, facts = [] }) {
   const win = Number.isFinite(window) && window > 0 ? window : null
+  const windowText = win ? `${win}-token context window` : 'context window of unknown size'
   const head = !warn ? '' : [
     Number.isFinite(used)
-      ? `doctrine gauge: this session has used ${used} tokens of a ${win ? `${win}-token context window (${Math.round((used / win) * 100)}%)` : 'context window of unknown size'}, reaching the auto-cycle tier ${tierText}${Number.isFinite(tier) && String(tier) !== tierText ? ` (${tier} tokens)` : ''}.`
-      : 'doctrine gauge: three context readings in a row were unknown, so the used tokens are unknown and the auto-cycle warning fires as tier unknown.',
-    'With auto-cycle on, the doctrine expects the current step to be finished first.',
-    'It then expects the record\'s state line to be written.',
-    'It then expects doctrine-handoff to be run.',
-    'It then expects the turn to end with `auto-cycle: ready` as the last line of the assistant message.',
+      ? `doctrine gauge: this session has used ${used} tokens of a ${win ? `${windowText} (${Math.round((used / win) * 100)}%)` : windowText}, reaching the auto-cycle tier ${tierText}${Number.isFinite(tier) && String(tier) !== tierText ? ` (${tier} tokens)` : ''}.`
+      : `doctrine gauge: three context readings in a row were unknown, so the used tokens of a ${windowText} are unknown and the auto-cycle warning fires as tier unknown.`,
+    'Doctrine step 5 states what follows this warning while auto-cycle is on.',
+    'The current step is finished first.',
+    'The record\'s state line is written next.',
+    'doctrine-handoff is run after that.',
+    'The ready line `- auto-cycle: ready` is appended to the record.',
+    'The turn ends with `auto-cycle: ready` as the last line of the assistant message.',
   ].join(' ')
   const tail = facts.length ? `doctrine gauge facts: ${facts.join('; ')}.` : ''
   const full = [head, tail].filter(Boolean).join(' ')
