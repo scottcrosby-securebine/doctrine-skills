@@ -24,9 +24,9 @@ For everything else the herdr integration is optional and runs outside the skill
 
 ## Auto-cycle setup
 
-Auto-cycle is off by default, and a phase switches it on in its own record. These four are needed only to use it:
+Auto-cycle is off by default, and a phase switches it on in its own record. These three are needed only to use it:
 
-- **`autoCompactEnabled: false`** in settings.json. The phase resets by `/clear` after a handoff, and a compaction mid-phase loses the record's state.
+- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase loses the record's state.
 - **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
 
   ```text
@@ -37,7 +37,6 @@ Auto-cycle is off by default, and a phase switches it on in its own record. Thes
 
   Without it, while auto-cycle is on, the gauge reports the window as unknown on every batch: a tier given in tokens still warns, and a percent or default tier cannot resolve and does not.
 - **herdr with its Claude integration**: `herdr integration install claude`.
-- **The `$autocycle` row** in your herdr sidebar config. [Watching a run](watching-a-run.md) shows the row shape for `$doctrine`.
 
 ## Optional integrations and their fallbacks
 

@@ -250,12 +250,12 @@ workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything o
 `doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
-Auto-cycle is off by default and switched on per phase in its record. Using it needs four things set
-up once: `autoCompactEnabled: false` in settings.json, since the phase resets by `/clear` and a
-compaction mid-phase loses the record's state; the statusline bridge, installed with
-`node <plugin-root>/hooks/dctr-bridge.mjs install` and re-run after every plugin update; herdr with
-its Claude integration (`herdr integration install claude`); and the `$autocycle` row in your herdr
-sidebar config. [docs/requirements.md](docs/requirements.md#auto-cycle-setup) says what each one
+Auto-cycle is off by default and switched on per phase in its record. Using it needs three things set
+up once: auto-compaction off, with `claude config set -g autoCompactEnabled false` (a global config
+key in `~/.claude.json`, not settings.json), since the phase resets by `/clear` and a compaction
+mid-phase loses the record's state; the statusline bridge, installed with
+`node <plugin-root>/hooks/dctr-bridge.mjs install` and re-run after every plugin update; and herdr
+with its Claude integration (`herdr integration install claude`). [docs/requirements.md](docs/requirements.md#auto-cycle-setup) says what each one
 does.
 
 ## Watching it work
