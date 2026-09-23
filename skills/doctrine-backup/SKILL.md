@@ -13,6 +13,14 @@ repo, with or without a doctrine project file or an open doctrine phase.
 forward everything you cannot disprove. Target ≤400 words. The only edits you make are for
 correctness: a line the repo, the record or this session shows is wrong.
 
+**Under auto-cycle, a question pauses the run.** Auto-cycle is on when the record of the phase this
+session runs has an on line as its last `auto-cycle: on` or `auto-cycle: off` line, and its last state
+line reads Open or Blocked. That record is the one the kickoff chain doctrine step 5 names reaches, else
+the one this session's anchor names. With auto-cycle on, wherever a step below says to ask the user,
+append `- auto-cycle paused: question: <the question as that step words it>` as a list item at the end
+of the record's orchestrator-only part (doctrine step 5), then stop this run and end the turn without
+putting the question to the user in any form. With auto-cycle off, or no such record, ask.
+
 ## 0. Conform the repo
 
 The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every handoff under
@@ -29,7 +37,7 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
   step, from step 5 by way of `doctrine-handoff` step 1, keeps what the first pass kept. When there is no `SESSION_MEMORY.md` but there is one other memory
   file (`SESSION_MEMORY-<x>.md`, `session-memory.md`, and the like), `git mv` it (plain `mv` when
   untracked) to `SESSION_MEMORY.md`. When there are several, ask which one is current and stop until
-  answered.
+  answered, or pause under auto-cycle (the top of this skill).
 - **Handoffs.** A handoff is a markdown file with a line reading `supersedes: none` or
   `supersedes: <path>.md` among its first five lines, or the file a memory file's kickoff names. When any sit outside `docs/handoffs/`, move each there with `git mv`
   (plain `mv` when untracked), keeping its name; when that name is taken there, append `-2`, `-3`.
@@ -96,7 +104,8 @@ The kickoff's first line is machine-shaped; `doctrine-resume` §1b says what the
   the previous kickoff named. When no kickoff names one (no memory file, or a kickoff with no
   machine-shaped first line), the current handoff is the one in `docs/handoffs/` that no other
   handoff's `supersedes:` names; when more than one qualifies, read them and ask the user which is
-  current rather than guess. Only when `docs/handoffs/` holds none, write `handoff: none`.
+  current rather than guess, or pause under auto-cycle (the top of this skill). Only when
+  `docs/handoffs/` holds none, write `handoff: none`.
 - **`state:`** is `open` when a doctrine phase is open, meaning the last state line of the record
   the current handoff's header names reads *Open* or *Blocked*, and `none` otherwise, including
   ordinary unfinished work and a repo with no doctrine at all. Read it from that record now, never

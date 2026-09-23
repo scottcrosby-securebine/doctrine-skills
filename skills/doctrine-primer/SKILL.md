@@ -18,7 +18,7 @@ issue-tracking and session-completion norms live. Read it if present.
 Run `doctrine-resume` steps 1 to 4 as written there: read the memory file, act on the kickoff's first
 line, check drift, hydrate Active Work, and produce its report. Put that report at the very top of
 your reply, ahead of everything else; the kickoff in it is a live instruction from the prior session,
-not history. Where it finds drift, offer its step 5 resync. Those steps are written there once and not restated here.
+not history. Where it finds drift or an interrupted backup, take its step 5 as written there. Those steps are written there once and not restated here.
 
 Where `doctrine-resume` would stop because no memory file exists, do not stop: say there is none,
 offer `doctrine-backup` at session end, run `doctrine-resume` step 2's batch anyway for the
