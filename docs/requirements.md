@@ -1,6 +1,6 @@
 # Requirements
 
-The two hard requirements in full, then every optional integration and what happens without it. The
+The two hard requirements in full, the one-time auto-cycle setup, then every optional integration and what happens without it. The
 [README](../README.md#requirements) names them all; this page is the detail.
 
 ## A browser, for `doctrine-gauntlet`
@@ -21,6 +21,21 @@ process on the host, so a contained session refuses for the same reason a non-he
 [watching a run](watching-a-run.md).
 
 For everything else the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
+
+## Auto-cycle setup
+
+Auto-cycle is off by default, and a phase switches it on in its own record. These two are needed only to use it:
+
+- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
+- **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
+
+  ```text
+  node <plugin-root>/hooks/dctr-bridge.mjs install
+  ```
+
+  It copies the bridge to `<config dir>/doctrine/dctr-bridge.mjs`, the config dir being `$CLAUDE_CONFIG_DIR` or `~/.claude`, and rewrites the `statusLine` command in that dir's settings.json to run the copy in front of your existing command, whose output passes through unchanged. settings.json names the copy, never the plugin's own path, so **re-run the command after every plugin update**. With no `statusLine` set it installs one that prints nothing; a statusline hides Claude Code's footer hints, so if you have none you may prefer to add your own first and then install. A `statusLine` that is not a command is refused, with the reason.
+
+  Without it, while auto-cycle is on, the gauge reports the window as unknown on every batch: a tier given in tokens still warns, and a percent or default tier cannot resolve and does not.
 
 ## Optional integrations and their fallbacks
 

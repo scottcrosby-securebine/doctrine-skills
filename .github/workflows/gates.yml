@@ -93,6 +93,16 @@ jobs:
         # called zero times. Needs only node.
         run: node hooks/dctr-restore.selftest.mjs
 
+      - name: context gauge tamper test
+        # Drives hooks/dctr-gauge.mjs end to end with a tripwire herdr on PATH: one warning per session id, a
+        # seat batch skipped, unknown readings never low, every tier error named, herdr called zero times.
+        run: node hooks/dctr-gauge.selftest.mjs
+
+      - name: statusline bridge tamper test
+        # Byte-identical passthrough, concurrent sessions, another session's file ignored, install on every
+        # settings shape. Pure node.
+        run: node hooks/dctr-bridge.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.

@@ -25,6 +25,15 @@ export function hookLog(sessionId, msg) {
   } catch { /* logging must never be the failure */ }
 }
 
+/** A hook's stand-down: the reason to the session's hook.log and to stderr, then exit 0, so a skip and a silent
+ *  success never look alike. `sessionId` is a function, read at the call, since a hook learns its session id
+ *  only once its payload parses. */
+export const standDown = (event, name, sessionId) => (why) => {
+  hookLog(sessionId(), `${event} ${name} skipped — ${why}`)
+  process.stderr.write(`${PREFIX}: ${name} skipped — ${why}\n`)
+  process.exit(0)
+}
+
 // `timeout` is the Q14 bound made real: without it a stalled herdr holds an operation forever, and
 // a caller holding a staleness-breakable lock then has that lock stolen out from under it while it
 // is still running. execFileSync kills the child and throws at the bound, so the caller refuses.

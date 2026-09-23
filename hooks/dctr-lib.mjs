@@ -1,8 +1,9 @@
 import os from 'node:os'
 import path from 'node:path'
-import { wrapperValue } from './dctr-record.mjs'
+import { wrapperValue, parseRecord } from './dctr-record.mjs'
 
-// Shared decisions for doctrine's herdr seat visibility (issue #17).
+// Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
+// (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
 //
 // Everything here is a pure function of a hook payload plus observed state. No herdr, no
 // filesystem, no clock. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
@@ -621,6 +622,36 @@ export function resolveRecordPath(ref, projectDir, exists) {
   return tries.find((p) => exists(p)) || null
 }
 
+/**
+ * The kickoff chain the restore hook and the gauge both follow (Q1): SESSION_MEMORY.md in the project dir, its
+ * kickoff `handoff:` line, that handoff's `record:` header line, the record, and the record's last state line,
+ * which must read Open or Blocked. `read(file)` returns a file's text or throws, `exists(file)` says whether a path
+ * exists; both are injected so this stays pure. Returns `{ handoffPath, header, recordPath, record, state }`, or
+ * `{ why }` naming where the chain stopped, which the caller reports as its stand-down reason.
+ */
+export function followKickoff({ projectDir, read, exists }) {
+  const load = (file, what) => {
+    try { return { text: read(file) } } catch (e) { return { why: `could not read the ${what} ${file} (${e.code || e.message})` } }
+  }
+  const memory = load(path.join(projectDir, 'SESSION_MEMORY.md'), 'memory file')
+  if (memory.why) return memory
+  const handoffRef = kickoffHandoff(memory.text)
+  if (!handoffRef) return { why: 'the kickoff names no handoff' }
+  const handoffPath = path.resolve(projectDir, handoffRef)
+  const handoff = load(handoffPath, 'handoff')
+  if (handoff.why) return handoff
+  const header = handoffHeader(handoff.text)
+  if (!header.record) return { why: `the handoff ${handoffPath} names no record` }
+  const recordPath = resolveRecordPath(header.record, projectDir, exists)
+  if (!recordPath) return { why: `the record ${header.record} named by ${handoffPath} was not found` }
+  const loaded = load(recordPath, 'record')
+  if (loaded.why) return loaded
+  const record = parseRecord(loaded.text)
+  const state = restoreState(record.state?.value)
+  if (!state) return { why: `the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked` }
+  return { handoffPath, header, recordPath, record, state }
+}
+
 /** The restore hook's text is under this many characters, far inside the harness's 10,000 cap. */
 export const RESTORE_MAX = 2000
 
@@ -641,4 +672,152 @@ export function restoreContext({ phase, state, stateLine, recordPath, wrapper, h
   const room = Math.max(0, stateLine.length - (full.length - RESTORE_MAX) - 2)
   const cut = build(`${stateLine.slice(0, room)}…`)
   return cut.length < RESTORE_MAX ? cut : cut.slice(0, RESTORE_MAX - 1)
+}
+
+// ---------------------------------------------------------------- context gauge (E8-D4, E8-D21, E8-D10, E8-D11)
+
+/** Why the gauge stands down, or null when it acts: only on PostToolBatch in the main session. A seat's batch
+ *  carries `agent_id` and the parent's session id, so it is filtered before anything is read or written (E8-D21). */
+export function gaugeSkip(p) {
+  if (!p || p.hook_event_name !== 'PostToolBatch') return `not a PostToolBatch event (${p?.hook_event_name || 'none'})`
+  if ('agent_id' in p) return 'a seat batch (agent_id present)'
+  if (!p.session_id) return 'no session_id in the payload'
+  if (!p.transcript_path) return 'no transcript_path in the payload'
+  return null
+}
+
+/** The record's last `auto-cycle` on or off entry, or null (E8-R10: auto-cycle is on only while that entry is on). */
+export const autoCycleOn = (entries) =>
+  (entries || []).filter((e) => e.kind === 'auto-cycle' && (e.sub === 'on' || e.sub === 'off')).at(-1) || null
+
+/**
+ * The used tokens from a transcript's text (E8-D10): the last main-thread assistant entry whose usage totals more
+ * than zero, read as that one entry's input plus cache tokens, never summed across the repeated entries of one
+ * response. Sidechain, API-error and zero-total entries are skipped, and so is a line that does not parse (a
+ * truncated tail). `{ used, uuid, at }`, or `{ unknown }`: `missing` for no text, `unparseable` for no such entry,
+ * `stale` when that entry is the one the latch saw at the previous batch (SC2).
+ */
+export function readUsage(transcriptText, lastUuid) {
+  if (transcriptText === null || transcriptText === undefined) return { unknown: 'missing' }
+  const ls = String(transcriptText).split('\n')
+  for (let i = ls.length - 1; i >= 0; i--) {
+    let e
+    try { e = JSON.parse(ls[i]) } catch { continue }
+    const u = e?.message?.usage
+    if (e?.type !== 'assistant' || !u || e.isSidechain === true || e.isApiErrorMessage) continue
+    const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+    if (used <= 0) continue
+    if (lastUuid && e.uuid === lastUuid) return { unknown: 'stale' }
+    return { used, uuid: e.uuid, at: e.timestamp || null }
+  }
+  return { unknown: 'unparseable' }
+}
+
+/** The handoff cost the floor adds to a session's first reading (SC5): the tokens from the gauge's warning to the
+ *  ready line, measured by E8-D22's drive on 2026-09-23 (run d22-1d, claude-haiku-4-5, a 200,000-token window, tier
+ *  60%): 23,320, rounded up to the thousand. On claude-opus-5 with a doctrine gate step in flight the same span ran
+ *  47,538 to 91,687 (the E8-D12 runs), which the floor does not bound: a tier is safe only where it leaves the
+ *  window room for that span, which the 90% check does not know. */
+export const HANDOFF_COST_TOKENS = 24000
+
+/**
+ * The tier the gauge warns at (E8-D11): `<n>` tokens, `<n>%` of the window, or `default`, which is 60% of it
+ * (SC4). `tierText` in the result is the tier as resolved, which the warned line carries (SC9): the percent as
+ * written, `60%` for the default, the number for a token tier or a raised floor. Every error is named, and the
+ * caller reports each on every batch. The 90% check reads the tier after any floor raise. A tier below the floor, the session's first reading plus `handoffCost`
+ * (SC5), is raised to the floor; an unknown window leaves a percent or default tier unresolved (SC3).
+ */
+export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
+  const text = tierText ?? 'default'
+  const errors = []
+  const win = Number.isFinite(window) && window > 0 ? window : null
+  if (!win) errors.push('window unknown')
+  let tier = null, label = text
+  const pct = text === 'default' ? 60 : /^(\d+)%$/.exec(text)?.[1]
+  if (pct !== undefined) {
+    label = `${Number(pct)}%`
+    if (win) tier = Math.round((win * Number(pct)) / 100)
+  } else if (/^\d+$/.test(text)) {
+    tier = Number(text)
+  } else {
+    errors.push(`malformed tier "${text}"`)
+    return { tier: null, tierText: text, errors }
+  }
+  if (tier !== null && Number.isFinite(firstUsed)) {
+    const floor = firstUsed + handoffCost
+    if (tier < floor) {
+      errors.push(`tier ${tier} below the floor ${floor}, raised to the floor`)
+      tier = floor
+      label = String(floor)
+    }
+  }
+  // Read after the floor raise, so a floor above 90% of the window is reported too.
+  if (win && tier !== null && tier > win * 0.9) errors.push('tier above 90% of the window')
+  return { tier, tierText: label, errors }
+}
+
+/** The latch as this session's own, or null: a latch left by another session id in the same directory is nobody's. */
+export const ownLatch = (latch, sessionId) => (latch && latch.session_id === sessionId ? latch : null)
+
+/** The session's first reading (SC5): the latch's where it has one, else this batch's reading, else null while unknown. */
+export const firstUsedOf = (latch, reading) => latch?.firstUsed ?? (reading?.unknown ? null : reading?.used ?? null)
+
+/**
+ * One batch's decision (E8-D4, E8-D10, SC2, SC7, SC10). The latch is per session id: another id's latch is
+ * replaced by a fresh one. A good reading records the first reading and the entry seen, resets the unknown run,
+ * and warns the first time used tokens reach the tier. An unknown reading is a fact, and the third in a row warns
+ * with `unknown`. Once warned, a session never warns again. `warnedInRecord` is true when the record already
+ * carries an `auto-cycle: warned` line for this session id; it counts as warned whatever the latch says, so a latch
+ * write that failed never produces a second warning or a second line. Pure: the caller writes the latch it returns.
+ */
+export function gaugeStep({ latch, reading, tier, tierText, sessionId, warnedInRecord = false }) {
+  const own = ownLatch(latch, sessionId)
+  const l = own ? { ...own } : { session_id: sessionId, firstUsed: null, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }
+  if (warnedInRecord) l.warned = true
+  const facts = []
+  let crossed = false, label = null
+  if (reading.unknown) {
+    l.unknownRun += 1
+    facts.push(`the context reading is unknown (${reading.unknown}), reading ${l.unknownRun} in a row`)
+    if (l.unknownRun >= 3) { crossed = true; label = 'unknown' }
+  } else {
+    l.unknownRun = 0
+    l.lastUuid = reading.uuid
+    l.firstUsed = firstUsedOf(l, reading)
+    if (tier !== null && tier !== undefined && reading.used >= tier) { crossed = true; label = tierText }
+  }
+  const warn = crossed && !l.warned
+  if (warn) { l.warned = true; l.warnedTier = label }
+  return { latch: l, warn, warnedTier: warn ? label : null, facts }
+}
+
+/** The gauge's text is at most this many characters (SC8). */
+export const GAUGE_MAX = 1000
+
+/**
+ * The additionalContext the gauge hands the main session (SC8): with `warn`, the reading, the window (or unknown),
+ * the percent where known and the tier as resolved, then the actions doctrine step 5 states for the warning, one
+ * sentence each and pointing at step 5 as their source, both ready-line placements included (E8-D12, SC14); then
+ * every fact. Facts, never orders. Over GAUGE_MAX the facts are cut first, so the warning survives whole.
+ */
+export function gaugeContext({ warn = false, used, window, tier, tierText, facts = [] }) {
+  const win = Number.isFinite(window) && window > 0 ? window : null
+  const windowText = win ? `${win}-token context window` : 'context window of unknown size'
+  const head = !warn ? '' : [
+    Number.isFinite(used)
+      ? `doctrine gauge: this session has used ${used} tokens of a ${win ? `${windowText} (${Math.round((used / win) * 100)}%)` : windowText}, reaching the auto-cycle tier ${tierText}${Number.isFinite(tier) && String(tier) !== tierText ? ` (${tier} tokens)` : ''}.`
+      : `doctrine gauge: three context readings in a row were unknown, so the used tokens of a ${windowText} are unknown and the auto-cycle warning fires as tier unknown.`,
+    'Doctrine step 5 states what follows this warning while auto-cycle is on.',
+    'The current step is finished first.',
+    'The record\'s state line is written next.',
+    'doctrine-handoff is run after that.',
+    'The ready line `- auto-cycle: ready` is appended to the record.',
+    'The turn ends with `auto-cycle: ready` as the last line of the assistant message.',
+  ].join(' ')
+  const tail = facts.length ? `doctrine gauge facts: ${facts.join('; ')}.` : ''
+  const full = [head, tail].filter(Boolean).join(' ')
+  if (full.length <= GAUGE_MAX) return full
+  if (!head) return full.slice(0, GAUGE_MAX - 1) + '…'
+  const room = GAUGE_MAX - head.length - 2
+  return room > 0 ? `${head} ${tail.slice(0, room)}…`.slice(0, GAUGE_MAX) : head.slice(0, GAUGE_MAX)
 }

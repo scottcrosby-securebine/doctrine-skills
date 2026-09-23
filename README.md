@@ -250,6 +250,13 @@ workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything o
 `doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
+Auto-cycle is off by default and switched on per phase in its record. Using it needs two things set
+up once: auto-compaction off, with `claude config set -g autoCompactEnabled false` (a global config
+key in `~/.claude.json`, not settings.json), since the phase resets by `/clear` and a compaction
+mid-phase discards the session's context and the gauge's reading; and the statusline bridge, installed
+with `node <plugin-root>/hooks/dctr-bridge.mjs install` and re-run after every plugin update. [docs/requirements.md](docs/requirements.md#auto-cycle-setup) says what each one
+does.
+
 ## Watching it work
 
 A doctrine run dispatches a lot of subagents and Claude Code shows you none of them: the terminal goes

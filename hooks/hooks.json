@@ -1,5 +1,5 @@
 {
-  "description": "doctrine — shows each dispatched seat while it runs. In a herdr session (HERDR_ENV=1) it panes the seat directly; in a contained agent (DCTR_VIEW_REQUEST_DIR set) it only writes a request file to that mount for a host-side watcher, calling no herdr. With neither set it stands down, costing one process spawn per hook event and nothing else — and that is more than one per seat: Claude Code also fires SubagentStop for its own forked queries (a prompt suggestion after most turns, memory extraction), each with an empty agent_type, so a session that dispatches no seats still spawns roughly once per turn. SessionStart after /clear (matcher clear) runs dctr-restore.mjs: when SESSION_MEMORY.md's kickoff names a handoff whose record's last state line reads Open or Blocked, it hands the new session the phase, the record path, that state line, the wrapper and the handoff as facts; otherwise it prints nothing and calls no herdr.",
+  "description": "doctrine — shows each dispatched seat while it runs. In a herdr session (HERDR_ENV=1) it panes the seat directly; in a contained agent (DCTR_VIEW_REQUEST_DIR set) it only writes a request file to that mount for a host-side watcher, calling no herdr. With neither set it stands down, costing one process spawn per hook event and nothing else — and that is more than one per seat: Claude Code also fires SubagentStop for its own forked queries (a prompt suggestion after most turns, memory extraction), each with an empty agent_type, so a session that dispatches no seats still spawns roughly once per turn. SessionStart after /clear (matcher clear) runs dctr-restore.mjs: when SESSION_MEMORY.md's kickoff names a handoff whose record's last state line reads Open or Blocked, it hands the new session the phase, the record path, that state line, the wrapper and the handoff as facts; otherwise it prints nothing and calls no herdr. PostToolBatch runs dctr-gauge.mjs: while that record is Open or Blocked and its last auto-cycle on/off line is on, it reads the main session's context use and, the first time it reaches the record's tier, hands the session the warning as facts and appends `- auto-cycle: warned <session id> <tier>` to the record, once per session id; a seat's batch (agent_id present) and every other case stand down, and it calls no herdr. While auto-cycle is on it also reports, on every batch, each tier or window error and each unknown context reading as facts, in additionalContext plus a systemMessage.",
   "hooks": {
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-seat.mjs\"", "timeout": 10 } ] }
@@ -9,6 +9,9 @@
     ],
     "SessionStart": [
       { "matcher": "clear", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-restore.mjs\"", "timeout": 5 } ] }
+    ],
+    "PostToolBatch": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-gauge.mjs\"", "timeout": 5 } ] }
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-seat.mjs\"", "timeout": 10 } ] }
