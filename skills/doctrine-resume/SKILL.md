@@ -78,16 +78,17 @@ in step 4, not silence.
 Two more checks follow the invocations above, or come first when none was due,
 whenever the kickoff names a handoff that exists on disk.
 
-**Interrupted backup.** Run `git status --short -- <memory file> <handoff>`,
-leaving the handoff out when `git check-ignore -q <handoff>` matches it. When
-it lists either path, the handoff was written and the `docs(session):` commit
-that carries it never landed: the Handoff line says
-`interrupted: handoff written, backup not committed`, and step 5 finishes that
-backup. The same holds when a handoff under `docs/handoffs/` names the
-kickoff's handoff in its `supersedes:` line, since the crash then fell between
-`doctrine-handoff` steps 3 and 4 and that newer handoff is the one to back up.
-Never run `doctrine-handoff` for this case, since a second handoff would head the
-`supersedes:` chain beside this one.
+**Interrupted backup.** The backup that should have carried the current
+handoff never landed when the memory file is untracked, or `git diff HEAD --
+<memory file>` changes its kickoff `handoff:` line, or a handoff under
+`docs/handoffs/` names the kickoff's handoff in its `supersedes:` line (the crash
+fell between `doctrine-handoff` steps 3 and 4, and that newer handoff is the one
+to back up: from here on, its header is the one this step's record read and
+invocations follow, so re-run those on it where they read the older one). A
+dirty memory file whose kickoff line is unchanged is an edit, not this case. The
+Handoff line says `interrupted: handoff written, backup not committed`, and step
+5 finishes that backup. Never run `doctrine-handoff` for this case, since a
+second handoff would head the `supersedes:` chain beside this one.
 
 **First action.** The handoff's section 5, Do this first, is one action; in the
 interrupted case above it is the section 5 of the handoff found interrupted, the one step 5 backs up.
@@ -100,10 +101,10 @@ Settle whether it already ran before anyone takes it:
   the check it launches exists). Take it zero times, whether or not auto-cycle
   is on. Append
   `- auto-cycle paused: first action ambiguous: <the section 5 sentence, verbatim>`
-  as the last line of the record read above, say
-  `first action: ambiguous, paused` in the Handoff line, and end the turn after step
-  4's report. With no record read, append nothing and ask the user whether it
-  ran.
+  to the record, placed as `doctrine-backup`'s rule "Under auto-cycle, a question
+  pauses the run" places its line, say `first action: ambiguous, paused` in the
+  Handoff line, and end the turn after step 4's report. Where that rule finds no
+  record, append nothing and ask the user whether it ran.
 - Otherwise it is due, and the Handoff line says `first action: due`.
 
 ## 2. Check drift
@@ -126,13 +127,14 @@ Trust the repo over the file. Name each mismatch specifically — "memory says
 `4b172f9b`, HEAD is `8b36d9f7`" beats "state has drifted."
 
 The backup's own commit is not drift. A backup records the SHA before it
-commits, so its commit always sits one past the Git State line. When
+commits, so its commit sits one past the Git State line. When
+`git merge-base --is-ancestor <recorded sha> HEAD` succeeds,
 `git rev-list --count <recorded sha>..HEAD` prints 1, `git log -1 --format=%s`
 starts `docs(session):`, and `git show --name-only --format= HEAD` lists only
-the memory file, paths under `docs/handoffs/` and `.gitignore` (the paths
-`doctrine-backup` step 6 commits), report no drift for that commit, nor for an
-ahead count that differs from the saved one by that commit alone. Any other
-commit ahead is drift.
+paths the pathspec of `doctrine-backup` step 6's commit line may name, report no
+drift for that commit, nor for an ahead count that differs from the saved one by
+that commit alone. Any other commit ahead, and a HEAD the recorded SHA is not an
+ancestor of, is drift.
 
 A green build usually means artifacts were published, not that anything was
 deployed. Treat a "deployed" claim as unverified unless the repo documents a
@@ -186,15 +188,15 @@ the code.
 ## 5. Resync on drift
 
 In step 1b's interrupted case, do not ask: run `doctrine-backup` steps 3 to 6 on
-the handoff step 1b found interrupted, so the kickoff names it, with step 2's batch as its step 1 output. That
-backup was already asked for, and its commit lands the handoff and the memory
-file together. Do not run `doctrine-handoff`.
+the handoff step 1b found interrupted, treated there as the handoff this run
+wrote, so the kickoff names it, with step 2's batch as its step 1 output and its
+step 2 skipped, since the interrupted run already carried forward. That backup
+was already asked for, and its commit lands the handoff and the memory file
+together. Do not run `doctrine-handoff`.
 
-Otherwise, when the repo and the file disagree, the question below is put under
-`doctrine-backup`'s rule "Under auto-cycle, a question pauses the run", which says
-how auto-cycle on is read and what is appended instead of asking: with it on, the
-line is `- auto-cycle paused: question: Memory is stale — resync it?` and the turn
-ends. With it off, or no record read, ask: "Memory is stale — resync it?" On yes,
+Otherwise, when the repo and the file disagree, the question below is asked
+under `doctrine-backup`'s rule "Under auto-cycle, a question pauses the run",
+which says when it is asked and what is appended instead. Ask: "Memory is stale — resync it?" On yes,
 run `doctrine-backup`, which updates the file in place and carries forward Gotchas
 and any unresolved 🔴 row. That closes the loop so the next session starts from
 truth instead of inheriting the same stale file.
