@@ -171,21 +171,6 @@ as dirty work. Writing "clean" over a dirty tree is the one error this file cann
 tracked files only: untracked tooling and plan directories can inflate a raw `git status --short`
 several-fold, which is why the `grep -v '^??'` is there.
 
-When this run wrote a handoff, find the chain's heads again (step 3) immediately before the commit
-below, and again before any retry of a refused commit, since another session may have published a
-handoff after this run resolved its `supersedes:`. Where this run's handoff is the one head, or the
-one head is another handoff whose `supersedes:` chain reaches this run's, go on. Where this run's
-handoff and one other handoff head the chain, exactly one of the two sessions rewrites, and which is
-read from the files alone: the other session has finished when its handoff is in HEAD
-(`git ls-files --error-unmatch`) or HEAD's memory file kickoff names it, and then this run rewrites;
-otherwise both are live, and this run rewrites only when its handoff path sorts later than the
-other's, else it goes on with its line as it is, since the later-sorting run rewrites. A rewrite
-changes this run's `supersedes:` line to name the other handoff and nothing else in either file, then
-finds the heads once more: this run's handoff the one head, go on; anything else, restore the line
-and ask the user which handoff is current, or pause under auto-cycle (the top of this skill). Any
-other set of heads asks or pauses the same way. Then, where this run's handoff heads the chain and
-the memory file's kickoff names another, rewrite the kickoff `handoff:` line to name it.
-
 Then land it locally. Name only what this run wrote, edited or moved: drop any path
 `git check-ignore -q <path>` matches and any file you did not touch, and name `.gitignore` only when
 `git diff HEAD -- .gitignore` shows your line and nothing else, or the file is untracked and holds nothing
