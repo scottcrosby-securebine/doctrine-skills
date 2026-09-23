@@ -37,15 +37,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 // inside the gate, which is the loudest quiet failure this harness has.
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
-  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-token.mjs', 'hooks.json']
+  'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-token.mjs', 'hooks.json',
+  // dctr-record.mjs is read by dctr-project.mjs too (STATE_LINE), so without it every project suite dies on load.
+  'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
  *  teardown, gate, was commented "cheapest first", and was not: every mutation only the gate suite
  *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim.
  *  Project placed on 2026-09-13 by measuring on one host: seat 0.07s, project 0.57s, gate 6.07s.
- *  Project history placed the same day, measured on one host: history 0.04s, project 0.46s, seat 1.14s. */
-const SUITES = ['dctr-project.history.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
+ *  Project history placed the same day, measured on one host: history 0.04s, project 0.46s, seat 1.14s.
+ *  Record and restore placed 2026-09-23, measured on one host: record 0.02s, restore 0.59s (after project, before gate). */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -876,6 +879,40 @@ const MUTATIONS = [
   { name: 'the parsed options reach the builder', file: 'dctr-token.mjs', clause: 'T-token: each well-formed call makes exactly one herdr call',
     from: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve, opts)',
     to: 'const args = metadataTokenArgs(process.env.HERDR_PANE_ID, round, exitCount, valve)' },
+  // e8-restore (2026-09-23): the record parser and the restore hook. Each named clause is in dctr-record.selftest.mjs
+  // or dctr-restore.selftest.mjs, and each was shown red by hand before it was listed.
+  { name: "the state is the first state line, not the last", file: "dctr-record.mjs",
+    clause: "clause 1i \u2014 state is the LAST state entry, and the wrapper is read",
+    from: "      state = { kind: 'state', line, value: l.replace(STATE_LINE, '').trim() }",
+    to: "      state = state || { kind: 'state', line, value: l.replace(STATE_LINE, '').trim() }" },
+  { name: "a form time is not checked as ISO 8601 UTC, so a near miss parses", file: "dctr-record.mjs",
+    clause: "clause 1b \u2014 no prose line and no near miss is an entry",
+    from: "const TIME = '(\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}(?::\\\\d{2}(?:\\\\.\\\\d+)?)?Z)'",
+    to: "const TIME = '(\\\\S+)'" },
+  { name: "the wrapper value is the rest of the line, not its first token", file: "dctr-record.mjs",
+    clause: "clause 1j \u2014 the E7 kit record: bold state line read, wrapper token taken with its prefix and period stripped",
+    from: "wrapper:\\s*(?:\\*\\*)?\\s*(\\S+)/i",
+    to: "wrapper:\\s*(?:\\*\\*)?\\s*(.+)/i" },
+  { name: "any last state line injects, not only Open or Blocked (SC1)", file: "dctr-restore.mjs",
+    clause: "clause 1e \u2014 an Exited record (SC1): exit 0, nothing on stdout, a reason on stderr",
+    from: "/^(Open|Blocked)\\b/i.exec(record.state?.value || '')?.[1]",
+    to: "(record.state?.value || '').split(/\\s/)[0]" },
+  { name: "a sibling-repo record path is not tried against the project dir's parent (SC2)", file: "dctr-lib.mjs",
+    clause: "clause 2b \u2014 Open record in a sibling repo, project dir from cwd: one SessionStart JSON object naming phase, record path, last state line, wrapper and handoff, under 2000 chars",
+    from: "[path.resolve(projectDir, ref), path.resolve(projectDir, '..', ref)]",
+    to: "[path.resolve(projectDir, ref)]" },
+  { name: "the restore hook acts on every SessionStart source, not only clear (E8-D1b)", file: "dctr-lib.mjs",
+    clause: "clause 1a \u2014 source startup: exit 0, nothing on stdout, a reason on stderr",
+    from: "if (p.source !== 'clear') return",
+    to: "if (false) return" },
+  { name: "a subagent clear is restored like the main session's (E8-D1b)", file: "dctr-lib.mjs",
+    clause: "clause 1d \u2014 a clear carrying agent_id: exit 0, nothing on stdout, a reason on stderr",
+    from: "  if (p.agent_id) return 'a subagent event'\n",
+    to: "" },
+  { name: "the restore text is not cut to the limit", file: "dctr-lib.mjs",
+    clause: "clause 2e \u2014 a 5,000-character state line is cut, and the other facts survive under the limit",
+    from: "  if (full.length < RESTORE_MAX) return full\n",
+    to: "  return full\n" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

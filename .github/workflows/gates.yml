@@ -82,6 +82,17 @@ jobs:
         # check after every step: legal steps clean, illegal steps named, and every prescribed fix clean.
         run: node hooks/dctr-project.history.selftest.mjs
 
+      - name: record line parser tamper test
+        # Three clauses over hooks/dctr-record.mjs: every record line form is returned with its fields,
+        # no prose line is, and the fixture is proved to carry each form without the parser. Pure node.
+        run: node hooks/dctr-record.selftest.mjs
+
+      - name: restore hook tamper test
+        # Drives hooks/dctr-restore.mjs end to end with a tripwire herdr on PATH: an Open or Blocked record
+        # injects the four facts, every other source and every missing input injects nothing, herdr is
+        # called zero times. Needs only node.
+        run: node hooks/dctr-restore.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
