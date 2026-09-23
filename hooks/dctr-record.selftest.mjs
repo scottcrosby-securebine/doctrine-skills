@@ -19,6 +19,7 @@ const T = '2026-09-23T10:38:00Z'
 const FORMS = [
   `- wave: ${T} seat H handle none`,
   `WAVE: ${T} seat codex-1 handle task-42 via doctrine-handoff`,
+  `wave: ${T} seat backup-1 handle a1b2 via doctrine-backup`,
   `- round: 3 closed ${T} at 1fee265 blockers 2 alarm 1`,
   `- finding: F1 raised ${T} blocking the parser drops a form`,
   `finding: F2 raised ${T} non-blocking the comment is vague`,
@@ -40,7 +41,13 @@ const FORMS = [
   `finding: F5 cleared ${T} rerun green`,
   `ruling: D7 ${T} append, never edit`,
   `question: Q3 opened ${T} which layout`,
+  `Question: Q3 answered ${T} both`,
   `auto-cycle paused: cap reached`,
+  `auto-cycle: on cap 10 tier 120000`,
+  `auto-cycle: warned 4a9392da-bd72 60%`,
+  `auto-cycle: cycle 3 tree 0f2c1ab`,
+  `auto-cycle: ready`,
+  `- auto-cycle: off`,
   `State: Exited`,
 ]
 // Lines that start like a form, or mention one, and must not parse.
@@ -58,7 +65,7 @@ const NEAR = [
   '* wave: 2026-09-23T10:38:00Z seat H handle none',
 ]
 const PROSE = ['# e8-restore record', '', 'Anchor: "go kickoff".', 'wrapper: doctrine-code', 'Some prose about the round.']
-const RECORD = [...PROSE, ...FORMS.slice(0, 9), ...NEAR, ...FORMS.slice(9, 18), '- State: Open', ...FORMS.slice(18), `- State: Blocked. Q1 open`].join('\n')
+const RECORD = [...PROSE, ...FORMS.slice(0, 10), ...NEAR, ...FORMS.slice(10, 19), '- State: Open', ...FORMS.slice(19), `- State: Blocked. Q1 open`].join('\n')
 const GOOD = [...PROSE, ...NEAR].join('\n')
 
 const r = parseRecord(RECORD)
@@ -68,8 +75,8 @@ const lines = RECORD.split('\n')
 // ---------------------------------------------------------------- clause 1: every form, and nothing else
 
 const want = {
-  wave: 2, round: 2, 'finding-raised': 2, 'finding-cleared': 2, ruling: 2, alarm: 2,
-  'question-opened': 2, 'question-answered': 1, 'auto-cycle': 7, state: 4,
+  wave: 3, round: 2, 'finding-raised': 2, 'finding-cleared': 2, ruling: 2, alarm: 2,
+  'question-opened': 2, 'question-answered': 2, 'auto-cycle': 12, state: 4,
 }
 const counts = Object.fromEntries(Object.keys(want).map((k) => [k, by(k).length]))
 clause('clause 1a — every form is returned once per line that carries it, no kind missing and none extra',
@@ -110,6 +117,14 @@ clause('clause 1g — ruling, alarm and question fields',
   a1.which === 'round' && a1.count === 4 && a2.which === 'time' && a2.time === T &&
   qo.id === 'Q1' && qo.text === 'which matcher does clear use' && qa.id === 'Q1' && qa.text === 'clear only',
   JSON.stringify([ru, a1, a2, qo, qa]))
+
+clause('clause 1m — every entry that carries a time carries the fixture time, both rounds are read with their own numbers, and each wave carries its own via',
+  r.entries.filter((e) => 'time' in e).length === 17 && r.entries.filter((e) => 'time' in e).every((e) => e.time === T) &&
+  JSON.stringify(by('round').map((e) => [e.n, e.revision])) === JSON.stringify([[3, '1fee265'], [4, '4b241fd']]) &&
+  JSON.stringify(by('wave').map((e) => e.via)) === JSON.stringify([null, 'doctrine-handoff', 'doctrine-backup']) &&
+  JSON.stringify(by('finding-raised').map((e) => e.time)) === JSON.stringify([T, T]) && by('question-opened').every((e) => e.time === T) &&
+  JSON.stringify(by('auto-cycle').map((e) => e.sub)) === JSON.stringify(['on', 'off', 'warned', 'cycle', 'ready', 'paused', 'paused', 'on', 'warned', 'cycle', 'ready', 'off']),
+  JSON.stringify(r.entries.map((e) => [e.kind, e.time, e.n, e.via, e.sub])))
 
 const ac = by('auto-cycle')
 const sub = (s) => ac.find((e) => e.sub === s) || {}
@@ -152,6 +167,7 @@ clause('clause 2 — a record of prose and near misses only yields no entry and 
 const KEYS = ['wave:', 'round:', 'finding:', 'ruling:', 'alarm:', 'question:', 'auto-cycle:', 'auto-cycle paused:', 'state:']
 clause('clause 3a — without the parser: the record holds every key as a list item and as a bare line, the near misses start with form keys, and GOOD holds none of FORMS',
   KEYS.every((k) => FORMS.some((l) => l.startsWith('- ') && bare(l).startsWith(k)) && FORMS.some((l) => !l.startsWith('- ') && bare(l).startsWith(k))) &&
+  ['on', 'off', 'warned', 'cycle', 'ready'].every((s) => FORMS.some((l) => l.startsWith(`- auto-cycle: ${s}`)) && FORMS.some((l) => l.startsWith(`auto-cycle: ${s}`))) &&
   NEAR.filter((l) => KEYS.some((k) => bare(l).startsWith(k))).length >= 9 &&
   FORMS.every((l) => RECORD.split('\n').includes(l)) && !FORMS.some((l) => GOOD.split('\n').includes(l)),
   'a fixture that lacked a form would let clause 1 pass by never meeting it')

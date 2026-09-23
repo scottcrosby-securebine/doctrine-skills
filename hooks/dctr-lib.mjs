@@ -557,12 +557,12 @@ export const exitLine = (code) => `exit=${code === null || code === undefined ? 
 // ---------------------------------------------------------------- session restore (E8-D1, E8-D1b)
 
 /** Why the restore hook stands down, or null when it acts: only on SessionStart after /clear, in the main
- *  session. A subagent's event carries `agent_id`; every other source (startup, resume, compact) is left
+ *  session. A subagent's event carries `agent_id`, whatever its value; every other source (startup, resume, compact) is left
  *  alone (E8-D1b). */
 export function restoreSkip(p) {
   if (!p || p.hook_event_name !== 'SessionStart') return `not a SessionStart event (${p?.hook_event_name || 'none'})`
   if (p.source !== 'clear') return `source is ${p.source || 'missing'}, not clear`
-  if (p.agent_id) return 'a subagent event'
+  if ('agent_id' in p) return 'a subagent event'
   if (!p.session_id) return 'no session_id in the payload'
   return null
 }
@@ -585,19 +585,21 @@ export function kickoffHandoff(memoryText) {
 
 /** The header lines of a handoff, above its first `##` section (doctrine step 5, doctrine-handoff step 3),
  *  whether they sit above or below the file's `#` title: `phase:` up to the first comma, backticks stripped;
- *  `record:` its first backticked token, else its first bare one; `wrapper:` read as a record's wrapper line
- *  is. Each null when absent. A header line may be a list item. */
+ *  `record:` its first backticked token, else its first bare one, a trailing `:<line>` cut off; `wrapper:` read
+ *  as a record's wrapper line is. The first line for each key wins. A key may be bold or a list item. Each null
+ *  when absent. */
 export function handoffHeader(text) {
   const out = { phase: null, record: null, wrapper: null }
   for (const raw of String(text ?? '').split('\n')) {
     if (/^##\s/.test(raw.trim())) break
-    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper):\s*(.*)$/i.exec(raw.trim())
+    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper)(?:\*\*)?:(?:\*\*)?\s*(.*)$/i.exec(raw.trim())
     if (!m) continue
     const key = m[1].toLowerCase(), v = m[2].trim()
+    if (out[key] !== null) continue
     if (key === 'phase') {
       out.phase = v.split(',')[0].replace(/[`*]/g, '').trim() || null
     } else if (key === 'record') {
-      out.record = (/`([^`]+)`/.exec(v)?.[1] || v.split(/\s+/)[0].replace(/[,;]$/, '')) || null
+      out.record = (/`([^`]+)`/.exec(v)?.[1] || v.split(/\s+/)[0]).replace(/[,;]$/, '').replace(/:\d+$/, '') || null
     } else {
       out.wrapper = wrapperValue(v.split(/\s+/)[0])
     }

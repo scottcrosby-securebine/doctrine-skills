@@ -93,6 +93,7 @@ for (const [n, what, res] of [
   ['1b', 'source resume', run(clear(openIn.proj, { source: 'resume' }))],
   ['1c', 'source compact', run(clear(openIn.proj, { source: 'compact' }))],
   ['1d', 'a clear carrying agent_id', run(clear(openIn.proj, { agent_id: 'ad1a7dbb0d453a08d' }))],
+  ['1d2', 'a clear carrying an empty agent_id', run(clear(openIn.proj, { agent_id: '' }))],
   ['1e', 'an Exited record (SC1)', run(clear(exited.proj))],
   ['1f', 'no memory file', run(clear(noMem.proj))],
   ['1g', 'handoff: none', run(clear(noneHo.proj))],
@@ -130,6 +131,14 @@ clause('clause 1o — handoffHeader reads phase, record and wrapper above the fi
   handoffHeader('- phase: p1\n- record: a/b.md, line 4\n# h').record === 'a/b.md' &&
   handoffHeader('# Handoff\nsupersedes: none\nphase: p2\nrecord: `r2.md`\nwrapper: doctrine-code\n\n## 1. State\nrecord: `late.md`').record === 'r2.md',
   JSON.stringify(hh))
+
+clause('clause 1o2 — handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read',
+  handoffHeader('- **record**: `a/r.md`, line 4').record === 'a/r.md' && handoffHeader('**Record:** a/r.md').record === 'a/r.md' &&
+  handoffHeader('record: a/r.md:19, which reads').record === 'a/r.md' && handoffHeader('record: `a/r.md:19`').record === 'a/r.md' &&
+  handoffHeader('wrapper: doctrine-code, the E8 wrapper').wrapper === 'doctrine-code' && handoffHeader('**wrapper:** doctrine-code').wrapper === 'doctrine-code' &&
+  handoffHeader('**phase:** p3, state Open').phase === 'p3' &&
+  handoffHeader('record: `first.md`\nrecord: `second.md`').record === 'first.md' && handoffHeader('phase: p1, x\nphase: p2').phase === 'p1',
+  JSON.stringify([handoffHeader('- **record**: `a/r.md`, line 4'), handoffHeader('**Record:** a/r.md'), handoffHeader('record: a/r.md:19, which reads'), handoffHeader('record: `first.md`\nrecord: `second.md`')]))
 
 const has = (set) => (p) => set.includes(p)
 clause('clause 1p — resolveRecordPath: absolute first, then project dir, then its parent, else null',

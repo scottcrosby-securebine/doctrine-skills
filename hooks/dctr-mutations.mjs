@@ -907,7 +907,7 @@ const MUTATIONS = [
     to: "if (false) return" },
   { name: "a subagent clear is restored like the main session's (E8-D1b)", file: "dctr-lib.mjs",
     clause: "clause 1d \u2014 a clear carrying agent_id: exit 0, nothing on stdout, a reason on stderr",
-    from: "  if (p.agent_id) return 'a subagent event'\n",
+    from: "  if ('agent_id' in p) return 'a subagent event'\n",
     to: "" },
   { name: "the restore text is not cut to the limit", file: "dctr-lib.mjs",
     clause: "clause 2e \u2014 a 5,000-character state line is cut, and the other facts survive under the limit",
@@ -926,6 +926,23 @@ const MUTATIONS = [
     clause: "clause 1o \u2014 handoffHeader reads phase, record and wrapper above the first ## section only, above or below the # title",
     from: "if (/^##\\s/.test(raw.trim())) break",
     to: "if (/^#/.test(raw.trim())) break" },
+  // e8-restore round 3 (2026-09-23): the handoff header forms the hub now states.
+  { name: "a later header line for a key already read overrides the first", file: "dctr-lib.mjs",
+    clause: "clause 1o2 \u2014 handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read",
+    from: "    if (out[key] !== null) continue\n",
+    to: "" },
+  { name: "a record path joined to its line number is taken whole, so it resolves nowhere", file: "dctr-lib.mjs",
+    clause: "clause 1o2 \u2014 handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read",
+    from: ".replace(/[,;]$/, '').replace(/:\\d+$/, '') || null",
+    to: ".replace(/[,;]$/, '') || null" },
+  { name: "an empty agent_id is read as the main session (E8-D1b)", file: "dctr-lib.mjs",
+    clause: "clause 1d2 \u2014 a clear carrying an empty agent_id: exit 0, nothing on stdout, a reason on stderr",
+    from: "  if ('agent_id' in p) return 'a subagent event'\n",
+    to: "  if (p.agent_id) return 'a subagent event'\n" },
+  { name: "a wave dispatched by doctrine-backup is not read as one", file: "dctr-record.mjs",
+    clause: "clause 1m \u2014 every entry that carries a time carries the fixture time, both rounds are read with their own numbers, and each wave carries its own via",
+    from: "(?:\\\\s+via\\\\s+(doctrine-handoff|doctrine-backup))?",
+    to: "(?:\\\\s+via\\\\s+(doctrine-handoff))?" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

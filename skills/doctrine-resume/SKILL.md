@@ -37,8 +37,9 @@ exists: the path as written if absolute, else relative to the repo root, else
 relative to the repo root's parent directory, which is where a sibling repo's
 path such as `<other-repo>/.doctrine/records/<file>.md` lands. In the record,
 take its last state line (a line whose text starts `State:`, in any case, bare,
-bold or as a list item) and its `wrapper:` line (doctrine step 1; drop a
-`doctrine:` prefix and a trailing period from the value). What the record reads
+bold or as a list item) and its last `wrapper:` line, else the handoff header's
+`wrapper:` line (doctrine step 1; drop a `doctrine:` prefix and a trailing
+period from the value). What the record reads
 is the first word after `State:` on that line, bold and trailing period ignored.
 The record is the authority on whether a phase is open, never the kickoff: when
 the record's state and the kickoff's `state:` disagree (the record reads Open or
@@ -50,7 +51,7 @@ record.
 When the record reads Open or Blocked, your next tool calls are Skill tool
 invocations, in this order: `doctrine:<wrapper>` (for example
 `doctrine:doctrine-code`), then `doctrine:doctrine` unless the wrapper already
-had you invoke it. With `wrapper: none` or no wrapper line, invoke only
+had you invoke it. With `wrapper: none`, or no wrapper line in the record or the handoff header, invoke only
 `doctrine:doctrine`. Nothing comes before them except step 1's `ls` and the
 reads this step and step 1 already made: no drift check, no `git` or `gh`, no
 other file read. When it reads Blocked, also name the open question in the
