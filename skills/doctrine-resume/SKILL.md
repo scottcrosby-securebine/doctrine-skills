@@ -83,8 +83,10 @@ leaving the handoff out when `git check-ignore -q <handoff>` matches it. When
 it lists either path, the handoff was written and the `docs(session):` commit
 that carries it never landed: the Handoff line says
 `interrupted: handoff written, backup not committed`, and step 5 finishes that
-backup. Never run
-`doctrine-handoff` for this case, since a second handoff would head the
+backup. The same holds when a handoff under `docs/handoffs/` names the
+kickoff's handoff in its `supersedes:` line, since the crash then fell between
+`doctrine-handoff` steps 3 and 4 and that newer handoff is the one to back up.
+Never run `doctrine-handoff` for this case, since a second handoff would head the
 `supersedes:` chain beside this one.
 
 **First action.** The handoff's section 5, Do this first, is one action.
@@ -183,7 +185,7 @@ the code.
 ## 5. Resync on drift
 
 In step 1b's interrupted case, do not ask: run `doctrine-backup` steps 3 to 6 on
-the handoff the kickoff names, with step 2's batch as its step 1 output. That
+the handoff step 1b found interrupted, so the kickoff names it, with step 2's batch as its step 1 output. That
 backup was already asked for, and its commit lands the handoff and the memory
 file together. Do not run `doctrine-handoff`.
 
