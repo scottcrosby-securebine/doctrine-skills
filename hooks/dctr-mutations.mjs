@@ -1087,6 +1087,10 @@ const MUTATIONS = [
     clause: "clause 2n",
     from: "  const self = `node ${shQuote(copyPath)}`",
     to: "  const self = `node \"${copyPath}\"`" },
+  { name: "the transcript read stops at the second chunk, so a tool result past 2 MB after the last usage entry hides a crossing (G2-N1)", file: "dctr-gauge.mjs",
+    clause: "clause 2s2",
+    from: "const TAIL_CHUNKS = [512 * 1024, 2 * 1024 * 1024, Infinity]",
+    to: "const TAIL_CHUNKS = [512 * 1024, 2 * 1024 * 1024]" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
