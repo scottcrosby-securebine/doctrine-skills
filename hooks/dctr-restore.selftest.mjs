@@ -136,15 +136,15 @@ clause('clause 1o — handoffHeader reads phase, record and wrapper above the fi
 // One table drives clause 1o2 (the parser reads each shape) and clause 3d (each shape really is what its name says,
 // checked without the parser): a shape dropped from one is dropped from both, so 3d can never prove a fixture 1o2 no longer runs.
 const HDRS = [
-  ['bold list-item key, backticked path, trailing comma', '- **record**: `a/r.md`, line 4', 'record', 'a/r.md', (h) => /^- \*\*record\*\*:/.test(h)],
-  ['bold key with the colon inside, bare path', '**Record:** a/r.md', 'record', 'a/r.md', (h) => /^\*\*Record:\*\*/.test(h)],
+  ['bold list-item key, backticked path, trailing comma', '- **record**: `a/r.md`, line 4', 'record', 'a/r.md', (h) => /^- \*\*record\*\*: `a\/r\.md`,/.test(h)],
+  ['bold key with the colon inside, bare path', '**Record:** a/r.md', 'record', 'a/r.md', (h) => /^\*\*Record:\*\* a\/r\.md$/.test(h)],
   ['path joined to its line number', 'record: a/r.md:19, which reads', 'record', 'a/r.md', (h) => /r\.md:19,/.test(h)],
   ['backticked path joined to its line number', 'record: `a/r.md:19`', 'record', 'a/r.md', (h) => /`a\/r\.md:19`/.test(h)],
-  ['wrapper followed by a comma', 'wrapper: doctrine-code, the E8 wrapper', 'wrapper', 'doctrine-code', (h) => /doctrine-code,/.test(h)],
-  ['bold wrapper key', '**wrapper:** doctrine-code', 'wrapper', 'doctrine-code', (h) => /^\*\*wrapper:\*\*/.test(h)],
-  ['bold phase key', '**phase:** p3, state Open', 'phase', 'p3', (h) => /^\*\*phase:\*\*/.test(h)],
-  ['second record line for a key already read', 'record: `first.md`\nrecord: `second.md`', 'record', 'first.md', (h) => h.split('\n').filter((l) => l.startsWith('record:')).length === 2],
-  ['second phase line for a key already read', 'phase: p1, x\nphase: p2', 'phase', 'p1', (h) => h.split('\n').filter((l) => l.startsWith('phase:')).length === 2],
+  ['wrapper followed by a comma', 'wrapper: doctrine-code, the E8 wrapper', 'wrapper', 'doctrine-code', (h) => /^wrapper: doctrine-code, \S/.test(h)],
+  ['bold wrapper key', '**wrapper:** doctrine-code', 'wrapper', 'doctrine-code', (h) => /^\*\*wrapper:\*\* doctrine-code$/.test(h)],
+  ['bold phase key', '**phase:** p3, state Open', 'phase', 'p3', (h) => /^\*\*phase:\*\* p3, /.test(h)],
+  ['second record line for a key already read', 'record: `first.md`\nrecord: `second.md`', 'record', 'first.md', (h) => h === 'record: `first.md`\nrecord: `second.md`'],
+  ['second phase line for a key already read', 'phase: p1, x\nphase: p2', 'phase', 'p1', (h) => h === 'phase: p1, x\nphase: p2'],
   ['phase with no comma', 'phase: e8-restore Open', 'phase', 'e8-restore', (h) => !h.includes(',') && h.split(' ').length === 3],
   ['backticked phase then a parenthesis', 'phase: `e8-restore` (Open)', 'phase', 'e8-restore', (h) => /`e8-restore` \(/.test(h)],
   ['bare path before backticked text', 'record: a/r.md, last state line at `:19`, which reads: "x"', 'record', 'a/r.md', (h) => /^record: a\/r\.md, .*`:19`/.test(h)],
@@ -152,7 +152,7 @@ const HDRS = [
   ['quoted path', 'record: "a/r.md"', 'record', 'a/r.md', (h) => /^record: "a\/r\.md"$/.test(h)],
   ['phase with the state joined by a space', 'phase: e8-fixture state: Open', 'phase', 'e8-fixture', (h) => /^phase: e8-fixture state:/.test(h)],
   ['bare path before backticked state and a line number', 'record: .doctrine/records/r.md last state `State: Open` line 2', 'record', '.doctrine/records/r.md', (h) => /r\.md last state `State: Open` line 2$/.test(h)],
-  ['a record line only inside a ## section', '# Handoff\n## Notes\nrecord: unrelated.md', 'record', null, (h) => /^# Handoff\n## Notes\nrecord: /.test(h)],
+  ['a record line only inside a ## section', '# Handoff\n## Notes\nrecord: unrelated.md', 'record', null, (h) => h === '# Handoff\n## Notes\nrecord: unrelated.md'],
 ]
 const bad1o2 = HDRS.filter(([, h, key, want]) => handoffHeader(h)[key] !== want).map(([name, h, key]) => [name, handoffHeader(h)[key]])
 clause('clause 1o2 — handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section',
