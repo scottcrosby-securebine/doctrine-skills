@@ -42,6 +42,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { herdr, codexStateDir } from './dctr-state.mjs'
 import { codexTerminal, ID_RE } from './dctr-lib.mjs'
+import { STATE_LINE } from './dctr-record.mjs'
 
 export const PROJECT_PATH = 'docs/PROJECT.md'
 const PROJECT_STATES = ['Proposed', 'Ruled', 'Done']
@@ -504,7 +505,6 @@ export function statusLines(model, readers) {
  *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. A
  *  state line starts with `state:` after an optional `- ` and an optional `**`, the two forms run
  *  records use. */
-const STATE_LINE = /^(?:-\s+)?(?:\*\*)?state:\s*/i
 /** Throws, printed unknown, when Records is absent or unreadable or a result file that exists cannot
  *  be read. A transcript with no result file is a pending gate, never a failed read. */
 export function readRecords(root, records) {

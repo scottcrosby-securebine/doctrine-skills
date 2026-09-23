@@ -1,4 +1,6 @@
 import os from 'node:os'
+import path from 'node:path'
+import { wrapperValue } from './dctr-record.mjs'
 
 // Shared decisions for doctrine's herdr seat visibility (issue #17).
 //
@@ -551,3 +553,92 @@ export const gateRunCommand = (script, out, marker, paneId, tabId, workspace, la
  *  the check's exit status. It is never written into the transcript: a check's own output printing
  *  `exit=0` ended the old in-transcript wait while the check was still running. */
 export const exitLine = (code) => `exit=${code === null || code === undefined ? 'signal' : code}`
+
+// ---------------------------------------------------------------- session restore (E8-D1, E8-D1b)
+
+/** Why the restore hook stands down, or null when it acts: only on SessionStart after /clear, in the main
+ *  session. A subagent's event carries `agent_id`, whatever its value; every other source (startup, resume, compact) is left
+ *  alone (E8-D1b). */
+export function restoreSkip(p) {
+  if (!p || p.hook_event_name !== 'SessionStart') return `not a SessionStart event (${p?.hook_event_name || 'none'})`
+  if (p.source !== 'clear') return `source is ${p.source || 'missing'}, not clear`
+  if ('agent_id' in p) return 'a subagent event'
+  if (!p.session_id) return 'no session_id in the payload'
+  return null
+}
+
+/** The `handoff:` path from the first line of `## Next Session Kickoff` that has the machine shape
+ *  `handoff: <path> | state: <word>` (doctrine-backup), backticks stripped, or null for `none`, for no
+ *  kickoff section, and for a kickoff with no such line: a `handoff:` line without its `| state:` half is not
+ *  the machine line and selects nothing. */
+export function kickoffHandoff(memoryText) {
+  const lines = String(memoryText ?? '').split('\n')
+  const at = lines.findIndex((l) => /^##\s+Next Session Kickoff\s*$/i.test(l.trim()))
+  if (at < 0) return null
+  for (const l of lines.slice(at + 1)) {
+    if (/^##\s/.test(l)) return null
+    const m = /^handoff:\s*`?([^`|\s]+)`?\s*\|\s*state:/i.exec(l.trim())
+    if (m) return m[1].toLowerCase() === 'none' ? null : m[1]
+  }
+  return null
+}
+
+/** The header lines of a handoff, above its first `##` section (doctrine step 5, doctrine-handoff step 3),
+ *  whether they sit above or below the file's `#` title. Each value is the first word after the key, as the hub
+ *  states the forms: backticks, quotes, `*` and a trailing comma, semicolon or period stripped; for `record:` a
+ *  trailing `:<line>` cut off too; `wrapper:` read as a record's wrapper line is. The first line for each key wins.
+ *  A key may be bold or a list item. Each null when absent. */
+export function handoffHeader(text) {
+  const out = { phase: null, record: null, wrapper: null }
+  for (const raw of String(text ?? '').split('\n')) {
+    if (/^##\s/.test(raw.trim())) break
+    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper)(?:\*\*)?:(?:\*\*)?\s*(.*)$/i.exec(raw.trim())
+    if (!m) continue
+    const key = m[1].toLowerCase(), v = m[2].trim()
+    if (out[key] !== null) continue
+    const tok = v.split(/\s+/)[0].replace(/[`'"*]/g, '').replace(/[.,;]+$/, '')
+    if (key === 'phase') {
+      out.phase = tok || null
+    } else if (key === 'record') {
+      out.record = tok.replace(/:\d+$/, '') || null
+    } else {
+      out.wrapper = wrapperValue(tok)
+    }
+  }
+  return out
+}
+
+/** The state the restore hook acts on: `Open` or `Blocked` as the first word of a state entry's value, else
+ *  null (scope choice SC1: any other state injects nothing). */
+export const restoreState = (value) => /^(Open|Blocked)\b/i.exec(value || '')?.[1] || null
+
+/** The record a handoff names, resolved in this order, the first that exists (scope choice SC2): absolute
+ *  as written; relative to the project dir; relative to its parent, the sibling-repo form a handoff uses
+ *  for a companion tracking repo. `exists` is injected so this stays pure. Null when none exists. */
+export function resolveRecordPath(ref, projectDir, exists) {
+  if (!ref) return null
+  const tries = path.isAbsolute(ref) ? [ref] : [path.resolve(projectDir, ref), path.resolve(projectDir, '..', ref)]
+  return tries.find((p) => exists(p)) || null
+}
+
+/** The restore hook's text is under this many characters, far inside the harness's 10,000 cap. */
+export const RESTORE_MAX = 2000
+
+/** The facts a cleared session is handed (E8-D1): the phase, the record's path, its last state line quoted,
+ *  the wrapper, and the handoff. Facts only, never orders: imperative text is shown to the user instead of
+ *  used. Over RESTORE_MAX the quoted state line is cut first, then the whole. */
+export function restoreContext({ phase, state, stateLine, recordPath, wrapper, handoffPath }) {
+  const build = (q) => [
+    `doctrine restore: this session was cleared while doctrine phase ${phase || '(unnamed in the handoff)'} was ${state}.`,
+    `The phase record is ${recordPath}; its last state line reads: "${q}".`,
+    wrapper && wrapper.toLowerCase() === 'none' ? 'The phase runs under no wrapper (wrapper: none).'
+      : `The phase runs under wrapper ${wrapper ? `doctrine:${wrapper}` : '(none named in the record or the handoff)'}.`,
+    `The current handoff is ${handoffPath}.`,
+    'The record is the authority for phase state; doctrine-resume reads it and routes on it.',
+  ].join(' ')
+  const full = build(stateLine)
+  if (full.length < RESTORE_MAX) return full
+  const room = Math.max(0, stateLine.length - (full.length - RESTORE_MAX) - 2)
+  const cut = build(`${stateLine.slice(0, room)}…`)
+  return cut.length < RESTORE_MAX ? cut : cut.slice(0, RESTORE_MAX - 1)
+}
