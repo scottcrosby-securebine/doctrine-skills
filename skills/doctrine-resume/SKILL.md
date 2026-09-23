@@ -89,7 +89,8 @@ kickoff's handoff in its `supersedes:` line, since the crash then fell between
 Never run `doctrine-handoff` for this case, since a second handoff would head the
 `supersedes:` chain beside this one.
 
-**First action.** The handoff's section 5, Do this first, is one action.
+**First action.** The handoff's section 5, Do this first, is one action; in the
+interrupted case above it is the section 5 of the handoff found interrupted, the one step 5 backs up.
 Settle whether it already ran before anyone takes it:
 
 - Done: a line in the memory file's Resume or in the record names it done.
@@ -189,13 +190,11 @@ the handoff step 1b found interrupted, so the kickoff names it, with step 2's ba
 backup was already asked for, and its commit lands the handoff and the memory
 file together. Do not run `doctrine-handoff`.
 
-Otherwise, when the repo and the file disagree, read whether auto-cycle is on.
-Take the record step 1b read, else the record this session's anchor names:
-auto-cycle is on when that record's last `auto-cycle: on` or `auto-cycle: off`
-line is the on line and its last state line reads Open or Blocked. When it is
-on, do not ask: append
-`- auto-cycle paused: question: Memory is stale — resync it?` as the record's last line and end the turn. When it is off, or no record
-was read, ask: "Memory is stale — resync it?" On yes,
+Otherwise, when the repo and the file disagree, the question below is put under
+`doctrine-backup`'s rule "Under auto-cycle, a question pauses the run", which says
+how auto-cycle on is read and what is appended instead of asking: with it on, the
+line is `- auto-cycle paused: question: Memory is stale — resync it?` and the turn
+ends. With it off, or no record read, ask: "Memory is stale — resync it?" On yes,
 run `doctrine-backup`, which updates the file in place and carries forward Gotchas
 and any unresolved 🔴 row. That closes the loop so the next session starts from
 truth instead of inheriting the same stale file.
