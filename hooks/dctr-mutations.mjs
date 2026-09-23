@@ -39,7 +39,8 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
   'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-token.mjs', 'hooks.json',
   // dctr-record.mjs is read by dctr-project.mjs too (STATE_LINE), so without it every project suite dies on load.
-  'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs']
+  'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs',
+  'dctr-gauge.mjs', 'dctr-gauge.selftest.mjs', 'dctr-bridge.mjs', 'dctr-bridge.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -47,8 +48,11 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim.
  *  Project placed on 2026-09-13 by measuring on one host: seat 0.07s, project 0.57s, gate 6.07s.
  *  Project history placed the same day, measured on one host: history 0.04s, project 0.46s, seat 1.14s.
- *  Record and restore placed 2026-09-23, measured on one host: record 0.02s, restore 0.59s (after project, before gate). */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
+ *  Record and restore placed 2026-09-23, measured on one host: record 0.02s, restore 0.59s (after project, before gate).
+ *  Gauge and bridge placed 2026-09-23, and the whole list re-measured on one host at that commit: record 0.04s,
+ *  history 0.06s, project 0.51s, restore 0.67s, bridge 0.90s, seat 1.18s, gauge 1.30s, gate 6.30s, pane 8.92s,
+ *  teardown 17.33s; seat had grown past project since it was placed, so the two swapped. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -959,6 +963,82 @@ const MUTATIONS = [
     clause: "clause 1o2 \u2014 handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section",
     from: "    if (/^##\\s/.test(raw.trim())) break\n",
     to: "" },
+  { name: "the gauge warns inside a dispatched seat, and burns the main session's latch (E8-D21)", file: "dctr-lib.mjs",
+    clause: "clause 1a",
+    from: "  if ('agent_id' in p) return 'a seat batch (agent_id present)'\n",
+    to: "" },
+  { name: "the gauge warns on every crossing, not once per session (E8-D4)", file: "dctr-lib.mjs",
+    clause: "clause 1o",
+    from: "  const warn = crossed && !l.warned\n",
+    to: "  const warn = crossed\n" },
+  { name: "a missing transcript reads as zero use, not unknown (E8-D10)", file: "dctr-lib.mjs",
+    clause: "clause 1c",
+    from: "  if (transcriptText === null || transcriptText === undefined) return { unknown: 'missing' }\n",
+    to: "  if (transcriptText === null || transcriptText === undefined) return { used: 0, uuid: null, at: null }\n" },
+  { name: "a malformed tier resolves to a number and reports nothing (E8-D11)", file: "dctr-lib.mjs",
+    clause: "clause 1k",
+    from: "    errors.push(`malformed tier \"${text}\"`)\n    return { tier: null, tierText: text, errors }\n",
+    to: "    tier = Number.parseInt(text) || 0\n" },
+  { name: "a stale reading is read as current (SC2)", file: "dctr-lib.mjs",
+    clause: "clause 1f",
+    from: "    if (lastUuid && e.uuid === lastUuid) return { unknown: 'stale' }\n",
+    to: "" },
+  { name: "a tier below the floor is not raised to it (SC5)", file: "dctr-lib.mjs",
+    clause: "clause 1m",
+    from: "    if (tier < floor) {\n",
+    to: "    if (false) {\n" },
+  { name: "three unknown readings never warn (SC10)", file: "dctr-lib.mjs",
+    clause: "clause 1q",
+    from: "    if (l.unknownRun >= 3) { crossed = true; label = 'unknown' }\n",
+    to: "" },
+  { name: "an unknown window is not reported (SC3)", file: "dctr-lib.mjs",
+    clause: "clause 1n",
+    from: "  if (!win) errors.push('window unknown')\n",
+    to: "" },
+  { name: "a tier above 90% of the window is not reported (E8-D11)", file: "dctr-lib.mjs",
+    clause: "clause 1l",
+    from: "errors.push('tier above 90% of the window')",
+    to: "void 0" },
+  { name: "a zero-total usage entry is read as the reading (E8-D10)", file: "dctr-lib.mjs",
+    clause: "clause 1i",
+    from: "    if (used <= 0) continue\n",
+    to: "" },
+  { name: "the warned line is never appended to the record (SC9)", file: "dctr-gauge.mjs",
+    clause: "clause 2b",
+    from: "      fs.appendFileSync(recordPath, (text === '' || text.endsWith('\\n') ? '' : '\\n') + line)\n",
+    to: "" },
+  { name: "the bridge reader returns another session's file (E8-D23)", file: "dctr-bridge.mjs",
+    clause: "clause 1a",
+    from: "    return r && r.session_id === sessionId ? r : null",
+    to: "    return r" },
+  { name: "the wrapped statusLine command is not quoted, so a compound command splits", file: "dctr-bridge.mjs",
+    clause: "clause 2a",
+    from: "command: `${self} -- ${shQuote(sl.command)}`",
+    to: "command: `${self} -- ${sl.command}`" },
+  { name: "the bridge file is written in place, not through a temp file (E8-D23)", file: "dctr-bridge.mjs",
+    clause: "clause 2d",
+    from: "  const tmp = `${file}.tmp.${process.pid}`",
+    to: "  const tmp = file" },
+  { name: "a failed bridge write kills the inner statusLine command", file: "dctr-bridge.mjs",
+    clause: "clause 2c",
+    from: "  } catch (e) { process.stderr.write(`dctr-bridge: bridge file not written: ${e.message}\\n`) }",
+    to: "  } catch (e) { throw e }" },
+  { name: "a second install wraps the wrapper", file: "dctr-bridge.mjs",
+    clause: "clause 2j",
+    from: "  if (sl.command.startsWith(self)) return settings\n",
+    to: "" },
+  { name: "a statusline payload with no session_id is recorded", file: "dctr-bridge.mjs",
+    clause: "clause 2f",
+    from: "  if (!j?.session_id || window === null) return null",
+    to: "  if (window === null) return null" },
+  { name: "a non-command statusLine is wrapped instead of refused", file: "dctr-bridge.mjs",
+    clause: "clause 1d",
+    from: "  if (sl.type !== 'command') throw new Error(`statusLine type ${JSON.stringify(sl.type)} is not \"command\"; only a command statusLine can be wrapped`)\n",
+    to: "" },
+  { name: "the inner command's exit code is not passed through", file: "dctr-bridge.mjs",
+    clause: "clause 2a",
+    from: "  return r.status ?? 1",
+    to: "  return 0" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
