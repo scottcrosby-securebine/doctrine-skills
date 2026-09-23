@@ -133,17 +133,30 @@ clause('clause 1o — handoffHeader reads phase, record and wrapper above the fi
   handoffHeader('# Handoff\nsupersedes: none\nphase: p2\nrecord: `r2.md`\nwrapper: doctrine-code\n\n## 1. State\nrecord: `late.md`').record === 'r2.md',
   JSON.stringify(hh))
 
-clause('clause 1o2 — handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read',
-  handoffHeader('- **record**: `a/r.md`, line 4').record === 'a/r.md' && handoffHeader('**Record:** a/r.md').record === 'a/r.md' &&
-  handoffHeader('record: a/r.md:19, which reads').record === 'a/r.md' && handoffHeader('record: `a/r.md:19`').record === 'a/r.md' &&
-  handoffHeader('wrapper: doctrine-code, the E8 wrapper').wrapper === 'doctrine-code' && handoffHeader('**wrapper:** doctrine-code').wrapper === 'doctrine-code' &&
-  handoffHeader('**phase:** p3, state Open').phase === 'p3' &&
-  handoffHeader('record: `first.md`\nrecord: `second.md`').record === 'first.md' && handoffHeader('phase: p1, x\nphase: p2').phase === 'p1' &&
-  handoffHeader('phase: e8-restore Open').phase === 'e8-restore' && handoffHeader('phase: `e8-restore` (Open)').phase === 'e8-restore' &&
-  handoffHeader('record: a/r.md, last state line at `:19`, which reads: "x"').record === 'a/r.md' && handoffHeader('record: a/r.md line 12: `- State: Open`').record === 'a/r.md' &&
-  handoffHeader('record: "a/r.md"').record === 'a/r.md' &&
-  handoffHeader('phase: e8-fixture state: Open').phase === 'e8-fixture' && handoffHeader('record: .doctrine/records/r.md last state `State: Open` line 2').record === '.doctrine/records/r.md',
-  JSON.stringify([handoffHeader('- **record**: `a/r.md`, line 4'), handoffHeader('**Record:** a/r.md'), handoffHeader('record: a/r.md:19, which reads'), handoffHeader('record: `first.md`\nrecord: `second.md`')]))
+// One table drives clause 1o2 (the parser reads each shape) and clause 3d (each shape really is what its name says,
+// checked without the parser): a shape dropped from one is dropped from both, so 3d can never prove a fixture 1o2 no longer runs.
+const HDRS = [
+  ['bold list-item key, backticked path, trailing comma', '- **record**: `a/r.md`, line 4', 'record', 'a/r.md', (h) => /^- \*\*record\*\*:/.test(h)],
+  ['bold key with the colon inside, bare path', '**Record:** a/r.md', 'record', 'a/r.md', (h) => /^\*\*Record:\*\*/.test(h)],
+  ['path joined to its line number', 'record: a/r.md:19, which reads', 'record', 'a/r.md', (h) => /r\.md:19,/.test(h)],
+  ['backticked path joined to its line number', 'record: `a/r.md:19`', 'record', 'a/r.md', (h) => /`a\/r\.md:19`/.test(h)],
+  ['wrapper followed by a comma', 'wrapper: doctrine-code, the E8 wrapper', 'wrapper', 'doctrine-code', (h) => /doctrine-code,/.test(h)],
+  ['bold wrapper key', '**wrapper:** doctrine-code', 'wrapper', 'doctrine-code', (h) => /^\*\*wrapper:\*\*/.test(h)],
+  ['bold phase key', '**phase:** p3, state Open', 'phase', 'p3', (h) => /^\*\*phase:\*\*/.test(h)],
+  ['second record line for a key already read', 'record: `first.md`\nrecord: `second.md`', 'record', 'first.md', (h) => h.split('\n').filter((l) => l.startsWith('record:')).length === 2],
+  ['second phase line for a key already read', 'phase: p1, x\nphase: p2', 'phase', 'p1', (h) => h.split('\n').filter((l) => l.startsWith('phase:')).length === 2],
+  ['phase with no comma', 'phase: e8-restore Open', 'phase', 'e8-restore', (h) => !h.includes(',') && h.split(' ').length === 3],
+  ['backticked phase then a parenthesis', 'phase: `e8-restore` (Open)', 'phase', 'e8-restore', (h) => /`e8-restore` \(/.test(h)],
+  ['bare path before backticked text', 'record: a/r.md, last state line at `:19`, which reads: "x"', 'record', 'a/r.md', (h) => /^record: a\/r\.md, .*`:19`/.test(h)],
+  ['bare path before a backticked state line', 'record: a/r.md line 12: `- State: Open`', 'record', 'a/r.md', (h) => /a\/r\.md line 12: `- State: Open`/.test(h)],
+  ['quoted path', 'record: "a/r.md"', 'record', 'a/r.md', (h) => /^record: "a\/r\.md"$/.test(h)],
+  ['phase with the state joined by a space', 'phase: e8-fixture state: Open', 'phase', 'e8-fixture', (h) => /^phase: e8-fixture state:/.test(h)],
+  ['bare path before backticked state and a line number', 'record: .doctrine/records/r.md last state `State: Open` line 2', 'record', '.doctrine/records/r.md', (h) => /r\.md last state `State: Open` line 2$/.test(h)],
+  ['a record line only inside a ## section', '# Handoff\n## Notes\nrecord: unrelated.md', 'record', null, (h) => /^# Handoff\n## Notes\nrecord: /.test(h)],
+]
+const bad1o2 = HDRS.filter(([, h, key, want]) => handoffHeader(h)[key] !== want).map(([name, h, key]) => [name, handoffHeader(h)[key]])
+clause('clause 1o2 — handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section',
+  bad1o2.length === 0 && HDRS.length === 17, JSON.stringify(bad1o2))
 
 const has = (set) => (p) => set.includes(p)
 clause('clause 1p — resolveRecordPath: absolute first, then project dir, then its parent, else null',
@@ -179,10 +192,8 @@ clause('clause 3c — without the hook: each stand-down fixture really lacks wha
   'a stand-down fixture carries what it should lack')
 
 fs.rmSync(tmp, { recursive: true, force: true })
-const HDRS = ['- **record**: `a/r.md`, line 4', '**Record:** a/r.md', 'record: a/r.md:19, which reads', 'wrapper: doctrine-code, the E8 wrapper', 'phase: e8-restore Open', 'record: a/r.md, last state line at `:19`, which reads: "x"']
-clause('clause 3d — without the parser: the header fixtures carry a bold key, a path joined to :19, a wrapper followed by a comma, a phase with no comma, and a bare path before backticked text',
-  /^\*\*[Rr]ecord/.test(HDRS[1]) && /^- \*\*record\*\*/.test(HDRS[0]) && /r\.md:19/.test(HDRS[2]) && /doctrine-code,/.test(HDRS[3]) &&
-  !HDRS[4].includes(',') && /^record: a\/r\.md, .*`:19`/.test(HDRS[5]) && HDRS.every((h) => !/^#/.test(h)),
-  'if a header fixture lacked its shape, clause 1o2 would prove nothing about it')
+clause('clause 3d — without the parser: every header-table shape really carries the property its name says',
+  HDRS.every(([, h, , , carries]) => carries(h)) && HDRS.length === 17,
+  JSON.stringify(HDRS.filter(([, h, , , carries]) => !carries(h)).map(([n]) => n)))
 
 process.exit(bad ? 1 : 0)

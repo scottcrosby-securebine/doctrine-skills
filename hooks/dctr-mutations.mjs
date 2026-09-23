@@ -928,11 +928,11 @@ const MUTATIONS = [
     to: "if (/^#/.test(raw.trim())) break" },
   // e8-restore round 3 (2026-09-23): the handoff header forms the hub now states.
   { name: "a later header line for a key already read overrides the first", file: "dctr-lib.mjs",
-    clause: "clause 1o2 \u2014 handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read",
+    clause: "clause 1o2 \u2014 handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section",
     from: "    if (out[key] !== null) continue\n",
     to: "" },
   { name: "a record path joined to its line number is taken whole, so it resolves nowhere", file: "dctr-lib.mjs",
-    clause: "clause 1o2 \u2014 handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read",
+    clause: "clause 1o2 \u2014 handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section",
     from: "      out.record = tok.replace(/:\\d+$/, '') || null",
     to: "      out.record = tok || null" },
   { name: "an empty agent_id is read as the main session (E8-D1b)", file: "dctr-lib.mjs",
@@ -944,7 +944,7 @@ const MUTATIONS = [
     from: "(?:\\\\s+via\\\\s+(doctrine-handoff|doctrine-backup))?",
     to: "(?:\\\\s+via\\\\s+(doctrine-handoff))?" },
   { name: "a phase name runs to the first comma, so a header with none states the state as part of the name", file: "dctr-lib.mjs",
-    clause: "clause 1o2 \u2014 handoffHeader: a bold key, a path joined to its line number, a wrapper followed by a comma, and a second line for a key already read",
+    clause: "clause 1o2 \u2014 handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section",
     from: "      out.phase = tok || null\n",
     to: "      out.phase = v.split(',')[0].replace(/[`*]/g, '').trim() || null\n" },
   { name: "the first wrapper line wins instead of the last", file: "dctr-record.mjs",
@@ -955,6 +955,10 @@ const MUTATIONS = [
     clause: "clause 1n \u2014 every entry, whole, equals the hand-written table for its fixture line, so no field is lost on any instance",
     from: "(m) => ({ kind: 'alarm', which: m[1].toLowerCase(), time: m[2], count: num(m[3]) })",
     to: "(m) => ({ kind: 'alarm', which: m[1].toLowerCase(), time: m[2] })" },
+  { name: "the handoff header never stops at a ## section, so a body record line is read", file: "dctr-lib.mjs",
+    clause: "clause 1o2 \u2014 handoffHeader reads every shape in the header table to its expected value, including a record line that sits only inside a ## section",
+    from: "    if (/^##\\s/.test(raw.trim())) break\n",
+    to: "" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

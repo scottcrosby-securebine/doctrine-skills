@@ -42,8 +42,8 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
   file in the directory, which on a clone is any of them.
 - Then whatever header lines the skill that owns the work requires. A doctrine phase's are given in
   doctrine step 5; carry them in full, each on its own line, and never fold one into another: the
-  `phase:` line, the `record:` line, the `wrapper:` line (its name taken in the order the next bullet
-  gives), and the `invoke doctrine:doctrine first` line while the phase is Open or
+  `phase:` line, the `record:` line, the `wrapper:` line (the record's last `wrapper:` line; only where the
+  record has none, the source order the next bullet gives), and the `invoke doctrine:doctrine first` line while the phase is Open or
   Blocked. A handoff written from inside `doctrine-backup` carries the same four. When that skill is not loaded this session, copy the
   previous handoff's header lines below `supersedes:` forward, so the record's path stays in the chain,
   and refresh the state header, the quoted record state line with its line number, and the `wrapper:`
