@@ -24,9 +24,9 @@ For everything else the herdr integration is optional and runs outside the skill
 
 ## Auto-cycle setup
 
-Auto-cycle is off by default, and a phase switches it on in its own record. These three are needed only to use it:
+Auto-cycle is off by default, and a phase switches it on in its own record. These two are needed only to use it:
 
-- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase loses the record's state.
+- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
 - **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
 
   ```text
@@ -36,7 +36,6 @@ Auto-cycle is off by default, and a phase switches it on in its own record. Thes
   It copies the bridge to `<config dir>/doctrine/dctr-bridge.mjs`, the config dir being `$CLAUDE_CONFIG_DIR` or `~/.claude`, and rewrites the `statusLine` command in that dir's settings.json to run the copy in front of your existing command, whose output passes through unchanged. settings.json names the copy, never the plugin's own path, so **re-run the command after every plugin update**. With no `statusLine` set it installs one that prints nothing; a statusline hides Claude Code's footer hints, so if you have none you may prefer to add your own first and then install. A `statusLine` that is not a command is refused, with the reason.
 
   Without it, while auto-cycle is on, the gauge reports the window as unknown on every batch: a tier given in tokens still warns, and a percent or default tier cannot resolve and does not.
-- **herdr with its Claude integration**: `herdr integration install claude`.
 
 ## Optional integrations and their fallbacks
 
