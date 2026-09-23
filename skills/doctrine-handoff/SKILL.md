@@ -41,12 +41,19 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
   step 3 defines it, else `none`. It is never this file. Never the newest
   file in the directory, which on a clone is any of them.
 - Then whatever header lines the skill that owns the work requires. A doctrine phase's are given in
-  doctrine step 5; carry them in full, including its `invoke doctrine:doctrine first` line while the
-  phase is Open or Blocked. When that skill is not loaded this session, copy the previous handoff's
-  header lines below `supersedes:` forward, so the record's path stays in the chain, and refresh the
-  state header and the quoted record state line with its line number from the record itself; when the
-  record is not on this host, suffix the quoted line with "(copied from <previous handoff>; record not
-  found <today>)".
+  doctrine step 5; carry them in full, including its `wrapper:` line and its `invoke doctrine:doctrine
+  first` line while the phase is Open or Blocked. When that skill is not loaded this session, copy the
+  previous handoff's header lines below `supersedes:` forward, so the record's path stays in the chain,
+  and refresh the state header, the quoted record state line with its line number, and the `wrapper:`
+  line from the record itself; when the record is not on this host, suffix the quoted line with
+  "(copied from <previous handoff>; record not found <today>)".
+- When the record the header names is on this host and has no `wrapper:` line (any case), add one
+  before you quote its state line, since the line numbers move: `wrapper: <skill name>` as the last
+  line of the record's first part (above its orchestrator-only section, or at the end of the file
+  where it has none), naming the wrapper the phase runs under, taken from the record's own title line,
+  else the `doctrine-*` wrapper this session invoked for the phase, else `none`. Write the name without
+  a `doctrine:` prefix, carry the same line in this header, and say in your report that you added it
+  to the record.
 
 **Sections**, in this order and no others:
 
