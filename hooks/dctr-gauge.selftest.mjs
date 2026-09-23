@@ -96,10 +96,11 @@ clause('clause 1l — resolveTier: a tier above 90% of the window is an error, a
   rt('190000').errors.includes('tier above 90% of the window') && rt('95%').errors.includes('tier above 90% of the window') &&
   !rt('90%').errors.includes('tier above 90% of the window'),
   JSON.stringify([rt('190000'), rt('95%')]))
+const FU = Math.ceil(W * 0.9) - HANDOFF_COST_TOKENS + 1
 clause('clause 1l2 — resolveTier: the 90% check reads the tier after the floor raise, so a floor above 90% of the window is an error',
-  rt('60%', W, 150000).tier === 150000 + HANDOFF_COST_TOKENS && rt('60%', W, 150000).errors.includes('tier above 90% of the window') &&
+  rt('60%', W, FU).tier === FU + HANDOFF_COST_TOKENS && rt('60%', W, FU).errors.includes('tier above 90% of the window') &&
   !rt('20000', W, 10000).errors.includes('tier above 90% of the window'),
-  JSON.stringify([rt('60%', W, 150000), rt('20000', W, 10000)]))
+  JSON.stringify([rt('60%', W, FU), rt('20000', W, 10000)]))
 clause('clause 1m — resolveTier: a tier below the floor (first reading plus the handoff cost) is raised to the floor, with the error',
   rt('20000', W, 10000).tier === 10000 + HANDOFF_COST_TOKENS &&
   rt('20000', W, 10000).errors.includes(`tier 20000 below the floor ${10000 + HANDOFF_COST_TOKENS}, raised to the floor`) &&
