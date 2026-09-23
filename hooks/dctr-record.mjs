@@ -2,8 +2,8 @@
 //
 // Pure: a string in, a value out. No filesystem, no clock, no herdr. The line forms are the ones hub step 5
 // (skills/doctrine/SKILL.md) defines; this file pins exactly those and nothing looser, and the selftest's fixture
-// record holds every key and every auto-cycle sub-form as a list item and bare, each with its fields asserted, so a
-// form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
+// record holds every key and every auto-cycle sub-form as a list item and bare, and every parsed entry is compared whole
+// against a hand-written table, so a form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
 //
 // Every form may be a list item (`- `) or bare, its key in any case. A line that starts like a form but
 // does not parse is not an entry, and neither is prose: a hook acts only on a line it can read whole.
@@ -42,8 +42,8 @@ const FORMS = [
 ]
 
 /** `wrapper: <name>`, key in any case, as a list item or bare, optionally bold. The value is the first
- *  whitespace-delimited token after the key with backticks, `**`, a `doctrine:` prefix and a trailing period
- *  stripped: the E7 drive kit's line `Wrapper: doctrine:doctrine-code. Opened 2026-09-20T09:00:00Z.` reads
+ *  whitespace-delimited token after the key with backticks, `**`, a `doctrine:` prefix and a trailing period, comma
+ *  or semicolon stripped: the E7 drive kit's line `Wrapper: doctrine:doctrine-code. Opened 2026-09-20T09:00:00Z.` reads
  *  `doctrine-code`. */
 const WRAPPER_LINE = /^(?:-\s+)?(?:\*\*)?wrapper:\s*(?:\*\*)?\s*(\S+)/i
 export const wrapperValue = (tok) => tok.replace(/[`*]/g, '').replace(/^doctrine:/i, '').replace(/[.,;]+$/, '') || null

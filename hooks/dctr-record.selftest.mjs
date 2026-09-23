@@ -8,6 +8,7 @@
 // finds nothing. Clause 3 proves the fixtures carry what those clauses rest on without calling the
 // parser, so a parser that silently returns nothing cannot pass clause 1 by the fixture being empty.
 
+import { deepStrictEqual } from 'node:assert'
 import { parseRecord, STATE_LINE } from './dctr-record.mjs'
 
 let bad = 0
@@ -64,7 +65,7 @@ const NEAR = [
   '- auto-cycle paused:',
   '* wave: 2026-09-23T10:38:00Z seat H handle none',
 ]
-const PROSE = ['# e8-restore record', '', 'Anchor: "go kickoff".', 'wrapper: doctrine-code', 'Some prose about the round.']
+const PROSE = ['# e8-restore record', '', 'Anchor: "go kickoff".', 'wrapper: doctrine-draft', 'wrapper: doctrine-code', 'Some prose about the round.']
 const RECORD = [...PROSE, ...FORMS.slice(0, 10), ...NEAR, ...FORMS.slice(10, 19), '- State: Open', ...FORMS.slice(19), `- State: Blocked. Q1 open`].join('\n')
 const GOOD = [...PROSE, ...NEAR].join('\n')
 
@@ -117,6 +118,50 @@ clause('clause 1g — ruling, alarm and question fields',
   a1.which === 'round' && a1.count === 4 && a2.which === 'time' && a2.time === T &&
   qo.id === 'Q1' && qo.text === 'which matcher does clear use' && qa.id === 'Q1' && qa.text === 'clear only',
   JSON.stringify([ru, a1, a2, qo, qa]))
+
+// Every entry, whole, against a table written by hand from the fixture lines above: a field the parser loses on ANY
+// instance is a failure here, which the per-form clauses above cannot promise since each reads one instance.
+const E = (o) => o
+const EXPECTED = [
+  { kind: 'wave', time: T, seat: 'H', handle: 'none', via: null },
+  { kind: 'wave', time: T, seat: 'codex-1', handle: 'task-42', via: 'doctrine-handoff' },
+  { kind: 'wave', time: T, seat: 'backup-1', handle: 'a1b2', via: 'doctrine-backup' },
+  { kind: 'round', n: 3, time: T, revision: '1fee265', blockers: 2, alarm: 1 },
+  { kind: 'finding-raised', id: 'F1', time: T, blocking: true, text: 'the parser drops a form' },
+  { kind: 'finding-raised', id: 'F2', time: T, blocking: false, text: 'the comment is vague' },
+  { kind: 'finding-cleared', id: 'F1', time: T, evidence: 'diff hunk 12-14 and grep finds nothing' },
+  { kind: 'ruling', id: 'D5', time: T, text: 'the ruling wins over feasibility' },
+  { kind: 'alarm', which: 'round', time: T, count: 4 },
+  { kind: 'alarm', which: 'time', time: T, count: 1 },
+  { kind: 'question-opened', id: 'Q1', time: T, text: 'which matcher does clear use' },
+  { kind: 'question-answered', id: 'Q1', time: T, text: 'clear only' },
+  { kind: 'auto-cycle', sub: 'on', cap: 3, tier: '60%' },
+  { kind: 'auto-cycle', sub: 'off' },
+  { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: 'unknown' },
+  { kind: 'auto-cycle', sub: 'cycle', n: 2, hash: '9f2c1ab' },
+  { kind: 'auto-cycle', sub: 'ready' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'waiting on Scott' },
+  { kind: 'state', raw: '- State: Blocked. Q1 open', value: 'Blocked. Q1 open' },
+  { kind: 'state', raw: '- State: Open', value: 'Open' },
+  { kind: 'round', n: 4, time: T, revision: '4b241fd', blockers: 0, alarm: 1 },
+  { kind: 'finding-cleared', id: 'F5', time: T, evidence: 'rerun green' },
+  { kind: 'ruling', id: 'D7', time: T, text: 'append, never edit' },
+  { kind: 'question-opened', id: 'Q3', time: T, text: 'which layout' },
+  { kind: 'question-answered', id: 'Q3', time: T, text: 'both' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'cap reached' },
+  { kind: 'auto-cycle', sub: 'on', cap: 10, tier: '120000' },
+  { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: '60%' },
+  { kind: 'auto-cycle', sub: 'cycle', n: 3, hash: '0f2c1ab' },
+  { kind: 'auto-cycle', sub: 'ready' },
+  { kind: 'auto-cycle', sub: 'off' },
+  { kind: 'state', raw: 'State: Exited', value: 'Exited' },
+  { kind: 'state', raw: '- State: Blocked. Q1 open', value: 'Blocked. Q1 open' },
+].map(E)
+const sansLine = r.entries.map(({ line, ...e }) => e)
+let tableOk = true, tableWhy = ''
+try { deepStrictEqual(sansLine, EXPECTED) } catch (e) { tableOk = false; tableWhy = String(e.message).slice(0, 600) }
+clause('clause 1n — every entry, whole, equals the hand-written table for its fixture line, so no field is lost on any instance',
+  tableOk && sansLine.length === 33, tableWhy || `length ${sansLine.length}`)
 
 clause('clause 1m — every entry that carries a time carries the fixture time, both rounds are read with their own numbers, and each wave carries its own via',
   r.entries.filter((e) => 'time' in e).length === 17 && r.entries.filter((e) => 'time' in e).every((e) => e.time === T) &&
@@ -171,6 +216,10 @@ clause('clause 3a — without the parser: the record holds every key as a list i
   NEAR.filter((l) => KEYS.some((k) => bare(l).startsWith(k))).length >= 9 &&
   FORMS.every((l) => RECORD.split('\n').includes(l)) && !FORMS.some((l) => GOOD.split('\n').includes(l)),
   'a fixture that lacked a form would let clause 1 pass by never meeting it')
+
+clause('clause 3e — without the parser: the record holds two wrapper lines with different values, the doctrine-code one last',
+  lines.filter((l) => /^wrapper:/i.test(l)).length === 2 && lines.filter((l) => /^wrapper:/i.test(l)).at(-1) === 'wrapper: doctrine-code' && lines.find((l) => /^wrapper:/i.test(l)) === 'wrapper: doctrine-draft',
+  'if the record held one wrapper line, clause 1i could not show that the last one wins')
 
 clause('clause 3b — without the parser: the record has more than one state line and the last differs from the first',
   lines.filter((l) => STATE_LINE.test(l.trim())).length === 4 && lines.at(-1) !== '- State: Open',

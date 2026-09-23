@@ -584,10 +584,10 @@ export function kickoffHandoff(memoryText) {
 }
 
 /** The header lines of a handoff, above its first `##` section (doctrine step 5, doctrine-handoff step 3),
- *  whether they sit above or below the file's `#` title: `phase:` up to the first comma, backticks stripped;
- *  `record:` its first backticked token, else its first bare one, a trailing `:<line>` cut off; `wrapper:` read
- *  as a record's wrapper line is. The first line for each key wins. A key may be bold or a list item. Each null
- *  when absent. */
+ *  whether they sit above or below the file's `#` title. Each value is the first word after the key, as the hub
+ *  states the forms: backticks, quotes, `*` and a trailing comma, semicolon or period stripped; for `record:` a
+ *  trailing `:<line>` cut off too; `wrapper:` read as a record's wrapper line is. The first line for each key wins.
+ *  A key may be bold or a list item. Each null when absent. */
 export function handoffHeader(text) {
   const out = { phase: null, record: null, wrapper: null }
   for (const raw of String(text ?? '').split('\n')) {
@@ -596,12 +596,13 @@ export function handoffHeader(text) {
     if (!m) continue
     const key = m[1].toLowerCase(), v = m[2].trim()
     if (out[key] !== null) continue
+    const tok = v.split(/\s+/)[0].replace(/[`'"*]/g, '').replace(/[.,;]+$/, '')
     if (key === 'phase') {
-      out.phase = v.split(',')[0].replace(/[`*]/g, '').trim() || null
+      out.phase = tok || null
     } else if (key === 'record') {
-      out.record = (/`([^`]+)`/.exec(v)?.[1] || v.split(/\s+/)[0]).replace(/[,;]$/, '').replace(/:\d+$/, '') || null
+      out.record = tok.replace(/:\d+$/, '') || null
     } else {
-      out.wrapper = wrapperValue(v.split(/\s+/)[0])
+      out.wrapper = wrapperValue(tok)
     }
   }
   return out

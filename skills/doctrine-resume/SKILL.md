@@ -39,7 +39,7 @@ path such as `<other-repo>/.doctrine/records/<file>.md` lands. In the record,
 take its last state line (a line whose text starts `State:`, in any case, bare,
 bold or as a list item) and its last `wrapper:` line, else the handoff header's
 `wrapper:` line (doctrine step 1; drop a `doctrine:` prefix and a trailing
-period from the value). What the record reads
+period or comma from the value). What the record reads
 is the first word after `State:` on that line, bold and trailing period ignored.
 The record is the authority on whether a phase is open, never the kickoff: when
 the record's state and the kickoff's `state:` disagree (the record reads Open or

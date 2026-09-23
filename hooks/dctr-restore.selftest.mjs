@@ -94,6 +94,7 @@ for (const [n, what, res] of [
   ['1c', 'source compact', run(clear(openIn.proj, { source: 'compact' }))],
   ['1d', 'a clear carrying agent_id', run(clear(openIn.proj, { agent_id: 'ad1a7dbb0d453a08d' }))],
   ['1d2', 'a clear carrying an empty agent_id', run(clear(openIn.proj, { agent_id: '' }))],
+  ['1d3', 'a clear carrying a null agent_id', run(clear(openIn.proj, { agent_id: null }))],
   ['1e', 'an Exited record (SC1)', run(clear(exited.proj))],
   ['1f', 'no memory file', run(clear(noMem.proj))],
   ['1g', 'handoff: none', run(clear(noneHo.proj))],
@@ -137,7 +138,11 @@ clause('clause 1o2 — handoffHeader: a bold key, a path joined to its line numb
   handoffHeader('record: a/r.md:19, which reads').record === 'a/r.md' && handoffHeader('record: `a/r.md:19`').record === 'a/r.md' &&
   handoffHeader('wrapper: doctrine-code, the E8 wrapper').wrapper === 'doctrine-code' && handoffHeader('**wrapper:** doctrine-code').wrapper === 'doctrine-code' &&
   handoffHeader('**phase:** p3, state Open').phase === 'p3' &&
-  handoffHeader('record: `first.md`\nrecord: `second.md`').record === 'first.md' && handoffHeader('phase: p1, x\nphase: p2').phase === 'p1',
+  handoffHeader('record: `first.md`\nrecord: `second.md`').record === 'first.md' && handoffHeader('phase: p1, x\nphase: p2').phase === 'p1' &&
+  handoffHeader('phase: e8-restore Open').phase === 'e8-restore' && handoffHeader('phase: `e8-restore` (Open)').phase === 'e8-restore' &&
+  handoffHeader('record: a/r.md, last state line at `:19`, which reads: "x"').record === 'a/r.md' && handoffHeader('record: a/r.md line 12: `- State: Open`').record === 'a/r.md' &&
+  handoffHeader('record: "a/r.md"').record === 'a/r.md' &&
+  handoffHeader('phase: e8-fixture state: Open').phase === 'e8-fixture' && handoffHeader('record: .doctrine/records/r.md last state `State: Open` line 2').record === '.doctrine/records/r.md',
   JSON.stringify([handoffHeader('- **record**: `a/r.md`, line 4'), handoffHeader('**Record:** a/r.md'), handoffHeader('record: a/r.md:19, which reads'), handoffHeader('record: `first.md`\nrecord: `second.md`')]))
 
 const has = (set) => (p) => set.includes(p)
@@ -174,4 +179,10 @@ clause('clause 3c — without the hook: each stand-down fixture really lacks wha
   'a stand-down fixture carries what it should lack')
 
 fs.rmSync(tmp, { recursive: true, force: true })
+const HDRS = ['- **record**: `a/r.md`, line 4', '**Record:** a/r.md', 'record: a/r.md:19, which reads', 'wrapper: doctrine-code, the E8 wrapper', 'phase: e8-restore Open', 'record: a/r.md, last state line at `:19`, which reads: "x"']
+clause('clause 3d — without the parser: the header fixtures carry a bold key, a path joined to :19, a wrapper followed by a comma, a phase with no comma, and a bare path before backticked text',
+  /^\*\*[Rr]ecord/.test(HDRS[1]) && /^- \*\*record\*\*/.test(HDRS[0]) && /r\.md:19/.test(HDRS[2]) && /doctrine-code,/.test(HDRS[3]) &&
+  !HDRS[4].includes(',') && /^record: a\/r\.md, .*`:19`/.test(HDRS[5]) && HDRS.every((h) => !/^#/.test(h)),
+  'if a header fixture lacked its shape, clause 1o2 would prove nothing about it')
+
 process.exit(bad ? 1 : 0)
