@@ -35,7 +35,7 @@ One file at `docs/handoffs/<YYYY-MM-DD>-<slug>.md`, where `<slug>` names the pie
 every time this skill runs, even when one was written earlier today, beside the previous one and never
 overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is edited.
 
-**Header lines**, above section 1:
+**Header lines**, the first lines of the file, above its title:
 
 - `supersedes: <path>`: resolved before you create this file, the current handoff as `doctrine-backup`
   step 3 defines it, else `none`. It is never this file. Never the newest
@@ -47,13 +47,13 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
   and refresh the state header, the quoted record state line with its line number, and the `wrapper:`
   line from the record itself; when the record is not on this host, suffix the quoted line with
   "(copied from <previous handoff>; record not found <today>)".
-- When the record the header names is on this host and has no `wrapper:` line (any case), add one
-  before you quote its state line, since the line numbers move: `wrapper: <skill name>` as the last
-  line of the record's first part (above its orchestrator-only section, or at the end of the file
-  where it has none), naming the wrapper the phase runs under, taken from the record's own title line,
-  else the `doctrine-*` wrapper this session invoked for the phase, else `none`. Write the name without
-  a `doctrine:` prefix, carry the same line in this header, and say in your report that you added it
-  to the record.
+- When the record the header names is on this host and has no `wrapper:` line (any case), append
+  `wrapper: <skill name>` as the record's last line, before you quote its state line: a record is
+  appended to and never edited (doctrine step 5), so nothing above it moves, and the last wrapper line
+  is the one read (doctrine step 1). Name the wrapper the phase runs under, taken from the record's own
+  title line, else the `doctrine-*` wrapper this session invoked for the phase, else `none`. Write the
+  name without a `doctrine:` prefix, carry the same line in this header, and say in your report that
+  you appended it to the record.
 
 **Sections**, in this order and no others:
 

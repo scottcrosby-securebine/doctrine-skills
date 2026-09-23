@@ -68,8 +68,8 @@ const facts = (res, f, state) => {
     const j = JSON.parse(res.out)
     const t = j.hookSpecificOutput.additionalContext
     return Object.keys(j).length === 1 && j.hookSpecificOutput.hookEventName === 'SessionStart' && typeof t === 'string' &&
-      t.length < RESTORE_MAX && t.includes('e8-fixture') && t.includes(f.recordAbs) && t.includes(`State: ${state}`) === false &&
-      t.includes(`"${state}`) && t.includes('doctrine:doctrine-code') && t.includes(path.join(f.proj, 'docs/handoffs/h.md')) && res.code === 0
+      t.length < RESTORE_MAX && t.includes('e8-fixture') && t.includes(f.recordAbs) &&
+      t.includes(`"- State: ${state}"`) && t.includes('doctrine:doctrine-code') && t.includes(path.join(f.proj, 'docs/handoffs/h.md')) && res.code === 0
   } catch { return false }
 }
 for (const [n, f, state, via] of [['2a', openIn, 'Open', 'cwd'], ['2b', openSib, 'Open', 'cwd'],
@@ -120,13 +120,15 @@ clause('clause 1m — restoreSkip acts only on a main-session clear with a sessi
 clause('clause 1n — kickoffHandoff reads the kickoff\'s machine line only, and none is null',
   kickoffHandoff(memoryText('docs/handoffs/a.md')) === 'docs/handoffs/a.md' && kickoffHandoff(memoryText('none')) === null &&
   kickoffHandoff('handoff: docs/x.md | state: open\n## Next Session Kickoff\nprose only') === null &&
-  kickoffHandoff('## Next Session Kickoff\nhandoff: `docs/b.md` | state: open') === 'docs/b.md',
-  'kickoffHandoff read outside the kickoff or kept a none')
+  kickoffHandoff('## Next Session Kickoff\nhandoff: `docs/b.md` | state: open') === 'docs/b.md' &&
+  kickoffHandoff('## Next Session Kickoff\nhandoff: ../x.md\nmore') === null,
+  'kickoffHandoff read outside the kickoff, kept a none, or took a handoff: line with no | state: half')
 
-const hh = handoffHeader(handoffText('track/r.md') + '\nrecord: `later.md`\n')
-clause('clause 1o — handoffHeader reads phase, record, wrapper and state above the first heading only',
-  hh.phase === 'e8-fixture' && hh.record === 'track/r.md' && hh.wrapper === 'doctrine-code' && hh.state === 'Open' &&
-  handoffHeader('- phase: p1\n- record: a/b.md, line 4\n# h').record === 'a/b.md',
+const hh = handoffHeader(handoffText('track/r.md') + '\n## 1. State\nrecord: `later.md`\n')
+clause('clause 1o — handoffHeader reads phase, record and wrapper above the first ## section only, above or below the # title',
+  hh.phase === 'e8-fixture' && hh.record === 'track/r.md' && hh.wrapper === 'doctrine-code' && !('state' in hh) &&
+  handoffHeader('- phase: p1\n- record: a/b.md, line 4\n# h').record === 'a/b.md' &&
+  handoffHeader('# Handoff\nsupersedes: none\nphase: p2\nrecord: `r2.md`\nwrapper: doctrine-code\n\n## 1. State\nrecord: `late.md`').record === 'r2.md',
   JSON.stringify(hh))
 
 const has = (set) => (p) => set.includes(p)

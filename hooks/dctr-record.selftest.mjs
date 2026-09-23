@@ -35,6 +35,13 @@ const FORMS = [
   `- auto-cycle: ready`,
   `- auto-cycle paused: waiting on Scott`,
   `- State: Blocked. Q1 open`,
+  // the same keys bare, so clause 3a can require both layouts per key and clause 1a counts them
+  `round: 4 closed ${T} at 4b241fd blockers 0 alarm 1`,
+  `finding: F5 cleared ${T} rerun green`,
+  `ruling: D7 ${T} append, never edit`,
+  `question: Q3 opened ${T} which layout`,
+  `auto-cycle paused: cap reached`,
+  `State: Exited`,
 ]
 // Lines that start like a form, or mention one, and must not parse.
 const NEAR = [
@@ -51,7 +58,7 @@ const NEAR = [
   '* wave: 2026-09-23T10:38:00Z seat H handle none',
 ]
 const PROSE = ['# e8-restore record', '', 'Anchor: "go kickoff".', 'wrapper: doctrine-code', 'Some prose about the round.']
-const RECORD = [...PROSE, ...FORMS.slice(0, 9), ...NEAR, ...FORMS.slice(9), '- State: Open', `- State: Blocked. Q1 open`].join('\n')
+const RECORD = [...PROSE, ...FORMS.slice(0, 9), ...NEAR, ...FORMS.slice(9, 18), '- State: Open', ...FORMS.slice(18), `- State: Blocked. Q1 open`].join('\n')
 const GOOD = [...PROSE, ...NEAR].join('\n')
 
 const r = parseRecord(RECORD)
@@ -61,8 +68,8 @@ const lines = RECORD.split('\n')
 // ---------------------------------------------------------------- clause 1: every form, and nothing else
 
 const want = {
-  wave: 2, round: 1, 'finding-raised': 2, 'finding-cleared': 1, ruling: 1, alarm: 2,
-  'question-opened': 1, 'question-answered': 1, 'auto-cycle': 6, state: 3,
+  wave: 2, round: 2, 'finding-raised': 2, 'finding-cleared': 2, ruling: 2, alarm: 2,
+  'question-opened': 2, 'question-answered': 1, 'auto-cycle': 7, state: 4,
 }
 const counts = Object.fromEntries(Object.keys(want).map((k) => [k, by(k).length]))
 clause('clause 1a — every form is returned once per line that carries it, no kind missing and none extra',
@@ -114,15 +121,20 @@ clause('clause 1h — every auto-cycle sub-form with its fields',
   JSON.stringify(ac))
 
 clause('clause 1i — state is the LAST state entry, and the wrapper is read',
-  r.state && r.state.value === 'Blocked. Q1 open' && r.state.line === lines.length && r.wrapper === 'doctrine-code',
+  r.state && r.state.value === 'Blocked. Q1 open' && r.state.raw === '- State: Blocked. Q1 open' && r.state.line === lines.length && r.wrapper === 'doctrine-code',
   JSON.stringify({ state: r.state, wrapper: r.wrapper }))
 
 // The E7 drive kit's fixture record, its two lines exactly as the kit writes them.
 const KIT = ['# limiter phase', 'Wrapper: doctrine:doctrine-code. Opened 2026-09-20T09:00:00Z.', '', '- **State: Open.** limiter phase.'].join('\n')
 const kit = parseRecord(KIT)
 clause('clause 1j — the E7 kit record: bold state line read, wrapper token taken with its prefix and period stripped',
-  kit.state && /^Open\b/.test(kit.state.value) && kit.state.line === 4 && kit.wrapper === 'doctrine-code',
+  kit.state && kit.state.value === 'Open. limiter phase.' && kit.state.raw === '- **State: Open.** limiter phase.' && kit.state.line === 4 && kit.wrapper === 'doctrine-code',
   JSON.stringify(kit))
+
+clause('clause 1l — a state line with the key or the value in bold reads its value with every ** removed, and keeps the raw line',
+  parseRecord('- **State:** Open').state.value === 'Open' && parseRecord('State: **Blocked**. Q1').state.value === 'Blocked. Q1' &&
+  parseRecord('- **State:** Open').state.raw === '- **State:** Open',
+  JSON.stringify([parseRecord('- **State:** Open').state, parseRecord('State: **Blocked**. Q1').state]))
 
 clause('clause 1k — a record with no state line and no wrapper line reads null for both',
   parseRecord('# nothing\n\nprose only').state === null && parseRecord('# nothing').wrapper === null,
@@ -139,14 +151,13 @@ clause('clause 2 — a record of prose and near misses only yields no entry and 
 
 const KEYS = ['wave:', 'round:', 'finding:', 'ruling:', 'alarm:', 'question:', 'auto-cycle:', 'auto-cycle paused:', 'state:']
 clause('clause 3a — without the parser: the record holds every key as a list item and as a bare line, the near misses start with form keys, and GOOD holds none of FORMS',
-  KEYS.every((k) => FORMS.some((l) => bare(l).startsWith(k))) &&
-  FORMS.some((l) => !l.startsWith('- ')) && FORMS.some((l) => l.startsWith('- ')) &&
+  KEYS.every((k) => FORMS.some((l) => l.startsWith('- ') && bare(l).startsWith(k)) && FORMS.some((l) => !l.startsWith('- ') && bare(l).startsWith(k))) &&
   NEAR.filter((l) => KEYS.some((k) => bare(l).startsWith(k))).length >= 9 &&
   FORMS.every((l) => RECORD.split('\n').includes(l)) && !FORMS.some((l) => GOOD.split('\n').includes(l)),
   'a fixture that lacked a form would let clause 1 pass by never meeting it')
 
 clause('clause 3b — without the parser: the record has more than one state line and the last differs from the first',
-  lines.filter((l) => STATE_LINE.test(l.trim())).length === 3 && lines.at(-1) !== '- State: Open',
+  lines.filter((l) => STATE_LINE.test(l.trim())).length === 4 && lines.at(-1) !== '- State: Open',
   'if the record held one state line, "last" in clause 1i would prove nothing')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',

@@ -1,5 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
+import { wrapperValue } from './dctr-record.mjs'
 
 // Shared decisions for doctrine's herdr seat visibility (issue #17).
 //
@@ -568,46 +569,45 @@ export function restoreSkip(p) {
 
 /** The `handoff:` path from the first line of `## Next Session Kickoff` that has the machine shape
  *  `handoff: <path> | state: <word>` (doctrine-backup), backticks stripped, or null for `none`, for no
- *  kickoff section, and for a kickoff with no such line. */
+ *  kickoff section, and for a kickoff with no such line: a `handoff:` line without its `| state:` half is not
+ *  the machine line and selects nothing. */
 export function kickoffHandoff(memoryText) {
   const lines = String(memoryText ?? '').split('\n')
   const at = lines.findIndex((l) => /^##\s+Next Session Kickoff\s*$/i.test(l.trim()))
   if (at < 0) return null
   for (const l of lines.slice(at + 1)) {
     if (/^##\s/.test(l)) return null
-    const m = /^handoff:\s*`?([^`|\s]+)`?\s*(?:\||$)/i.exec(l.trim())
+    const m = /^handoff:\s*`?([^`|\s]+)`?\s*\|\s*state:/i.exec(l.trim())
     if (m) return m[1].toLowerCase() === 'none' ? null : m[1]
   }
   return null
 }
 
-/** The header lines of a handoff, above its first `#` heading (doctrine step 5, doctrine-handoff step 3):
- *  `phase:` up to the first comma, backticks stripped; `record:` its first backticked token, else its
- *  first bare one; `wrapper:` read as a record's wrapper line is; `state:` from its own line, else from
- *  the phase line after the comma. Each null when absent. A header line may be a list item. */
+/** The header lines of a handoff, above its first `##` section (doctrine step 5, doctrine-handoff step 3),
+ *  whether they sit above or below the file's `#` title: `phase:` up to the first comma, backticks stripped;
+ *  `record:` its first backticked token, else its first bare one; `wrapper:` read as a record's wrapper line
+ *  is. Each null when absent. A header line may be a list item. */
 export function handoffHeader(text) {
-  const out = { phase: null, record: null, wrapper: null, state: null }
-  let stateAfterPhase = null
+  const out = { phase: null, record: null, wrapper: null }
   for (const raw of String(text ?? '').split('\n')) {
-    if (/^#/.test(raw.trim())) break
-    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper|state):\s*(.*)$/i.exec(raw.trim())
+    if (/^##\s/.test(raw.trim())) break
+    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper):\s*(.*)$/i.exec(raw.trim())
     if (!m) continue
     const key = m[1].toLowerCase(), v = m[2].trim()
     if (key === 'phase') {
-      const [name, ...rest] = v.split(',')
-      out.phase = name.replace(/[`*]/g, '').trim() || null
-      stateAfterPhase = rest.join(',').replace(/^\s*(?:state:\s*)?/i, '').split(/\s+/)[0].replace(/[`*.]/g, '') || null
+      out.phase = v.split(',')[0].replace(/[`*]/g, '').trim() || null
     } else if (key === 'record') {
       out.record = (/`([^`]+)`/.exec(v)?.[1] || v.split(/\s+/)[0].replace(/[,;]$/, '')) || null
-    } else if (key === 'wrapper') {
-      out.wrapper = v.split(/\s+/)[0].replace(/[`*]/g, '').replace(/^doctrine:/i, '').replace(/\.+$/, '') || null
     } else {
-      out.state = v.split(/\s+/)[0].replace(/[`*.]/g, '') || null
+      out.wrapper = wrapperValue(v.split(/\s+/)[0])
     }
   }
-  if (!out.state) out.state = stateAfterPhase
   return out
 }
+
+/** The state the restore hook acts on: `Open` or `Blocked` as the first word of a state entry's value, else
+ *  null (scope choice SC1: any other state injects nothing). */
+export const restoreState = (value) => /^(Open|Blocked)\b/i.exec(value || '')?.[1] || null
 
 /** The record a handoff names, resolved in this order, the first that exists (scope choice SC2): absolute
  *  as written; relative to the project dir; relative to its parent, the sibling-repo form a handoff uses

@@ -1,8 +1,9 @@
 // doctrine — the parser for a phase record's event lines (E8-D24).
 //
 // Pure: a string in, a value out. No filesystem, no clock, no herdr. The line forms are the ones hub step 5
-// (skills/doctrine/SKILL.md) defines; this file pins exactly those and nothing looser, so a form the hub
-// changes and this file does not is a selftest failure in hooks/dctr-record.selftest.mjs, never a silent miss.
+// (skills/doctrine/SKILL.md) defines; this file pins exactly those and nothing looser, and the selftest's fixture
+// record holds every one of them as a list item and bare, so a form this file loses is a selftest failure and never
+// a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
 //
 // Every form may be a list item (`- `) or bare, its key in any case. A line that starts like a form but
 // does not parse is not an entry, and neither is prose: a hook acts only on a line it can read whole.
@@ -45,11 +46,13 @@ const FORMS = [
  *  stripped: the E7 drive kit's line `Wrapper: doctrine:doctrine-code. Opened 2026-09-20T09:00:00Z.` reads
  *  `doctrine-code`. */
 const WRAPPER_LINE = /^(?:-\s+)?(?:\*\*)?wrapper:\s*(?:\*\*)?\s*(\S+)/i
-const wrapperValue = (tok) => tok.replace(/[`*]/g, '').replace(/^doctrine:/i, '').replace(/\.+$/, '') || null
+export const wrapperValue = (tok) => tok.replace(/[`*]/g, '').replace(/^doctrine:/i, '').replace(/\.+$/, '') || null
 
 /**
  * `{ entries, state, wrapper }`. `entries` is every line that parses as a form, in file order, each
- * `{ kind, line, ...fields }` with `line` 1-based. `state` is the last state entry or null: where a record
+ * `{ kind, line, ...fields }` with `line` 1-based. A state entry carries `raw`, the line as written, and `value`,
+ * what follows the key with every `**` removed, so `- **State: Open.** limiter phase.` and `**State:** Open` both
+ * read `Open`. `state` is the last state entry or null: where a record
  * carries more than one state line the last is current (hub step 5). `wrapper` is the last wrapper line's
  * value or null, the last for the same reason: a record is corrected by appending.
  */
@@ -60,7 +63,7 @@ export function parseRecord(text) {
     const l = raw.trim()
     const line = i + 1
     if (STATE_LINE.test(l)) {
-      state = { kind: 'state', line, value: l.replace(STATE_LINE, '').trim() }
+      state = { kind: 'state', line, raw: l, value: l.replace(STATE_LINE, '').replace(/\*\*/g, '').trim() }
       entries.push(state)
       return
     }

@@ -15,7 +15,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { restoreSkip, kickoffHandoff, handoffHeader, resolveRecordPath, restoreContext, PREFIX } from './dctr-lib.mjs'
+import { restoreSkip, kickoffHandoff, handoffHeader, resolveRecordPath, restoreContext, restoreState, PREFIX } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import { hookLog } from './dctr-state.mjs'
 
@@ -49,11 +49,11 @@ try {
   const recordPath = resolveRecordPath(header.record, projectDir, fs.existsSync)
   if (!recordPath) stand_down(`the record ${header.record} named by ${handoffPath} was not found`)
   const record = parseRecord(read(recordPath, 'record'))
-  const state = /^(Open|Blocked)\b/i.exec(record.state?.value || '')?.[1]
+  const state = restoreState(record.state?.value)
   if (!state) stand_down(`the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked`)
 
   const additionalContext = restoreContext({
-    phase: header.phase, state, stateLine: record.state.value, recordPath,
+    phase: header.phase, state, stateLine: record.state.raw, recordPath,
     wrapper: record.wrapper || header.wrapper, handoffPath,
   })
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }))
