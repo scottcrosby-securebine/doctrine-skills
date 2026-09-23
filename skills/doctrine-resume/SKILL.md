@@ -79,13 +79,15 @@ Two more checks follow the invocations above, or come first when none was due,
 whenever the kickoff names a handoff that exists on disk.
 
 **Interrupted backup.** The backup that should have carried the current
-handoff never landed when the memory file is untracked, or `git diff HEAD --
-<memory file>` changes its kickoff `handoff:` line, or a handoff under
-`docs/handoffs/` names the kickoff's handoff in its `supersedes:` line (the crash
-fell between `doctrine-handoff` steps 3 and 4, and that newer handoff is the one
-to back up: from here on, its header is the one this step's record read and
-invocations follow, so re-run those on it where they read the older one). A
-dirty memory file whose kickoff line is unchanged is an edit, not this case. The
+handoff never landed when the memory file is tracked and `git diff HEAD --
+<memory file>` changes its kickoff `handoff:` line, or it is untracked and not
+ignored (`git ls-files --others --exclude-standard -- <memory file>` lists it),
+or a handoff under `docs/handoffs/` names the kickoff's handoff in its
+`supersedes:` line (the crash fell between `doctrine-handoff` steps 3 and 4, and
+that newer handoff is the one to back up: from here on, its header is the one
+this step's record read and invocations follow, so re-run those on it where they
+read the older one). A dirty memory file whose kickoff line is unchanged, and an
+ignored one, are not this case. The
 Handoff line says `interrupted: handoff written, backup not committed`, and step
 5 finishes that backup. Never run `doctrine-handoff` for this case, since a
 second handoff would head the `supersedes:` chain beside this one.
@@ -101,8 +103,9 @@ Settle whether it already ran before anyone takes it:
   the check it launches exists). Take it zero times, whether or not auto-cycle
   is on. Append
   `- auto-cycle paused: first action ambiguous: <the section 5 sentence, verbatim>`
-  to the record, placed as `doctrine-backup`'s rule "Under auto-cycle, a question
-  pauses the run" places its line, say `first action: ambiguous, paused` in the
+  to the record read above (the newer handoff's in the interrupted case),
+  placed as `doctrine-backup`'s rule "Under auto-cycle, a question pauses the
+  run" places its line, say `first action: ambiguous, paused` in the
   Handoff line, and end the turn after step 4's report. Where that rule finds no
   record, append nothing and ask the user whether it ran.
 - Otherwise it is due, and the Handoff line says `first action: due`.
@@ -189,10 +192,12 @@ the code.
 
 In step 1b's interrupted case, do not ask: run `doctrine-backup` steps 3 to 6 on
 the handoff step 1b found interrupted, treated there as the handoff this run
-wrote, so the kickoff names it, with step 2's batch as its step 1 output and its
-step 2 skipped, since the interrupted run already carried forward. That backup
-was already asked for, and its commit lands the handoff and the memory file
-together. Do not run `doctrine-handoff`.
+wrote, so the kickoff names it, with step 2's batch as its step 1 output, its
+step 2 run only where the kickoff line is unchanged (the crash fell before the
+memory file was rewritten), and `git show HEAD:<memory file>` as the previous
+memory file its step 5 hands the red team. That backup was already asked for,
+and its commit lands the handoff and the memory file together. Do not run
+`doctrine-handoff`.
 
 Otherwise, when the repo and the file disagree, the question below is asked
 under `doctrine-backup`'s rule "Under auto-cycle, a question pauses the run",

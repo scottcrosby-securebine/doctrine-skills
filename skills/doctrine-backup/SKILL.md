@@ -174,12 +174,14 @@ several-fold, which is why the `grep -v '^??'` is there.
 When this run wrote a handoff, find the chain's heads again (step 3) immediately before the commit
 below, and again before any retry of a refused commit, since another session may have published a
 handoff after this run resolved its `supersedes:`. Where this run's handoff is the one head, go on.
+Where the one head is another handoff whose `supersedes:` chain reaches this run's, change nothing.
 Where this run's handoff and one other handoff head the chain, rewrite this run's `supersedes:` line
-to name that other handoff, change nothing else in either file, and find the heads once more; where
-that leaves no head, the other session rewrote toward this run's handoff in the same moment, so
-restore this run's line as it was and find the heads once more. Where the one head is another
-handoff whose `supersedes:` chain reaches this run's, change nothing. In any other case, ask the user
-which handoff is current, or pause under auto-cycle (the top of this skill).
+to name that other handoff, change nothing else in either file, and find the heads once more. One
+head: go on. No head: the other session rewrote toward this run's handoff in the same moment, so
+restore this run's line as it was and find the heads once more, and where that shows two heads again
+the run whose handoff path sorts later rewrites once more while the other goes on. Two or more heads
+straight after the rewrite: restore this run's line and ask the user which handoff is current, or
+pause under auto-cycle (the top of this skill). In any other case, ask or pause the same way.
 
 Then land it locally. Name only what this run wrote, edited or moved: drop any path
 `git check-ignore -q <path>` matches and any file you did not touch, and name `.gitignore` only when
