@@ -140,9 +140,10 @@ held that is still true and now sits nowhere, is missing from the memory file? R
 
 Verify each finding against the source, then fix what it shows and nothing else: no rewording, no
 trimming, no removal of detail the next session can use. A fix that changes which Gotchas the memory
-file holds applies step 2's cap again: a true Gotcha that leaves the memory file goes into the
-handoff's Gotchas section, written by `doctrine-handoff` steps 1 to 3 when this run wrote none, so
-only a Gotcha the code, the repo or the record disproves leaves both files. Say what the seat found and what you fixed,
+file holds applies step 2's Gotcha rule again, so a true Gotcha leaves the memory file only for the
+handoff. When that makes this run write its first handoff, set the kickoff's `handoff:` line to it by
+step 3's rule and run this step again, so a seat checks the new handoff beside the memory file.
+Say what the seat found and what you fixed,
 and name any finding you rejected with its reason.
 
 ## 6. Verify, then commit
