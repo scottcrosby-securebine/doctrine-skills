@@ -25,7 +25,8 @@ The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every
   this before any move keeps an untracked handoff from being committed there; a handoff already
   tracked stays tracked.
 - **Memory file.** `ls` the root, and keep the current memory file's text as it stands now, before any
-  move or write: step 5 hands it to the red team as the previous file. When there is no `SESSION_MEMORY.md` but there is one other memory
+  move or write: step 5 hands it to the red team as the previous file, and a later pass through this
+  step, from step 5 by way of `doctrine-handoff` step 1, keeps what the first pass kept. When there is no `SESSION_MEMORY.md` but there is one other memory
   file (`SESSION_MEMORY-<x>.md`, `session-memory.md`, and the like), `git mv` it (plain `mv` when
   untracked) to `SESSION_MEMORY.md`. When there are several, ask which one is current and stop until
   answered.
@@ -50,7 +51,7 @@ takes. Add `gh issue list --state open --limit 200 --json number --jq 'length'` 
 Before writing, take from the existing file:
 
 - **Every Gotcha still true.** They are the highest-value lines in the file and nothing in step 1 can
-  regenerate them. Add this session's. Check each against the code and the repo: one they contradict is wrong and is deleted, not carried as unverified. The file holds three;
+  regenerate them. Add this session's. Check each against the code, the repo and the record: one they contradict is wrong and is deleted, not carried as unverified. The file holds three;
   when more than three are true, the three that save the next session the most stay and the rest go
   into the handoff this run writes, appended to its Gotchas section when it is already written. When this run writes none, run `doctrine-handoff` steps 1 to 3 to write one, then continue here.
   A true Gotcha is never dropped.
