@@ -102,9 +102,9 @@ The kickoff's first line is machine-shaped; `doctrine-resume` §1b says what the
 
 - **`handoff:`** names the current handoff: the file `doctrine-handoff` wrote this run, else the one
   the previous kickoff named. When no kickoff names one (no memory file, or a kickoff with no
-  machine-shaped first line), the current handoff is the head of the chain: the one in `docs/handoffs/`
-  that no other handoff's `supersedes:` names. When more than one heads it, read them and ask the user
-  which is current rather than guess, or pause under auto-cycle (the top of this skill). Only when
+  machine-shaped first line), the current handoff is the one in `docs/handoffs/` that no other
+  handoff's `supersedes:` names; when more than one qualifies, read them and ask the user which is
+  current rather than guess, or pause under auto-cycle (the top of this skill). Only when
   `docs/handoffs/` holds none, write `handoff: none`.
 - **`state:`** is `open` when a doctrine phase is open, meaning the last state line of the record
   the current handoff's header names reads *Open* or *Blocked*, and `none` otherwise, including
