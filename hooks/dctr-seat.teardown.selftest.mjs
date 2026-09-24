@@ -17,7 +17,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { readMeta, sleepMs } from './dctr-state.mjs'
+import { readMeta, sleepMs, sideOccupants } from './dctr-state.mjs'
+import { seatPlacement } from './dctr-lib.mjs'
 
 const hook = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dctr-seat.mjs')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-teardown-'))
@@ -46,6 +47,11 @@ const calls = path.join(tmp, 'calls')
 // closed the tab — so the suite was green over a transport blip destroying a focused tab.
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/usr/bin/env bash
 echo "$@" >> ${JSON.stringify(calls)}
+# A moved gate's file REPLACED while its lookup is in flight: the window between the lookup a drop is
+# judged on and the drop itself, which must not take a record naming another pane.
+if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_REPLACE_ON_GET" ]; then
+  printf '%s' "$DCTR_TEST_STEAL_RECORD" > "$DCTR_TEST_REPLACE_FILE"
+fi
 if [ "$1 $2" = "pane close" ] && [ "$3" = "$DCTR_TEST_CLOSE_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no"}}' >&2; exit 1
 fi
@@ -77,6 +83,14 @@ if [ "$1 $2" = "pane get" ] && [ "$3" = "$DCTR_TEST_GET_FOCUSED2" ]; then
   fi
   : > "$TMPDIR/paneget-seen"
   echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":false}}}'; exit 0
+fi
+# A moved gate is judged by a SERVER-WIDE lookup, and for a tab gate that is 'tab get', which answers
+# a missing tab with its own code. Absent both variables it answers a found tab.
+if [ "$1 $2" = "tab get" ] && [ "$3" = "$DCTR_TEST_TABGET_GONE" ]; then
+  echo '{"error":{"code":"tab_not_found","message":"tab '"$3"' not found"},"id":"cli:tab:get"}' >&2; exit 1
+fi
+if [ "$1 $2" = "tab get" ] && [ "$3" = "$DCTR_TEST_TABGET_FAILS" ]; then
+  echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
 fi
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then
   echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1
@@ -854,6 +868,184 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     metaFixture.description === 'Fresh refuter of N1-N16' && !fs.existsSync(path.join(tmp, 'proj', 'sess', 'subagents', 'agent-a8.meta.json')))
 }
 
+console.log('clause 1 — SessionEnd moves a RUNNING gate to the unowned directory and closes everything else (E8-R13)')
+const gatesDir = path.join(tmp, 'dctr-gates')
+const movedFile = (sid, name) => path.join(gatesDir, `${sid}.${name}.json`)
+const gate = (agent, ids, done) => {
+  const out = path.join(tmp, `${agent}.out`)
+  fs.rmSync(`${out}.result`, { force: true })
+  if (done) fs.writeFileSync(`${out}.result`, 'exit=0\n')
+  fs.writeFileSync(path.join(seatsDir, `${agent}.json`), JSON.stringify({ agent, role: 'gate', n: 1, tabId: null, paneId: null, ...ids, file: out, label: agent }))
+}
+/** A live holder of the lock in `dir`: this process's own pid, which breakIfOrphaned will never steal. */
+const holdLock = (dir) => { fs.mkdirSync(path.join(dir, 'placement.lock'), { recursive: true }); fs.writeFileSync(path.join(dir, 'placement.lock', 'pid'), String(process.pid)) }
+const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Date.now() < until) { if (pred()) return true; sleepMs(50) } return pred() }
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true })
+  seat('dctr-explore-1', 'w1:s1')
+  gate('dctr-gate-1', { paneId: 'w1:g1' }, false)
+  gate('dctr-gate-2', { paneId: 'w1:g2' }, true)
+  gate('dctr-gate-3', { paneId: 'w1:pR3', tabId: 'w1:tg3' }, false)
+  // Another session's marker and an interactive pane: neither is this session's to touch.
+  const otherSeats = path.join(tmp, 'dctr-other-session', 'seats'); fs.mkdirSync(otherSeats, { recursive: true })
+  fs.writeFileSync(path.join(otherSeats, 'dctr-gate-1.json'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:o1', file: path.join(tmp, 'o1.out') }))
+  const panes = path.join(tmp, 'dctr-panes'); fs.mkdirSync(panes, { recursive: true })
+  fs.writeFileSync(path.join(panes, 'w1-pI.json'), JSON.stringify({ paneId: 'w1:pI', tee: '/t/i' }))
+  run({ hook_event_name: 'SessionEnd' })
+  let moved1 = null; try { moved1 = JSON.parse(fs.readFileSync(movedFile(SESSION, 'dctr-gate-1'), 'utf8')) } catch { /* checked below */ }
+  check('a running side gate is NOT closed and its marker is moved under <session>.<name>.json with its pane id',
+    !called(/^pane close w1:g1$/m) && moved1?.paneId === 'w1:g1', `moved: ${JSON.stringify(moved1)}; calls: ${callLines(/close/).join(' | ')}`)
+  check('a running TAB gate is not closed either, and moves the same way',
+    !called(/^tab close w1:tg3$/m) && fs.existsSync(movedFile(SESSION, 'dctr-gate-3')))
+  check('a FINISHED gate and an ordinary seat are closed as before, and neither moves',
+    called(/^pane close w1:g2$/m) && called(/^pane close w1:s1$/m) &&
+    !fs.existsSync(movedFile(SESSION, 'dctr-gate-2')) && !fs.existsSync(movedFile(SESSION, 'dctr-explore-1')))
+  check('and the state directory goes, since nothing that stayed in it failed', !fs.existsSync(stateDir),
+    fs.existsSync(stateDir) ? fs.readdirSync(stateDir).join(',') : '')
+  check('another session\'s marker and an interactive pane are untouched',
+    fs.existsSync(path.join(otherSeats, 'dctr-gate-1.json')) && fs.existsSync(path.join(panes, 'w1-pI.json')) &&
+    !called(/w1:o1|w1:pI/))
+  fs.rmSync(path.join(tmp, 'dctr-other-session'), { recursive: true, force: true }); fs.rmSync(panes, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a move that FAILS keeps the gate\'s record and the state directory (R1-S1)')
+{
+  // A session id long enough that its moved name exceeds NAME_MAX, while its own state directory does
+  // not: the rename itself throws, with the gate directory's lock taken and nothing at the destination.
+  const LONG = 'r'.repeat(250)
+  const longState = path.join(tmp, `dctr-${LONG}`), longSeats = path.join(longState, 'seats')
+  fs.rmSync(gatesDir, { recursive: true, force: true }); fs.rmSync(longState, { recursive: true, force: true })
+  fs.mkdirSync(longSeats, { recursive: true }); fs.writeFileSync(calls, '')
+  const out = path.join(tmp, 'long-gate.out'); fs.rmSync(`${out}.result`, { force: true })
+  fs.writeFileSync(path.join(longSeats, 'dctr-gate-1.json'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:gL', tabId: null, file: out }))
+  fs.writeFileSync(path.join(longSeats, 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', agent_id: 'x', role: 'Explore', paneId: 'w1:sL', tabId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SessionEnd', session_id: LONG })
+  check('the running gate\'s marker and the state directory both survive a rename that failed',
+    fs.existsSync(path.join(longSeats, 'dctr-gate-1.json')) && fs.existsSync(path.join(longState, 'hook.log')),
+    fs.existsSync(longState) ? fs.readdirSync(longState).join(',') : 'state directory gone')
+  check('and the running gate\'s pane was not closed', !called(/^pane close w1:gL$/m))
+  fs.rmSync(longState, { recursive: true, force: true }); fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a RESUMED session id never overwrites its own earlier moved gate (R1-P1)')
+{
+  // `claude --resume` keeps the session id, and gate names restart from an emptied seats directory, so
+  // the ending session's dctr-gate-1 can meet a still-live `<session>.dctr-gate-1.json` moved earlier.
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  fs.writeFileSync(movedFile(SESSION, 'dctr-gate-1'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:gOLD', tabId: null }))
+  gate('dctr-gate-1', { paneId: 'w1:gNEW' }, false); seat('dctr-explore-1', 'w1:s1')
+  const before = JSON.parse(fs.readFileSync(movedFile(SESSION, 'dctr-gate-1'), 'utf8')).paneId
+  run({ hook_event_name: 'SessionEnd' })
+  let after = null; try { after = JSON.parse(fs.readFileSync(movedFile(SESSION, 'dctr-gate-1'), 'utf8')).paneId } catch { /* checked below */ }
+  check('the earlier moved record still names its own pane: an occupied destination is a failed move, not a replace',
+    before === 'w1:gOLD' && after === 'w1:gOLD', `before ${before}, after ${after}`)
+  check('and the new gate keeps its marker and the state directory, with neither gate\'s pane closed',
+    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !called(/^pane close w1:g(NEW|OLD)$/m),
+    callLines(/close/).join(' | '))
+  fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a column that cannot be observed because of a moved marker says which file (R1-C2)')
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  const broken = path.join(gatesDir, 'other.dctr-gate-7.json'); fs.writeFileSync(broken, 'not json')
+  run({ hook_event_name: 'SubagentStart', agent_id: 'a3', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' })
+  let logText = ''; try { logText = fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { /* checked below */ }
+  let parses = true; try { JSON.parse(fs.readFileSync(broken, 'utf8')) } catch { parses = false }
+  check('the seat hook\'s log names the unreadable moved marker, not an unreadable layout',
+    !parses && logText.includes(broken) && called(/^tab create /m), logText.split('\n').filter((l) => /side column/.test(l)).join(' | '))
+  fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — SessionEnd exits inside its budget when the lock is busy, and a detached sweep finishes the job (B5)')
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true })
+  seat('dctr-explore-1', 'w1:s1'); holdLock(stateDir)
+  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
+  check('the hook exits 0 in under 1,500ms with the placement lock held by a live process', r.code === 0 && took < 1500, `took ${took}ms, code ${r.code}`)
+  check('and closed nothing while it could not hold the lock', !called(/^pane close w1:s1$/m))
+  fs.rmSync(path.join(stateDir, 'placement.lock'), { recursive: true, force: true })
+  check('once the lock is free, the detached sweep closes the seat and removes the state directory',
+    waitFor(() => called(/^pane close w1:s1$/m) && !fs.existsSync(stateDir)), callLines(/close/).join(' | ') || '(no close)')
+}
+
+console.log('clause 1 — a move into the unowned directory waits for THAT directory\'s lock (B6)')
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(gatesDir)
+  const t0 = Date.now(); run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
+  check('with the gate directory locked, the gate is not moved and the hook still exits inside its budget',
+    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && took < 1500,
+    `took ${took}ms; moved ${fs.existsSync(movedFile(SESSION, 'dctr-gate-1'))}`)
+  fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
+  check('and once it is free, the detached sweep moves it',
+    waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
+  check('without ever closing the running gate\'s pane', !called(/^pane close w1:g1$/m))
+}
+
+console.log('clause 1 — the two lock waits share ONE deadline, so both busy in turn still fit the budget (B5)')
+{
+  // The placement lock frees part-way through the wait and the gate directory's never does. A second
+  // wait that restarted the clock would run the hook past 1,500ms; one deadline holds it inside.
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(stateDir); holdLock(gatesDir)
+  const freer = spawn('bash', ['-c', `sleep 0.7; rm -rf ${JSON.stringify(path.join(stateDir, 'placement.lock'))}`], { stdio: 'ignore' })
+  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
+  await new Promise((res) => (freer.exitCode !== null ? res() : freer.on('exit', res)))
+  check('with the placement lock freed at 700ms and the gate directory still held, the hook exits in under 1,500ms',
+    r.code === 0 && took < 1500 && fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')), `took ${took}ms`)
+  fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
+  check('and the detached sweep it handed off to still moves the gate', waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
+}
+
+console.log('clause 1 — a placement drops a moved gate ONLY on a server-wide not-found, never from its layout (B3)')
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  const mv = (name, ids) => fs.writeFileSync(movedFile('other', name), JSON.stringify({ agent: name, role: 'gate', paneId: null, tabId: null, ...ids }))
+  mv('dctr-gate-1', { paneId: 'w9:gA' }); mv('dctr-gate-2', { paneId: 'w9:gB' }); mv('dctr-gate-3', { paneId: 'w9:gC' })
+  mv('dctr-gate-4', { paneId: 'w9:pD', tabId: 'w9:tD' }); mv('dctr-gate-5', { paneId: 'w9:pE', tabId: 'w9:tE' })
+  run({ hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' },
+    { DCTR_TEST_GET_GONE: 'w9:gA', DCTR_TEST_GET_FAILS: 'w9:gB', DCTR_TEST_TABGET_GONE: 'w9:tD', DCTR_TEST_TABGET_FAILS: 'w9:tE' })
+  const has = (n) => fs.existsSync(movedFile('other', n))
+  check('a pane that answered pane_not_found and a tab that answered tab_not_found are dropped',
+    !has('dctr-gate-1') && !has('dctr-gate-4'), `gate-1 ${has('dctr-gate-1')}, gate-4 ${has('dctr-gate-4')}`)
+  check('a failed pane lookup, a failed tab lookup and a FOUND pane that is not in this layout all keep their markers',
+    has('dctr-gate-2') && has('dctr-gate-5') && has('dctr-gate-3'))
+  check('the tab gates were asked about their TAB, and nothing moved was closed',
+    called(/^tab get w9:tD$/m) && called(/^tab get w9:tE$/m) && !called(/^pane get w9:p[DE]$/m) && !called(/^(pane|tab) close w9:/m),
+    callLines(/w9:/).join(' | '))
+
+  // A marker that names ANOTHER pane by the time the drop runs was not the one judged gone.
+  fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  mv('dctr-gate-6', { paneId: 'w9:gF' })
+  run({ hook_event_name: 'SubagentStart', agent_id: 'a2', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' },
+    { DCTR_TEST_GET_GONE: 'w9:gF', DCTR_TEST_REPLACE_ON_GET: 'w9:gF', DCTR_TEST_REPLACE_FILE: movedFile('other', 'dctr-gate-6'),
+      DCTR_TEST_STEAL_RECORD: JSON.stringify({ agent: 'dctr-gate-6', role: 'gate', paneId: 'w9:gNEW', tabId: null }) })
+  let after = null; try { after = JSON.parse(fs.readFileSync(movedFile('other', 'dctr-gate-6'), 'utf8')) } catch { /* checked below */ }
+  check('a moved marker replaced during its lookup is left alone: the drop removes only the record it judged',
+    after?.paneId === 'w9:gNEW', JSON.stringify(after))
+  fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a moved gate in this session\'s layout counts against the cap; one elsewhere does not (B2)')
+{
+  const saved = process.env.TMPDIR; process.env.TMPDIR = tmp
+  try {
+    fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+    fs.writeFileSync(movedFile('other', 'dctr-gate-1'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:gL', tabId: null }))
+    fs.writeFileSync(movedFile('other', 'dctr-gate-2'), JSON.stringify({ agent: 'dctr-gate-2', role: 'gate', paneId: 'w9:gX', tabId: null }))
+    const layout = [{ pane_id: 'w1:p1' }, ...[1, 2, 3, 4, 5].map((i) => ({ pane_id: `w1:s${i}` })), { pane_id: 'w1:gL' }]
+    const five = [1, 2, 3, 4, 5].map((i) => ({ agent: `dctr-explore-${i}`, paneId: `w1:s${i}`, tabId: null }))
+    const occ = sideOccupants(five, layout) || []
+    check('the in-layout moved gate is an occupant and the out-of-layout one is not',
+      occ.some((o) => o.paneId === 'w1:gL') && !occ.some((o) => o.paneId === 'w9:gX'), JSON.stringify(occ.map((o) => o.paneId)))
+    check('so five seats plus that gate fill the column and the next placement takes a tab',
+      seatPlacement(occ, 'w1:p1') === 'tab' && seatPlacement(five, 'w1:p1') === 'pane')
+    fs.writeFileSync(path.join(gatesDir, 'broken.json'), 'not json')
+    check('an unreadable moved marker makes the column unknown, which reads as full', sideOccupants(five, layout) === null)
+  } finally { process.env.TMPDIR = saved; fs.rmSync(gatesDir, { recursive: true, force: true }) }
+}
+
 console.log('clause 3 — the fixtures really carry their defects, proved without the hook')
 {
   reset()
@@ -900,6 +1092,29 @@ console.log('clause 3 — the fixtures really carry their defects, proved withou
     { encoding: 'utf8', env: { ...process.env, DCTR_TEST_GET_FAILS: 'w1:s9' } }).trim()
   check('the failing-lookup fixture really fails, and with a code that is NOT an answer',
     /transport_error/.test(getFail) && !/not_found/.test(getFail) && /rc=1/.test(getFail), getFail)
+}
+
+{
+  const tg = (env) => execFileSync('bash', ['-c', `${bin}/herdr tab get w9:tQ 2>&1 1>/dev/null; echo "rc=$?"`], { encoding: 'utf8', env: { ...process.env, ...env } }).trim()
+  const gone = tg({ DCTR_TEST_TABGET_GONE: 'w9:tQ' }), fails = tg({ DCTR_TEST_TABGET_FAILS: 'w9:tQ' })
+  check('the tab-get fixtures really answer tab_not_found and a transport error, both with rc=1',
+    /"code":"tab_not_found"/.test(gone) && /rc=1/.test(gone) && /transport_error/.test(fails) && !/not_found/.test(fails) && /rc=1/.test(fails), `${gone} / ${fails}`)
+  const lockDir = path.join(tmp, 'lockprobe'); holdLock(lockDir)
+  let live = false; try { process.kill(Number(fs.readFileSync(path.join(lockDir, 'placement.lock', 'pid'), 'utf8')), 0); live = true } catch { /* dead */ }
+  const probe = path.join(tmp, 'replace-probe.json'); fs.writeFileSync(probe, '{"paneId":"before"}')
+  execFileSync('bash', ['-c', `${bin}/herdr pane get w9:gP >/dev/null 2>&1 || true`],
+    { env: { ...process.env, DCTR_TEST_REPLACE_ON_GET: 'w9:gP', DCTR_TEST_REPLACE_FILE: probe, DCTR_TEST_STEAL_RECORD: '{"paneId":"after"}' } })
+  check('the replace-on-get fixture really rewrites the moved marker during the lookup', JSON.parse(fs.readFileSync(probe, 'utf8')).paneId === 'after')
+  check('the held-lock fixture names a pid that is really alive, so no waiter may steal it', live)
+  gate('dctr-gate-8', { paneId: 'w1:g8' }, false); gate('dctr-gate-9', { paneId: 'w1:g9' }, true)
+  const recordOf = (a) => JSON.parse(fs.readFileSync(path.join(seatsDir, `${a}.json`), 'utf8')).file
+  check('the finished-gate fixture really has its result file, and a running one really has none, at the paths their records name',
+    !fs.existsSync(`${recordOf('dctr-gate-8')}.result`) && fs.existsSync(`${recordOf('dctr-gate-9')}.result`),
+    `${recordOf('dctr-gate-8')} / ${recordOf('dctr-gate-9')}`)
+  const longDest = path.join(tmp, `${'r'.repeat(250)}.dctr-gate-1.json`), longSrc = path.join(tmp, 'long-src.json')
+  fs.writeFileSync(longSrc, '{}')
+  let longCode = null; try { fs.renameSync(longSrc, longDest) } catch (e) { longCode = e.code }
+  check('a moved name built from a 250-character session id really cannot be renamed into, proved without the hook', longCode === 'ENAMETOOLONG', String(longCode))
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

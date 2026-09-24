@@ -461,6 +461,111 @@ const renames = fs.readFileSync(calls, 'utf8').split('\n').filter((l) => l.start
     'without this the four clauses could pass because the launcher never called herdr at all')
 }
 
+// A gate whose session ended while it ran has had its marker MOVED by SessionEnd to the unowned
+// directory as `<session>.<name>.json` (B1). Its completion keeps the shipped branches and finds the
+// marker at the original path first, then at the moved one (B4). The pane's shell has a fresh
+// environment, so the moved path is derived from the marker's own path: every run below sets a
+// TMPDIR that is NOT the marker's root, which a lookup through the environment would get wrong.
+{
+  const root = path.join(tmp, 'root-b4')
+  const original = path.join(root, 'dctr-S1', 'seats', 'dctr-gate-1.json')
+  const moved = path.join(root, 'dctr-gates', 'S1.dctr-gate-1.json')
+  const elsewhere = path.join(tmp, 'elsewhere'); fs.mkdirSync(elsewhere, { recursive: true })
+  const place = (orig, mv) => {
+    fs.rmSync(root, { recursive: true, force: true })
+    fs.mkdirSync(path.dirname(original), { recursive: true }); fs.mkdirSync(path.dirname(moved), { recursive: true })
+    if (orig) fs.writeFileSync(original, JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:pS' }))
+    if (mv) fs.writeFileSync(moved, JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:pS' }))
+  }
+  const finish = (env, label) => {
+    fs.writeFileSync(calls, '')
+    execFileSync('node', [script, '--run', path.join(tmp, `b4-${label}.out`), original, 'w1:pS', '', '', label, '--', 'true'],
+      { env: paneEnv({ TMPDIR: elsewhere, ...env }), encoding: 'utf8' })
+    return fs.readFileSync(calls, 'utf8')
+  }
+  place(false, true)
+  const fixtureOk = !fs.existsSync(original) && fs.existsSync(moved)
+  finish({ DCTR_TEST_GET_GONE: '1' }, 'moved gone')
+  clause('clause 9 — a gate whose marker MOVED and whose pane is gone drops the moved marker, found by its own path and not by TMPDIR',
+    !fs.existsSync(moved), `moved marker still at ${moved}`)
+  clause('clause 3g — that fixture really had no marker at the original path and one at the moved path before the run',
+    fixtureOk, `original ${fs.existsSync(original)}; moved ${fs.existsSync(moved)} (after the run)`)
+
+  place(false, true)
+  const unfocused = finish({}, 'moved unfocused')
+  clause('clause 9b — a moved gate that finishes unfocused closes its pane and KEEPS the moved marker (the 2026-09-08 ruling)',
+    unfocused.split('\n').includes('pane close w1:pS') && fs.existsSync(moved), unfocused.trim().split('\n').join(' | '))
+
+  place(false, true)
+  const focused = finish({ DCTR_TEST_GET_FOCUSED: '1' }, 'moved focused')
+  clause('clause 9c — a moved gate that finishes focused is relabelled, not closed, and keeps the moved marker',
+    /^pane rename w1:pS /m.test(focused) && !focused.includes('pane close') && fs.existsSync(moved), focused.trim().split('\n').join(' | '))
+
+  // Both paths occupied is the RESUMED session: `claude --resume` keeps the session id, so the new
+  // session's own dctr-gate-1 can sit at the original path while this older gate's record is moved.
+  // Only the record naming THIS gate's pane may go, whichever path holds it.
+  const placeTwo = (origPane, movedPane) => {
+    place(false, false)
+    fs.writeFileSync(original, JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: origPane, tabId: null }))
+    fs.writeFileSync(moved, JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: movedPane, tabId: null }))
+  }
+  const paneAt = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).paneId } catch { return null } }
+  placeTwo('w1:pNEW', 'w1:pS')
+  const newFixture = paneAt(original) === 'w1:pNEW' && paneAt(moved) === 'w1:pS'
+  finish({ DCTR_TEST_GET_GONE: '1' }, 'resumed new')
+  clause('clause 9d — a gone gate leaves ANOTHER gate\'s record at the original path and drops its own moved one',
+    paneAt(original) === 'w1:pNEW' && !fs.existsSync(moved), `original ${paneAt(original)}; moved ${paneAt(moved)}`)
+  placeTwo('w1:pS', 'w1:pOLD')
+  const oldFixture = paneAt(original) === 'w1:pS' && paneAt(moved) === 'w1:pOLD'
+  finish({ DCTR_TEST_GET_GONE: '1' }, 'resumed old')
+  clause('clause 9f — and with its own record at the original path, it drops that one and leaves another gate\'s moved record',
+    !fs.existsSync(original) && paneAt(moved) === 'w1:pOLD', `original ${paneAt(original)}; moved ${paneAt(moved)}`)
+  clause('clause 3h — each two-record fixture really named one pane of this gate and one of another before its run',
+    newFixture && oldFixture, `${newFixture} / ${oldFixture}`)
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+// A placement by the gate launcher drops a moved marker whose pane a server-wide lookup says is gone
+// (B3), as the seat hook's does: every placement reads the unowned directory.
+{
+  const gates = path.join(tmp, 'dctr-gates'); fs.mkdirSync(gates, { recursive: true })
+  const gone = path.join(gates, 'S2.dctr-gate-4.json')
+  fs.writeFileSync(gone, JSON.stringify({ agent: 'dctr-gate-4', role: 'gate', paneId: 'w9:gOld' }))
+  fs.writeFileSync(calls, '')
+  execFileSync('node', [script, 'b3 gate', path.join(tmp, 'b3.out'), '--', 'true'], { env: paneEnv({ DCTR_TEST_GET_GONE: '1' }), encoding: 'utf8' })
+  clause('clause 9e — the gate launcher\'s placement asked the server about a moved gate and dropped it on pane_not_found',
+    callLine(/^pane get w9:gOld$/) !== '' && !fs.existsSync(gone), `calls: ${fs.readFileSync(calls, 'utf8').trim().split('\n').join(' | ')}`)
+  fs.rmSync(gates, { recursive: true, force: true })
+}
+
+// A RESUMED session keeps its id, and its seats directory starts empty, so gate names must also skip
+// the ones this session id already holds in the unowned directory (R1-P1).
+{
+  const seatsHere = path.join(tmp, 'dctr-gate-selftest', 'seats'), gates = path.join(tmp, 'dctr-gates')
+  const allocated = () => { const l = callLine(/^pane run w1:pS /); const m = l.match(/seats\/(dctr-gate-\d+)\.json/); return m ? m[1] : null }
+  fs.rmSync(seatsHere, { recursive: true, force: true }); fs.rmSync(gates, { recursive: true, force: true }); fs.writeFileSync(calls, '')
+  execFileSync('node', [script, 'fresh', path.join(tmp, 'fresh.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
+  const control = allocated()
+  fs.rmSync(seatsHere, { recursive: true, force: true }); fs.mkdirSync(gates, { recursive: true }); fs.writeFileSync(calls, '')
+  fs.writeFileSync(path.join(gates, 'gate-selftest.dctr-gate-1.json'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w9:gLive' }))
+  fs.writeFileSync(path.join(gates, 'other-session.dctr-gate-2.json'), JSON.stringify({ agent: 'dctr-gate-2', role: 'gate', paneId: 'w9:gOther' }))
+  execFileSync('node', [script, 'resumed', path.join(tmp, 'resumed.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
+  clause('clause 9g — a resumed session skips the gate name its id already holds as a moved marker, and ONLY its own id\'s names',
+    allocated() === 'dctr-gate-2' && fs.existsSync(path.join(gates, 'gate-selftest.dctr-gate-1.json')), `allocated ${allocated()}`)
+  clause('clause 3i — with no moved marker the same launch really takes dctr-gate-1, so 9g measured the moved name',
+    control === 'dctr-gate-1', `control ${control}`)
+
+  // The column reason names a moved marker it could not read (R1-C2).
+  fs.rmSync(seatsHere, { recursive: true, force: true }); fs.rmSync(gates, { recursive: true, force: true }); fs.mkdirSync(gates, { recursive: true })
+  const broken = path.join(gates, 'other.dctr-gate-7.json'); fs.writeFileSync(broken, 'not json')
+  const logFile = path.join(tmp, 'dctr-gate-selftest', 'hook.log'); fs.rmSync(logFile, { force: true })
+  execFileSync('node', [script, 'reason', path.join(tmp, 'reason.out'), '--', 'true'], { env: paneEnv({}), encoding: 'utf8' })
+  let logText = ''; try { logText = fs.readFileSync(logFile, 'utf8') } catch { /* checked below */ }
+  clause('clause 9h — the gate launcher\'s log names the unreadable moved marker as why it could not observe the column',
+    /could not observe the side column/.test(logText) && logText.includes(broken), logText.trim().split('\n').join(' | '))
+  fs.rmSync(gates, { recursive: true, force: true })
+}
+
 // A check that could not even SPAWN. The pane is alive and nothing here closes it, so the record has
 // to survive: dropping it was the same live-pane-with-no-record the completion path is written to
 // avoid, one screen up in the same function, and no fixture drove this path at all.

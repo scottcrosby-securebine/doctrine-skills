@@ -629,6 +629,28 @@ console.log('the overflow ruling, driven through open rather than asserted aroun
   check('and the side markers the layout still carries are untouched',
     fs.readdirSync(md).filter((f) => /^w1_i\d\.json$/.test(f)).length === SIDE_CAP)
 
+  // A gate another session's SessionEnd moved to the unowned directory holds a slot when this layout
+  // carries its pane (B2), and is dropped only when a server-wide lookup answers not-found (B3).
+  const gd = path.join(tmp, 'dctr-gates')
+  fs.rmSync(gd, { recursive: true, force: true }); fs.mkdirSync(gd, { recursive: true })
+  for (const f of fs.readdirSync(md)) fs.rmSync(path.join(md, f), { force: true })
+  for (let i = 0; i < SIDE_CAP - 1; i += 1) fs.writeFileSync(path.join(md, `w1_i${i}.json`), JSON.stringify({ paneId: `w1:i${i}`, tee: `/t/i${i}.log`, label: `i${i}` }))
+  const movedGate = path.join(gd, 'old.dctr-gate-1.json')
+  fs.writeFileSync(movedGate, JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: `w1:i${SIDE_CAP - 1}`, tabId: null }))
+  const t4 = path.join(tmp, 'moved-gate.log')
+  fs.rmSync(`${t4}.state.json`, { force: true }); fs.rmSync(t4, { force: true })
+  const counted = run(['open', 'movedGate', t4, 'true'])
+  check('five interactive panes plus a moved gate in this layout fill the column, so open takes a tab',
+    counted.code === 0 && /overflow=tab/.test(counted.out) && fs.existsSync(movedGate), counted.out.trim() || counted.err.trim())
+  check('the moved-gate fixture really leaves the column one short without the gate',
+    fs.readdirSync(md).filter((f) => /^w1_i\d\.json$/.test(f)).length === SIDE_CAP - 1)
+  fs.rmSync(`${t4}.state.json`, { force: true }); fs.rmSync(t4, { force: true })
+  fs.writeFileSync(calls, '')
+  run(['open', 'movedGone', t4, 'true'], { DCTR_TEST_PANE_GONE: '1' })
+  check('and a moved gate whose pane the server says is gone is dropped by the next open',
+    !fs.existsSync(movedGate) && herdrSaw(new RegExp(`^pane get w1:i${SIDE_CAP - 1}$`, 'm')), fs.readFileSync(calls, 'utf8').trim())
+  fs.rmSync(gd, { recursive: true, force: true })
+
   fs.rmSync(md, { recursive: true, force: true })
   if (oldTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = oldTmp
 }

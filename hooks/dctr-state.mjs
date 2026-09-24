@@ -9,9 +9,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { PREFIX, parseHerdr } from './dctr-lib.mjs'
+import { PREFIX, parseHerdr, movedGateName, movedGateVerdict } from './dctr-lib.mjs'
 
-export const stateDir = (sessionId) => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-${sessionId}`)
+const tmpRoot = () => process.env.TMPDIR || os.tmpdir()
+export const stateDir = (sessionId) => path.join(tmpRoot(), `${PREFIX}-${sessionId}`)
 export const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
 
 /** Best-effort append to the session's hook.log; never throws. Hook output goes to a stream nobody
@@ -144,7 +145,95 @@ export function liveSeats(sessionId) {
 /** The one derivation of the interactive marker directory. The launcher writes here and the seat
  *  and gate hooks read here, so a second expression for the same path is a fork that agrees only
  *  by accident: it used to be spelled out again as a literal in dctr-pane.mjs. */
-export const panesDir = () => path.join(process.env.TMPDIR || os.tmpdir(), `${PREFIX}-panes`)
+export const panesDir = () => path.join(tmpRoot(), `${PREFIX}-panes`)
+
+/**
+ * The unowned gate directory. A gate still running when its session ends has its marker MOVED here
+ * by SessionEnd (E8-R13), because its pane must outlive the session and still count against the cap
+ * of whichever session is placing beside it now. Its own name, not panesDir: an interactive pane
+ * marker and a moved gate marker are judged by different rules, and one directory would make every
+ * reader of either tell them apart by shape. `root` exists for the gate's own completion, which runs
+ * in a pane shell with a fresh environment and so derives the root from its marker path instead.
+ */
+export const gatesDir = (root = tmpRoot()) => path.join(root, `${PREFIX}-gates`)
+
+/** Where SessionEnd moves the marker at `marker`, derived from that path alone: the gate's `--run`
+ *  process runs in a pane whose TMPDIR need not match the session's, and the marker path is the one
+ *  thing both share. Null for a path that is not `<root>/dctr-<session>/seats/<name>.json`. */
+export function movedGatePath(marker) {
+  const seats = path.dirname(marker), state = path.dirname(seats), base = path.basename(state)
+  if (path.basename(seats) !== 'seats' || !base.startsWith(`${PREFIX}-`)) return null
+  return path.join(gatesDir(path.dirname(state)), movedGateName(base.slice(PREFIX.length + 1), path.basename(marker, '.json')))
+}
+
+/** The gate names this session id holds in the unowned directory, readable or not: a name is taken
+ *  by the file, whatever is in it. A directory not there yet holds none. */
+export function movedGateNames(sessionId) {
+  let names
+  try { names = fs.readdirSync(gatesDir()) }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e }
+  const prefix = `${sessionId}.`
+  return names.filter((f) => f.startsWith(prefix) && f.endsWith('.json')).map((f) => f.slice(prefix.length, -'.json'.length))
+}
+
+/** Why sideOccupants could not observe the column, naming the file where a file is the cause.
+ *  sideOccupants answers null and throws the reason away, and a log line naming no file is one the
+ *  operator cannot act on. Read again only on the failure. */
+export function sideColumnReason() {
+  try { interactivePanes() } catch (e) { return e.message }
+  try {
+    const { unreadable } = movedGates()
+    if (unreadable.length) return `moved gate marker(s) could not be read: ${unreadable.join(', ')}`
+  } catch (e) { return `moved gates could not be listed (${e.message})` }
+  return 'the layout could not be read'
+}
+
+/** The moved gate markers, each carrying its file name as `moved`, and the ones that could not be
+ *  read, kept apart as liveSeatsPartial keeps them. A directory not there yet is none of either. */
+export function movedGates() {
+  let names
+  try { names = fs.readdirSync(gatesDir()) }
+  catch (e) { if (e.code === 'ENOENT') return { gates: [], unreadable: [] }; throw e }
+  const gates = [], unreadable = []
+  for (const f of names.filter((n) => n.endsWith('.json'))) {
+    const file = path.join(gatesDir(), f)
+    try { gates.push({ ...JSON.parse(fs.readFileSync(file, 'utf8')), moved: f }) } catch { unreadable.push(file) }
+  }
+  return { gates, unreadable }
+}
+
+/**
+ * Drop every moved gate marker whose pane or tab a SERVER-WIDE lookup answers not-found (B3). Never
+ * judged from a layout: the layout is the placing session's tab, and a moved gate can be alive in
+ * another tab, or be a tab gate whose root pane no layout carries (F3). The lookups run outside the
+ * directory lock, each bounded at HERDR_TIMEOUT_MS; the drops run inside it and only for a file that
+ * still names the pane or tab that was judged, so a SessionEnd moving a marker in meanwhile cannot
+ * have its record taken. Best effort: whatever this cannot do leaves the marker, which is the safe
+ * direction, and it never throws into a placement.
+ */
+export function dropGoneGates(log = () => {}) {
+  let found
+  try { found = movedGates() } catch (e) { log(`moved gates could not be listed (${e.message}); dropping none`); return }
+  const gone = found.gates.filter((g) => {
+    let answer = 'failed'
+    try { herdr(g.tabId ? ['tab', 'get', g.tabId] : ['pane', 'get', g.paneId]); answer = 'found' }
+    catch (e) { if (g.tabId ? isTabNotFound(e) : isPaneNotFound(e)) answer = 'not_found' }
+    return movedGateVerdict(answer) === 'drop'
+  })
+  if (!gone.length) return
+  try {
+    withDirLock(gatesDir(), () => {
+      for (const g of gone) {
+        const file = path.join(gatesDir(), g.moved)
+        let current = null
+        try { current = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { continue }
+        if (current.paneId !== g.paneId || current.tabId !== g.tabId) continue
+        fs.rmSync(file, { force: true })
+        log(`dropped moved gate ${g.moved}: ${g.tabId || g.paneId} is gone`)
+      }
+    })
+  } catch (e) { log(`moved gates not dropped (${e.message}); they stay`) }
+}
 
 export function interactivePanes() {
   let names
@@ -180,8 +269,13 @@ export function sideOccupants(seats, layout) {
   // TAB'S ROOT paneId, which this layout never holds. It occupies no column slot, so no placement
   // decision changes. What this returns is THE COLUMN'S OCCUPANTS, not the seat roster, and no
   // caller may read it as one.
+  // A gate moved here by another session's SessionEnd occupies this column when its pane is in this
+  // layout (B2), exactly as an interactive pane does. One that cannot be read makes the count unknown.
+  let moved
+  try { moved = movedGates() } catch { return null }
+  if (moved.unreadable.length) return null
   const inLayout = (m) => !m.paneId || layout.some((l) => l.pane_id === m.paneId)
-  return seats.filter(inLayout).concat(panes.filter(inLayout))
+  return seats.filter(inLayout).concat(panes.filter(inLayout), moved.gates.filter(inLayout))
 }
 
 // Placement is a read-decide-split sequence, and doctrine dispatches waves: six SubagentStarts in
@@ -320,20 +414,27 @@ export function breakStaleLock(lock, condemnedPid = null) {
 export const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
 /** How long a caller waits for the placement lock. A placement gives up quickly because another wave
- *  is behind it; SessionEnd waits longer because it is the LAST chance, and a sweep that gives up
- *  leaves a live pane with nobody left to reclaim it.
- *
- *  SESSION_END_WAIT_MS MUST STAY UNDER THE SessionEnd HOOK'S OWN TIMEOUT IN hooks.json. It was set
- *  to 30000 against a hook Claude Code SIGKILLs at 10s, which is strictly worse than the 5s it
- *  replaced: the 5s deadline threw, reached its caller's catch and logged, where the 30s one is
- *  killed mid-wait and logs nothing. A deadline past the lifetime of the process holding it is not
- *  a longer wait, it is a silent death. `dctr-seat.selftest.mjs` reads hooks.json and pins the
- *  relationship, so drift on either side fails rather than going quiet. */
-const PLACEMENT_WAIT_MS = 5000
-export const SESSION_END_WAIT_MS = 8000
+ *  is behind it. SessionEnd gives up quicker still, because Claude Code gives that hook 1.5s whatever
+ *  hooks.json declares, and a wait past the lifetime of the process holding it is not a longer wait,
+ *  it is a silent death: it was once 30000 against a hook SIGKILLed at 10s, killed mid-wait and
+ *  logging nothing. The LAST chance is therefore the detached `--sweep` child SessionEnd hands the
+ *  sweep to on a timeout, and SWEEP_WAIT_MS is the long wait. The inline wait sits well under 1.5s
+ *  because node's start-up and the closes after the lock share that budget with it.
+ *  `dctr-seat.selftest.mjs` pins both. */
+export const PLACEMENT_WAIT_MS = 5000
+export const SESSION_END_WAIT_MS = 800
+/** The detached `--sweep` child's wait, which SessionEnd hands the sweep to when the lock is not free
+ *  inside its budget. It has no hook timeout over it, so it waits past a holder's longest herdr call. */
+export const SWEEP_WAIT_MS = 60000
+/** The code a lock wait that ran out throws with, so a caller can tell "busy" from every other failure. */
+export const LOCK_TIMEOUT = 'ELOCKTIMEOUT'
 
-export function withPlacementLock(sessionId, fn, waitMs = PLACEMENT_WAIT_MS) {
-  const lock = path.join(stateDir(sessionId), 'placement.lock')
+export const withPlacementLock = (sessionId, fn, waitMs = PLACEMENT_WAIT_MS) => withDirLock(stateDir(sessionId), fn, waitMs)
+
+/** The lock on one directory: the session's state directory for placement, and the unowned gate
+ *  directory for moves into it and drops from it (B6). One protocol for both. */
+export function withDirLock(dir, fn, waitMs = PLACEMENT_WAIT_MS) {
+  const lock = path.join(dir, 'placement.lock')
   // The parent has to exist first. mkdir of a lock inside a directory that is not there yet fails
   // with ENOENT on every pass, so the wait runs to its deadline and blames a holder that never
   // existed. The tee lock carried this same defect and was repaired; this one was not.
@@ -347,7 +448,7 @@ export function withPlacementLock(sessionId, fn, waitMs = PLACEMENT_WAIT_MS) {
     breakIfOrphaned(lock, PLACEMENT_STALE_MS)
     // Checked on every path through the loop: a `continue` used to skip it, which is the recorded
     // spin-forever defect here.
-    if (Date.now() > deadline) throw new Error(`placement lock timed out after ${waitMs}ms`)
+    if (Date.now() > deadline) throw Object.assign(new Error(`lock on ${path.basename(dir)} timed out after ${waitMs}ms`), { code: LOCK_TIMEOUT })
     sleepMs(50)
   }
   // fn stands down by returning a reason, never by exiting: process.exit skips finally and the
