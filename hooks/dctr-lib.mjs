@@ -971,9 +971,13 @@ export function standingPauses(entries, startLine = 0) {
   return latest?.sub === 'paused' && !pauseResolved(latest, es) ? [latest] : []
 }
 
-/** The dedup (E8-D18, E8-R27): no new paused line for `reason` while a standing pause names the same pause
- *  (samePause); a pause that differs from every standing one is written. */
-export const pauseStands = (entries, startLine, reason) => standingPauses(entries, startLine).some((p) => samePause(p.reason, reason))
+/** The dedup (E8-D18, E8-R27, E8-R28): no new paused line for `reason` while a standing pause names the same pause
+ *  (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for that
+ *  reason; any other pause that differs from every standing one is written. */
+export const pauseStands = (entries, startLine, reason) => {
+  const standing = standingPauses(entries, startLine)
+  return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
+}
 
 /** B2 step 3 (E8-R25): an unresolved paused line follows this session's latest warned line, whatever anchor follows
  *  it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False with no such line.
@@ -1190,7 +1194,8 @@ export function typerStep(o) {
  * B6's reason for a Notification or StopFailure event while auto-cycle is active (E8-D18), or null. `event` is
  * `StopFailure` or the notification type. idle_prompt pauses only when no live claim is held for this pane,
  * nothing is live, and the last Stop's persisted facts say its background tasks were empty and its message did
- * not end with the ready line; a missing record of the last Stop is not a known-empty one.
+ * not end with the ready line; a missing record of the last Stop is not a known-empty one. Its R8 line is then
+ * written only while no paused line stands, which the dedup decides (pauseStands, E8-R28).
  */
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown')

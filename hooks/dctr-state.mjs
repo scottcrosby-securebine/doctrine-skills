@@ -558,8 +558,8 @@ export function appendRecordLine(recordPath, line) {
   fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
 }
 
-/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause
- *  (pauseStands, E8-D18, E8-R27). Never a state line: the record's last state line is left as it was.
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause, or,
+ *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Never a state line: the record's last state line is left as it was.
  *  `{ written }`. */
 export function appendPaused(recordPath, reason) {
   if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason)) return { written: false }

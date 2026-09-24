@@ -66,7 +66,7 @@ try {
   const messages = []
   const pause = (reason) => {
     const { written } = appendPaused(recordPath, reason)
-    log(written ? `paused: ${reason}` : `pause not written, a paused line naming the same pause already stands: ${reason}`)
+    log(written ? `paused: ${reason}` : `pause not written, a standing paused line refuses it (the same pause, or any for an idle prompt): ${reason}`)
   }
 
   if (event === 'Stop') {
