@@ -12,7 +12,9 @@
 //                  job record instead (`--codex-tail`, below) and its marker stays until the next
 //                  codex seat is placed, whose placement closes it if it has finished and nobody is
 //                  looking at it (close-on-next), or until SessionEnd if no codex seat follows
-//   SessionEnd     sweep any pane or tab whose seat never stopped
+//   SessionEnd     sweep any pane or tab whose seat never stopped, except a gate still running,
+//                  whose marker moves to the unowned gate directory (E8-R13). A lock it cannot take
+//                  inside the 1.5s budget hands the sweep to a detached `--sweep` child
 //
 // It always exits 0. A hook that fails must never fail the run it is watching: this is not a gate,
 // it cannot block a phase, it cannot reset a counter and it cannot produce a finding. Every reason
@@ -27,11 +29,101 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import {
   PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose } from './dctr-lib.mjs'
-import { SESSION_END_WAIT_MS, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName } from './dctr-lib.mjs'
+import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+
+/**
+ * SessionEnd's sweep, run inline by the hook under SESSION_END_WAIT_MS and by the detached `--sweep`
+ * child under SWEEP_WAIT_MS. A seat whose SubagentStop never fired leaves a pane or tab behind, and
+ * nothing else will clear it. Returns 'busy' when a lock was not taken inside `waitMs`, having changed
+ * nothing; every other outcome is logged here.
+ */
+function sweepSession(sessionId, waitMs, log) {
+  // Enumerate, close and remove ALL INSIDE the placement lock. Reading the seats outside it let a
+  // placement finish while this waited, and its brand-new marker was then deleted without its
+  // pane being closed — an untracked pane nothing can ever find.
+  const deadline = Date.now() + waitMs
+  try {
+    let removable = false
+    placementLock(sessionId, () => {
+      const { seats, unreadable } = liveSeatsPartial(sessionId)
+      let failed = 0
+      // A gate whose verdict is not written yet is still running (E8-R13): closing its pane kills
+      // the check. Its marker MOVES instead, under the unowned directory's own lock (B6), and FIRST,
+      // so a lock that is busy there hands the whole sweep off before anything has been closed and
+      // the retry starts from the state this one found. The name carries the session id because
+      // gate names are per session (F4). Its pane is left alone, and a placement in any session
+      // later drops the marker only when a server-wide lookup says the pane is gone.
+      const moving = seats.filter((seat) => sweepAction(seat, Boolean(seat?.file) && fs.existsSync(`${seat.file}.result`)) === 'move')
+      if (moving.length) {
+        fs.mkdirSync(gatesDir(), { recursive: true })
+        withDirLock(gatesDir(), () => {
+          for (const seat of moving) {
+            try {
+              fs.renameSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), path.join(gatesDir(), movedGateName(sessionId, seat.agent)))
+              log(`SessionEnd: gate ${seat.agent} is still running; its marker moved to ${gatesDir()} and its ${seat.tabId ? 'tab' : 'pane'} stays`)
+            } catch (e) { failed += 1; log(`SessionEnd: could not move running gate ${seat.agent} (${String(e.message).split('\n')[0]}); keeping its record`) }
+          }
+        }, Math.max(0, deadline - Date.now()))
+      }
+      // Close every seat we can read. A close that FAILS is not "already gone" — a timeout or a
+      // transport error leaves the pane alive — so it is counted, and anything uncounted keeps
+      // the records that say how to tear it down.
+      for (const seat of seats) {
+        if (moving.includes(seat)) continue
+        // A record that NAMES nothing cannot be closed. `reserveMarker` publishes `{}` and it
+        // survives whenever a rollback's republish also failed, so this shape reaches disk; asking
+        // herdr to close `undefined` turned a useless record into a failed close, which is a
+        // different thing from a pane that would not die. Counted rather than ignored, so the
+        // directory is kept with the evidence still in it.
+        if (!seat || (!seat.tabId && !seat.paneId)) {
+          failed += 1
+          log('SessionEnd: a seat record names neither a pane nor a tab; there is nothing to close, keeping it')
+          continue
+        }
+        try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) }
+        catch (e) {
+          // Same rule as SubagentStop above: "not found" is an answer, and the thing we were
+          // about to close is already gone, which is the outcome we wanted.
+          if (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e)) log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`)
+          else { failed += 1; log(`SessionEnd: could not close ${seat.tabId || seat.paneId} (${String(e.message).split('\n')[0]}); keeping its record`) }
+        }
+      }
+      if (unreadable.length) log(`SessionEnd: ${unreadable.length} marker(s) could not be read; keeping the state directory`)
+      if (failed || unreadable.length) return
+      // Remove the CONTENTS while still holding the lock, and leave the lock itself: it lives
+      // inside this directory, and a recursive removal deletes it part-way through, which lets a
+      // waiting launcher place a seat into the very directory still being deleted.
+      for (const name of fs.readdirSync(stateDir(sessionId))) {
+        if (name === 'placement.lock') continue
+        try { fs.rmSync(path.join(stateDir(sessionId), name), { recursive: true, force: true }) } catch { /* best effort */ }
+      }
+      removable = true
+    }, waitMs)
+    // The lock is released by now, so the directory can go. If anything above kept a record, this
+    // does not run and the directory stays for a human to look at.
+    // rmdir, NOT a recursive remove. The lock was released a line ago, and a waiting placement can
+    // have taken it and published a marker by now; a recursive remove would carry both off, which
+    // is the race moved outside the critical section rather than removed. rmdir fails ENOTEMPTY
+    // against exactly that, and failing is the correct outcome.
+    if (removable) try { fs.rmdirSync(stateDir(sessionId)) } catch { /* someone got in first, or it is already gone */ }
+  } catch (e) {
+    // A lock that stayed busy changed nothing, and the caller decides what that means.
+    if (e.code === LOCK_TIMEOUT) return 'busy'
+    // NOTHING is removed on this path, deliberately, and the two ways to get here are why. A read
+    // that failed must not authorize a deletion: one truncated marker would otherwise destroy the
+    // records of every healthy seat. And a lock that could not be taken must not be deleted out
+    // from under whoever holds it. The cost of leaving it is a stale directory under the temp
+    // directory that no later session reads; the cost of the alternatives is a live lock or the
+    // only record of how to tear down a pane.
+    log(`SessionEnd: swept nothing (${e.message}); state directory left in place for a human to remove`)
+  }
+  return null
+}
 
 // Watcher mode, typed into a codex seat's pane by SubagentStop:
 //
@@ -82,6 +174,14 @@ if (process.argv[2] === '--codex-tail') {
   setInterval(pump, PUMP_MS)
   setInterval(poll, Number(process.env.DCTR_POLL_MS) || POLL_MS)
   poll()
+} else if (process.argv[2] === '--sweep') {
+  // The detached sweep SessionEnd hands off to when a lock is busy past its budget. Its stdin is not a
+  // hook payload, so it runs before the payload read, like the watcher above.
+  const sid = process.argv[3]
+  if (!sid) { console.error('usage: node dctr-seat.mjs --sweep <session-id>'); process.exit(1) }
+  const log = (msg) => hookLog(sid, msg)
+  if (sweepSession(sid, SWEEP_WAIT_MS, log) === 'busy') log(`SessionEnd sweep: a lock was still busy after ${SWEEP_WAIT_MS}ms; swept nothing, state directory left in place for a human to remove`)
+  process.exit(0)
 } else {
 
 let logSession = null
@@ -348,6 +448,9 @@ try {
       // returns null for "I could not look" — an unreadable marker directory or a failed layout
       // read — and that must read as a FULL column, not an empty one. Filtering an unknown layout
       // silently dropped every interactive pane from the count and split on top of six of them.
+      // A gate another session's SessionEnd moved to the unowned directory is dropped here only on a
+      // server-wide not-found (B3), then counted by sideOccupants when its pane is in this layout (B2).
+      dropGoneGates(log)
       const occupants = sideOccupants(seats, layout)
       if (!occupants) {
         // Name the cause. A malformed marker in the shared directory stops every placement on the
@@ -475,6 +578,8 @@ try {
         // deadline: at one shared 5s bound that sweep could time out too, its caller swallowed the
         // throw, and the bound this sentence claims did not exist. Untracking a live pane is bounded
         // by nothing at all. Every other contended path in this file defers to SessionEnd too.
+        // (SessionEnd's own inline wait is now held under its 1.5s budget, and a lock busy past it
+        // hands the sweep to the detached `--sweep` child, whose SWEEP_WAIT_MS is what bounds this.)
         const recordJob = () => {
           const file = path.join(seatsDir(sessionId), `${seat.agent}.json`)
           let current = null
@@ -600,68 +705,15 @@ try {
   }
 
   if (event === 'SessionEnd') {
-    // A seat whose SubagentStop never fired leaves a pane or tab behind. Nothing else will clear it.
-    //
-    // Enumerate, close and remove ALL INSIDE the placement lock. Reading the seats outside it let a
-    // placement finish while this waited, and its brand-new marker was then deleted without its
-    // pane being closed — an untracked pane nothing can ever find.
-    try {
-      let removable = false
-      // The LAST chance, so it waits far longer than a placement does. At the shared 5s deadline
-      // this call could time out under contention and be swallowed by the catch below, and the
-      // "losing close-on-next is bounded by SessionEnd" claim beside the codex stop path was then
-      // false: nothing else ever reclaims that pane, and the next session reads its own state dir.
-      placementLock(sessionId, () => {
-        const { seats, unreadable } = liveSeatsPartial(sessionId)
-        // Close every seat we can read. A close that FAILS is not "already gone" — a timeout or a
-        // transport error leaves the pane alive — so it is counted, and anything uncounted keeps
-        // the records that say how to tear it down.
-        let failed = 0
-        for (const seat of seats) {
-          // A record that NAMES nothing cannot be closed. `reserveMarker` publishes `{}` and it
-          // survives whenever a rollback's republish also failed, so this shape reaches disk; asking
-          // herdr to close `undefined` turned a useless record into a failed close, which is a
-          // different thing from a pane that would not die. Counted rather than ignored, so the
-          // directory is kept with the evidence still in it.
-          if (!seat || (!seat.tabId && !seat.paneId)) {
-            failed += 1
-            log('SessionEnd: a seat record names neither a pane nor a tab; there is nothing to close, keeping it')
-            continue
-          }
-          try { herdr(seat.tabId ? ['tab', 'close', seat.tabId] : ['pane', 'close', seat.paneId]) }
-          catch (e) {
-            // Same rule as SubagentStop above: "not found" is an answer, and the thing we were
-            // about to close is already gone, which is the outcome we wanted.
-            if (seat.tabId ? isTabNotFound(e) : isPaneNotFound(e)) log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`)
-            else { failed += 1; log(`SessionEnd: could not close ${seat.tabId || seat.paneId} (${String(e.message).split('\n')[0]}); keeping its record`) }
-          }
-        }
-        if (unreadable.length) log(`SessionEnd: ${unreadable.length} marker(s) could not be read; keeping the state directory`)
-        if (failed || unreadable.length) return
-        // Remove the CONTENTS while still holding the lock, and leave the lock itself: it lives
-        // inside this directory, and a recursive removal deletes it part-way through, which lets a
-        // waiting launcher place a seat into the very directory still being deleted.
-        for (const name of fs.readdirSync(stateDir(sessionId))) {
-          if (name === 'placement.lock') continue
-          try { fs.rmSync(path.join(stateDir(sessionId), name), { recursive: true, force: true }) } catch { /* best effort */ }
-        }
-        removable = true
-      }, SESSION_END_WAIT_MS)
-      // The lock is released by now, so the directory can go. If anything above kept a record, this
-      // does not run and the directory stays for a human to look at.
-      // rmdir, NOT a recursive remove. The lock was released a line ago, and a waiting placement can
-      // have taken it and published a marker by now; a recursive remove would carry both off, which
-      // is the race moved outside the critical section rather than removed. rmdir fails ENOTEMPTY
-      // against exactly that, and failing is the correct outcome.
-      if (removable) try { fs.rmdirSync(stateDir(sessionId)) } catch { /* someone got in first, or it is already gone */ }
-    } catch (e) {
-      // NOTHING is removed on this path, deliberately, and the two ways to get here are why. A read
-      // that failed must not authorize a deletion: one truncated marker would otherwise destroy the
-      // records of every healthy seat. And a lock that could not be taken must not be deleted out
-      // from under whoever holds it. The cost of leaving it is a stale directory under the temp
-      // directory that no later session reads; the cost of the alternatives is a live lock or the
-      // only record of how to tear down a pane.
-      log(`SessionEnd: swept nothing (${e.message}); state directory left in place for a human to remove`)
+    // Inline under the 1.5s budget. A lock that is busy past SESSION_END_WAIT_MS is not a sweep that
+    // failed, it is one that has not happened yet, so it goes to a detached child with its own longer
+    // wait rather than being dropped: nothing after this hook would ever reclaim those panes.
+    if (sweepSession(sessionId, SESSION_END_WAIT_MS, log) === 'busy') {
+      try {
+        const child = spawn(process.execPath, [import.meta.filename, '--sweep', sessionId], { detached: true, stdio: 'ignore' })
+        child.unref()
+        log(`SessionEnd: a lock was busy past ${SESSION_END_WAIT_MS}ms; handed the sweep to detached pid ${child.pid}`)
+      } catch (e) { log(`SessionEnd: a lock was busy and the detached sweep could not start (${e.message}); state directory left in place`) }
     }
   }
   if (!['SubagentStart', 'SubagentStop', 'SessionEnd'].includes(event)) {

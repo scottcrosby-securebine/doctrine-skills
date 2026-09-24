@@ -526,6 +526,27 @@ export function codexJobMatch(records, cwd, notBefore) {
 export const GATE_ROLE = 'gate'
 
 /**
+ * What SessionEnd does with one of the ending session's markers (E8-R13: the sweep skips running
+ * gates). A gate whose `<file>.result` does not exist yet is still running, and closing its pane
+ * would kill the check, so its marker MOVES to the unowned gate directory and its pane is left
+ * alone. Everything else closes, a finished gate included. The caller reads the file; this decides.
+ */
+export const sweepAction = (seat, resultExists) => (seat?.role === GATE_ROLE && !resultExists ? 'move' : 'close')
+
+/** The name a moved gate marker takes in the unowned directory. Gate names are allocated per session,
+ *  so two sessions' `dctr-gate-1.json` moved under their bare names would overwrite each other (F4). */
+export const movedGateName = (sessionId, name) => `${sessionId}.${name}.json`
+
+/**
+ * Whether a placement drops a moved gate marker, from a SERVER-WIDE lookup of its pane or tab:
+ * `'found'`, `'not_found'` or `'failed'`. Only an observed absence drops it. A lookup that failed is
+ * "I could not look", and a found pane is a gate still on screen somewhere, which a layout cannot
+ * say: the moved marker may belong to a pane in another tab, and a tab gate's root pane is in no
+ * layout at all (F3). Never judged from a layout.
+ */
+export const movedGateVerdict = (answer) => (answer === 'not_found' ? 'drop' : 'keep')
+
+/**
  * The line typed into the gate's pane: this script in `--run` mode, which runs the check, tees its
  * output to `out`, writes the verdict to `<out>.result` (never into `out` itself, Scott's ruling
  * 2026-09-11), then relabels or closes the pane. It does NOT then drop the

@@ -74,7 +74,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SIDE_CAP, isSideSeat, seatPlacement, shq, skipReason, splitArgs, staleSideSeats, tabCreateArgs } from './dctr-lib.mjs'
-import { acquireLock, breakIfOrphaned, herdr, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
+import { acquireLock, breakIfOrphaned, dropGoneGates, herdr, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
 
 const SETTLE_MS = 400          // one beat after a write, so the echo has somewhere to land
 const LOCK_WAIT_MS = 5000
@@ -359,6 +359,9 @@ async function open(label, tee, connect) {
       // The cap is shared with seats and gates (Q6), counted the same way in both directions: this
       // session's seats plus every interactive pane the layout carries. A null return is "I could
       // not look", which counts as full, never as empty.
+      // A gate moved here by another session's SessionEnd is dropped only on a server-wide not-found
+      // (B3), and counted by sideOccupants while this layout carries its pane (B2).
+      dropGoneGates()
       const occupants = sideOccupants(liveSeats(sessionId), layout)
       if (!occupants) die('cannot observe the side column; not splitting blind')
 

@@ -16,7 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { SESSION_END_WAIT_MS } from './dctr-state.mjs'
+import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, PLACEMENT_WAIT_MS } from './dctr-state.mjs'
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
@@ -25,7 +25,7 @@ import {
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
-  suiteOutcome, progressLine,
+  suiteOutcome, progressLine, GATE_ROLE, sweepAction, movedGateName, movedGateVerdict,
 } from './dctr-lib.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -112,11 +112,17 @@ const SEAT_TAB_ID = 'w4Z:t9'
   const hooksJson = JSON.parse(fs.readFileSync(new URL('./hooks.json', import.meta.url), 'utf8'))
   const sessionEnd = (hooksJson.hooks?.SessionEnd || []).flatMap((m) => m.hooks || [])
   const timeoutMs = Math.min(...sessionEnd.map((h) => (h.timeout ?? 60) * 1000))
-  clause('clause 1ay — SESSION_END_WAIT_MS fits inside the SessionEnd hook\'s own configured timeout',
-    Number.isFinite(timeoutMs) && SESSION_END_WAIT_MS < timeoutMs,
-    `wait ${SESSION_END_WAIT_MS}ms vs hooks.json timeout ${timeoutMs}ms — a deadline past the process's lifetime is a silent death, not a longer wait`)
-  clause('clause 1az — and it is still longer than a placement waits, which is the point of having two',
-    SESSION_END_WAIT_MS > 5000, `${SESSION_END_WAIT_MS}`)
+  // Claude Code gives a SessionEnd hook 1.5s whatever hooks.json declares, so the declared timeout is
+  // not the lifetime that binds. Both bounds are read, and the wait must fit inside the smaller.
+  clause('clause 1ay — SESSION_END_WAIT_MS fits inside the 1,500ms SessionEnd budget and the hook\'s own configured timeout',
+    Number.isFinite(timeoutMs) && SESSION_END_WAIT_MS < Math.min(1500, timeoutMs),
+    `wait ${SESSION_END_WAIT_MS}ms vs budget 1500ms and hooks.json timeout ${timeoutMs}ms — a deadline past the process's lifetime is a silent death, not a longer wait`)
+  // Clause 1az is REMOVED. It required SESSION_END_WAIT_MS to exceed a placement's wait because the
+  // inline sweep was the last chance; under the 1.5s budget it cannot be, so the long wait moved to
+  // the detached `--sweep` child and 1bk pins it there.
+  clause('clause 1bk — the detached sweep, now the last chance, waits longer than a placement and longer than the inline sweep',
+    SWEEP_WAIT_MS > PLACEMENT_WAIT_MS && SWEEP_WAIT_MS > SESSION_END_WAIT_MS,
+    `sweep ${SWEEP_WAIT_MS}ms, placement ${PLACEMENT_WAIT_MS}ms, inline ${SESSION_END_WAIT_MS}ms`)
   clause('clause 3t — hooks.json really declares a SessionEnd timeout, so the clause above is reading something',
     sessionEnd.length > 0 && Number.isFinite(timeoutMs) && timeoutMs > 0,
     `parsed ${sessionEnd.length} SessionEnd hook(s), timeout ${timeoutMs}ms`)
@@ -125,6 +131,27 @@ const SEAT_TAB_ID = 'w4Z:t9'
 clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
   anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
   `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
+// e8-sessionend's pure seams. A running gate survives SessionEnd by moving, a moved marker takes a
+// name no other session's can take, and only an observed absence drops one.
+{
+  const gate = { agent: 'dctr-gate-1', role: GATE_ROLE, paneId: 'w1:pG', file: '/o/g.out' }
+  const seat = { agent: 'dctr-explore-1', role: 'Explore', paneId: 'w1:pE', file: '/t/x.jsonl' }
+  clause('clause 1bh — SessionEnd moves a gate whose result is not written yet, and closes a finished gate, a seat and a bare reservation',
+    sweepAction(gate, false) === 'move' && sweepAction(gate, true) === 'close' &&
+    sweepAction(seat, false) === 'close' && sweepAction({}, false) === 'close' && sweepAction(null, false) === 'close',
+    [sweepAction(gate, false), sweepAction(gate, true), sweepAction(seat, false), sweepAction({}, false)].join(' / '))
+  clause('clause 3ca — the gate fixture really carries the gate role and the seat fixture really does not',
+    gate.role === 'gate' && seat.role !== 'gate', `${gate.role} / ${seat.role}`)
+  clause('clause 1bi — a moved gate is named <session>.<name>.json, so two sessions\' dctr-gate-1 cannot overwrite each other',
+    movedGateName('s1', 'dctr-gate-1') === 's1.dctr-gate-1.json' &&
+    movedGateName('s1', 'dctr-gate-1') !== movedGateName('s2', 'dctr-gate-1'),
+    `${movedGateName('s1', 'dctr-gate-1')} / ${movedGateName('s2', 'dctr-gate-1')}`)
+  clause('clause 1bj — a moved gate is dropped ONLY on not_found; a failed lookup and a found pane both keep it',
+    movedGateVerdict('not_found') === 'drop' && movedGateVerdict('failed') === 'keep' &&
+    movedGateVerdict('found') === 'keep' && movedGateVerdict(undefined) === 'keep',
+    ['not_found', 'failed', 'found', undefined].map(movedGateVerdict).join(' / '))
+}
+
 clause('clause 1ax — and the two refusals are DISTINCT, so a runner cannot collapse "occurs twice" into "not there"',
   anchorVerdict(0) !== anchorVerdict(2),
   'a comparison of hits === 0 in place of hits !== 1 accepts duplicate anchors again, silently')

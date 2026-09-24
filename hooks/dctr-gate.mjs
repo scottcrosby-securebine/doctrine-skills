@@ -57,7 +57,7 @@ import { spawn } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS } from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates } from './dctr-state.mjs'
 
 /** Why the column could not be observed. sideOccupants answers null and throws the reason away, and
  *  a log line naming no file is one the operator cannot act on. Read again only on the failure. */
@@ -178,7 +178,23 @@ if (argv[0] === '--run') {
     // record. It also wrote with writeFileSync, the only non-atomic marker write in shipping code,
     // against a file whose own module says a truncated marker stands down every later seat.
     // Removing the machinery removes all three defects: there is no window and nothing to restore.
-    const dropMarker = () => { if (marker) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ } }
+    //
+    // The marker may have MOVED while the check ran: a SessionEnd in this gate's session renames a
+    // running gate's marker into the unowned directory (E8-R13). So the drop looks at the original
+    // path first and then at the moved one, both under that directory's lock, which every move takes,
+    // so no move can fall between the two reads. A lock it cannot take drops nothing: the record
+    // stays, and a later placement's server-wide lookup drops it.
+    const dropMarker = () => {
+      if (!marker) return
+      const moved = movedGatePath(marker)
+      if (!moved) { try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ } return }
+      try {
+        withDirLock(path.dirname(moved), () => {
+          const found = [marker, moved].find((f) => fs.existsSync(f))
+          if (found) fs.rmSync(found, { force: true })
+        })
+      } catch { /* the record stays for a placement to judge */ }
+    }
     if (tabId) {
       // A TAB gate asks the TAB. Scott's ruling, 2026-09-08, and CLAUDE.md law: the thing being
       // closed is the tab, so the thing whose focus decides it is the tab. This launcher asked
@@ -336,6 +352,9 @@ if (argv[0] === '--run') {
       if (!marker) throw new Error('could not allocate a gate name')
 
       let tabId = null, paneId = null
+      // Moved gates from ended sessions: dropped only on a server-wide not-found (B3), then counted
+      // by sideOccupants below when this layout carries their pane (B2).
+      dropGoneGates((msg) => hookLog(sessionId, `gate "${label}": ${msg}`))
       try {
         // Same rule as the seat hook: an interactive pane counts toward the cap and can be the
         // split target, but is never swept and never allocated a seat name. A null return is "I
