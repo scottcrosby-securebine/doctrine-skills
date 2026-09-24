@@ -6,7 +6,8 @@
 // against a hand-written table, so a form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
 //
 // Every form may be a list item (`- `) or bare, its key in any case. The forms the agent writes (auto-cycle on, off,
-// ready and paused) are also read with inline code, bold or italic markers wrapping the whole line (unwrapLine). A
+// ready and paused) are also read with one inline code, bold or italic span wrapping the whole line (unwrapLine); a
+// line with two spans, or words outside the span, is prose. A
 // line that starts like a form but does not parse is not an entry, and neither is prose: a hook acts only on a line it
 // can read whole.
 
@@ -16,10 +17,12 @@ export const STATE_LINE = /^(?:-\s+)?(?:\*\*)?state:\s*/i
 
 /** A line as an agent may write it, with its list marker and the inline code, bold or italic markers that wrap all
  *  the rest removed, and nothing else: `` - `auto-cycle: ready` ``, `**auto-cycle: off**` and `*auto-cycle: ready*`
- *  read as their text, and a line with other words beside the wrapped text is left as it was (K4-RL). */
+ *  read as their text (K4-RL). A wrapper counts only when it is one span over the whole rest of the line, its text
+ *  holding no instance of its own delimiter, so a line with words beside the span, or two spans (`` `a` then `b` ``),
+ *  is left as it was and parses as prose (DSP7-B1). */
 export function unwrapLine(l) {
   let t = String(l ?? '').trim().replace(/^(?:[-*+]|\d+\.)\s+/, '')
-  for (let m; (m = /^(`+|\*\*|\*|__|_)(\S(?:.*\S)?)\1$/.exec(t)); ) t = m[2].trim()
+  for (let m; (m = /^(`+|\*\*|\*|__|_)(\S(?:.*\S)?)\1$/.exec(t)) && !m[2].includes(m[1]); ) t = m[2].trim()
   return t
 }
 

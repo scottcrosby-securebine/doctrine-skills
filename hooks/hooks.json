@@ -23,7 +23,7 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-cycle.mjs\"", "timeout": 30 } ] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-cycle.mjs\"", "timeout": 60 } ] }
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-cycle.mjs\"", "timeout": 5 } ] }
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-seat.mjs\"", "timeout": 10 } ] }

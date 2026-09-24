@@ -15,7 +15,7 @@
 // prompt, idle stop or error of a kind already paused is written once a turn has ended since (pauseStands, E8-R29,
 // E8-R31); UserPromptSubmit does only that.
 //
-// On every event past the stand-down it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
+// On every event past the stand-down but UserPromptSubmit it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
 // pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
 // SP1). While auto-cycle is active the `autocycle` sidebar token names the last standing pause, or reads the cycle
 // count when none stands, republished only when its value changes. The typer it launches is keyed by the record's
@@ -25,6 +25,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
@@ -36,6 +37,10 @@ import {
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
+
+/** The hook, over one event's payload text; every path ends in process.exit. Run as a script it reads stdin; the cycle
+ *  selftest's event enumeration (clause 1x) calls it in-process with process.exit and stdout stubbed. */
+export function runHook(input) {
 let sessionId = null, event = 'Stop'
 const stand_down = (why) => standDown(event, 'auto-cycle', () => sessionId)(why)
 
@@ -44,7 +49,7 @@ try {
   // read below, which the asynchronous transcript writer can still be short of (K2-R16).
   const stopAt = Date.now()
   let payload
-  try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}') } catch { stand_down('hook payload was not readable JSON') }
+  try { payload = JSON.parse(input || '{}') } catch { stand_down('hook payload was not readable JSON') }
   event = payload.hook_event_name || 'none'
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
@@ -157,3 +162,6 @@ try {
 } catch (e) {
   stand_down(`hook error (${String(e?.message || e).split('\n')[0]})`)
 }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runHook(fs.readFileSync(0, 'utf8'))
