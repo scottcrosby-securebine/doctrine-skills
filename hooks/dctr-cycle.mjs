@@ -10,7 +10,9 @@
 // ordinary turn, or live work, writes nothing; a stall, the cap or no progress writes one paused line; otherwise
 // it hashes the tree and spawns the typer (dctr-typer.mjs) detached, which types /clear and the resume line once
 // the user moves focus off the pane. On Notification and StopFailure, while auto-cycle is active, it pauses on a
-// permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision).
+// permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision); each Stop records the
+// record's line count in its Stop facts, so a second prompt or error of a kind already paused is written only after
+// the session's next Stop (pauseStands, E8-R29).
 //
 // On every event past the stand-down it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
 // pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
@@ -29,7 +31,7 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, publishToken, liveWork, treeHash, handoffLanded,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, recordLineCount, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure']
@@ -65,13 +67,14 @@ try {
   const active = autoCycleActive(record.entries, Boolean(stopRepo))
   const messages = []
   const pause = (reason) => {
-    const { written } = appendPaused(recordPath, reason)
+    const { written } = appendPaused(recordPath, reason, sessionId)
     log(written ? `paused: ${reason}` : `pause not written, a standing paused line refuses it (the same pause, or any for an idle prompt): ${reason}`)
   }
 
   if (event === 'Stop') {
-    // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down.
-    writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
+    // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down, and the
+    // record's line count before this Stop writes any line: the dedup's latest Stop (E8-R29).
+    writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message), line: recordLineCount(recordPath) })
 
     const keyLine = claimKey(record.entries)
     const warned = Boolean(sessionWarned(record.entries, sessionId))

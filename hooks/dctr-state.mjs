@@ -519,10 +519,21 @@ const recordHash = (recordPath) => crypto.createHash('sha1').update(path.resolve
 /** Where the restore hook records a session start (RB3-2): the record's line count when a session began after /clear. */
 export const sessionStartFile = (recordPath) => path.join(autoCycleDir(), `start-${recordHash(recordPath)}`)
 
+/** The record's line count, the number of its last line. */
+export function recordLineCount(recordPath) {
+  const text = fs.readFileSync(recordPath, 'utf8')
+  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+}
+
 /** Record that a session starts now, as the record's current line count. */
 export function writeSessionStart(recordPath) {
-  const text = fs.readFileSync(recordPath, 'utf8')
-  writeMarker(sessionStartFile(recordPath), text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
+  writeMarker(sessionStartFile(recordPath), recordLineCount(recordPath))
+}
+
+/** The record's line count at this session's latest Stop, from its Stop facts (E8-R29), or 0 when no Stop is known:
+ *  a missing or unreadable facts file never frees a line from the dedup. */
+export function stopLine(sessionId) {
+  try { const n = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')).line; return Number.isInteger(n) ? n : 0 } catch { return 0 }
 }
 
 /** The line count the last recorded session start saw, or 0 when none was recorded or it cannot be read. */
@@ -559,10 +570,11 @@ export function appendRecordLine(recordPath, line) {
 }
 
 /** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause, or,
- *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Never a state line: the record's last state line is left as it was.
- *  `{ written }`. */
-export function appendPaused(recordPath, reason) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason)) return { written: false }
+ *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
+ *  R7, R8 or R9 line from before that session's latest Stop does not count (E8-R29); the typer passes none, so its
+ *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
+export function appendPaused(recordPath, reason, sessionId = null) {
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? stopLine(sessionId) : 0)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }

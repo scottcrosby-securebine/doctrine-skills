@@ -972,11 +972,17 @@ export function standingPauses(entries, startLine = 0) {
   return latest?.sub === 'paused' && !pauseResolved(latest, es) ? [latest] : []
 }
 
-/** The dedup (E8-D18, E8-R27, E8-R28): no new paused line for `reason` while a standing pause names the same pause
- *  (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for that
- *  reason; any other pause that differs from every standing one is written. */
-export const pauseStands = (entries, startLine, reason) => {
-  const standing = standingPauses(entries, startLine)
+/** The event pauses (E8-D18): a permission prompt, an idle stop and an API error, each answered by the session going on. */
+const EVENT_PAUSES = ['R7', 'R8', 'R9']
+
+/** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
+ *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for
+ *  that reason; any other pause that differs from every standing one is written. `stopLine` is the record's line count
+ *  at this session's latest Stop, 0 when none is known: an R7, R8 or R9 line at or before it was answered by the turn
+ *  that Stop ended, so it counts for neither rule, and a second prompt, idle stop or error is written. Every other
+ *  pause counts whatever the Stop, and step 3, the token and the alerts read standingPauses unchanged. */
+export const pauseStands = (entries, startLine, reason, stopLine = 0) => {
+  const standing = standingPauses(entries, startLine).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= stopLine))
   return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
 }
 
