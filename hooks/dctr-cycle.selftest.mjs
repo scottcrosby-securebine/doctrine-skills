@@ -509,7 +509,7 @@ for (let len = 1; len <= ENUM_LEN; len++) {
     const seq = []; for (let x = k, j = 0; j < len; j++, x = Math.floor(x / ENUM_LINES.length)) seq.push(x % ENUM_LINES.length)
     const lines = [...ENUM_HEAD, ...seq.map((i) => ENUM_LINES[i][1])]
     const es = rec(...lines)
-    for (const start of [0, 4].filter((s) => s <= lines.length)) {
+    for (const start of [0, 3, 4].filter((s) => s <= lines.length)) {
       enumCount++
       const S = standingPauses(es, start), tags = S.map((p) => tagOf.get(p.reason))
       for (const [tag, reason] of ENUM_CANDS) {
@@ -733,7 +733,7 @@ fs.rmSync(claimFile('s-the-old-session'))
 const iGate = fixture('i-gate'); stopFacts(iGate, { backgroundEmpty: true, cronsEmpty: true, ready: false }); gateLive(iGate); note(iGate, 'idle_prompt')
 const iReady = fixture('i-ready'); stopFacts(iReady, { backgroundEmpty: true, cronsEmpty: true, ready: true }); note(iReady, 'idle_prompt')
 const iBg = fixture('i-bg'); stopFacts(iBg, { backgroundEmpty: false, cronsEmpty: true, ready: false }); note(iBg, 'idle_prompt')
-clause('clause 2o — idle_prompt writes nothing while any paused line stands (R8, R7, R2, R3, R4, the skills\' question), while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; behind none it writes R8 (E8-R28)',
+clause('clause 2o — idle_prompt writes nothing while a paused line stands that the session has not ended a turn since (R8, R7, R2, R3, R4, the skills\' question), or any other paused line, while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; behind none it writes R8 (E8-R28)',
   paused(iPaused).length === 1 && JSON.stringify(paused(nIdle)) === '["- auto-cycle paused: session idle, waiting for you"]' && idleBehind.every(({ f }) => paused(f).length === 1 && toasts(f).length === 1 && !paused(f).some((l) => l.includes('session idle'))) && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
   JSON.stringify([paused(iPaused), idleBehind.map(({ n, f }) => [n, paused(f), toasts(f).length]), claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
 const s4 = fixture('s4')
@@ -752,11 +752,11 @@ clause('clause 2p — every Stop persists its background tasks and ready line fo
 const rb52 = fixture('rb5-2'), rb52Pane = { HERDR_PANE_ID: 'w9:prb52' }
 const perm = { hook_event_name: 'Notification', notification_type: 'permission_prompt' }, fail = { hook_event_name: 'StopFailure', error: 'overloaded' }
 const turn = { last_assistant_message: 'working' }
-for (const p of [perm, perm, turn, perm, fail, fail, turn, fail]) run(rb52, p, rb52Pane)
+for (const p of [perm, perm, turn, perm, fail, turn, fail]) run(rb52, p, rb52Pane)
 const idleAfter = (name, lines) => { const f = fixture(name, { lines }); run(f, turn, { HERDR_PANE_ID: `w9:p${name}` }); note(f, 'idle_prompt', {}, { HERDR_PANE_ID: `w9:p${name}` }); return f }
 const idle7 = idleAfter('idle-after-r7', [R7P]), idle3 = idleAfter('idle-after-r3', R3L)
 const noFacts = fixture('no-stop-facts', { lines: [R7P] }); run(noFacts, perm, { HERDR_PANE_ID: 'w9:pnofacts' })
-clause('clause 2c14 — a second permission prompt or API error after the session\'s next Stop is written and toasted, and not before it; an idle stop behind an R7 from an earlier turn is written, behind an R3 not; with no Stop known a second R7 is refused (E8-R29, RB5-2)',
+clause('clause 2c14 — a second permission prompt after the session\'s next Stop is written and toasted, and not before it, and a second API error after a Stop too; an idle stop behind an R7 from an earlier turn is written, behind an R3 not; with no Stop known a second R7 is refused (E8-R29, RB5-2)',
   JSON.stringify(paused(rb52)) === JSON.stringify(['- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: Claude API error: overloaded', '- auto-cycle paused: Claude API error: overloaded']) &&
   toasts(rb52).length === 4 && paused(idle7).at(-1) === `- auto-cycle paused: ${R8R}` && paused(idle7).length === 2 &&
   !paused(idle3).some((l) => l.includes('session idle')) && paused(noFacts).length === 1,
@@ -767,16 +767,39 @@ const liveBehind = [['seat', {}, seatUp], ['gate', {}, gateLive], ['codex job', 
     run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f } })
 clause('clause 2o2 — a seat, a gate, a codex job, a background task or a session cron live at the Stop: the next idle_prompt writes no paused line (E8-D7, E8-D18, RB6-3)',
   liveBehind.every(({ f }) => paused(f).length === 0), JSON.stringify(liveBehind.map(({ n, f }) => [n, paused(f)])))
-// RB6-2: Stop facts written for another record never free a line in this one.
+// RB6-2: a turn end recorded for another record never frees a line in this one.
 const rbA = path.join(tmp, 'rb62', 'a.md'), rbB = path.join(tmp, 'rb62', 'b.md')
 write(rbB, `- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%\n${R7P}\n`)
 fs.mkdirSync(autoCycleDir(), { recursive: true })
-fs.writeFileSync(stopFactsFile('s-rb62'), JSON.stringify({ backgroundEmpty: true, cronsEmpty: true, ready: false, record: path.resolve(rbA), line: 99 }))
+fs.writeFileSync(state.turnEndFile('s-rb62'), JSON.stringify({ record: path.resolve(rbA), line: 99 }))
 const rb62Other = appendPaused(rbB, R7R, 's-rb62')
-fs.writeFileSync(stopFactsFile('s-rb62'), JSON.stringify({ backgroundEmpty: true, cronsEmpty: true, ready: false, record: path.resolve(rbB), line: 4 }))
+state.writeTurnEnd('s-rb62', rbB)
 const rb62Same = appendPaused(rbB, R7R, 's-rb62')
-clause('clause 1w — the dedup reads the Stop facts\' line only for the record they name: facts for another record free nothing, facts for this one free its earlier R7 (E8-R29, RB6-2)',
+clause('clause 1w — the dedup reads the turn end\'s line only for the record it names: one for another record frees nothing, one for this record frees its earlier R7 (E8-R29, E8-R31, RB6-2)',
   rb62Other.written === false && rb62Same.written === true, JSON.stringify([rb62Other, rb62Same, fs.readFileSync(rbB, 'utf8')]))
+// E8-R31, DP6-B1: a StopFailure and a submitted prompt end a turn too. A retried turn that fails again writes its R9
+// again; a permission prompt after an interrupted turn, once the next prompt is submitted, writes its R7 again; with
+// no turn end between, the second is refused. UserPromptSubmit writes no paused line, prints nothing, and stands down
+// with auto-cycle off or for a subagent; it leaves the Stop facts the idle test reads as they were.
+const ups = { hook_event_name: 'UserPromptSubmit', prompt: 'go on' }
+const sf = fixture('turn-end-stopfailure'), sfPane = { HERDR_PANE_ID: 'w9:psf2' }
+run(sf, fail, sfPane); run(sf, fail, sfPane)
+const it = fixture('turn-end-prompt'), itPane = { HERDR_PANE_ID: 'w9:pit' }
+stopFacts(it, { backgroundEmpty: true, cronsEmpty: true, ready: false })
+run(it, perm, itPane); const itUps = run(it, ups, itPane); run(it, perm, itPane)
+const itFacts = JSON.parse(fs.readFileSync(stopFactsFile(it.session), 'utf8'))
+const nb = fixture('no-turn-end'), nbPane = { HERDR_PANE_ID: 'w9:pnb' }
+run(nb, perm, nbPane); run(nb, perm, nbPane)
+const upsOff = fixture('ups-off', { lines: ['- auto-cycle: off'] }), upsOffR = run(upsOff, ups)
+const upsSub = fixture('ups-subagent'), upsSubR = run(upsSub, { ...ups, agent_id: 'a1' })
+clause('clause 2c15 — a turn ended by a StopFailure or a submitted prompt: a repeat API error and a repeat permission prompt are written and toasted; with no turn end between, refused; UserPromptSubmit writes and prints nothing, keeps the Stop facts, and stands down when off or for a subagent (E8-R31, DP6-B1)',
+  JSON.stringify(paused(sf)) === JSON.stringify(['- auto-cycle paused: Claude API error: overloaded', '- auto-cycle paused: Claude API error: overloaded']) && toasts(sf).length === 2 &&
+  JSON.stringify(paused(it)) === JSON.stringify([R7P, R7P]) && toasts(it).length === 2 && itUps.out === '' && itUps.code === 0 &&
+  itFacts.backgroundEmpty === true && itFacts.cronsEmpty === true && itFacts.ready === false &&
+  paused(nb).length === 1 && toasts(nb).length === 1 &&
+  upsOffR.out === '' && !fs.existsSync(state.turnEndFile(upsOff.session)) && calls(upsOff).length === 0 &&
+  upsSubR.out === '' && !fs.existsSync(state.turnEndFile(upsSub.session)) && calls(upsSub).length === 0,
+  `${show(sf, { code: 0, msg: '', err: '' })} || ${show(it, itUps)} || ${JSON.stringify(itFacts)} || ${JSON.stringify(paused(nb))} || ${upsOffR.out}|${upsSubR.out}`)
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
@@ -790,15 +813,16 @@ clause('clause 2q — the typer is spawned only for the launching fixtures, with
 
 const hj = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).hooks
 const runsCycle = (entry) => entry?.hooks?.[0]?.command?.endsWith('/hooks/dctr-cycle.mjs"') && entry.hooks[0].timeout > 0
-clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification with matcher permission_prompt|idle_prompt, and on StopFailure (E8-D18)',
+clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification with matcher permission_prompt|idle_prompt, on StopFailure and on UserPromptSubmit (E8-D18, E8-R31)',
   hj.Stop?.length === 1 && runsCycle(hj.Stop[0]) && !hj.Stop[0].matcher && hj.Notification?.length === 1 && runsCycle(hj.Notification[0]) &&
-  hj.Notification[0].matcher === 'permission_prompt|idle_prompt' && hj.StopFailure?.length === 1 && runsCycle(hj.StopFailure[0]),
-  JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure]))
+  hj.Notification[0].matcher === 'permission_prompt|idle_prompt' && hj.StopFailure?.length === 1 && runsCycle(hj.StopFailure[0]) &&
+  hj.UserPromptSubmit?.length === 1 && runsCycle(hj.UserPromptSubmit[0]) && !hj.UserPromptSubmit[0].matcher,
+  JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure, hj.UserPromptSubmit]))
 
 const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description
-clause('clause 2r2 — hooks.json says what the stop file does: the Stop hook writes a paused line naming it and alerts, the other two write nothing (RB3)',
+clause('clause 2r2 — hooks.json says what the stop file does (Stop writes a paused line naming it and alerts, the other two write nothing), names UserPromptSubmit, and does not state the idle rule without E8-R30\'s exception (RB3, DS6-B1)',
   hjd.includes('With a .doctrine/auto-cycle.stop in the session\'s repo or the record\'s, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure write nothing.') &&
-  !/stands down unless auto-cycle is active/.test(hjd), hjd.slice(-900))
+  !/stands down unless auto-cycle is active/.test(hjd) && !hjd.includes('(no paused line stands,') && hjd.includes('UserPromptSubmit'), hjd.slice(-900))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
@@ -856,9 +880,11 @@ clause('clause 3a12 — without the hook: the pre-warning question sits after th
   (() => { const es = parseRecord(fs.readFileSync(qpre.record, 'utf8')).entries, qp = es.find((e) => /^question: /.test(e.reason || ''))
     return qp.line > JSON.parse(fs.readFileSync(state.sessionStartFile(qpre.record), 'utf8')) && qp.line > es.find((e) => e.sub === 'cycle').line && !es.some((e) => e.sub === 'warned' && e.line > qp.line) })(),
   fs.readFileSync(qpre.record, 'utf8'))
-clause('clause 3a13 — the idle-after fixtures\' Stop facts carry a record line at or after their earlier pause, and the no-facts fixture has none',
-  [idle7, idle3].every((f) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8')); const p = parseRecord(fs.readFileSync(f.record, 'utf8')).entries.find((e) => e.sub === 'paused')
-    return Number.isInteger(facts.line) && facts.line >= p.line && facts.backgroundEmpty === true && facts.ready === false }) && !fs.existsSync(stopFactsFile(noFacts.session)),
+clause('clause 3a13 — the idle-after fixtures\' turn end carries a record line at or after their earlier pause and their Stop facts no background task and no ready line, and the no-facts fixture has neither file',
+  [idle7, idle3].every((f) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8')), end = JSON.parse(fs.readFileSync(state.turnEndFile(f.session), 'utf8'))
+    const p = parseRecord(fs.readFileSync(f.record, 'utf8')).entries.find((e) => e.sub === 'paused')
+    return Number.isInteger(end.line) && end.line >= p.line && end.record === path.resolve(f.record) && facts.backgroundEmpty === true && facts.ready === false }) &&
+    !fs.existsSync(stopFactsFile(noFacts.session)) && !fs.existsSync(state.turnEndFile(noFacts.session)),
   JSON.stringify([idle7, idle3].map((f) => fs.existsSync(stopFactsFile(f.session)) && fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
 clause('clause 3a14 — without the hook: the live-work fixtures carry their condition (a seat, gate or codex marker, or a Stop with a background task or a cron), and each Stop said its message was not ready',
   liveBehind.every(({ n, f }) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
