@@ -457,8 +457,9 @@ clause('clause 1q2 — standingPauses anchors on the latest warned, cycle or on 
 // lines drawn from ENUM_LINES, after a head of `State: Open` and an on line, with no session start recorded or one
 // recorded after the head's first sequence line or its second. For each, with S = standingPauses:
 //   a. for each candidate pause differing from every pause in S, the dedup (pauseStands) lets it be written, and the
-//      line it writes stands at once, so it is alerted and the token names it (E8-R27);
-//   b. for each candidate the same as a pause in S, the dedup refuses it;
+//      line it writes stands at once, so it is alerted and the token names it (E8-R27); the idle pause R8 only when S
+//      is empty (E8-R28);
+//   b. for each candidate the same as a pause in S, the dedup refuses it, and R8 while S holds any pause (E8-R28);
 //   c. on a record whose last on/off line is off or whose last state line is not Open or Blocked, the typer, the one
 //      writer that runs past the hooks' stand-downs, never pauses at any stage, a stop file present (RB4-1);
 //   d. the consumers agree on S: the token reads paused iff S is non-empty and then names S's last line, and step 3
@@ -498,9 +499,9 @@ for (let len = 1; len <= ENUM_LEN; len++) {
       enumCount++
       const S = standingPauses(es, start), tags = S.map((p) => tagOf.get(p.reason))
       for (const [tag, reason] of ENUM_CANDS) {
-        const refused = pauseStands(es, start, reason)
-        if (tags.includes(tag) && !refused) enumNote('b', seq, start, `${reason} written while ${tag} stands`)
-        if (!tags.includes(tag)) {
+        const refused = pauseStands(es, start, reason), same = tag === 'R8' ? tags.length > 0 : tags.includes(tag)
+        if (same && !refused) enumNote('b', seq, start, `${reason} written while ${tags.join(', ')} stands`)
+        if (!same) {
           if (refused) enumNote('a', seq, start, `${reason} refused while only ${tags.join(', ') || 'nothing'} stands`)
           else if (standingPauses([...es, { ...enumParsed.get(reason), line: lines.length + 1 }], start).at(-1)?.line !== lines.length + 1) enumNote('a', seq, start, `${reason} written but does not stand`)
         }
@@ -519,8 +520,9 @@ for (let len = 1; len <= ENUM_LEN; len++) {
     }
   }
 }
-clause(`clause 1r — the pause model enumerated over every sequence of up to ${ENUM_LEN} lines (${enumCount} cases): a different pause is written and stands, the same pause is not, the typer never pauses an off or closed record, and the token and step 3 agree with the standing set (E8-R25, E8-R27, RB4-1, RB4-2)`,
+clause(`clause 1r — the pause model enumerated over every sequence of up to ${ENUM_LEN} lines (${enumCount} cases): a different pause is written and stands, the same pause is not, the idle pause only when none stands, the typer never pauses an off or closed record, and the token and step 3 agree with the standing set (E8-R25, E8-R27, E8-R28, RB4-1, RB4-2)`,
   enumCount > 0 && Object.values(enumBad).every((v) => v.length === 0), JSON.stringify(enumBad))
+// E8-R28: an idle_prompt writes nothing while any paused line stands, whatever pause it names, and R8 behind none.
 // F1: the alerts read the standing set with the recorded session start, so a pause from before a /clear is neither
 // toasted nor shown again in the new session, and the new session's own pause is.
 const f1 = path.join(tmp, 'f1', 'r.md')
@@ -673,7 +675,8 @@ const nStop = fixture('n-stop'); write(path.join(nStop.proj, '.doctrine/auto-cyc
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
 const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
-const iOther = fixture('i-other', { lines: ['- auto-cycle paused: waiting for your permission approval'] }); stopFacts(iOther, { backgroundEmpty: true, ready: false }); note(iOther, 'idle_prompt', {}, { HERDR_PANE_ID: 'w9:pother' })
+const idleBehind = [['R7', ['- auto-cycle paused: waiting for your permission approval']], ['R2', R2L], ['R3', R3L], ['R4', R4L], ['question', ['- auto-cycle paused: question: which way?']]]
+  .map(([n, lines]) => { const f = fixture(`i-behind-${n}`, { lines }); stopFacts(f, { backgroundEmpty: true, ready: false }); note(f, 'idle_prompt', {}, { HERDR_PANE_ID: `w9:pidle${n}` }); return { n, f } })
 const iClaim = fixture('i-claim'); stopFacts(iClaim, { backgroundEmpty: true, ready: false })
 write(claimFile('s-the-old-session'), JSON.stringify({ pid: process.pid, pane: 'w9:p1', session: 's-the-old-session' })); note(iClaim, 'idle_prompt')
 const claimSeen = paused(iClaim).length
@@ -681,9 +684,9 @@ fs.rmSync(claimFile('s-the-old-session'))
 const iGate = fixture('i-gate'); stopFacts(iGate, { backgroundEmpty: true, ready: false }); gateLive(iGate); note(iGate, 'idle_prompt')
 const iReady = fixture('i-ready'); stopFacts(iReady, { backgroundEmpty: true, ready: true }); note(iReady, 'idle_prompt')
 const iBg = fixture('i-bg'); stopFacts(iBg, { backgroundEmpty: false, ready: false }); note(iBg, 'idle_prompt')
-clause('clause 2o — idle_prompt writes nothing while a paused line naming the same pause stands, while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; it writes its line while a different pause stands (E8-R27)',
-  paused(iPaused).length === 1 && JSON.stringify(paused(iOther)) === '["- auto-cycle paused: waiting for your permission approval","- auto-cycle paused: session idle, waiting for you"]' && toasts(iOther).length === 2 && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
-  JSON.stringify([paused(iPaused), paused(iOther), toasts(iOther).length, claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
+clause('clause 2o — idle_prompt writes nothing while any paused line stands (R8, R7, R2, R3, R4, the skills\' question), while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; behind none it writes R8 (E8-R28)',
+  paused(iPaused).length === 1 && JSON.stringify(paused(nIdle)) === '["- auto-cycle paused: session idle, waiting for you"]' && idleBehind.every(({ f }) => paused(f).length === 1 && toasts(f).length === 1 && !paused(f).some((l) => l.includes('session idle'))) && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
+  JSON.stringify([paused(iPaused), idleBehind.map(({ n, f }) => [n, paused(f), toasts(f).length]), claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
 const s4 = fixture('s4')
 run(s4, { background_tasks: [{ id: 'b' }] })
 let s4a = null
