@@ -24,7 +24,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, standingPauses, claimKey, unresolvedPausesAfter, onToken, pausedToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -66,7 +66,7 @@ try {
   const messages = []
   const pause = (reason) => {
     const { written } = appendPaused(recordPath, reason)
-    log(written ? `paused: ${reason}` : `pause not written, the latest auto-cycle line is already paused: ${reason}`)
+    log(written ? `paused: ${reason}` : `pause not written, a paused line naming the same pause already stands: ${reason}`)
   }
 
   if (event === 'Stop') {
@@ -74,14 +74,14 @@ try {
     writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
 
     const keyLine = claimKey(record.entries)
-    const mine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1)
+    const warned = record.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId)
     let hash = null
     const decision = cycleDecision({
       sessionId,
       stopRepo,
       ...pausingStates(record.entries),
-      warned: Boolean(mine),
-      pausedAfterWarned: Boolean(mine) && unresolvedPausesAfter(record.entries, mine.line).length > 0,
+      warned,
+      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
       backgroundTasks: nonEmpty(payload.background_tasks),
       liveWork: liveWork(sessionId),
       sessionCrons: nonEmpty(payload.session_crons),
@@ -139,12 +139,7 @@ try {
   const shown = pauseMessageOnce(recordPath)
   if (shown) messages.push(shown)
   // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
-  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries
-  const standing = standingPauses(entries, sessionStartLine(recordPath))
-  if (active && paneId) {
-    publishToken(paneId, standing.length ? pausedToken(standing.at(-1).reason)
-      : onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, on.cap), log)
-  }
+  if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath)), log)
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)
 } catch (e) {

@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pausedToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -558,11 +558,11 @@ export function appendRecordLine(recordPath, line) {
   fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
 }
 
-/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is a standing
- *  pause (pauseStands, E8-D18, E8-R25). Never a state line: the record's last state line is left as it was.
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause
+ *  (pauseStands, E8-D18, E8-R27). Never a state line: the record's last state line is left as it was.
  *  `{ written }`. */
 export function appendPaused(recordPath, reason) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))) return { written: false }
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }
@@ -591,11 +591,11 @@ const pauseMarker = (kind, recordPath, line) =>
  * one guard keeping herdr out of it. True when this call raised any.
  */
 export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
-  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))
-  const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
+  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
+  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
   if (!fresh.length) return false
   if (paneId) {
-    publishToken(paneId, pausedToken(standing.at(-1).reason), log)
+    publishToken(paneId, autocycleToken(entries, start), log)
     for (const p of fresh) {
       try { herdr(pauseToastArgs(repo, phase, p.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
       catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }

@@ -9,8 +9,10 @@
 //
 //   - It takes the claim `<autocycle dir>/<session>.<key>.claim` with reserveMarker and writes its pid into it (S3);
 //     a claim already taken ends it with nothing sent. The claim is single use per record state (RB3-1).
-//   - Before every send it stops if auto-cycle is no longer active (B1) or a paused line was written since the
-//     claim, needs herdr's agent_status ready (idle or done, READY_STATUSES), and waits while the pane is focused.
+//   - Before every send it stops, writing nothing, if the record is switched off or no longer Open or Blocked, or a
+//     paused line was written since the claim; on a record still active it pauses with R1 if the stop file exists in
+//     either repo (RB4-1). It needs herdr's agent_status ready (idle or done, READY_STATUSES), and waits while the
+//     pane is focused.
 //   - Before /clear it needs herdr to report the old session and the old transcript to hold no user or assistant
 //     entry timestamped at or after the Stop hook's start (typedAfter; an entry with no time counts). The file is
 //     read from the Stop's byte length on, and only to find such entries: it is written asynchronously, so an entry
@@ -67,7 +69,7 @@ function pausing(reason) {
   const { written } = appendPaused(a.record, reason)
   // The toast and token only: the pane message is printed by the next Stop, Notification or StopFailure hook (SP1).
   const alerted = alertPaused({ recordPath: a.record, repo: path.basename(path.resolve(a.project || '.')), phase: a.phase, paneId: a.pane, log })
-  log(`${written ? 'paused' : 'pause not written, already paused'}: ${reason}${alerted ? '; alerted' : ''}`)
+  log(`${written ? 'paused' : 'pause not written, the same pause already stands'}: ${reason}${alerted ? '; alerted' : ''}`)
   process.exit(0)
 }
 
@@ -104,10 +106,12 @@ try {
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const stopRepo = stopFileRepo(repos, fs.existsSync)
-    const active = autoCycleActive(rec.entries, Boolean(stopRepo))
+    // The record's own half of B1, without the stop file: an off or closed record aborts whether or not the stop file
+    // exists too, and only an active one pauses on it (RB4-1).
+    const active = autoCycleActive(rec.entries, false)
     const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > claimLine)
     if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
-    const pane = active && !pausedSinceClaim ? readPane() : null
+    const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
@@ -117,8 +121,8 @@ try {
     })
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     // An abort writes nothing because its stop is already recorded: the user's own off line, a state line no longer
-    // Open or Blocked, or a paused line written since the claim. A confirm is success. Every other stop is a pause:
-    // R1 for a stop file, R14 to R17 for a failure (RN3-3).
+    // Open or Blocked (with or without a stop file), or a paused line written since the claim. A confirm is success.
+    // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R17 for a failure (RN3-3, RB4-1).
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
