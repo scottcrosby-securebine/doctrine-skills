@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPause, pauseMessage, pausedToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pausedToken,
   autocycleTokenArgs, pauseToastArgs, seatLive,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -508,7 +508,10 @@ export const autoCycleDir = () => {
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
-export const claimFile = (sessionId) => path.join(autoCycleDir(), `${sessionId}.claim`)
+/** The typer's claim, single use per ready line (RB2-2): keyed by the session id and the line number of the record's
+ *  latest `auto-cycle: ready` line at launch (0 when it has none), so a new ready line after a resolved pause gets a
+ *  claim of its own while the same ready line never launches twice. */
+export const claimFile = (sessionId, readyLine) => path.join(autoCycleDir(), `${sessionId}.${readyLine}.claim`)
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
 export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
 const tokenFile = (paneId) => path.join(autoCycleDir(), `token-${paneToken(paneId)}.txt`)
@@ -538,11 +541,11 @@ export function appendRecordLine(recordPath, line) {
   fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
 }
 
-/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is a paused line
- *  still standing, one not resolved (E8-D18, E8-R25). Never a state line: the record's last state line is left as
- *  it was. `{ written }`. */
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is a standing
+ *  pause (pauseStands, E8-D18, E8-R25). Never a state line: the record's last state line is left as it was.
+ *  `{ written }`. */
 export function appendPaused(recordPath, reason) {
-  if (standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)) return { written: false }
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }
@@ -559,40 +562,42 @@ export function publishToken(paneId, value, log = () => {}) {
   } catch (e) { log(`autocycle token not published (${e.message.split('\n')[0]})`); return false }
 }
 
-/** The standing pause's marker name in the auto-cycle dir: `<kind>-<hash of record path>-<line>`. */
+/** A paused line's marker name in the auto-cycle dir: `<kind>-<hash of record path>-<line>`. */
 const pauseMarker = (kind, recordPath, line) =>
   path.join(autoCycleDir(), `${kind}-${crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)}-${line}`)
 
 /**
- * Raise the toast and the paused token once for the record's standing pause (B3, E8-D26), whoever wrote its line.
- * The alerted marker is taken first, exclusively, and outlives the session, so a later session, a concurrent hook
- * or the typer never raises the same line again (F2). herdr is called only given a pane: the hook passes none in a
- * contained session, which is the one guard keeping herdr out of it. True when this call raised it.
+ * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
+ * whoever wrote the line, and publish the paused token naming the last of them. Each line's alerted marker is taken
+ * first, exclusively, and outlives the session, so a later session, a concurrent hook or the typer never raises
+ * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
+ * one guard keeping herdr out of it. True when this call raised any.
  */
 export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
-  const standing = standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
-  if (!standing) return false
-  try { reserveMarker(pauseMarker('alerted', recordPath, standing.line)) } catch { return false }
+  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
+  if (!fresh.length) return false
   if (paneId) {
-    publishToken(paneId, pausedToken(standing.reason), log)
-    try { herdr(pauseToastArgs(repo, phase, standing.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
-    catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
+    publishToken(paneId, pausedToken(standing.at(-1).reason), log)
+    for (const p of fresh) {
+      try { herdr(pauseToastArgs(repo, phase, p.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
+      catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
+    }
   }
   return true
 }
 
 /**
- * The pane message for the record's standing pause, once (E8-R23): `doctrine auto-cycle paused: <reason>. <what to
- * do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of them to run after the
- * line is written. Its own marker, apart from the toast's: the detached typer raises the toast and has no pane
- * output of its own, so one marker for both left its pauses with no pane message (SP1). Null when there is nothing
- * to print or it was printed already.
+ * The pane message for each standing pause not yet shown (E8-R23), one line each: `doctrine auto-cycle paused:
+ * <reason>. <what to do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of
+ * them to run after the line is written. Its own marker, apart from the toast's: the detached typer raises the toast
+ * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
+ * there is nothing to print.
  */
 export function pauseMessageOnce(recordPath) {
-  const standing = standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
-  if (!standing) return null
-  try { reserveMarker(pauseMarker('shown', recordPath, standing.line)) } catch { return null }
-  return pauseMessage(standing.reason)
+  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
+  return fresh.length ? fresh.map((p) => pauseMessage(p.reason)).join('\n') : null
 }
 
 /** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,
@@ -625,7 +630,7 @@ export function treeHash(repos, excludes) {
     try {
       const env = { GIT_INDEX_FILE: tmp }
       // Add everything, then take the excluded paths back out: an excluded path named in the add itself makes git
-      // refuse when that path is ignored, and one left in the copied index would carry its committed content.
+      // refuse when that path is ignored.
       git(['add', '-A', '--', '.'], env)
       const ex = excludes(repo)
       if (ex.length) git(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...ex], env)

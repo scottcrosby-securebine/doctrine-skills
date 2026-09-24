@@ -12,17 +12,19 @@
 // the user moves focus off the pane. On Notification and StopFailure, while auto-cycle is active, it pauses on a
 // permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision).
 //
-// On every event past the stand-down it alerts the record's latest paused line once, whoever wrote it: the
-// `autocycle` sidebar token, the toast and the pane's systemMessage (B3). While auto-cycle is active and not
-// paused the same token reads the cycle count, republished only when it changes. With DCTR_VIEW_REQUEST_DIR set
-// it writes the line and prints the message and calls herdr zero times. It always exits 0.
+// On every event past the stand-down it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
+// pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
+// SP1). While auto-cycle is active the `autocycle` sidebar token names the last standing pause, or reads the cycle
+// count when none stands, republished only when its value changes. The typer it launches is keyed by the record's
+// latest ready line, so one ready line launches once. With DCTR_VIEW_REQUEST_DIR set it writes the line and prints
+// the message and calls herdr zero times. It always exits 0.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, standingPause, unresolvedPauseAfter, onToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, standingPauses, unresolvedPausesAfter, onToken, pausedToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -71,6 +73,7 @@ try {
     // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down.
     writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
 
+    const readyLine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'ready').at(-1)?.line ?? 0
     const mine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1)
     let hash = null
     const decision = cycleDecision({
@@ -78,7 +81,7 @@ try {
       stopRepo,
       ...pausingStates(record.entries),
       warned: Boolean(mine),
-      pausedAfterWarned: Boolean(mine) && unresolvedPauseAfter(record.entries, mine.line),
+      pausedAfterWarned: Boolean(mine) && unresolvedPausesAfter(record.entries, mine.line).length > 0,
       backgroundTasks: nonEmpty(payload.background_tasks),
       liveWork: liveWork(sessionId),
       sessionCrons: nonEmpty(payload.session_crons),
@@ -104,7 +107,7 @@ try {
         try { hash = treeHash(repos, (repo) => treeExcludes(recordPath, repo)) } catch (e) { log(`tree hash failed (${String(e.message).split('\n')[0]})`); return { error: 'hash' } }
         return cycleProgress(record.entries, hash)
       },
-      claimTaken: fs.existsSync(claimFile(sessionId)),
+      claimTaken: fs.existsSync(claimFile(sessionId, readyLine)),
     })
     log(`Stop decided ${decision.act}${decision.code ? ` ${decision.code}` : ''}: ${decision.reason}`)
     if (decision.act === 'pause') pause(decision.reason)
@@ -113,7 +116,7 @@ try {
       try { length = fs.statSync(payload.transcript_path).size } catch { /* unreadable: the typer could not tell new entries */ }
       if (length === null) pause(pauseReason('R17', R17_WHY.transcript))
       else {
-        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt }
+        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt, readyLine }
         const script = process.env.DCTR_TYPER_SCRIPT || path.join(import.meta.dirname, 'dctr-typer.mjs')
         spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
         messages.push(LAUNCH_MESSAGE)
@@ -135,10 +138,12 @@ try {
   alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, log })
   const shown = pauseMessageOnce(recordPath)
   if (shown) messages.push(shown)
-  // The on token while no pause stands, so a resolved pause stops showing paused (LB2, E8-R25).
+  // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries
-  if (active && paneId && !standingPause(entries)) {
-    publishToken(paneId, onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, on.cap), log)
+  const standing = standingPauses(entries)
+  if (active && paneId) {
+    publishToken(paneId, standing.length ? pausedToken(standing.at(-1).reason)
+      : onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, on.cap), log)
   }
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)

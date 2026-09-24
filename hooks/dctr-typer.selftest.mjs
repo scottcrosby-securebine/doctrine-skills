@@ -92,11 +92,13 @@ if (args[0] === 'pane' && args[1] === 'get') {
   if (st.fail) { fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n'); process.stderr.write('{"error":{"code":"server_error","message":"boom"}}\\n'); process.exit(1) }
   if (st.clearedAt) st.getsSinceClear = (st.getsSinceClear || 0) + 1
   save()
+  if (st.onClear === 'late' && st.getsSinceClear === st.restoreAfterGets) fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
   const session = st.clearedAt && st.getsSinceClear > (st.newSessionAfterGets || 0) ? st.newSession : st.session
+  const status = st.clearedAt && st.statusAfterClear && st.getsSinceClear <= st.statusAfterClear.length ? st.statusAfterClear[st.getsSinceClear - 1] : (st.status || 'idle')
   const focused = st.gets <= (st.focusedGets || 0)
   logged.session = session; logged.focused = focused
   fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n')
-  console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'idle', focused, ...(st.noSession ? {} : { agent_session: { value: session } }) } } }))
+  console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: status, focused, ...(st.noSession ? {} : { agent_session: { value: session } }) } } }))
   process.exit(0)
 }
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n')
@@ -135,7 +137,7 @@ function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noS
   fs.mkdirSync(autoCycleDir(), { recursive: true })
   fs.writeFileSync(shimState, JSON.stringify({ session, newSession: `${session}-new`, status: 'idle', restoreFile: restoreFile(pane), onClear: 'write', reply: true, newTranscript, ...st }))
   pre?.(f)
-  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', ...(noStopAt ? {} : { stopAt }) }
+  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', readyLine: 5, ...(noStopAt ? {} : { stopAt }) }
   const r = spawnSync('node', [typer, JSON.stringify(args)], { env: { ...env, SHIM_STATE: shimState, SHIM_LOG: shimLog, ...extraEnv }, encoding: 'utf8', timeout: 20000 })
   const calls = fs.existsSync(shimLog) ? fs.readFileSync(shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
   const runs = calls.filter((c) => c.args[0] === 'pane' && c.args[1] === 'run')
@@ -165,7 +167,7 @@ clause('clause 2a2 — normal: the resume line is sent only after herdr reports 
   normal.calls.slice(clearIdx).some((c) => c.session === `${normal.session}-new`) &&
   normal.calls.findIndex((c) => c.args[3] === RESUME_LINE) > normal.calls.findIndex((c, i) => i > clearIdx && c.session === `${normal.session}-new`), detail(normal))
 
-const taken = typerCase('taken', {}, { pre: (f) => { reserveMarker(claimFile(f.session)) } })
+const taken = typerCase('taken', {}, { pre: (f) => { reserveMarker(claimFile(f.session, 5)) } })
 clause('clause 2b — the claim already taken: nothing sent, no herdr call, no line (E8-D15)', sends(taken) === '0,0' && taken.calls.length === 0 && taken.paused.length === 0, detail(taken))
 const stopped = typerCase('stopfile', {}, { pre: (f) => write(path.join(f.proj, '.doctrine/auto-cycle.stop'), '') })
 const stoppedRec = typerCase('stopfile-rec', {}, { recordRepo: 'other', pre: (f) => write(path.join(f.recRoot, '.doctrine/auto-cycle.stop'), '') })
@@ -179,6 +181,11 @@ clause('clause 2e — agent_status working: nothing sent, paused with R17 in its
   JSON.stringify(working.paused) === '["- auto-cycle paused: could not type into the pane: the session stayed busy"]', detail(working))
 const done = typerCase('done', { status: 'done' })
 clause('clause 2e2 — agent_status done, an unseen finish: /clear once, resume once (RB1)', sends(done) === '1,1' && done.paused.length === 0, detail(done))
+// RN2-2: after /clear the pane reads done, a ready state, for twelve polls while the restore file is not there yet,
+// then working twice, then idle. Only a not-ready read may start the busy clock, so this resumes.
+const doneWait = typerCase('done-then-working', { onClear: 'late', restoreAfterGets: 12, statusAfterClear: [...Array(12).fill('done'), 'working', 'working'] })
+clause('clause 2e5 — done while the restore file is awaited, then working, then idle: /clear once, resume once, no pause (RN2-2)',
+  sends(doneWait) === '1,1' && doneWait.paused.length === 0, detail(doneWait))
 const noSess = typerCase('no-session', { noSession: true })
 clause('clause 2e3 — herdr reports no Claude session: nothing sent, paused with R17 as a failed lookup, not R16 (ST2)', sends(noSess) === '0,0' &&
   JSON.stringify(noSess.paused) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]', detail(noSess))
@@ -210,9 +217,9 @@ clause('clause 2h — the record switched off while the pane is focused: nothing
   offWhile.paused.length === 0 && offWhile.cycled.length === 0 && offWhile.code === 0, detail(offWhile))
 const sys = typerCase('system-entries', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'system', subtype: 'stop_hook_summary' }, { type: 'system', subtype: 'turn_duration' })) })
 clause('clause 2i — stop_hook_summary and turn_duration entries after the Stop do not count: /clear once, resume once', sends(sys) === '1,1', detail(sys))
-// Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear. The
-// typer's 30 s wait is kept at a minute here, so three reads never outrun it however loaded the host is.
-const late = typerCase('late-session', { newSessionAfterGets: 3 }, { extraEnv: { DCTR_TYPER_TIMES: JSON.stringify({ ...T, session: 60000 }) } })
+// Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear, and the
+// typer counts its own waits in polls (RB2-4), so no load on the host changes the outcome.
+const late = typerCase('late-session', { newSessionAfterGets: 3 })
 clause('clause 2j — herdr reports the new session id a while after the restore file: /clear once, resume once, after it is reported',
   sends(late) === '1,1' && late.calls.some((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session && c.args[1] === 'get'), detail(late))
 const fail = typerCase('lookup-fails', { fail: true })

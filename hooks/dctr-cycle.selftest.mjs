@@ -22,7 +22,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPause, unresolvedPauseAfter } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -230,7 +230,13 @@ process.exit(0)
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 const stub = path.join(tmp, 'typer-stub.mjs')
-fs.writeFileSync(stub, "import fs from 'node:fs'\nfs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')\n")
+// The stub takes the claim as the typer would, then records its launch.
+fs.writeFileSync(stub, `import fs from 'node:fs'
+const { claimFile, reserveMarker } = await import(${JSON.stringify(path.join(import.meta.dirname, 'dctr-state.mjs'))})
+const a = JSON.parse(process.argv[2])
+try { reserveMarker(claimFile(a.session, a.readyLine)) } catch { process.exit(0) }
+fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
+`)
 
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_TYPER_SCRIPT: stub, HERDR_PANE_ID: 'w9:p1' }
 for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete baseEnv[k]
@@ -374,7 +380,7 @@ const blk = negs.find((x) => x.name === 'Blocked')
 const again = run(blk.f)
 const other = run(blk.f, { session_id: 's-another' })
 clause('clause 2i — a second Stop, and a later session, write no second paused line and never alert the same line again (E8-D18, F2)',
-  paused(blk.f).length === 1 && metas(blk.f).length === 1 && toasts(blk.f).length === 1 && again.msg === '' && other.msg === '', show(blk.f, again))
+  paused(blk.f).length === 1 && toasts(blk.f).length === 1 && again.msg === '' && other.msg === '', show(blk.f, again))
 
 // B3: a paused line the agent wrote is alerted too, with its written form.
 const agent = negs.find((x) => x.name === 'paused after warned')
@@ -386,24 +392,53 @@ const R2L = ['- State: Blocked. waits', '- auto-cycle paused: phase Blocked: Sta
 const R3L = ['- alarm: time fired 2026-09-24T01:00:00Z count 1', '- auto-cycle paused: time alarm fired, ruling needed']
 const R4L = ['- question: Q5 opened 2026-09-24T01:00:00Z which?', '- auto-cycle paused: open question Q5: which?']
 const pr = (...ls) => { const es = rec(...ls); return pauseResolved(es.filter((e) => e.sub === 'paused').at(-1), es) }
-clause('clause 1p — pauseResolved: R2 once the last state line is not Blocked, R3 once a ruling follows the alarm, R4 once its id is answered; R5, R10 and the skills\' question form never (E8-R25)',
+clause('clause 1p — pauseResolved, judged on the lines after the paused line: R2 on a later state line not Blocked, R3 on a later ruling, R4 on a later answer for its id; R5, R10 and the skills\' question form never (E8-R25)',
   !pr(...R2L) && pr(...R2L, '- State: Open') && !pr(...R3L) && pr(...R3L, '- ruling: R9 2026-09-24T02:00:00Z go') &&
   !pr('- alarm: round fired 2026-09-24T01:00:00Z count 4', '- auto-cycle paused: round alarm fired, ruling needed', '- alarm: time fired 2026-09-24T01:30:00Z count 1') &&
   !pr(...R4L) && pr(...R4L, '- question: Q5 answered 2026-09-24T02:00:00Z this') && !pr(...R4L, '- question: Q6 answered 2026-09-24T02:00:00Z that') &&
   !pr('- State: Open', '- auto-cycle paused: cycle cap 10 reached') && !pr('- auto-cycle paused: could not cycle: handoff not written') &&
-  !pr('- question: Q5 answered 2026-09-24T02:00:00Z x', '- auto-cycle paused: question: which way?'), 'a branch misread')
-clause('clause 1q — standingPause and unresolvedPauseAfter: a resolved pause neither stands nor holds step 3; an unresolved one does both (E8-R25)',
-  standingPause(rec(...R2L)) !== null && standingPause(rec(...R2L, '- State: Open')) === null &&
-  unresolvedPauseAfter(rec('- auto-cycle: warned s 60%', ...R3L), 1) && !unresolvedPauseAfter(rec('- auto-cycle: warned s 60%', ...R3L, '- ruling: R9 2026-09-24T02:00:00Z go'), 1) &&
-  !unresolvedPauseAfter(rec('- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: warned s 60%'), 2), 'wrong')
+  !pr('- question: Q5 answered 2026-09-24T02:00:00Z x', '- auto-cycle paused: question: which way?') &&
+  !pr('- ruling: R8 2026-09-24T00:00:00Z earlier', ...R3L) && !pr(...R2L, '- State: Blocked. still') && !pr('- State: Open', ...R2L) && !pr('- question: Q5 answered 2026-09-24T00:00:00Z earlier', ...R4L),
+  'a branch misread')
+// RB2-1: an answered pause stays answered when a later alarm or Blocked of the same kind arrives.
+const es21 = rec('- auto-cycle: warned s 60%', ...R3L, '- ruling: R9 2026-09-24T02:00:00Z go', '- alarm: time fired 2026-09-24T03:00:00Z count 2')
+const es21b = rec('- auto-cycle: warned s 60%', ...R2L, '- State: Open', '- State: Blocked. again')
+clause('clause 1p2 — a ruled R3 pause stays resolved after a second alarm of its kind, an unblocked R2 after a second Blocked, so neither stands again (RB2-1)',
+  pauseResolved(es21.find((e) => e.sub === 'paused'), es21) && standingPauses(es21).length === 0 && !pauseStands(es21) &&
+  pauseResolved(es21b.find((e) => e.sub === 'paused'), es21b) && standingPauses(es21b).length === 0, 'an old pause stood again')
+const RDY = '- auto-cycle: ready'
+clause('clause 1q — standingPauses: the unresolved pauses after the latest warned or cycle line, or with neither the latest line when an unresolved pause; a ready line after a pause hides nothing; pauseStands only when the latest line is one of them (E8-R25, RB2-3)',
+  standingPauses(rec(...R2L)).length === 1 && standingPauses(rec(...R2L, '- State: Open')).length === 0 &&
+  standingPauses(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY)).length === 1 &&
+  !pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY)) &&
+  pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written')) &&
+  standingPauses(rec('- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: cycle 2 tree aa')).length === 0 &&
+  standingPauses(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: cycle 3 tree aa', RDY)).length === 0 &&
+  standingPauses(rec('- auto-cycle paused: cycle cap 10 reached', RDY)).length === 0 &&
+  unresolvedPausesAfter(rec('- auto-cycle: warned s 60%', ...R3L), 1).length === 1 && unresolvedPausesAfter(rec('- auto-cycle: warned s 60%', ...R3L, '- ruling: R9 2026-09-24T02:00:00Z go'), 1).length === 0,
+  'wrong')
 const resolved = [['R2', [...R2L, '- State: Open']], ['R3', [...R3L, '- ruling: R9 2026-09-24T02:00:00Z go']], ['R4', [...R4L, '- question: Q5 answered 2026-09-24T02:00:00Z this']]]
   .map(([n, lines]) => { const f = fixture(`resolved-${n}`, { lines }); return { n, f, r: run(f) } })
 clause('clause 2c4 — a resolved R2, R3 or R4 pause after the warned line: the next ready Stop launches and writes no paused line (E8-R25)',
   resolved.every(({ f, r }) => launched(r) && paused(f).length === 1), resolved.map(({ f, r }) => show(f, r)).join(' || '))
-const fresh = fixture('fresh-after-resolved', { lines: [...R3L, '- ruling: R9 2026-09-24T02:00:00Z go', '- alarm: round fired 2026-09-24T03:00:00Z count 8'] })
-run(fresh)
-clause('clause 2c5 — a new alarm after a resolved pause writes a fresh paused line: dedup holds only against a pause still standing (E8-R25)',
-  JSON.stringify(paused(fresh)) === JSON.stringify(['- auto-cycle paused: time alarm fired, ruling needed', '- auto-cycle paused: round alarm fired, ruling needed']), JSON.stringify(paused(fresh)))
+const fresh = fixture('fresh-after-resolved', { lines: [...R3L, '- ruling: R9 2026-09-24T02:00:00Z go', '- alarm: time fired 2026-09-24T03:00:00Z count 2'] })
+const freshR = run(fresh, {}, { HERDR_PANE_ID: 'w9:pfresh' })
+const blk2 = fixture('second-blocked', { lines: [...R2L, '- State: Open', '- State: Blocked. again'] })
+const blk2R = run(blk2, {}, { HERDR_PANE_ID: 'w9:pblk2' })
+clause('clause 2c5 — a second alarm of the same kind after a ruled one, and a second Blocked after an unblock, each write a fresh paused line, alert it and show paused (E8-R25, RB2-1)',
+  JSON.stringify(paused(fresh)) === JSON.stringify(['- auto-cycle paused: time alarm fired, ruling needed', '- auto-cycle paused: time alarm fired, ruling needed']) &&
+  toasts(fresh).length === 1 && freshR.msg === 'doctrine auto-cycle paused: time alarm fired, ruling needed. rule in the pane' &&
+  metas(fresh).at(-1)?.[6] === 'autocycle=auto-cycle paused·time alarm fired, ruling needed' &&
+  paused(blk2).at(-1) === '- auto-cycle paused: phase Blocked: State: Blocked. again' && paused(blk2).length === 2 && toasts(blk2).length === 1 &&
+  metas(blk2).at(-1)?.[6] === `autocycle=${pausedToken('phase Blocked: State: Blocked. again')}`,
+  `${show(fresh, freshR)} || ${show(blk2, blk2R)}`)
+// RB2-3: a pause the ready line follows still holds step 3, is alerted, and keeps the token paused.
+const hidden = [['R10', '- auto-cycle paused: could not cycle: handoff not written'], ['R7', '- auto-cycle paused: waiting for your permission approval'], ['question', '- auto-cycle paused: question: which way?']]
+  .map(([n, line]) => { const f = fixture(`ready-after-${n}`, { lines: [line, RDY] }); return { n, line, f, r: run(f, {}, { HERDR_PANE_ID: `w9:pready${n}` }) } })
+clause('clause 2c8 — R10, R7 or the skills\' question pause followed by the ready line: step 3 decides none, the pane message prints, the toast is raised and the token reads paused (RB2-3)',
+  hidden.every(({ f, r, line }) => !launched(r) && paused(f).length === 1 && toasts(f).length === 1 &&
+    r.msg === pauseMessage(line.slice('- auto-cycle paused: '.length)) && metas(f).at(-1)?.[6] === `autocycle=${pausedToken(line.slice('- auto-cycle paused: '.length))}`),
+  hidden.map(({ f, r }) => show(f, r)).join(' || '))
 const tokR = fixture('token-resolved', { warned: false, lines: R2L.slice(0, 1) })
 const tokRRun = () => run(tokR, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pres' })
 tokRRun()
@@ -411,6 +446,27 @@ fs.appendFileSync(tokR.record, '- State: Open\n'); tokRRun()
 clause('clause 2c6 — once the pause resolves, the next event republishes the on token though the paused line is still the latest auto-cycle line (E8-R25)',
   JSON.stringify(metas(tokR).map((c) => c[6])) === JSON.stringify(['autocycle=auto-cycle paused·phase Blocked: State: Blocked. waits', 'autocycle=auto-cycle on·cycle 0 of 10']),
   JSON.stringify(metas(tokR).map((c) => c[6])))
+
+// RB2-2: the claim is single use per ready line. A typer that used the claim for one ready line (its pid now dead)
+// does not block the next ready line after a resolved pause; the same ready line never launches twice.
+const readyLineOf = (f) => parseRecord(fs.readFileSync(f.record, 'utf8')).entries.filter((e) => e.sub === 'ready').at(-1).line
+const stubLog = (f) => (fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [])
+const waitStub = async (f, n) => { for (const end = Date.now() + 30000; Date.now() < end && stubLog(f).length < n; ) await new Promise((r) => setTimeout(r, 50)) }
+const cl = fixture('claim-per-ready', { lines: [RDY] })
+const firstReady = readyLineOf(cl)
+write(claimFile(cl.session, firstReady), JSON.stringify({ pid: Number(deadPid), pane: 'w9:p1' }))
+const clUsed = run(cl)
+fs.appendFileSync(cl.record, `${R4L.join('\n')}\n- question: Q5 answered 2026-09-24T02:00:00Z this\n${RDY}\n`)
+const clNew = run(cl)
+await waitStub(cl, 1)
+const tw = fixture('same-ready-twice', { lines: [RDY] })
+const tw1 = run(tw)
+await waitStub(tw, 1)
+const tw2 = run(tw)
+clause('clause 2c9 — a used claim holds its own ready line only: after a typer abort and a resolved R4, a new ready line launches under a new key; one ready line launches once (RB2-2)',
+  !launched(clUsed) && launched(clNew) && stubLog(cl).length === 1 && stubLog(cl)[0].readyLine === readyLineOf(cl) && readyLineOf(cl) > firstReady &&
+  launched(tw1) && !launched(tw2) && stubLog(tw).length === 1 && fs.existsSync(claimFile(tw.session, readyLineOf(tw))),
+  `${show(cl, clUsed)} || ${show(cl, clNew)} || ${show(tw, tw2)}`)
 
 // SP1: a pause the detached typer wrote gets its toast from the typer and its pane message from the next hook event.
 const sp1 = fixture('typer-pause', { lines: ['- auto-cycle paused: resume typed twice, no reply from the new session'] })

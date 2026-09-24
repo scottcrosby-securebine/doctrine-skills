@@ -1,30 +1,35 @@
 // doctrine — the auto-cycle typer (E8-D15).
 //
-// Spawned detached by dctr-cycle.mjs's Stop when every precondition holds, with one JSON argument: the pane id,
-// the session id, the Stop's transcript path and byte length, the moment the Stop hook started, the record path, the tree hash, the session's repo,
-// the cycle number and the phase. It never reads the screen (E8-R12). It is a loop around typerStep in
-// dctr-lib.mjs, which decides from one observation at a time:
+// Spawned detached by dctr-cycle.mjs's Stop when every precondition holds, with one JSON argument: the pane id, the
+// session id, the Stop's transcript path and byte length, the moment the Stop hook started, the record path, the
+// tree hash, the session's repo, the cycle number, the phase, and the line number of the record's latest ready line.
+// It never reads the screen (E8-R12). It is a loop around typerStep in dctr-lib.mjs, which decides from one
+// observation at a time:
 //
-//   - It takes the claim `<autocycle dir>/<session>.claim` with reserveMarker and writes its pid into it (S3); a
-//     claim already taken ends it with nothing sent.
+//   - It takes the claim `<autocycle dir>/<session>.<ready line>.claim` with reserveMarker and writes its pid into
+//     it (S3); a claim already taken ends it with nothing sent. The claim is single use per ready line (RB2-2).
 //   - Before every send it stops if auto-cycle is no longer active (B1) or a paused line was written since the
-//     claim, needs herdr's agent_status idle, and waits while the pane is focused.
+//     claim, needs herdr's agent_status ready (idle or done, READY_STATUSES), and waits while the pane is focused.
 //   - Before /clear it needs herdr to report the old session and the old transcript to hold no user or assistant
 //     entry timestamped at or after the Stop hook's start (typedAfter; an entry with no time counts). The file is
 //     read from the Stop's byte length on, and only to find such entries: it is written asynchronously, so an entry
 //     past that length can be the turn's own final message, which carries a time before the Stop (K2-R16). A file
-//     that cannot be read, or is now shorter than that length, pauses rather than clears (RB2). It removes this pane's restore file, sends /clear once, and only then appends
-//     `auto-cycle: cycle <n> tree <hash>` (LN12: the line records a sent /clear, never an intended one).
+//     that cannot be read, or is now shorter than that length, pauses rather than clears (RB2). It removes this
+//     pane's restore file, sends /clear once, and only then appends `auto-cycle: cycle <n> tree <hash>` (LN12: the
+//     line records a sent /clear, never an intended one).
 //   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
 //     to report that id within 30 s, and sends the resume line once.
 //   - It confirms the first turn from the new transcript within 2 minutes, resends once, then pauses.
 //
-// Every pause appends one paused line and alerts it (B3). With DCTR_VIEW_REQUEST_DIR set it exits in its first
-// lines and calls no herdr: a contained session is never cycled.
+// Every wait is counted in polls, never read off the wall clock (RB2-4): each wait adds one poll interval to the
+// typer's clock, so a loaded host stretches a wait in real time and never shortens it in polls. Every pause appends
+// one paused line and raises its toast and token; its pane message is printed by the next Stop, Notification or
+// StopFailure hook (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no herdr: a contained
+// session is never cycled.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, typedAfter, TYPER_TIMES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
+import { typerStep, typedAfter, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
@@ -34,7 +39,7 @@ import {
 if (process.env.DCTR_VIEW_REQUEST_DIR) process.exit(0)
 let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
-if (!a?.pane || !a.session || !a.record || !a.transcript || !Number.isFinite(a.length) || !Number.isFinite(a.stopAt)) process.exit(0)
+if (!a?.pane || !a.session || !a.record || !a.transcript || !Number.isFinite(a.length) || !Number.isFinite(a.stopAt) || !Number.isInteger(a.readyLine)) process.exit(0)
 const log = (m) => hookLog(a.session, `auto-cycle typer: ${m}`)
 let times = TYPER_TIMES
 try { times = { ...TYPER_TIMES, ...JSON.parse(process.env.DCTR_TYPER_TIMES || '{}') } } catch { /* the defaults */ }
@@ -65,8 +70,8 @@ function pausing(reason) {
 }
 
 try {
-  try { reserveMarker(claimFile(a.session)) } catch { log('the claim is already taken; nothing sent'); process.exit(0) }
-  writeMarker(claimFile(a.session), { pid: process.pid, pane: a.pane })
+  try { reserveMarker(claimFile(a.session, a.readyLine)) } catch { log('the claim is already taken; nothing sent'); process.exit(0) }
+  writeMarker(claimFile(a.session, a.readyLine), { pid: process.pid, pane: a.pane })
   const claimText = fs.readFileSync(a.record, 'utf8')
   const claimLine = claimText.split('\n').length - (claimText.endsWith('\n') ? 1 : 0)
   const repos = [a.project, repoOf(a.record, fs.existsSync)]
@@ -91,22 +96,22 @@ try {
     } catch { return null }
   }
 
-  let stage = 'clear', stageStart = Date.now(), notIdleSince = null, restore = null, restoreSeen = null, resumes = 0
+  // The typer's clock: poll intervals waited, not wall time (RB2-4).
+  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const active = autoCycleActive(rec.entries, Boolean(stopFileRepo(repos, fs.existsSync)))
     const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > claimLine)
-    if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = Date.now() }
+    if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     const pane = active && !pausedSinceClaim ? readPane() : null
-    const now = Date.now()
-    notIdleSince = pane && !pane.error && pane.focused === false && pane.status !== 'idle' ? (notIdleSince ?? now) : null
+    notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
     const step = typerStep({
       stage, active, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
       grew: stage === 'clear' ? ((es) => (es === null ? null : es.some((e) => typedAfter(e, a.stopAt))))(entriesFrom(a.transcript, a.length)) : false,
       firstTurn: stage === 'confirm' && (entriesFrom(restore.transcript) || []).some((e) => e?.type === 'assistant'),
-      waited: now - stageStart, notIdle: notIdleSince ? now - notIdleSince : 0, sessionWait: restoreSeen ? now - restoreSeen : 0,
+      waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
-    if (step.act === 'wait') { sleepMs(times.poll); continue }
+    if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
@@ -114,12 +119,12 @@ try {
       send('/clear')
       appendRecordLine(a.record, `- auto-cycle: cycle ${a.n} tree ${a.hash}`)
       log(`sent /clear, cycle ${a.n}`)
-      stage = 'resume'; stageStart = Date.now()
+      stage = 'resume'; stageStart = now
     } else if (step.act === 'resume') {
       send(RESUME_LINE)
       resumes += 1
       log(`sent the resume line (${resumes})`)
-      stage = 'confirm'; stageStart = Date.now()
+      stage = 'confirm'; stageStart = now
     }
   }
 } catch (e) {

@@ -919,34 +919,45 @@ export const pauseToastArgs = (repo, phase, reason) =>
 export const latestAutoCycle = (entries) => (entries || []).filter((e) => e.kind === 'auto-cycle').at(-1) || null
 
 /**
- * Whether a paused line is resolved (E8-R25): only a pause for R2, R3 or R4, whoever wrote it, and only once its
- * condition no longer holds in the record: the last state line is not Blocked (R2); every alarm line of that kind
- * has a ruling line after it (R3); a `question: <id> answered` line follows that question's last opened line (R4).
- * Every other paused line never resolves, the skills' `question: <text>` form included, which carries no id.
+ * THE PAUSE MODEL (E8-R25), stated once; step 3, the dedup, the sidebar token and the alerts all read it.
+ *
+ * A paused line P is resolved only when it is an R2, R3 or R4 pause, whoever wrote it, and a line AFTER P answers
+ * it: a state line not reading Blocked (R2), a ruling line (R3), a `question: <id> answered` line for its id (R4).
+ * It is judged against the lines after P and never the whole record, so a later alarm or Blocked of the same kind
+ * never makes an old, answered pause stand again. Every other paused line never resolves, the skills' `question:
+ * <text>` form included, which carries no id.
  */
 export function pauseResolved(paused, entries) {
-  const es = entries || [], reason = paused?.reason || ''
-  if (PAUSES.R2.match.test(reason)) return !/^Blocked\b/i.test(es.filter((e) => e.kind === 'state').at(-1)?.value || '')
-  const alarm = /^(round|time) alarm fired, ruling needed$/.exec(reason)
-  if (alarm) return !es.some((a) => a.kind === 'alarm' && a.which === alarm[1] && !es.some((r) => r.kind === 'ruling' && r.line > a.line))
+  const after = (entries || []).filter((e) => e.line > paused.line), reason = paused?.reason || ''
+  if (PAUSES.R2.match.test(reason)) return after.some((e) => e.kind === 'state' && !/^Blocked\b/i.test(e.value || ''))
+  if (PAUSES.R3.match.test(reason)) return after.some((e) => e.kind === 'ruling')
   const q = /^open question (\S+): /.exec(reason)
-  if (q) {
-    const opened = es.filter((e) => e.kind === 'question-opened' && e.id === q[1]).at(-1)?.line ?? 0
-    return es.some((e) => e.kind === 'question-answered' && e.id === q[1] && e.line > opened)
-  }
+  if (q) return after.some((e) => e.kind === 'question-answered' && e.id === q[1])
   return false
 }
 
-/** The record's standing pause: its latest auto-cycle line when that is a paused line not resolved, else null. No
- *  new paused line is written while one stands, and the sidebar token reads paused only while one does. */
-export const standingPause = (entries) => {
-  const latest = latestAutoCycle(entries)
-  return latest?.sub === 'paused' && !pauseResolved(latest, entries) ? latest : null
+/** The unresolved paused lines after line `after` (E8-R25). */
+export const unresolvedPausesAfter = (entries, after) =>
+  (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > after && !pauseResolved(e, entries))
+
+/**
+ * The standing pauses, in record order: the unresolved paused lines after the record's latest `warned` or `cycle`
+ * line, or, when it has neither, its latest auto-cycle line when that is an unresolved paused line. A ready line
+ * after a pause hides nothing. The token reads paused while any stands, naming the last; each is alerted once.
+ */
+export function standingPauses(entries) {
+  const es = entries || []
+  const anchor = es.filter((e) => e.kind === 'auto-cycle' && (e.sub === 'warned' || e.sub === 'cycle')).at(-1)
+  if (anchor) return unresolvedPausesAfter(es, anchor.line)
+  const latest = latestAutoCycle(es)
+  return latest?.sub === 'paused' && !pauseResolved(latest, es) ? [latest] : []
 }
 
-/** B2 step 3: an unresolved paused line follows the line numbered `after` (E8-R25). */
-export const unresolvedPauseAfter = (entries, after) =>
-  (entries || []).some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > after && !pauseResolved(e, entries))
+/** The dedup (E8-D18, E8-R25): no new paused line while the latest auto-cycle line is a standing pause. */
+export const pauseStands = (entries) => {
+  const latest = latestAutoCycle(entries)
+  return latest?.sub === 'paused' && standingPauses(entries).includes(latest)
+}
 
 /** The directory holding `.git` at or above `file`'s directory, or that directory when none does. `exists` is
  *  injected so this stays pure. The record's repo is found this way, with no git process. */
@@ -1077,7 +1088,7 @@ export function cycleDecision(f) {
   if (p?.error) return pause('R17', R17_WHY[p.error] || R17_WHY.error)
   if (p.pause === 'no progress') return pause('R6')
   if (p.pause) return pause('R5', p.cap)
-  if (f.claimTaken) return { act: 'none', reason: "this session's claim is already taken" }
+  if (f.claimTaken) return { act: 'none', reason: "the claim for this ready line is already taken" }
   return { act: 'launch', n: p.n, reason: `cycle ${p.n} of ${p.cap}` }
 }
 
