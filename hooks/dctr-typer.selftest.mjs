@@ -58,8 +58,9 @@ clause('clause 1e5 — typedAfter: a user or assistant entry at or after the Sto
   !typedAfter({ type: 'assistant', timestamp: '2026-09-24T07:04:07.999Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
   !typedAfter({ type: 'system', timestamp: '2026-09-24T07:05:00Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
   typedAfter({ type: 'user' }, Date.parse('2026-09-24T07:04:08Z')), 'wrong')
-clause('clause 1e6 — typerStep: a stop file pauses with R1 before any other check, even with auto-cycle then inactive (RN3-3)',
-  ts({ stopRepo: '/w/p', active: false }).reason === 'stopped by .doctrine/auto-cycle.stop in /w/p' && ts({ stopRepo: null, active: false }).act === 'abort', 'wrong')
+clause('clause 1e6 — typerStep: an off or closed record aborts whether or not a stop file exists too; on a record still active a stop file pauses with R1 before any other check (RN3-3, RB4-1)',
+  ts({ stopRepo: '/w/p', active: false }).act === 'abort' && ts({ stopRepo: null, active: false }).act === 'abort' &&
+  ts({ stopRepo: '/w/p', pane: { error: 'x' } }).reason === 'stopped by .doctrine/auto-cycle.stop in /w/p', 'wrong')
 clause('clause 1e4 — typerStep: an old transcript that could not be read, or has shrunk, pauses with R17 and never clears (RB2)',
   ts({ grew: null }).reason === 'could not type into the pane: the transcript could not be read', JSON.stringify(ts({ grew: null })))
 clause('clause 1f — typerStep after /clear: no restore file waits, then pauses with R14',
@@ -185,6 +186,11 @@ const stopLate = typerCase('stopfile-while-waiting', { focusedGets: 100000 }, { 
 clause('clause 2c2 — a stop file created while the typer waits: nothing sent, paused with R1, the toast raised (RN3-3, E8-D16)',
   sends(stopLate) === '0,0' && JSON.stringify(stopLate.paused) === JSON.stringify([`- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in ${stopLate.proj}`]) &&
   stopLate.alerts === 2 && stopLate.calls.filter((c) => c.args[1] === 'get').length >= 3, detail(stopLate))
+// RB4-1: a stop file beside a record switched off, or no longer Open or Blocked: nothing written, nothing raised.
+const stopOff = typerCase('stopfile-off', {}, { pre: (f) => { fs.appendFileSync(f.record, '- auto-cycle: off\n'); write(path.join(f.proj, '.doctrine/auto-cycle.stop'), '') } })
+const stopExited = typerCase('stopfile-exited', {}, { pre: (f) => { fs.appendFileSync(f.record, '- State: Exited.\n'); write(path.join(f.proj, '.doctrine/auto-cycle.stop'), '') } })
+clause('clause 2c3 — a stop file beside a record switched off, or Exited: nothing sent, no paused line, no herdr call at all (RB4-1)',
+  [stopOff, stopExited].every((c) => sends(c) === '0,0' && c.paused.length === 0 && c.calls.length === 0 && c.code === 0), `${detail(stopOff)} | ${detail(stopExited)}`)
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -290,6 +296,9 @@ clause('clause 3a — without the typer: the grew fixture holds a user entry pas
 clause('clause 3b — without the typer: the stale restore file really carries the old session id, and the normal one the new id',
   JSON.parse(fs.readFileSync(restoreFile(stale.pane), 'utf8')).session_id === stale.session &&
   JSON.parse(fs.readFileSync(restoreFile(normal.pane), 'utf8')).session_id === `${normal.session}-new`, 'restore fixtures wrong')
+clause('clause 3c2 — without the typer: the RB4-1 fixtures hold the stop file and end their records with an off line and an Exited state line',
+  [stopOff, stopExited].every((c) => fs.existsSync(path.join(c.proj, '.doctrine/auto-cycle.stop'))) &&
+  parseRecord(fs.readFileSync(stopOff.record, 'utf8')).entries.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1)?.sub === 'off' && stopExited.state === '- State: Exited.', `${stopExited.state}`)
 clause('clause 3c — without the typer: the record-repo stop file sits outside the session\'s repo',
   !fs.existsSync(path.join(stoppedRec.proj, '.doctrine/auto-cycle.stop')) && fs.existsSync(path.join(stoppedRec.recRoot, '.doctrine/auto-cycle.stop')) &&
   fs.existsSync(path.join(stoppedRec.recRoot, '.git')), 'stop fixture wrong')

@@ -4,8 +4,9 @@
 //   node hooks/dctr-cycle.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
 // Clause 1 pins the pure decisions in dctr-lib.mjs (autoCycleActive, cycleDecision, cycleProgress, notifyDecision
-// and the pause reasons, verbatim from the D2 table) and the state helpers in dctr-state.mjs (appendPaused,
-// claimHeld, treeHash) over real git repos. Clause 2 drives hooks/dctr-cycle.mjs end to end over fixture projects
+// and the pause reasons, verbatim from the D2 table), the pause model enumerated over short record sequences
+// (clause 1r), and the state helpers in dctr-state.mjs (appendPaused, alertPaused, pauseMessageOnce, claimHeld,
+// treeHash) over real files and git repos. Clause 2 drives hooks/dctr-cycle.mjs end to end over fixture projects
 // with a `herdr` PATH shim that logs every call, and a stub in place of the typer that records its launch: one
 // fixture per E8-D7 precondition with that precondition alone false, one per pause reason, the Notification and
 // StopFailure events, the alerts and the contained case. The shim never reaches a herdr server. Clause 3 proves
@@ -22,7 +23,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -67,8 +68,8 @@ const TABLE = [
 const tableBad = TABLE.filter(([c, arg, reason, action]) => pauseReason(c, arg) !== reason || pauseAction(reason) !== action)
 clause('clause 1c — every pause reason R1 to R17 reads verbatim as the D2 table has it, and each reason maps back to its action',
   tableBad.length === 0 && Object.keys(PAUSES).length === 17, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
-clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; the skills\' own pauses ask for an answer in the pane',
-  TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane' &&
+clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; the skills\' own pauses ask for an answer in the pane, the question, which never resolves, then for a /clear and a typed resume (S4-1)',
+  TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane, then /clear and type resume' &&
   pauseAction('first action ambiguous: two phases') === 'answer in the pane' &&
   pauseMessage('session idle, waiting for you') === 'doctrine auto-cycle paused: session idle, waiting for you. reply in the pane' &&
   pausedToken('x'.repeat(60)) === `auto-cycle paused·${'x'.repeat(40)}`, 'a string leaked a banned word or the forms are wrong')
@@ -155,9 +156,9 @@ clause('clause 1j — notifyDecision: idle_prompt is nothing while a claim is he
 // T6: the state helpers.
 const recFile = path.join(tmp, 't6', 'r.md')
 write(recFile, '- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%')
-const w1 = appendPaused(recFile, 'x one'), w2 = appendPaused(recFile, 'x two')
-clause('clause 1k — appendPaused writes one line on a line of its own and none while the latest auto-cycle line is already paused (E8-D18)',
-  w1.written && !w2.written && fs.readFileSync(recFile, 'utf8') === '- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%\n- auto-cycle paused: x one\n',
+const w1 = appendPaused(recFile, 'Claude API error: one'), w2 = appendPaused(recFile, 'Claude API error: two'), w3 = appendPaused(recFile, 'x two')
+clause('clause 1k — appendPaused writes one line on a line of its own, none while a standing pause names the same pause, and one naming a different pause (E8-D18, E8-R27)',
+  w1.written && !w2.written && w3.written && fs.readFileSync(recFile, 'utf8') === '- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%\n- auto-cycle paused: Claude API error: one\n- auto-cycle paused: x two\n',
   fs.readFileSync(recFile, 'utf8'))
 const deadPid = spawnSync('node', ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout.trim()
 write(path.join(tmp, 'c-live'), JSON.stringify({ pid: process.pid })); write(path.join(tmp, 'c-dead'), JSON.stringify({ pid: Number(deadPid) })); write(path.join(tmp, 'c-empty'), '{}')
@@ -384,8 +385,8 @@ clause('clause 2i — a second Stop, and a later session, write no second paused
 
 // B3: a paused line the agent wrote is alerted too, with its written form.
 const agent = negs.find((x) => x.name === 'paused after warned')
-clause('clause 2j — a paused line the agent wrote is alerted once, naming its reason and an answer in the pane (B3, E8-D19)',
-  agent.r.msg === 'doctrine auto-cycle paused: question: which way?. answer in the pane' && toasts(agent.f).length === 1 && metas(agent.f).length === 1, show(agent.f, agent.r))
+clause('clause 2j — a paused line the agent wrote is alerted once, naming its reason and its action (B3, E8-D19, S4-1)',
+  agent.r.msg === 'doctrine auto-cycle paused: question: which way?. answer in the pane, then /clear and type resume' && toasts(agent.f).length === 1 && metas(agent.f).length === 1, show(agent.f, agent.r))
 
 // E8-R25: a resolved R2, R3 or R4 pause lets the same session cycle again.
 const R2L = ['- State: Blocked. waits', '- auto-cycle paused: phase Blocked: State: Blocked. waits']
@@ -404,14 +405,16 @@ clause('clause 1p — pauseResolved, judged on the lines after the paused line: 
 const es21 = rec('- auto-cycle: warned s 60%', ...R3L, '- ruling: R9 2026-09-24T02:00:00Z go', '- alarm: time fired 2026-09-24T03:00:00Z count 2')
 const es21b = rec('- auto-cycle: warned s 60%', ...R2L, '- State: Open', '- State: Blocked. again')
 clause('clause 1p2 — a ruled R3 pause stays resolved after a second alarm of its kind, an unblocked R2 after a second Blocked, so neither stands again (RB2-1)',
-  pauseResolved(es21.find((e) => e.sub === 'paused'), es21) && standingPauses(es21).length === 0 && !pauseStands(es21) &&
+  pauseResolved(es21.find((e) => e.sub === 'paused'), es21) && standingPauses(es21).length === 0 && !pauseStands(es21, 0, 'time alarm fired, ruling needed') &&
   pauseResolved(es21b.find((e) => e.sub === 'paused'), es21b) && standingPauses(es21b).length === 0, 'an old pause stood again')
 const RDY = '- auto-cycle: ready'
-clause('clause 1q — standingPauses: the unresolved pauses after the latest warned or cycle line, or with neither the latest line when an unresolved pause; a ready line after a pause hides nothing; pauseStands only when the latest line is one of them (E8-R25, RB2-3)',
+const R10R = 'could not cycle: handoff not written', R7R = 'waiting for your permission approval'
+clause('clause 1q — standingPauses: the unresolved pauses after the latest warned or cycle line, or with neither the latest line when an unresolved pause; a ready line after a pause hides nothing; pauseStands only for the same pause as one of them (E8-R25, RB2-3, E8-R27)',
   standingPauses(rec(...R2L)).length === 1 && standingPauses(rec(...R2L, '- State: Open')).length === 0 &&
   standingPauses(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY)).length === 1 &&
-  !pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY)) &&
-  pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written')) &&
+  pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY), 0, R10R) &&
+  !pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written'), 0, R7R) &&
+  !pauseStands(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: could not cycle: handoff not written', RDY, '- auto-cycle: cycle 3 tree aa'), 0, R10R) &&
   standingPauses(rec('- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: cycle 2 tree aa')).length === 0 &&
   standingPauses(rec('- auto-cycle: warned s 60%', '- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: cycle 3 tree aa', RDY)).length === 0 &&
   standingPauses(rec('- auto-cycle paused: cycle cap 10 reached', RDY)).length === 0 &&
@@ -448,8 +451,88 @@ clause('clause 1q2 — standingPauses anchors on the latest warned, cycle or on 
   standingPauses(rec('- auto-cycle: warned s 60%', R10P), 2).length === 0 &&
   JSON.stringify(standingPauses(rec('- auto-cycle: warned s 60%', R10P, '- auto-cycle paused: waiting for your permission approval'), 2).map((e) => e.line)) === '[3]' &&
   standingPauses(rec('- auto-cycle: warned s 60%', R10P), 1).length === 1 && standingPauses(rec(R10P)).length === 1 &&
-  !pauseStands(rec('- auto-cycle: warned s 60%', R10P), 2) && pauseStands(rec('- auto-cycle: warned s 60%', R10P), 1),
+  !pauseStands(rec('- auto-cycle: warned s 60%', R10P), 2, R10R) && pauseStands(rec('- auto-cycle: warned s 60%', R10P), 1, R10R),
   'an anchor was missed')
+// Clause 1r: the pause model's consumers, enumerated (E8-R25, E8-R27, RB4-1, RB4-2). Every sequence of up to ENUM_LEN record
+// lines drawn from ENUM_LINES, after a head of `State: Open` and an on line, with no session start recorded or one
+// recorded after the head's first sequence line or its second. For each, with S = standingPauses:
+//   a. for each candidate pause differing from every pause in S, the dedup (pauseStands) lets it be written, and the
+//      line it writes stands at once, so it is alerted and the token names it (E8-R27);
+//   b. for each candidate the same as a pause in S, the dedup refuses it;
+//   c. on a record whose last on/off line is off or whose last state line is not Open or Blocked, the typer, the one
+//      writer that runs past the hooks' stand-downs, never pauses at any stage, a stop file present (RB4-1);
+//   d. the consumers agree on S: the token reads paused iff S is non-empty and then names S's last line, and step 3
+//      (pausedAfterWarned) refuses whenever a pause in S follows this session's warned line. The alerts read S with
+//      the same session start, which clause 1s pins, so each line in S is alerted and shown once, by its marker.
+// "The same pause" is decided here from each line's own tag, never by samePause: the same PAUSES code (two R9 lines
+// with different error text, two R4 lines for different ids), or the same text for the skills' question.
+const ENUM_LEN = 4
+const ENUM_LINES = [
+  ['on', '- auto-cycle: on cap 10 tier 60%'], ['off', '- auto-cycle: off'], ['warned', '- auto-cycle: warned s1 60%'],
+  ['cycle', '- auto-cycle: cycle 1 tree aa'], ['ready', '- auto-cycle: ready'],
+  ['R1', '- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in /w/p'], ['R2', '- auto-cycle paused: phase Blocked: State: Blocked. waits'],
+  ['R4', '- auto-cycle paused: open question Q5: which?'], ['R7', '- auto-cycle paused: waiting for your permission approval'],
+  ['R9', '- auto-cycle paused: Claude API error: overloaded'], ['R14', '- auto-cycle paused: cleared, but the new session did not start doctrine'],
+  ['q:which way?', '- auto-cycle paused: question: which way?'],
+  ['open', '- State: Open'], ['blocked', '- State: Blocked. waits'], ['exited', '- State: Exited.'],
+  ['ruling', '- ruling: R9 2026-09-24T02:00:00Z go'], ['answered', '- question: Q5 answered 2026-09-24T02:00:00Z this'],
+]
+const ENUM_CANDS = [
+  ['R1', 'stopped by .doctrine/auto-cycle.stop in /w/q'], ['R2', 'phase Blocked: State: Blocked. other'], ['R4', 'open question Q6: and?'],
+  ['R7', 'waiting for your permission approval'], ['R8', 'session idle, waiting for you'], ['R9', 'Claude API error: rate_limit'],
+  ['R14', 'cleared, but the new session did not start doctrine'], ['q:which way?', 'question: which way?'], ['q:other?', 'question: other?'],
+]
+const enumParsed = new Map(ENUM_CANDS.map(([, r]) => [r, rec(`- auto-cycle paused: ${r}`)[0]]))
+const tagOf = new Map(ENUM_LINES.map(([t, l]) => [l.replace(/^- auto-cycle paused: /, ''), t]))
+const ENUM_HEAD = ['- State: Open', '- auto-cycle: on cap 10 tier 60%']
+const enumBad = { a: [], b: [], c: [], d: [] }
+let enumCount = 0
+const enumNote = (k, seq, start, what) => { if (enumBad[k].length < 3) enumBad[k].push(`[${seq.map((i) => ENUM_LINES[i][0]).join(', ')}] start ${start}: ${what}`) }
+const enumTyper = { pane: { status: 'idle', focused: false, session: 'old' }, oldSession: 'old', grew: false, restore: { session: 'new', transcript: '/n' }, waited: 0, notIdle: 0, sessionWait: 0, resumes: 0, firstTurn: false, pausedSinceClaim: false }
+for (let len = 1; len <= ENUM_LEN; len++) {
+  for (let k = 0; k < ENUM_LINES.length ** len; k++) {
+    const seq = []; for (let x = k, j = 0; j < len; j++, x = Math.floor(x / ENUM_LINES.length)) seq.push(x % ENUM_LINES.length)
+    const lines = [...ENUM_HEAD, ...seq.map((i) => ENUM_LINES[i][1])]
+    const es = rec(...lines)
+    for (const start of [0, 3, 4].filter((s) => s <= lines.length)) {
+      enumCount++
+      const S = standingPauses(es, start), tags = S.map((p) => tagOf.get(p.reason))
+      for (const [tag, reason] of ENUM_CANDS) {
+        const refused = pauseStands(es, start, reason)
+        if (tags.includes(tag) && !refused) enumNote('b', seq, start, `${reason} written while ${tag} stands`)
+        if (!tags.includes(tag)) {
+          if (refused) enumNote('a', seq, start, `${reason} refused while only ${tags.join(', ') || 'nothing'} stands`)
+          else if (standingPauses([...es, { ...enumParsed.get(reason), line: lines.length + 1 }], start).at(-1)?.line !== lines.length + 1) enumNote('a', seq, start, `${reason} written but does not stand`)
+        }
+      }
+      const active = autoCycleActive(es, false)
+      if (!active) {
+        for (const stage of ['clear', 'resume', 'confirm']) {
+          const st = typerStep({ ...enumTyper, stage, active, stopRepo: '/w/p' })
+          if (st.act === 'pause') enumNote('c', seq, start, `typer at ${stage} pauses: ${st.reason}`)
+        }
+      }
+      const token = autocycleToken(es, start)
+      if (S.length ? token !== pausedToken(S.at(-1).reason) : !token.startsWith('auto-cycle on·')) enumNote('d', seq, start, `token ${token} with ${tags.join(', ') || 'nothing'} standing`)
+      const mine = es.filter((e) => e.sub === 'warned' && e.session === 's1').at(-1)
+      if (mine && S.some((p) => p.line > mine.line) && !pausedAfterWarned(es, 's1')) enumNote('d', seq, start, `step 3 goes on with ${tags.join(', ')} standing after the warned line`)
+    }
+  }
+}
+clause(`clause 1r — the pause model enumerated over every sequence of up to ${ENUM_LEN} lines (${enumCount} cases): a different pause is written and stands, the same pause is not, the typer never pauses an off or closed record, and the token and step 3 agree with the standing set (E8-R25, E8-R27, RB4-1, RB4-2)`,
+  enumCount > 0 && Object.values(enumBad).every((v) => v.length === 0), JSON.stringify(enumBad))
+// F1: the alerts read the standing set with the recorded session start, so a pause from before a /clear is neither
+// toasted nor shown again in the new session, and the new session's own pause is.
+const f1 = path.join(tmp, 'f1', 'r.md')
+write(f1, '- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%\n- auto-cycle paused: could not cycle: handoff not written\n')
+state.writeSessionStart(f1)
+const f1Alert = state.alertPaused({ recordPath: f1, repo: 'proj', phase: 'e8-fixture', paneId: null }), f1Shown = state.pauseMessageOnce(f1)
+fs.appendFileSync(f1, '- auto-cycle paused: waiting for your permission approval\n')
+const f1Alert2 = state.alertPaused({ recordPath: f1, repo: 'proj', phase: 'e8-fixture', paneId: null }), f1Shown2 = state.pauseMessageOnce(f1)
+clause('clause 1s — alertPaused reads the recorded session start: a pause from before it raises nothing, the new session\'s own pause is raised (F1)',
+  f1Alert === false && f1Alert2 === true, JSON.stringify([f1Alert, f1Alert2]))
+clause('clause 1s2 — pauseMessageOnce reads the recorded session start: a pause from before it is not shown, the new session\'s own pause is shown alone (F1)',
+  f1Shown === null && f1Shown2 === 'doctrine auto-cycle paused: waiting for your permission approval. approve or deny in the pane', JSON.stringify([f1Shown, f1Shown2]))
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
 const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')
@@ -464,6 +547,18 @@ clause('clause 2c10 — after a manual /clear and resume the old R10 no longer s
   paused(mc).at(-1) === '- auto-cycle paused: waiting for your permission approval' && toasts(mc).length === 2 && mcNew.msg === '' &&
   mcPerm.msg === 'doctrine auto-cycle paused: waiting for your permission approval. approve or deny in the pane' && mcOld.msg.includes('handoff not written'),
   `${metas(mc).map((c) => c[6]).join(' | ')} || ${show(mc, mcPerm)}`)
+// RB4-2: a typer pause written after the /clear and the new session's start (R15) stands in the new session, and the
+// new session's own, different pauses are still written, alerted and shown, and the token names the latest.
+const rb2 = fixture('rb4-2', { lines: [RDY, '- auto-cycle: cycle 1 tree abc'] })
+state.writeSessionStart(rb2.record)
+fs.appendFileSync(rb2.record, '- auto-cycle paused: resume typed twice, no reply from the new session\n')
+const rb2Pane = { HERDR_PANE_ID: 'w9:prb42' }
+const rb2Perm = run(rb2, { session_id: 's-rb42-new', hook_event_name: 'Notification', notification_type: 'permission_prompt' }, rb2Pane)
+const rb2Fail = run(rb2, { session_id: 's-rb42-new', hook_event_name: 'StopFailure', error: 'overloaded' }, rb2Pane)
+clause('clause 2c12 — a typer pause standing in the new session does not swallow the new session\'s permission prompt or API error: each is written, toasted and shown, and the token names it (RB4-2, E8-R27)',
+  JSON.stringify(paused(rb2)) === JSON.stringify(['- auto-cycle paused: resume typed twice, no reply from the new session', '- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: Claude API error: overloaded']) &&
+  toasts(rb2).length === 3 && rb2Perm.msg.includes('waiting for your permission approval. approve or deny in the pane') && rb2Fail.msg === 'doctrine auto-cycle paused: Claude API error: overloaded. retry in the pane' &&
+  metas(rb2).at(-1)?.[6] === `autocycle=${pausedToken('Claude API error: overloaded')}`, `${show(rb2, rb2Perm)} || ${show(rb2, rb2Fail)}`)
 const r5 = fixture('r5-new-on-line', { lines: [R5P, '- auto-cycle: on cap 20 tier 60%'] })
 const r5R = run(r5, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pr5' })
 clause('clause 2c11 — R5 followed by the new on line its action asks for no longer stands: the token reads the cycle count of the new cap, and nothing is shown (RB3-2)',
@@ -577,7 +672,8 @@ clause('clause 2n — each with auto-cycle off does nothing and calls no herdr (
 const nStop = fixture('n-stop'); write(path.join(nStop.proj, '.doctrine/auto-cycle.stop'), ''); note(nStop, 'permission_prompt')
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
-const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: waiting for your permission approval'] }); stopFacts(iPaused, { backgroundEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
+const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
+const iOther = fixture('i-other', { lines: ['- auto-cycle paused: waiting for your permission approval'] }); stopFacts(iOther, { backgroundEmpty: true, ready: false }); note(iOther, 'idle_prompt', {}, { HERDR_PANE_ID: 'w9:pother' })
 const iClaim = fixture('i-claim'); stopFacts(iClaim, { backgroundEmpty: true, ready: false })
 write(claimFile('s-the-old-session'), JSON.stringify({ pid: process.pid, pane: 'w9:p1', session: 's-the-old-session' })); note(iClaim, 'idle_prompt')
 const claimSeen = paused(iClaim).length
@@ -585,9 +681,9 @@ fs.rmSync(claimFile('s-the-old-session'))
 const iGate = fixture('i-gate'); stopFacts(iGate, { backgroundEmpty: true, ready: false }); gateLive(iGate); note(iGate, 'idle_prompt')
 const iReady = fixture('i-ready'); stopFacts(iReady, { backgroundEmpty: true, ready: true }); note(iReady, 'idle_prompt')
 const iBg = fixture('i-bg'); stopFacts(iBg, { backgroundEmpty: false, ready: false }); note(iBg, 'idle_prompt')
-clause('clause 2o — idle_prompt writes nothing after a paused line, while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks',
-  paused(iPaused).length === 1 && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
-  JSON.stringify([paused(iPaused), claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
+clause('clause 2o — idle_prompt writes nothing while a paused line naming the same pause stands, while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; it writes its line while a different pause stands (E8-R27)',
+  paused(iPaused).length === 1 && JSON.stringify(paused(iOther)) === '["- auto-cycle paused: waiting for your permission approval","- auto-cycle paused: session idle, waiting for you"]' && toasts(iOther).length === 2 && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
+  JSON.stringify([paused(iPaused), paused(iOther), toasts(iOther).length, claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
 const s4 = fixture('s4')
 run(s4, { background_tasks: [{ id: 'b' }] })
 let s4a = null
@@ -648,6 +744,20 @@ clause('clause 3a7 — without the hook: the manual-clear record\'s R10 sits bef
   JSON.parse(fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')) >= parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.find((e) => e.sub === 'paused').line &&
   JSON.parse(fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')) < parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.filter((e) => e.sub === 'paused').at(-1).line,
   `start ${fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')} paused ${JSON.stringify(parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.filter((e) => e.sub === 'paused'))}`)
+const rb2Es = parseRecord(fs.readFileSync(rb2.record, 'utf8')).entries
+const rb2Start = JSON.parse(fs.readFileSync(state.sessionStartFile(rb2.record), 'utf8'))
+const rb2R15 = rb2Es.find((e) => e.reason === 'resume typed twice, no reply from the new session')
+clause('clause 3a8 — without the hook: the RB4-2 record\'s R15 line comes after its cycle line and after the recorded session start, with no auto-cycle line between it and the new session\'s pauses',
+  rb2R15 && rb2R15.line > rb2Start && rb2R15.line > rb2Es.find((e) => e.sub === 'cycle').line &&
+  !rb2Es.some((e) => e.kind === 'auto-cycle' && e.line > rb2R15.line && e.sub !== 'paused'), `start ${rb2Start} ${JSON.stringify(rb2Es.filter((e) => e.kind === 'auto-cycle'))}`)
+// Clause 1r's fixture sequences carry the defects it names, read from the parsed lines alone: RB4-1's record `off`
+// has an off line as its last on/off line; RB4-2's [warned, cycle, R14] with the session start before the cycle line
+// has R14 as its latest auto-cycle line, after both the cycle line and the start; E8-R27's candidate R7 is not R14.
+const e3 = rec(...ENUM_HEAD, '- auto-cycle: off'), e4 = rec(...ENUM_HEAD, '- auto-cycle: warned s1 60%', '- auto-cycle: cycle 1 tree aa', '- auto-cycle paused: cleared, but the new session did not start doctrine')
+clause('clause 3a9 — without the model: the enumeration\'s RB4-1 record ends switched off, and its RB4-2 record\'s latest line is an R14 pause after the cycle line and the session start 3',
+  e3.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1).sub === 'off' &&
+  e4.filter((e) => e.kind === 'auto-cycle').at(-1).reason === 'cleared, but the new session did not start doctrine' && e4.at(-1).line === 5 && e4.find((e) => e.sub === 'cycle').line === 4 &&
+  'waiting for your permission approval' !== e4.at(-1).reason, JSON.stringify([e3, e4]))
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
