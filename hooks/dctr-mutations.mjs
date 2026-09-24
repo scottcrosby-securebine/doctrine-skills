@@ -57,8 +57,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  project 0.61s, restore 0.74s, bridge 0.90s, seat 1.33s, gauge 2.18s, typer 4.92s, cycle 5.62s, gate 7.05s.
  *  Re-measured after the e8-autocycle round-1 repair, one host: typer 5.58s, cycle 6.93s, gate 6.98s; order unchanged.
  *  Re-measured after the cycle suite gained its pause-model enumeration, one host: gate 7.1s, typer 10.3s, pane 12.3s,
- *  cycle 13.0s, teardown 21.0s; gate moved ahead of typer, and pane ahead of cycle. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-seat.teardown.selftest.mjs']
+ *  cycle 13.0s, teardown 21.0s; gate moved ahead of typer, and pane ahead of cycle.
+ *  Re-measured after the cycle suite gained its hook-event enumeration, one host: gate 7.0s, pane 12.4s, typer 13.5s,
+ *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
