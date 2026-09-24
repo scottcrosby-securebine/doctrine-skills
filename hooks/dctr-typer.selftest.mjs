@@ -313,8 +313,11 @@ const fail = typerCase('lookup-fails', { fail: true })
 clause('clause 2k — the herdr lookup fails: nothing sent, paused with R17 in its fixed phrase', sends(fail) === '0,0' &&
   JSON.stringify(fail.paused) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]', detail(fail))
 const contained = typerCase('contained', {}, { extraEnv: { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'bridge') } })
-clause('clause 2l — DCTR_VIEW_REQUEST_DIR set: no herdr call at all, no claim, no line', contained.calls.length === 0 &&
-  !fs.existsSync(claimFile(contained.session)) && contained.paused.length === 0 && contained.cycled.length === 0, detail(contained))
+// The claim a launch would reserve is keyed by the fixture's key line (5, typerCase's keyLine); none under any key.
+const containedClaims = () => fs.readdirSync(autoCycleDir()).filter((n) => n.startsWith(`${contained.session}.`) && n.endsWith('.claim'))
+clause('clause 2l — DCTR_VIEW_REQUEST_DIR set: no herdr call at all, no claim under the launch\'s key or any other, no line (RB9-2)', contained.calls.length === 0 &&
+  !fs.existsSync(claimFile(contained.session, 5)) && containedClaims().length === 0 && contained.paused.length === 0 && contained.cycled.length === 0,
+  `${detail(contained)} claims ${JSON.stringify(containedClaims())}`)
 const noRestore = typerCase('no-restore', { onClear: 'none' })
 clause('clause 2m — no restore file: /clear once, no resume, the cycle line, then paused with R14',
   sends(noRestore) === '1,0' && noRestore.cycled.length === 1 &&
@@ -368,9 +371,11 @@ clause('clause 3b — without the typer: the stale restore file really carries t
 clause('clause 3c2 — without the typer: the RB4-1 fixtures hold the stop file and end their records with an off line and an Exited state line',
   [stopOff, stopExited].every((c) => fs.existsSync(path.join(c.proj, '.doctrine/auto-cycle.stop'))) &&
   parseRecord(fs.readFileSync(stopOff.record, 'utf8')).entries.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1)?.sub === 'off' && stopExited.state === '- State: Exited.', `${stopExited.state}`)
-clause('clause 3c3 — without the typer: the takeover transcript holds /clear\'s entries then a user prompt and a reply, the clear-only one begins with /clear\'s entries, and the unreadable one does not exist',
+clause('clause 3c3 — without the typer: the takeover transcript holds /clear\'s entries then a user prompt and a reply; in the clear-only one the first non-meta user entry is /clear\'s command and the only other is the typer\'s resume command; the unreadable one does not exist',
   fs.readFileSync(takeover.newTranscript, 'utf8').trim().split('\n').slice(0, 5).map((l) => JSON.parse(l).type).join(',') === 'user,user,system,user,assistant' &&
-  fs.readFileSync(clearOnly.newTranscript, 'utf8').trim().split('\n').slice(0, 3).map((l) => JSON.parse(l).type).join(',') === 'user,user,system' &&
+  (() => { const users = fs.readFileSync(clearOnly.newTranscript, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'user' && !e.isMeta).map((e) => e.message.content)
+    return users.length === 2 && users[0].startsWith('<command-name>/clear</command-name>') &&
+      users[1] === '<command-message>doctrine:doctrine-resume</command-message>\n<command-name>/doctrine:doctrine-resume</command-name>\n<command-args>(typed by doctrine auto-cycle, not a ruling)</command-args>' })() &&
   !fs.existsSync(path.join(tmp, 'no-such-dir', 'new.jsonl')), fs.readFileSync(takeover.newTranscript, 'utf8'))
 const lines = (file) => fs.readFileSync(file, 'utf8').split('\n')
 clause('clause 3c4 — without the typer: the partial-new transcript holds the user entry half-written after /clear\'s entries, which parses only once the shim completes it on its fourth read; the damaged one holds a line that does not parse before a well-formed last line; the partial-old one ends past the Stop\'s length in text that does not parse',
