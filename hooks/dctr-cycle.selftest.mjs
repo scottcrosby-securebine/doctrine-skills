@@ -23,7 +23,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -68,8 +68,8 @@ const TABLE = [
 const tableBad = TABLE.filter(([c, arg, reason, action]) => pauseReason(c, arg) !== reason || pauseAction(reason) !== action)
 clause('clause 1c — every pause reason R1 to R17 reads verbatim as the D2 table has it, and each reason maps back to its action',
   tableBad.length === 0 && Object.keys(PAUSES).length === 17, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
-clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; the skills\' own pauses ask for an answer in the pane, the question, which never resolves, then for a /clear and a typed resume (S4-1)',
-  TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane, then /clear and type resume' &&
+clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; from its text alone, each of the skills\' own pauses asks for an answer in the pane (its place decides more, clause 1t)',
+  TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane' &&
   pauseAction('first action ambiguous: two phases') === 'answer in the pane' &&
   pauseMessage('session idle, waiting for you') === 'doctrine auto-cycle paused: session idle, waiting for you. reply in the pane' &&
   pausedToken('x'.repeat(60)) === `auto-cycle paused·${'x'.repeat(40)}`, 'a string leaked a banned word or the forms are wrong')
@@ -439,8 +439,8 @@ clause('clause 2c5 — a second alarm of the same kind after a ruled one, and a 
 const hidden = [['R10', '- auto-cycle paused: could not cycle: handoff not written'], ['R7', '- auto-cycle paused: waiting for your permission approval'], ['question', '- auto-cycle paused: question: which way?']]
   .map(([n, line]) => { const f = fixture(`ready-after-${n}`, { lines: [line, RDY] }); return { n, line, f, r: run(f, {}, { HERDR_PANE_ID: `w9:pready${n}` }) } })
 clause('clause 2c8 — R10, R7 or the skills\' question pause followed by the ready line: step 3 decides none, the pane message prints, the toast is raised and the token reads paused (RB2-3)',
-  hidden.every(({ f, r, line }) => !launched(r) && paused(f).length === 1 && toasts(f).length === 1 &&
-    r.msg === pauseMessage(line.slice('- auto-cycle paused: '.length)) && metas(f).at(-1)?.[6] === `autocycle=${pausedToken(line.slice('- auto-cycle paused: '.length))}`),
+  hidden.every(({ n, f, r, line }) => !launched(r) && paused(f).length === 1 && toasts(f).length === 1 &&
+    r.msg === pauseMessage(line.slice('- auto-cycle paused: '.length), n === 'question' ? 'answer in the pane, then /clear and type resume' : undefined) && metas(f).at(-1)?.[6] === `autocycle=${pausedToken(line.slice('- auto-cycle paused: '.length))}`),
   hidden.map(({ f, r }) => show(f, r)).join(' || '))
 // RB3-2: an on line and a recorded session start are anchors too, so a manual /clear and resume, or R5's own new on
 // line, leaves the old pauses behind.
@@ -462,8 +462,9 @@ clause('clause 1q2 — standingPauses anchors on the latest warned, cycle or on 
 //   b. for each candidate the same as a pause in S, the dedup refuses it, and R8 while S holds any pause (E8-R28);
 //   c. on a record whose last on/off line is off or whose last state line is not Open or Blocked, the typer, the one
 //      writer that runs past the hooks' stand-downs, never pauses at any stage, a stop file present (RB4-1);
-//   d. the consumers agree on S: the token reads paused iff S is non-empty and then names S's last line, and step 3
-//      (pausedAfterWarned) refuses whenever a pause in S follows this session's warned line. The alerts read S with
+//   d. the consumers agree on S: the token reads paused iff S is non-empty and then names S's last line, step 3
+//      (pausedAfterWarned) refuses whenever a pause in S follows this session's warned line, and a skills' question
+//      in S asks for a /clear exactly when it stands after this session's warned line (RB5-1). The alerts read S with
 //      the same session start, which clause 1s pins, so each line in S is alerted and shown once, by its marker.
 // "The same pause" is decided here from each line's own tag, never by samePause: the same PAUSES code (two R9 lines
 // with different error text, two R4 lines for different ids), or the same text for the skills' question.
@@ -474,7 +475,8 @@ const ENUM_LINES = [
   ['R1', '- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in /w/p'], ['R2', '- auto-cycle paused: phase Blocked: State: Blocked. waits'],
   ['R4', '- auto-cycle paused: open question Q5: which?'], ['R7', '- auto-cycle paused: waiting for your permission approval'],
   ['R9', '- auto-cycle paused: Claude API error: overloaded'], ['R14', '- auto-cycle paused: cleared, but the new session did not start doctrine'],
-  ['q:which way?', '- auto-cycle paused: question: which way?'],
+  ['q:which way?', '- auto-cycle paused: question: which way?'], ['R3', '- auto-cycle paused: round alarm fired, ruling needed'],
+  ['alarm', '- alarm: round fired 2026-09-24T01:00:00Z count 4'],
   ['open', '- State: Open'], ['blocked', '- State: Blocked. waits'], ['exited', '- State: Exited.'],
   ['ruling', '- ruling: R9 2026-09-24T02:00:00Z go'], ['answered', '- question: Q5 answered 2026-09-24T02:00:00Z this'],
 ]
@@ -482,6 +484,7 @@ const ENUM_CANDS = [
   ['R1', 'stopped by .doctrine/auto-cycle.stop in /w/q'], ['R2', 'phase Blocked: State: Blocked. other'], ['R4', 'open question Q6: and?'],
   ['R7', 'waiting for your permission approval'], ['R8', 'session idle, waiting for you'], ['R9', 'Claude API error: rate_limit'],
   ['R14', 'cleared, but the new session did not start doctrine'], ['q:which way?', 'question: which way?'], ['q:other?', 'question: other?'],
+  ['R3', 'time alarm fired, ruling needed'],
 ]
 const enumParsed = new Map(ENUM_CANDS.map(([, r]) => [r, rec(`- auto-cycle paused: ${r}`)[0]]))
 const tagOf = new Map(ENUM_LINES.map(([t, l]) => [l.replace(/^- auto-cycle paused: /, ''), t]))
@@ -495,7 +498,7 @@ for (let len = 1; len <= ENUM_LEN; len++) {
     const seq = []; for (let x = k, j = 0; j < len; j++, x = Math.floor(x / ENUM_LINES.length)) seq.push(x % ENUM_LINES.length)
     const lines = [...ENUM_HEAD, ...seq.map((i) => ENUM_LINES[i][1])]
     const es = rec(...lines)
-    for (const start of [0, 3, 4].filter((s) => s <= lines.length)) {
+    for (const start of [0, 4].filter((s) => s <= lines.length)) {
       enumCount++
       const S = standingPauses(es, start), tags = S.map((p) => tagOf.get(p.reason))
       for (const [tag, reason] of ENUM_CANDS) {
@@ -515,12 +518,19 @@ for (let len = 1; len <= ENUM_LEN; len++) {
       }
       const token = autocycleToken(es, start)
       if (S.length ? token !== pausedToken(S.at(-1).reason) : !token.startsWith('auto-cycle on·')) enumNote('d', seq, start, `token ${token} with ${tags.join(', ') || 'nothing'} standing`)
+      // RB5-1: a question standing after this session's warned line, with no cycle, on line or session start between,
+      // asks for the /clear; any other asks only for an answer.
+      for (const p of S.filter((x) => /^question: /.test(x.reason))) {
+        const w = es.filter((e) => e.sub === 'warned' && e.line < p.line).at(-1)
+        const held = Boolean(w) && w.line > start && !es.some((e) => (e.sub === 'cycle' || e.sub === 'on') && e.line > w.line && e.line < p.line)
+        if (pauseActionAt(p, es, start).includes('/clear') !== held) enumNote('d', seq, start, `question at line ${p.line} action ${pauseActionAt(p, es, start)}`)
+      }
       const mine = es.filter((e) => e.sub === 'warned' && e.session === 's1').at(-1)
       if (mine && S.some((p) => p.line > mine.line) && !pausedAfterWarned(es, 's1')) enumNote('d', seq, start, `step 3 goes on with ${tags.join(', ')} standing after the warned line`)
     }
   }
 }
-clause(`clause 1r — the pause model enumerated over every sequence of up to ${ENUM_LEN} lines (${enumCount} cases): a different pause is written and stands, the same pause is not, the idle pause only when none stands, the typer never pauses an off or closed record, and the token and step 3 agree with the standing set (E8-R25, E8-R27, E8-R28, RB4-1, RB4-2)`,
+clause(`clause 1r — the pause model enumerated over every sequence of up to ${ENUM_LEN} lines (${enumCount} cases): a different pause is written and stands, the same pause is not, the idle pause only when none stands, the typer never pauses an off or closed record, and the token, step 3 and the question's action agree with the standing set (E8-R25, E8-R27, E8-R28, RB4-1, RB4-2, RB5-1)`,
   enumCount > 0 && Object.values(enumBad).every((v) => v.length === 0), JSON.stringify(enumBad))
 // E8-R28: an idle_prompt writes nothing while any paused line stands, whatever pause it names, and R8 behind none.
 // F1: the alerts read the standing set with the recorded session start, so a pause from before a /clear is neither
@@ -535,6 +545,17 @@ clause('clause 1s — alertPaused reads the recorded session start: a pause from
   f1Alert === false && f1Alert2 === true, JSON.stringify([f1Alert, f1Alert2]))
 clause('clause 1s2 — pauseMessageOnce reads the recorded session start: a pause from before it is not shown, the new session\'s own pause is shown alone (F1)',
   f1Shown === null && f1Shown2 === 'doctrine auto-cycle paused: waiting for your permission approval. approve or deny in the pane', JSON.stringify([f1Shown, f1Shown2]))
+// RB5-1: the skills' question asks for a /clear only where it holds step 3, after this session's warned line.
+const QP = '- auto-cycle paused: question: Memory is stale — resync it?'
+const qAct = (start, ...ls) => { const es = rec(...ls); return pauseActionAt(es.filter((e) => e.sub === 'paused').at(-1), es, start) }
+const CLR = 'answer in the pane, then /clear and type resume'
+clause('clause 1t — pauseActionAt: a question after the warned line asks for the /clear; before any warning, after a cycle line or after a recorded session start it asks only for an answer; a table reason keeps its D2 action (RB5-1)',
+  qAct(0, '- auto-cycle: on cap 10 tier 60%', '- auto-cycle: warned s 60%', QP) === CLR && qAct(0, '- auto-cycle: on cap 10 tier 60%', QP) === 'answer in the pane' &&
+  qAct(0, '- auto-cycle: warned s 60%', '- auto-cycle: cycle 1 tree aa', QP) === 'answer in the pane' && qAct(2, '- auto-cycle: on cap 10 tier 60%', '- auto-cycle: warned s 60%', QP) === 'answer in the pane' &&
+  qAct(0, '- auto-cycle: warned s 60%', '- auto-cycle paused: cycle cap 10 reached') === PAUSES.R5.action, 'wrong')
+clause('clause 1u — step 3 reads this session\'s own warned line: behind another session\'s later warned line a pause still holds it, and the later session is not held by it (E8-D7, DS-1)',
+  pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sA') === true &&
+  pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sB') === false, 'another session\'s warned line was read')
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
 const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')
@@ -561,6 +582,14 @@ clause('clause 2c12 — a typer pause standing in the new session does not swall
   JSON.stringify(paused(rb2)) === JSON.stringify(['- auto-cycle paused: resume typed twice, no reply from the new session', '- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: Claude API error: overloaded']) &&
   toasts(rb2).length === 3 && rb2Perm.msg.includes('waiting for your permission approval. approve or deny in the pane') && rb2Fail.msg === 'doctrine auto-cycle paused: Claude API error: overloaded. retry in the pane' &&
   metas(rb2).at(-1)?.[6] === `autocycle=${pausedToken('Claude API error: overloaded')}`, `${show(rb2, rb2Perm)} || ${show(rb2, rb2Fail)}`)
+// RB5-1 end to end: a freshly cycled session asks doctrine-resume's drift question before its own warning.
+const qpre = fixture('qpre-pre-warning', { lines: [RDY, '- auto-cycle: cycle 1 tree abc'] })
+state.writeSessionStart(qpre.record)
+fs.appendFileSync(qpre.record, `${QP}\n`)
+const q1R = run(qpre, { session_id: 's-qpre-new', last_assistant_message: 'Memory is stale — resync it?' }, { HERDR_PANE_ID: 'w9:pq1' })
+clause('clause 2c13 — a question a new session asks before its warning: the pane message and the toast ask only for an answer (RB5-1)',
+  q1R.msg === 'doctrine auto-cycle paused: question: Memory is stale — resync it?. answer in the pane' && toasts(qpre).length === 1 &&
+  toasts(qpre)[0][4] === 'question: Memory is stale — resync it?. answer in the pane', show(qpre, q1R))
 const r5 = fixture('r5-new-on-line', { lines: [R5P, '- auto-cycle: on cap 20 tier 60%'] })
 const r5R = run(r5, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pr5' })
 clause('clause 2c11 — R5 followed by the new on line its action asks for no longer stands: the token reads the cycle count of the new cap, and nothing is shown (RB3-2)',
@@ -761,6 +790,21 @@ clause('clause 3a9 — without the model: the enumeration\'s RB4-1 record ends s
   e3.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1).sub === 'off' &&
   e4.filter((e) => e.kind === 'auto-cycle').at(-1).reason === 'cleared, but the new session did not start doctrine' && e4.at(-1).line === 5 && e4.find((e) => e.sub === 'cycle').line === 4 &&
   'waiting for your permission approval' !== e4.at(-1).reason, JSON.stringify([e3, e4]))
+const f1Es = parseRecord(fs.readFileSync(f1, 'utf8')).entries, f1Start = JSON.parse(fs.readFileSync(state.sessionStartFile(f1), 'utf8'))
+clause('clause 3a10 — without the helpers: the F1 record\'s R10 sits at or before its recorded session start and its R7 after it, both after the warned line',
+  f1Es.find((e) => e.reason === 'could not cycle: handoff not written').line <= f1Start && f1Es.find((e) => e.reason === 'waiting for your permission approval').line > f1Start &&
+  f1Es.find((e) => e.sub === 'warned').line < f1Es.find((e) => e.sub === 'paused').line, `start ${f1Start} ${JSON.stringify(f1Es)}`)
+clause('clause 3a11 — without the hook: each idle-behind fixture holds its own paused line, after the warned line, and a Stop facts file saying no background task and no ready line',
+  idleBehind.every(({ n, f }) => {
+    const es = parseRecord(fs.readFileSync(f.record, 'utf8')).entries, p = es.filter((e) => e.sub === 'paused')
+    const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
+    return p.length >= 1 && p[0].line > es.find((e) => e.sub === 'warned').line && facts.backgroundEmpty === true && facts.ready === false &&
+      ({ R7: /^waiting for your/, R2: /^phase Blocked/, R3: /^time alarm/, R4: /^open question Q5/, question: /^question: / })[n].test(p[0].reason)
+  }), 'idle-behind fixtures wrong')
+clause('clause 3a12 — without the hook: the pre-warning question sits after the cycle line and after the recorded session start, with no warned line after it',
+  (() => { const es = parseRecord(fs.readFileSync(qpre.record, 'utf8')).entries, qp = es.find((e) => /^question: /.test(e.reason || ''))
+    return qp.line > JSON.parse(fs.readFileSync(state.sessionStartFile(qpre.record), 'utf8')) && qp.line > es.find((e) => e.sub === 'cycle').line && !es.some((e) => e.sub === 'warned' && e.line > qp.line) })(),
+  fs.readFileSync(qpre.record, 'utf8'))
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
