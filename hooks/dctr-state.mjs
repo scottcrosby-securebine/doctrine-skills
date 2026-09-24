@@ -502,7 +502,7 @@ export function readMeta(file, retryMs = 200) {
 
 /** Where auto-cycle's working files live (B0): beside dctr-panes and dctr-gates, never under dctr-<session>/,
  *  which SessionEnd empties (F8). The claims, the restore files, the alerted markers, the token values last
- *  published and the persisted Stop facts all sit here. Created on first use, so no caller makes it. */
+ *  published, the persisted Stop facts and each session's turn end all sit here. Created on first use, so no caller makes it. */
 export const autoCycleDir = () => {
   const dir = path.join(tmpRoot(), `${PREFIX}-autocycle`)
   fs.mkdirSync(dir, { recursive: true })
@@ -530,12 +530,21 @@ export function writeSessionStart(recordPath) {
   writeMarker(sessionStartFile(recordPath), recordLineCount(recordPath))
 }
 
-/** The record's line count at this session's latest Stop, from its Stop facts (E8-R29), or 0 when no Stop is known:
- *  a missing or unreadable facts file, or one written for another record (a kickoff that switched records, RB6-2),
- *  never frees a line from the dedup. */
-export function stopLine(sessionId, recordPath) {
+/** Where the session's latest turn end is kept: the record's path and line count when it ended (E8-R29, E8-R31). */
+export const turnEndFile = (sessionId) => path.join(autoCycleDir(), `turn-end-${sessionId}.json`)
+
+/** Record that this session's turn ended now, at a Stop, a StopFailure, or the next submitted prompt (E8-R31): the
+ *  record's path and line count, taken before the event writes any line. The one writer of the turn end. */
+export function writeTurnEnd(sessionId, recordPath) {
+  writeMarker(turnEndFile(sessionId), { record: path.resolve(recordPath), line: recordLineCount(recordPath) })
+}
+
+/** The record's line count at this session's latest turn end (E8-R29, E8-R31), or 0 when none is known: a missing or
+ *  unreadable turn end, or one written for another record (a kickoff that switched records, RB6-2), never frees a
+ *  line from the dedup. */
+export function turnEndLine(sessionId, recordPath) {
   try {
-    const f = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8'))
+    const f = JSON.parse(fs.readFileSync(turnEndFile(sessionId), 'utf8'))
     return f.record === path.resolve(recordPath) && Number.isInteger(f.line) ? f.line : 0
   } catch { return 0 }
 }
@@ -575,10 +584,10 @@ export function appendRecordLine(recordPath, line) {
 
 /** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause, or,
  *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
- *  R7, R8 or R9 line from before that session's latest Stop does not count (E8-R29); the typer passes none, so its
+ *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31); the typer passes none, so its
  *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
 export function appendPaused(recordPath, reason, sessionId = null) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? stopLine(sessionId, recordPath) : 0)) return { written: false }
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }

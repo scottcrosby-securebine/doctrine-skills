@@ -792,13 +792,15 @@ const nb = fixture('no-turn-end'), nbPane = { HERDR_PANE_ID: 'w9:pnb' }
 run(nb, perm, nbPane); run(nb, perm, nbPane)
 const upsOff = fixture('ups-off', { lines: ['- auto-cycle: off'] }), upsOffR = run(upsOff, ups)
 const upsSub = fixture('ups-subagent'), upsSubR = run(upsSub, { ...ups, agent_id: 'a1' })
+const upsQuiet = fixture('ups-quiet', { lines: ['- auto-cycle paused: resume typed twice, no reply from the new session'] }), upsQuietR = run(upsQuiet, ups, { HERDR_PANE_ID: 'w9:pupsq' })
 clause('clause 2c15 — a turn ended by a StopFailure or a submitted prompt: a repeat API error and a repeat permission prompt are written and toasted; with no turn end between, refused; UserPromptSubmit writes and prints nothing, keeps the Stop facts, and stands down when off or for a subagent (E8-R31, DP6-B1)',
   JSON.stringify(paused(sf)) === JSON.stringify(['- auto-cycle paused: Claude API error: overloaded', '- auto-cycle paused: Claude API error: overloaded']) && toasts(sf).length === 2 &&
   JSON.stringify(paused(it)) === JSON.stringify([R7P, R7P]) && toasts(it).length === 2 && itUps.out === '' && itUps.code === 0 &&
   itFacts.backgroundEmpty === true && itFacts.cronsEmpty === true && itFacts.ready === false &&
   paused(nb).length === 1 && toasts(nb).length === 1 &&
   upsOffR.out === '' && !fs.existsSync(state.turnEndFile(upsOff.session)) && calls(upsOff).length === 0 &&
-  upsSubR.out === '' && !fs.existsSync(state.turnEndFile(upsSub.session)) && calls(upsSub).length === 0,
+  upsSubR.out === '' && !fs.existsSync(state.turnEndFile(upsSub.session)) && calls(upsSub).length === 0 &&
+  upsQuietR.out === '' && calls(upsQuiet).length === 0 && fs.existsSync(state.turnEndFile(upsQuiet.session)),
   `${show(sf, { code: 0, msg: '', err: '' })} || ${show(it, itUps)} || ${JSON.stringify(itFacts)} || ${JSON.stringify(paused(nb))} || ${upsOffR.out}|${upsSubR.out}`)
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
@@ -890,6 +892,11 @@ clause('clause 3a14 — without the hook: the live-work fixtures carry their con
   liveBehind.every(({ n, f }) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
     return facts.ready === false && (n === 'background task' ? facts.backgroundEmpty === false : n === 'session cron' ? facts.backgroundEmpty === true : fs.readdirSync(seatsDir(f.session)).length === 1) }),
   JSON.stringify(liveBehind.map(({ f }) => fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
+clause('clause 3a15 — without the hook: the StopFailure fixture had no Stop (no Stop facts), the prompt fixture\'s Stop facts were written by this suite before any event, the off fixture ends switched off, and the quiet fixture\'s typer pause stands after its warned line',
+  !fs.existsSync(stopFactsFile(sf.session)) && JSON.stringify(Object.keys(itFacts)) === '["backgroundEmpty","cronsEmpty","ready"]' &&
+  parseRecord(fs.readFileSync(upsOff.record, 'utf8')).entries.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1).sub === 'off' &&
+  (() => { const es = parseRecord(fs.readFileSync(upsQuiet.record, 'utf8')).entries; return es.find((e) => e.sub === 'paused').line > es.find((e) => e.sub === 'warned').line })(),
+  'turn-end fixtures wrong')
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&

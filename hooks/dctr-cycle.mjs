@@ -1,6 +1,6 @@
 // doctrine — the auto-cycle hook (E8-D7, E8-D16, E8-D17, E8-D18, E8-D26).
 //
-// Stop, Notification (matcher permission_prompt|idle_prompt) and StopFailure in hooks.json, one script. It stands
+// Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit in hooks.json, one script. It stands
 // down in its first lines unless the record the kickoff chain reaches (SESSION_MEMORY.md's kickoff, the handoff's
 // `record:` line, the record: the chain the restore hook and the gauge follow) is Open or Blocked and its last
 // auto-cycle on/off line is on. The stop file `.doctrine/auto-cycle.stop`, in the session's repo or the record's,
@@ -10,9 +10,10 @@
 // ordinary turn, or live work, writes nothing; a stall, the cap or no progress writes one paused line; otherwise
 // it hashes the tree and spawns the typer (dctr-typer.mjs) detached, which types /clear and the resume line once
 // the user moves focus off the pane. On Notification and StopFailure, while auto-cycle is active, it pauses on a
-// permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision); each Stop records the
-// record's line count in its Stop facts, so a second prompt or error of a kind already paused is written only after
-// the session's next Stop (pauseStands, E8-R29).
+// permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision). A Stop, a StopFailure
+// and a UserPromptSubmit each record the record's line count as the session's turn end (writeTurnEnd), so a second
+// prompt, idle stop or error of a kind already paused is written once a turn has ended since (pauseStands, E8-R29,
+// E8-R31); UserPromptSubmit does only that.
 //
 // On every event past the stand-down it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
 // pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
@@ -31,10 +32,10 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, recordLineCount, publishToken, liveWork, treeHash, handoffLanded,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
-const EVENTS = ['Stop', 'Notification', 'StopFailure']
+const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
 let sessionId = null, event = 'Stop'
 const stand_down = (why) => standDown(event, 'auto-cycle', () => sessionId)(why)
 
@@ -45,7 +46,7 @@ try {
   let payload
   try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}') } catch { stand_down('hook payload was not readable JSON') }
   event = payload.hook_event_name || 'none'
-  if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification or StopFailure event (${event})`)
+  if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
   sessionId = payload.session_id || null
   if (!sessionId) stand_down('no session_id in the payload')
@@ -71,13 +72,17 @@ try {
     log(written ? `paused: ${reason}` : `pause not written, a standing paused line refuses it (the same pause, or any for an idle prompt): ${reason}`)
   }
 
+  // E8-R31: a Stop, a StopFailure and a submitted prompt each end a turn; record where, before this event writes any
+  // line, so an R7, R8 or R9 the ended turn answered no longer holds back the dedup. A submitted prompt does nothing
+  // else: it writes no paused line, raises no alert and prints nothing, since its output would reach the model.
+  if (event !== 'Notification') writeTurnEnd(sessionId, recordPath)
+  if (event === 'UserPromptSubmit') { log('turn end recorded'); process.exit(0) }
+
   if (event === 'Stop') {
-    // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down: the
-    // payload's two live-work lists (RB6-3) and its ready line; and the record's path and line count before this Stop
-    // writes any line, the dedup's latest Stop for that record (E8-R29, RB6-2).
+    // S4: what an idle_prompt later needs to know about this Stop, persisted by Stop alone, so a StopFailure or a
+    // submitted prompt never replaces them with unknowns: the payload's two live-work lists (RB6-3) and its ready line.
     writeMarker(stopFactsFile(sessionId), {
       backgroundEmpty: !nonEmpty(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
-      record: path.resolve(recordPath), line: recordLineCount(recordPath),
     })
 
     const keyLine = claimKey(record.entries)

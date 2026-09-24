@@ -977,12 +977,13 @@ const EVENT_PAUSES = ['R7', 'R8', 'R9']
 
 /** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
  *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for
- *  that reason; any other pause that differs from every standing one is written. `stopLine` is the record's line count
- *  at this session's latest Stop, 0 when none is known: an R7, R8 or R9 line at or before it was answered by the turn
- *  that Stop ended, so it counts for neither rule, and a second prompt, idle stop or error is written. Every other
+ *  that reason; any other pause that differs from every standing one is written. `turnEnd` is the record's line count
+ *  at this session's latest turn end (a Stop, a StopFailure or the next submitted prompt, E8-R31), 0 when none is
+ *  known: an R7, R8 or R9 line at or before it was answered by the turn that ended there, so it counts for neither
+ *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Every other
  *  pause counts whatever the Stop, and step 3, the token and the alerts read standingPauses unchanged. */
-export const pauseStands = (entries, startLine, reason, stopLine = 0) => {
-  const standing = standingPauses(entries, startLine).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= stopLine))
+export const pauseStands = (entries, startLine, reason, turnEnd = 0) => {
+  const standing = standingPauses(entries, startLine).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))
   return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
 }
 
@@ -1261,8 +1262,9 @@ export function typerStep(o) {
  * `StopFailure` or the notification type. idle_prompt pauses only when no live claim is held for this pane,
  * nothing is live, and the last Stop's persisted facts say its background tasks and its session crons were empty
  * (E8-D7's live-work test, E8-R22) and its message did not end with the ready line; a missing record of the last
- * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then
- * written only while no paused line stands, which the dedup decides (pauseStands, E8-R28).
+ * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then written only while no paused
+ * line stands but a permission prompt, idle stop or API error the session has ended a turn since, which the dedup
+ * decides (pauseStands, E8-R28, E8-R30).
  */
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown')
