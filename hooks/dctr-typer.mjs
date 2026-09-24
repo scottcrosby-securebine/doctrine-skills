@@ -21,8 +21,11 @@
 //     pane's restore file, sends /clear once, and only then appends `auto-cycle: cycle <n> tree <hash>` (LN12: the
 //     line records a sent /clear, never an intended one).
 //   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
-//     to report that id within 30 s, and sends the resume line once.
-//   - It confirms the first turn from the new transcript within 2 minutes, resends once, then pauses.
+//     to report that id within 30 s, and sends the resume line once, only while the new session's transcript holds
+//     no entry the user typed (userTyped: /clear's own entries and the resume line are not typing); typing pauses
+//     with R16, and a transcript still unreadable when the 30 s end pauses with R17, never sends (DP-1).
+//   - It confirms the first turn from the new transcript within 2 minutes, resends once, then pauses; typing into
+//     the new session before the first turn pauses with R16, and an unreadable transcript with R17.
 //
 // Every wait is counted in polls, never read off the wall clock (RB2-4): each wait adds one poll interval to the
 // typer's clock, so a loaded host stretches a wait in real time and never shortens it in polls. Every pause appends
@@ -32,7 +35,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, typedAfter, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
+import { typerStep, typedAfter, userTyped, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
@@ -113,10 +116,13 @@ try {
     if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
+    // The new session's transcript, read once per poll after the /clear: typing into it (DP-1) and its first turn.
+    const fresh = stage !== 'clear' && restore ? entriesFrom(restore.transcript) : null
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
       grew: stage === 'clear' ? ((es) => (es === null ? null : es.some((e) => typedAfter(e, a.stopAt))))(entriesFrom(a.transcript, a.length)) : false,
-      firstTurn: stage === 'confirm' && (entriesFrom(restore.transcript) || []).some((e) => e?.type === 'assistant'),
+      typedNew: fresh === null ? null : fresh.some(userTyped),
+      firstTurn: stage === 'confirm' && Boolean(fresh?.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }

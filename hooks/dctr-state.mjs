@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, autocycleToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -597,7 +597,7 @@ export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} })
   if (paneId) {
     publishToken(paneId, autocycleToken(entries, start), log)
     for (const p of fresh) {
-      try { herdr(pauseToastArgs(repo, phase, p.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
+      try { herdr(pauseToastArgs(repo, phase, p.reason, pauseActionAt(p, entries, start))) } // herdr-lint: display only; the paused line and the pane message stand without it
       catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
     }
   }
@@ -612,9 +612,9 @@ export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} })
  * there is nothing to print.
  */
 export function pauseMessageOnce(recordPath) {
-  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))
-  const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
-  return fresh.length ? fresh.map((p) => pauseMessage(p.reason)).join('\n') : null
+  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
+  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
+  return fresh.length ? fresh.map((p) => pauseMessage(p.reason, pauseActionAt(p, entries, start))).join('\n') : null
 }
 
 /** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,

@@ -24,7 +24,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -74,7 +74,7 @@ try {
     writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
 
     const keyLine = claimKey(record.entries)
-    const warned = record.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId)
+    const warned = Boolean(sessionWarned(record.entries, sessionId))
     let hash = null
     const decision = cycleDecision({
       sessionId,
