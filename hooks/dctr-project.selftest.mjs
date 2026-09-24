@@ -815,6 +815,11 @@ const writeTree = (root, files) => { for (const [rel, body] of Object.entries(fi
 const good = path.join(tmp, 'good'); writeTree(good, GOOD)
 writeTree(good, { 'docs/records/p3.md': 'state: Blocked\nnotes\nstate: Open\n', 'docs/records/p1.md': 'state: Open\nstate: Shipped\n', 'docs/records/gate1.out': 'x', 'docs/records/gate2.out': 'y', 'docs/records/gate2.out.result': 'exit=0\n' })
 const rGood = cli('check', good)
+// ORC7-1: run through a symlinked hooks directory, the CLI still dispatches: with no arguments it prints its usage.
+const projLink = path.join(tmp, 'linked-hooks'); fs.symlinkSync(import.meta.dirname, projLink)
+const rLink = spawnSync('node', [path.join(projLink, 'dctr-project.mjs')], { env, encoding: 'utf8' })
+clause('CLI via a symlink — through a symlinked hooks directory the CLI dispatches: no arguments print its usage and exit 2 (ORC7-1)',
+  fs.lstatSync(projLink).isSymbolicLink() && rLink.status === 2 && rLink.stderr.includes('usage: node dctr-project.mjs check|status'), `status ${rLink.status}: ${rLink.stderr}`)
 clause('CLI check — the good tree exits 0 and prints nothing on stdout', rGood.status === 0 && rGood.stdout.trim() === '', `status ${rGood.status}: ${rGood.stdout}${rGood.stderr}`)
 
 const broken = path.join(tmp, 'broken'); writeTree(broken, mutate([[P, 'Current epic: E3', 'Current epic: E9']]))

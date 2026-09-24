@@ -11,7 +11,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { seatPlacement, SIDE_CAP, isSideSeat } from './dctr-lib.mjs'
 import { acquireLock, breakIfOrphaned, breakStaleLock, interactivePanes, isPaneNotFound, liveSeatsPartial, panesDir, publishPid, releaseLock, reserveMarker, seatsDir, sideOccupants, writeMarker } from './dctr-state.mjs'
@@ -746,6 +746,15 @@ console.log('isPaneNotFound is an ANSWER, read exactly, not a string found anywh
   check('the same code nested under another error is NOT', !isPaneNotFound({ stderr: '{"error":{"code":"transport_error","cause":{"code":"pane_not_found"}}}' }))
   check('the string echoed in a command line is NOT', !isPaneNotFound({ message: 'Command failed: herdr pane get pane_not_found' }))
   check('an empty failure is NOT', !isPaneNotFound({}))
+}
+
+console.log('run through a symlinked hooks directory, the launcher still dispatches (ORC7-1)')
+{
+  // Node resolves symlinks in the main module's URL; a guard comparing the unresolved argv path to it dispatched nothing.
+  const linkDir = path.join(tmp, 'linked-hooks'); fs.symlinkSync(HERE, linkDir)
+  const r = spawnSync('node', [path.join(linkDir, 'dctr-pane.mjs')], { encoding: 'utf8', timeout: 30000 })
+  check('the fixture link is a symlink to this suite\'s hooks directory', fs.lstatSync(linkDir).isSymbolicLink() && fs.realpathSync(linkDir) === fs.realpathSync(HERE))
+  check('no arguments through the link print the usage and exit 1', r.status === 1 && r.stderr.includes('usage: dctr-pane.mjs open'), `status ${r.status}: ${r.stderr}`)
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

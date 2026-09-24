@@ -918,6 +918,12 @@ const sfIdle = fixture('stopfailure-then-idle'), sfIdlePane = { HERDR_PANE_ID: '
 run(sfIdle, { last_assistant_message: 'working' }, sfIdlePane); run(sfIdle, fail, sfIdlePane); note(sfIdle, 'idle_prompt', {}, sfIdlePane)
 clause('clause 2c16 — a StopFailure then an idle_prompt in the same turn: the R9 is written and the idle stop writes no R8 behind it (E8-R28, E8-R31, RB7-3)',
   JSON.stringify(paused(sfIdle)) === '["- auto-cycle paused: Claude API error: overloaded"]', show(sfIdle, { code: 0, msg: '', err: '' }))
+// ORC7-1: the hook runs when its tree is reached through a symlink (a symlinked config or plugin dir): Node resolves
+// symlinks in the main module's URL, so an entry guard comparing unresolved paths would drop every event silently.
+const linkHooks = path.join(tmp, 'linked-hooks'); fs.symlinkSync(import.meta.dirname, linkHooks)
+const viaLink = spawnSync('node', [path.join(linkHooks, 'dctr-cycle.mjs')], { input: JSON.stringify({ hook_event_name: 'Bogus', session_id: 's-link' }), env: baseEnv, encoding: 'utf8' })
+clause('clause 2s — run through a symlinked hooks directory, the hook still runs: a bogus event prints its stand-down line (ORC7-1)',
+  viaLink.status === 0 && viaLink.stderr.includes('auto-cycle skipped — not a Stop, Notification, StopFailure or UserPromptSubmit event (Bogus)'), JSON.stringify([viaLink.status, viaLink.stdout, viaLink.stderr]))
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
@@ -1019,6 +1025,8 @@ clause('clause 3a16 — without the hook: the event-enumeration record, as resto
   evHead.includes('- State: Open') && evHead.some((l) => /^- auto-cycle: on /.test(l)) && !evHead.some((l) => /^- auto-cycle: warned|^- auto-cycle paused: /.test(l)) &&
   !fs.existsSync(path.join(stateDir(ev.session), 'gauge.json')) && !evQ.startsWith('- auto-cycle paused: ') && evQ.split('`').length - 1 === 4 &&
   (fs.statSync(path.join(trip, 'herdr')).mode & 0o111) !== 0, evHead.join(' | '))
+clause('clause 3a17 — without the hook: the linked hooks directory is a symlink whose real path is this suite\'s own',
+  fs.lstatSync(linkHooks).isSymbolicLink() && fs.realpathSync(linkHooks) === fs.realpathSync(import.meta.dirname) && linkHooks !== import.meta.dirname, linkHooks)
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
