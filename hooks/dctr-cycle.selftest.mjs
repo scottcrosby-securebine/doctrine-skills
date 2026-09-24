@@ -142,6 +142,12 @@ clause('clause 1h — cycleProgress: only the cap, the bookkeeping-only and the 
 clause('clause 1h4 — endsReady takes the ready line wrapped in inline code, bold or italics or behind a list marker, as the whole last line, and never inside a sentence (K4-RL)',
   endsReady('Done.\n\n`auto-cycle: ready`') && endsReady('x\n**auto-cycle: ready**\n') && endsReady('x\n- auto-cycle: ready') && endsReady('x\n  *auto-cycle: ready*  ') &&
   !endsReady('The next line says `auto-cycle: ready`') && !endsReady('x\n`auto-cycle: ready` done') && !endsReady('x\n`auto-cycle: ready*'), 'wrong')
+// E8-R33: background work is live unless its status says it ended.
+const BG = lib.backgroundLive
+clause('clause 1h5 — backgroundLive: an empty list or only completed, failed or killed entries is not live; running, unknown or missing status, a mixed list and a non-object entry are (E8-R33, K2-BG)',
+  typeof BG === 'function' && !BG([]) && !BG(undefined) && !BG([{ id: 'a', status: 'completed' }, { id: 'b', status: 'failed' }, { id: 'c', status: 'killed' }]) &&
+  BG([{ id: 'a', status: 'running' }]) && BG([{ id: 'a', status: 'paused' }]) && BG([{ id: 'a' }]) && BG([{ status: 'completed' }, { status: 'running' }]) && BG(['x']) && BG([null]),
+  'misread')
 clause('clause 1h2 — endsReady reads the message\'s last line only; nonEmpty counts a listed task or cron and never an empty list or object',
   endsReady('done\nauto-cycle: ready\n') && !endsReady('auto-cycle: ready\nthen more') && !endsReady(undefined) &&
   nonEmpty([{ id: 1 }]) && nonEmpty({ a: 1 }) && !nonEmpty([]) && !nonEmpty({}) && !nonEmpty(null) && !nonEmpty(undefined), 'wrong')
@@ -931,6 +937,15 @@ const badIn = spawnSync('node', [hook], { stdio: [dirFd, 'pipe', 'pipe'], env: b
 fs.closeSync(dirFd)
 clause('clause 2t — stdin that cannot be read stands the hook down with exit 0 and a reason, never a stack (RB8-2)',
   badIn.status === 0 && badIn.stderr.includes('auto-cycle skipped — hook payload was not readable') && !badIn.stderr.includes('    at '), JSON.stringify([badIn.status, badIn.stderr]))
+// E8-R33 end to end: a Stop whose background tasks all ended launches, and its facts let the next idle stop pause; a
+// running, an unknown-status, a mixed or a non-object list waits.
+const DONE = [{ id: 'a', type: 'subagent', status: 'completed', description: 'x' }, { id: 'b', status: 'failed' }, { id: 'c', status: 'killed' }]
+const bgDone = fixture('bg-done'), bgDoneR = run(bgDone, { background_tasks: DONE })
+const bgIdle = fixture('bg-done-idle'); run(bgIdle, { background_tasks: DONE, last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pbgi' }); note(bgIdle, 'idle_prompt', {}, { HERDR_PANE_ID: 'w9:pbgi' })
+const bgWait = [[{ id: 'a', status: 'running' }], [{ id: 'a' }], [...DONE, { id: 'd', status: 'running' }], ['x']].map((tasks, i) => { const f = fixture(`bg-live-${i}`); return { f, r: run(f, { background_tasks: tasks }) } })
+clause('clause 2c17 — background tasks that all completed, failed or were killed: the Stop launches and the next idle stop may pause; running, unknown status, a mixed list or a non-object entry waits (E8-R33, K2-BG)',
+  launched(bgDoneR) && paused(bgIdle).at(-1) === '- auto-cycle paused: session idle, waiting for you' && bgWait.every(({ f, r }) => !launched(r) && paused(f).length === 0),
+  `${show(bgDone, bgDoneR)} || ${JSON.stringify(paused(bgIdle))} || ${bgWait.map(({ f, r }) => show(f, r)).join(' | ')}`)
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]

@@ -82,6 +82,14 @@ const CLEAR_ENTRIES = [
   { type: 'user', message: { role: 'user', content: '<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>' } },
   { type: 'system', subtype: 'local_command', content: '<local-command-stdout></local-command-stdout>' },
 ]
+// E8-R32: the typer's resume is the doctrine-resume slash command; its entry, as Claude Code writes it, is not typing,
+// and the same command with other arguments, another slash command, or the old bare line, is.
+const ownCmd = { type: 'user', message: { role: 'user', content: '<command-message>doctrine:doctrine-resume</command-message>\n<command-name>/doctrine:doctrine-resume</command-name>\n<command-args>(typed by doctrine auto-cycle, not a ruling)</command-args>' } }
+const cmdWith = (name, args) => ({ type: 'user', message: { role: 'user', content: `<command-message>${name.slice(1)}</command-message>\n<command-name>${name}</command-name>\n<command-args>${args}</command-args>` } })
+clause('clause 1j6 — userTyped: the typer\'s own /doctrine:doctrine-resume entry is not typing; that command with other arguments or none, another slash command, and the bare old resume line are (E8-R32, K1-D3b)',
+  !userTyped(ownCmd) && userTyped(cmdWith('/doctrine:doctrine-resume', 'go')) && userTyped(cmdWith('/doctrine:doctrine-resume', '')) &&
+  userTyped(cmdWith('/grill-me', '(typed by doctrine auto-cycle, not a ruling)')) && userTyped({ type: 'user', message: { content: 'resume (typed by doctrine auto-cycle, not a ruling)' } }) &&
+  userTyped({ type: 'user', message: { content: `${ownCmd.message.content} and more` } }), 'misread')
 clause('clause 1j — userTyped: /clear\'s own entries, the resume line, a tool result and an assistant entry are not typing; a prompt as a string or as text parts is (DP-1)',
   CLEAR_ENTRIES.every((e) => !userTyped(e)) && !userTyped({ type: 'user', message: { content: RESUME_LINE } }) &&
   !userTyped({ type: 'user', message: { content: [{ type: 'text', text: RESUME_LINE }] } }) &&
@@ -106,8 +114,8 @@ clause('clause 1j3 — transcriptEntries: well-formed lines are entries; a last 
 clause('clause 1j4 — typerStep: a transcript ending in a line still being written waits a poll in every stage, then pauses with R17 once that outlasts the idle grace; it never clears or resumes (RB6-1)',
   ts({ midWrite: 0 }).act === 'wait' && ts({ midWrite: 100 }).act === 'wait' && ts({ midWrite: 500 }).reason === 'could not type into the pane: the transcript could not be read' &&
   ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: false, midWrite: 40 }).act === 'wait' && ts({ midWrite: null }).act === 'clear', 'wrong')
-clause('clause 1i — the typer\'s default timings are the spec\'s: 30 s for the new session, 2 min for the first turn',
-  TYPER_TIMES.session === 30000 && TYPER_TIMES.firstTurn === 120000 && RESUME_LINE === 'resume (typed by doctrine auto-cycle, not a ruling)', JSON.stringify(TYPER_TIMES))
+clause('clause 1i — the typer\'s default timings are the spec\'s: 30 s for the new session, 2 min for the first turn, and it types the doctrine-resume command (E8-R32)',
+  TYPER_TIMES.session === 30000 && TYPER_TIMES.firstTurn === 120000 && RESUME_LINE === '/doctrine:doctrine-resume (typed by doctrine auto-cycle, not a ruling)', JSON.stringify(TYPER_TIMES))
 
 // ---------------------------------------------------------------- clause 2: the typer end to end (T7)
 
@@ -141,7 +149,14 @@ if (args[0] === 'pane' && args[1] === 'run') {
   if (args[3] === '/clear') {
     st.clearedAt = Date.now(); save()
     if (st.onClear === 'write' || st.onClear === 'stale') fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.onClear === 'stale' ? st.session : st.newSession, transcript_path: st.newTranscript }))
-  } else if (st.reply) fs.appendFileSync(st.newTranscript, JSON.stringify({ type: 'assistant', message: { content: 'ok' } }) + '\\n')
+  } else if (st.reply) {
+    // What Claude Code writes when a slash command with arguments is typed (read from host transcripts): the command
+    // entry, the skill's loaded text as a meta entry, then the reply.
+    const [name, ...rest] = String(args[3]).split(' ')
+    const cmd = name.startsWith('/') ? [{ type: 'user', message: { role: 'user', content: '<command-message>' + name.slice(1) + '</command-message>\\n<command-name>' + name + '</command-name>\\n<command-args>' + rest.join(' ') + '</command-args>' } },
+      { type: 'user', isMeta: true, message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /x' }] } }] : [{ type: 'user', message: { content: args[3] } }]
+    fs.appendFileSync(st.newTranscript, [...cmd, { type: 'assistant', message: { content: 'ok' } }].map((e) => JSON.stringify(e)).join('\\n') + '\\n')
+  }
 }
 process.exit(0)
 `)
@@ -354,9 +369,9 @@ clause('clause 3b — without the typer: the stale restore file really carries t
 clause('clause 3c2 — without the typer: the RB4-1 fixtures hold the stop file and end their records with an off line and an Exited state line',
   [stopOff, stopExited].every((c) => fs.existsSync(path.join(c.proj, '.doctrine/auto-cycle.stop'))) &&
   parseRecord(fs.readFileSync(stopOff.record, 'utf8')).entries.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1)?.sub === 'off' && stopExited.state === '- State: Exited.', `${stopExited.state}`)
-clause('clause 3c3 — without the typer: the takeover transcript holds /clear\'s entries then a user prompt and a reply, the clear-only one /clear\'s entries alone, and the unreadable one does not exist',
+clause('clause 3c3 — without the typer: the takeover transcript holds /clear\'s entries then a user prompt and a reply, the clear-only one begins with /clear\'s entries, and the unreadable one does not exist',
   fs.readFileSync(takeover.newTranscript, 'utf8').trim().split('\n').slice(0, 5).map((l) => JSON.parse(l).type).join(',') === 'user,user,system,user,assistant' &&
-  fs.readFileSync(clearOnly.newTranscript, 'utf8').trim().split('\n').filter((l) => JSON.parse(l).type === 'user' && !JSON.parse(l).isMeta).length === 1 &&
+  fs.readFileSync(clearOnly.newTranscript, 'utf8').trim().split('\n').slice(0, 3).map((l) => JSON.parse(l).type).join(',') === 'user,user,system' &&
   !fs.existsSync(path.join(tmp, 'no-such-dir', 'new.jsonl')), fs.readFileSync(takeover.newTranscript, 'utf8'))
 const lines = (file) => fs.readFileSync(file, 'utf8').split('\n')
 clause('clause 3c4 — without the typer: the partial-new transcript holds the user entry half-written after /clear\'s entries, which parses only once the shim completes it on its fourth read; the damaged one holds a line that does not parse before a well-formed last line; the partial-old one ends past the Stop\'s length in text that does not parse',
