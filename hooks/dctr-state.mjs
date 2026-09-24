@@ -8,8 +8,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { PREFIX, parseHerdr, movedGateName, movedGateVerdict } from './dctr-lib.mjs'
+import {
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, latestAutoCycle, pauseMessage, pausedToken,
+  autocycleTokenArgs, pauseToastArgs, seatLive,
+} from './dctr-lib.mjs'
+import { parseRecord } from './dctr-record.mjs'
 
 const tmpRoot = () => process.env.TMPDIR || os.tmpdir()
 export const stateDir = (sessionId) => path.join(tmpRoot(), `${PREFIX}-${sessionId}`)
@@ -491,4 +496,145 @@ export function readMeta(file, retryMs = 200) {
     sleepMs(retryMs)
   }
   return null
+}
+
+// ---------------------------------------------------------------- auto-cycle (E8-D15, E8-D16, E8-D17, E8-D26)
+
+/** Where auto-cycle's working files live (B0): beside dctr-panes and dctr-gates, never under dctr-<session>/,
+ *  which SessionEnd empties (F8). The claims, the restore files, the alerted markers, the token values last
+ *  published and the persisted Stop facts all sit here. */
+export const autoCycleDir = () => path.join(tmpRoot(), `${PREFIX}-autocycle`)
+export const claimFile = (sessionId) => path.join(autoCycleDir(), `${sessionId}.claim`)
+export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
+const tokenFile = (paneId) => path.join(autoCycleDir(), `token-${paneToken(paneId)}.txt`)
+
+/** A claim is held when its file exists and the pid written into it is alive (S3). A claim whose pid is not
+ *  written yet, or whose writer died, is not held. */
+export function claimHeld(file) {
+  let c
+  try { c = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return false }
+  return pidAlive(String(c?.pid ?? ''))
+}
+
+/** Any held claim naming this pane, whatever session took it: the typer's claim is keyed by the old session id,
+ *  and the Notification that asks comes from the new one (F9). */
+export function paneClaimHeld(paneId) {
+  let names
+  try { names = fs.readdirSync(autoCycleDir()) } catch { return false }
+  return names.filter((f) => f.endsWith('.claim')).some((f) => {
+    const file = path.join(autoCycleDir(), f)
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')).pane === paneId && claimHeld(file) } catch { return false }
+  })
+}
+
+/** Append one line to a record, starting it on a line of its own. */
+export function appendRecordLine(recordPath, line) {
+  const text = fs.readFileSync(recordPath, 'utf8')
+  fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
+}
+
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is already a
+ *  paused line (E8-D18). Never a state line: the record's last state line is left as it was. `{ written }`. */
+export function appendPaused(recordPath, reason) {
+  if (latestAutoCycle(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)?.sub === 'paused') return { written: false }
+  appendRecordLine(recordPath, pausedLine(reason))
+  return { written: true }
+}
+
+/** Publish the autocycle token only when its value differs from the one last published for this pane (LB2). A
+ *  failed call is left unrecorded, so the next event tries again. Display only: nothing is decided from it. */
+export function publishToken(paneId, value, log = () => {}) {
+  if (!paneId) return false
+  try { if (JSON.parse(fs.readFileSync(tokenFile(paneId), 'utf8')) === value) return false } catch { /* none published yet */ }
+  try {
+    herdr(autocycleTokenArgs(paneId, value)) // herdr-lint: display only; a failed publish is logged and retried at the next event
+    fs.mkdirSync(autoCycleDir(), { recursive: true })
+    writeMarker(tokenFile(paneId), value)
+    return true
+  } catch (e) { log(`autocycle token not published (${e.message.split('\n')[0]})`); return false }
+}
+
+/**
+ * Alert the record's latest auto-cycle line once, if it is a paused line (B3, E8-D26), whoever wrote it. The
+ * alerted marker `alerted-<hash of record path>-<line>` is taken first, exclusively, and outlives the session, so
+ * a later session or a concurrent hook never alerts that line again (F2). Given a herdr pane it publishes the
+ * paused token and raises the toast; in every case it returns the pane message, which the hook prints as a
+ * systemMessage. The caller passes no pane in a contained session, which is the one guard keeping herdr out of it.
+ * Null when there is nothing to alert.
+ */
+export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
+  const latest = latestAutoCycle(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  if (latest?.sub !== 'paused') return null
+  const hash = crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)
+  fs.mkdirSync(autoCycleDir(), { recursive: true })
+  try { reserveMarker(path.join(autoCycleDir(), `alerted-${hash}-${latest.line}`)) } catch { return null }
+  if (paneId) {
+    publishToken(paneId, pausedToken(latest.reason), log)
+    try { herdr(pauseToastArgs(repo, phase, latest.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
+    catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
+  }
+  return pauseMessage(latest.reason)
+}
+
+/** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,
+ *  a gate without its result file, a codex seat whose job is not terminal. Markers that cannot be read are live:
+ *  an unknown count is never an empty one. */
+export function liveWork(sessionId) {
+  let found
+  try { found = liveSeatsPartial(sessionId) } catch (e) { return `the seat markers could not be read (${e.message})` }
+  if (found.unreadable.length) return `a seat marker could not be read: ${found.unreadable[0]}`
+  for (const s of found.seats) {
+    let status = null
+    if (s.codexJob) { try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* not terminal */ } }
+    if (seatLive(s, Boolean(s.file) && fs.existsSync(`${s.file}.result`), status)) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
+  }
+  return null
+}
+
+/**
+ * B7's tree hash (E8-D17): for each repo, `git add -A` into a temporary index copied from the real one, the
+ * excluded paths then removed from it, then `git write-tree`. One repo gives its tree id; two
+ * give the sha1 of both ids, which is not a git object (F7). `excludes(repo)` returns that repo's pathspecs, each a
+ * path relative to it or a `:(glob)` pattern. Throws when git cannot answer.
+ */
+export function treeHash(repos, excludes) {
+  const ids = [...new Set(repos)].map((repo) => {
+    const git = (args, env = {}) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    const real = path.resolve(repo, git(['rev-parse', '--git-path', 'index']))
+    fs.mkdirSync(autoCycleDir(), { recursive: true })
+    const tmp = path.join(autoCycleDir(), `index.${process.pid}.${Date.now()}`)
+    try {
+      if (fs.existsSync(real)) fs.copyFileSync(real, tmp)
+      const env = { GIT_INDEX_FILE: tmp }
+      // Add everything, then take the excluded paths back out: an excluded path named in the add itself makes git
+      // refuse when that path is ignored, and one left in the copied index would carry its committed content.
+      git(['add', '-A', '--', '.'], env)
+      const ex = excludes(repo)
+      if (ex.length) git(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...ex], env)
+      return git(['write-tree'], env)
+    } finally { fs.rmSync(tmp, { force: true }) }
+  })
+  return ids.length === 1 ? ids[0] : crypto.createHash('sha1').update(ids.join('\n')).digest('hex')
+}
+
+/**
+ * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
+ * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
+ * touching it was made at or after that second and it and the memory file carry no uncommitted change. Outside a
+ * git work tree the file and the kickoff line naming it are the landing. False when `warnedAt` is unknown.
+ */
+export function handoffLanded({ handoffPath, memoryPath, warnedAt }) {
+  if (!Number.isFinite(warnedAt)) return false
+  let st
+  try { st = fs.statSync(handoffPath) } catch { return false }
+  if (st.mtimeMs < warnedAt) return false
+  const git = (args) => execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  try { git(['rev-parse', '--is-inside-work-tree']) } catch { return true }
+  try { git(['check-ignore', '-q', handoffPath]); return true } catch { /* not ignored: it needs its commit */ }
+  try {
+    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
+    if (!ct || ct < Math.floor(warnedAt / 1000)) return false
+    return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''
+  } catch { return false }
 }

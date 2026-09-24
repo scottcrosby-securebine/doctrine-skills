@@ -1,7 +1,8 @@
 // doctrine — context gauge hook (E8-D4, E8-D21, E8-D10, E8-D11).
 //
-// PostToolBatch, no matcher, in hooks.json. While a doctrine phase's record is Open or Blocked and its last
-// auto-cycle on/off line is on (E8-R10), it reads how much of the context window the main session has used and,
+// PostToolBatch, no matcher, in hooks.json. While auto-cycle is active (autoCycleActive in dctr-lib.mjs: the record
+// Open or Blocked, its last auto-cycle on/off line on, and no `.doctrine/auto-cycle.stop` in the session's repo or
+// the record's, U4), it reads how much of the context window the main session has used and,
 // the first time that reaches the tier, hands the session the warning as facts, appends
 // `- auto-cycle: warned <session id> <tier>` to the record (SC9) and latches so the session is warned once (SC7).
 // It finds the record through the chain the restore hook follows: SESSION_MEMORY.md's kickoff `handoff:` line,
@@ -17,7 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  gaugeSkip, followKickoff, autoCycleOn, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
+  gaugeSkip, followKickoff, lastOnOffEntry, autoCycleActive, stopFileRepo, repoOf, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
 } from './dctr-lib.mjs'
 import { hookLog, stateDir, standDown, writeMarker } from './dctr-state.mjs'
 import { readBridge } from './dctr-bridge.mjs'
@@ -61,8 +62,10 @@ try {
   const chain = followKickoff({ projectDir, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
   if (chain.why) stand_down(chain.why)
   const { recordPath, record } = chain
-  const cycle = autoCycleOn(record.entries)
+  const cycle = lastOnOffEntry(record.entries)
   if (cycle?.sub !== 'on') stand_down(`auto-cycle is ${cycle ? 'off' : 'not switched on'} in ${recordPath}`)
+  const stopRepo = stopFileRepo([projectDir, repoOf(recordPath, fs.existsSync)], fs.existsSync)
+  if (!autoCycleActive(record.entries, Boolean(stopRepo))) stand_down(`auto-cycle is stopped by the stop file in ${stopRepo}`)
 
   const latchFile = path.join(stateDir(sessionId), 'gauge.json')
   let latch = null
@@ -78,6 +81,8 @@ try {
   const facts = [...resolved.errors, ...stepped.facts]
 
   if (stepped.warn) {
+    // When it warned, for the auto-cycle Stop hook's test that the handoff was written after the warning (B2 step 5).
+    stepped.latch.warnedAt = Date.now()
     const line = `- auto-cycle: warned ${sessionId} ${stepped.warnedTier}\n`
     try {
       const text = fs.readFileSync(recordPath, 'utf8')

@@ -18,7 +18,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-gauge-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { gaugeSkip, autoCycleOn, readUsage, resolveTier, gaugeStep, gaugeContext, GAUGE_MAX, HANDOFF_COST_TOKENS } = lib
+const { gaugeSkip, lastOnOffEntry, readUsage, resolveTier, gaugeStep, gaugeContext, GAUGE_MAX, HANDOFF_COST_TOKENS } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const { stateDir } = await import('./dctr-state.mjs')
 const { bridgeFile } = await import('./dctr-bridge.mjs')
@@ -58,12 +58,12 @@ clause('clause 1a — gaugeSkip acts only on a main-session PostToolBatch with a
   'gaugeSkip mis-gated')
 
 const rec = (...ls) => parseRecord(ls.join('\n')).entries
-clause('clause 1b — autoCycleOn returns the last on or off line, and a warned or ready line after it changes nothing',
-  autoCycleOn(rec('- auto-cycle: on cap 10 tier 60%'))?.sub === 'on' &&
-  autoCycleOn(rec('- auto-cycle: on cap 10 tier 60%', '- auto-cycle: off'))?.sub === 'off' &&
-  autoCycleOn(rec('- auto-cycle: off', '- auto-cycle: on cap 3 tier 1000', '- auto-cycle: warned s1 1000', '- auto-cycle: ready'))?.tier === '1000' &&
-  autoCycleOn(rec('- State: Open')) === null,
-  'autoCycleOn read the wrong line')
+clause('clause 1b — lastOnOffEntry returns the last on or off line, and a warned or ready line after it changes nothing',
+  lastOnOffEntry(rec('- auto-cycle: on cap 10 tier 60%'))?.sub === 'on' &&
+  lastOnOffEntry(rec('- auto-cycle: on cap 10 tier 60%', '- auto-cycle: off'))?.sub === 'off' &&
+  lastOnOffEntry(rec('- auto-cycle: off', '- auto-cycle: on cap 3 tier 1000', '- auto-cycle: warned s1 1000', '- auto-cycle: ready'))?.tier === '1000' &&
+  lastOnOffEntry(rec('- State: Open')) === null,
+  'lastOnOffEntry read the wrong line')
 
 const ru = (t, last = null) => readUsage(t, last)
 clause('clause 1c — readUsage: a missing transcript is unknown, never a zero (E8-D10)',
@@ -198,6 +198,9 @@ clause('clause 2b — the crossing: one PostToolBatch JSON object with the warni
 clause('clause 2c — a second crossing in the same session: no second warning, no second warned line (E8-D4)',
   m3.code === 0 && !isWarning(m3) && warnedLines(main).length === 1 && latchOf('sess-1')?.warned === true, `out ${m3.out} lines ${JSON.stringify(warnedLines(main))}`)
 
+clause('clause 2c2 — the crossing records when it warned in the latch, which the auto-cycle Stop hook reads (B2 step 5)',
+  Number.isFinite(latchOf('sess-1')?.warnedAt) && latchOf('sess-1').warnedAt <= Date.now(), JSON.stringify(latchOf('sess-1')))
+
 // E8-D21: a seat's batch carries agent_id and the PARENT's session id; it touches nothing. The parent is not yet
 // warned and the seat's batch reads past the tier, so admitting it would warn; the last run below shows that.
 const par = fixture('seat-parent')
@@ -243,6 +246,27 @@ for (const [n, what, f] of [['2f', 'auto-cycle off after an on line', off], ['2g
     [r1, r2, r3].every((r) => r.code === 0 && r.out === '' && /gauge skipped — \S/.test(r.err)) && warnedLines(f).length === 0 && latchOf(sid) === null,
     `out ${r1.out} err ${r1.err}`)
 }
+
+// U4: the stop file stops the gauge, in the session's repo or in the record's repo (Q1). The same fixture with the
+// stop file gone warns, so the stand-down is the stop file's doing.
+const stopS = fixture('stop-session'), stopR = fixture('stop-record')
+fs.mkdirSync(path.join(stopR.proj, '.doctrine/.git'), { recursive: true })
+write(path.join(stopS.proj, '.doctrine/auto-cycle.stop'), '')
+write(path.join(stopR.proj, '.doctrine/records/.doctrine/auto-cycle.stop'), '')
+fs.mkdirSync(path.join(stopR.proj, '.doctrine/records/.git'), { recursive: true })
+// Each session already has a first reading of 10000 in its latch, so a 130000 reading is past the tier and its floor.
+for (const f of [stopS, stopR]) {
+  const sid = `st-${path.basename(f.proj)}`
+  write(f.transcript, lines(entry(130000))); bridge(sid)
+  write(path.join(stateDir(sid), 'gauge.json'), JSON.stringify({ session_id: sid, firstUsed: 10000, lastUuid: null, unknownRun: 0, warned: false, warnedTier: null }))
+}
+const stopRuns = [stopS, stopR].map((f) => run(f, `st-${path.basename(f.proj)}`))
+fs.rmSync(path.join(stopS.proj, '.doctrine/auto-cycle.stop'))
+const unstopped = run(stopS, 'st-stop-session')
+clause('clause 2i2 — the stop file in the session\'s repo or in the record\'s repo stands the gauge down past the tier; with it removed the same batch warns (U4, Q1)',
+  stopRuns.every((r) => r.code === 0 && r.out === '' && /gauge skipped — auto-cycle is stopped by the stop file/.test(r.err)) &&
+  warnedLines(stopR).length === 0 && isWarning(unstopped) && warnedLines(stopS).length === 1,
+  `${stopRuns.map((r) => r.err).join(' | ')} | ${unstopped.out}`)
 
 // E8-D10: three unknown readings in a row, end to end.
 const unk = fixture('unknown')

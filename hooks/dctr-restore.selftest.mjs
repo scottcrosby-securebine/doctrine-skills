@@ -48,6 +48,7 @@ function fixture(name, { state = 'Open', where = 'in-repo', memory = true, hando
 
 const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp }
 delete env.CLAUDE_PROJECT_DIR
+delete env.HERDR_PANE_ID
 const run = (payload, extraEnv = {}) => {
   const r = spawnSync('node', [hook], { input: JSON.stringify(payload), env: { ...env, ...extraEnv }, encoding: 'utf8' })
   return { code: r.status, out: r.stdout, err: r.stderr }
@@ -85,6 +86,19 @@ try { lt = JSON.parse(lres.out).hookSpecificOutput.additionalContext } catch { /
 clause('clause 2e — a 5,000-character state line is cut, and the other facts survive under the limit',
   lt.length > 0 && lt.length < RESTORE_MAX && lt.includes('e8-fixture') && lt.includes(long.recordAbs) && lt.includes('doctrine:doctrine-code') && lt.includes('…'),
   `length ${lt.length}: ${lt.slice(0, 200)}`)
+
+// B5, T8: the restore file the auto-cycle typer waits for, written only when the hook injected and HERDR_PANE_ID is set.
+const restored = (pane) => path.join(tmp, 'dctr-autocycle', `pane-${pane}.restored`)
+const rNoPane = run(clear(openIn.proj))
+const noPaneFiles = fs.existsSync(path.join(tmp, 'dctr-autocycle')) ? fs.readdirSync(path.join(tmp, 'dctr-autocycle')) : []
+const rPane = run(clear(openIn.proj, { session_id: 'sess-new', transcript_path: '/new.jsonl' }), { HERDR_PANE_ID: 'w7:p3' })
+let rf = null
+try { rf = JSON.parse(fs.readFileSync(restored('w7_p3'), 'utf8')) } catch { /* the clause reports it */ }
+const rSkip = run(clear(exited.proj, { session_id: 'sess-skip' }), { HERDR_PANE_ID: 'w7:p4' })
+clause('clause 2f — with HERDR_PANE_ID set and the facts injected, the restore file carries the new session id and transcript path; without the pane id, or on a stand-down, none is written (B5)',
+  facts(rNoPane, openIn, 'Open') && noPaneFiles.length === 0 && rPane.out.includes('additionalContext') &&
+  rf?.session_id === 'sess-new' && rf?.transcript_path === '/new.jsonl' && rSkip.out === '' && !fs.existsSync(restored('w7_p4')),
+  `noPane ${JSON.stringify(noPaneFiles)} file ${JSON.stringify(rf)} skip ${rSkip.out}`)
 
 // ---------------------------------------------------------------- clause 1: every reason to stand down
 

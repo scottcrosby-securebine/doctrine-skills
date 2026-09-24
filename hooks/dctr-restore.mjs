@@ -9,13 +9,15 @@
 // It injects only when the record's last state line reads Open or Blocked (scope choice SC1). Every other
 // case prints nothing to stdout, so the session starts exactly as it would without the plugin.
 //
-// It always exits 0 and calls no herdr and nothing on the network. Every reason it stood down is printed
+// When it injected and HERDR_PANE_ID is set, it also writes the restore file `<autocycle dir>/pane-<token>.restored`
+// carrying the new session id and transcript path, which the auto-cycle typer waits for before it types the resume
+// line (B5, E8-D15). It always exits 0 and calls no herdr and nothing on the network. Every reason it stood down is printed
 // to stderr and logged, so a skip and a silent success are never the same signal. The decisions are pure,
 // in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads around them.
 
 import fs from 'node:fs'
 import { restoreSkip, followKickoff, restoreContext } from './dctr-lib.mjs'
-import { hookLog, standDown } from './dctr-state.mjs'
+import { hookLog, standDown, autoCycleDir, restoreFile, writeMarker } from './dctr-state.mjs'
 
 let sessionId = null
 const stand_down = standDown('SessionStart', 'restore', () => sessionId)
@@ -38,6 +40,12 @@ try {
     wrapper: record.wrapper || header.wrapper, handoffPath,
   })
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }))
+  if (process.env.HERDR_PANE_ID) {
+    try {
+      fs.mkdirSync(autoCycleDir(), { recursive: true })
+      writeMarker(restoreFile(process.env.HERDR_PANE_ID), { session_id: sessionId, transcript_path: payload.transcript_path || null })
+    } catch (e) { hookLog(sessionId, `SessionStart restore file not written (${e.code || e.message})`) }
+  }
   hookLog(sessionId, `SessionStart restore injected — ${header.phase || 'unnamed phase'} ${state}, record ${recordPath}`)
   process.exit(0)
 } catch (e) {

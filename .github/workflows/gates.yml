@@ -103,6 +103,17 @@ jobs:
         # settings shape. Pure node.
         run: node hooks/dctr-bridge.selftest.mjs
 
+      - name: auto-cycle hook tamper test
+        # Drives hooks/dctr-cycle.mjs end to end over git fixture repos with a logging herdr shim on PATH: one
+        # fixture per Stop precondition, every pause reason verbatim, each paused line alerted once, the
+        # Notification and StopFailure events, the tree hash, and zero herdr calls in a contained session.
+        run: node hooks/dctr-cycle.selftest.mjs
+
+      - name: auto-cycle typer tamper test
+        # Drives hooks/dctr-typer.mjs with a herdr shim that plays the pane: the /clear and resume sends per
+        # case, the claim, focus, the restore file, the first-turn confirm, and zero herdr calls when contained.
+        run: node hooks/dctr-typer.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
