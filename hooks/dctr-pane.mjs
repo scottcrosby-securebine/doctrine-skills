@@ -475,7 +475,9 @@ async function enter(tee) {
 // fileURLToPath, never `new URL(...).pathname`: that percent-encodes, so on a path containing a
 // space the comparison failed, nothing dispatched, and EVERY subcommand exited 0 having done
 // nothing — `type` and `enter` included, which reads to the agent as a command sent successfully.
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+// Both through realpath: Node resolves symlinks in import.meta.url, so a symlinked plugin dir made the same silent
+// exit 0 (ORC7-1).
+const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) } catch { return false } })()
 const argv = process.argv.slice(2)
 const [cmd] = argv
 if (isMain) try {

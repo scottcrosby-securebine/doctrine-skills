@@ -164,4 +164,7 @@ try {
 }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runHook(fs.readFileSync(0, 'utf8'))
+// Run as the script: both paths through realpath, since Node resolves symlinks in import.meta.url and a symlinked
+// plugin or config dir would otherwise make every event a silent no-op (ORC7-1). A failed realpath is not the script.
+const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) } catch { return false } })()
+if (isMain) runHook(fs.readFileSync(0, 'utf8'))
