@@ -13,10 +13,8 @@ repo, with or without a doctrine project file or an open doctrine phase.
 forward everything you cannot disprove. Target ≤400 words. The only edits you make are for
 correctness: a line the repo, the record or this session shows is wrong.
 
-**Under auto-cycle, a question pauses the run.** Auto-cycle is on when the record of the phase this
-session runs has an on line as its last `auto-cycle: on` or `auto-cycle: off` line, and its last state
-line reads Open or Blocked. That record is the one the kickoff chain doctrine step 5 names reaches, else
-the one this session's anchor names. With auto-cycle on, wherever a step below says to ask the user,
+**Under auto-cycle, a question pauses the run.** Doctrine step 5 defines when auto-cycle is on and
+which record is the phase's. With auto-cycle on, wherever a step below says to ask the user,
 append `- auto-cycle paused: question: <the question as that step words it>` as a list item at the end
 of the record's orchestrator-only part (doctrine step 5), then stop this run and end the turn without
 putting the question to the user in any form. With auto-cycle off, or no such record, ask.
