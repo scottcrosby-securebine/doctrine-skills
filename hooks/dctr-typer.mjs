@@ -1,7 +1,7 @@
 // doctrine — the auto-cycle typer (E8-D15).
 //
 // Spawned detached by dctr-cycle.mjs's Stop when every precondition holds, with one JSON argument: the pane id,
-// the session id, the Stop's transcript path and byte length, the record path, the tree hash, the session's repo,
+// the session id, the Stop's transcript path and byte length, the moment the Stop hook started, the record path, the tree hash, the session's repo,
 // the cycle number and the phase. It never reads the screen (E8-R12). It is a loop around typerStep in
 // dctr-lib.mjs, which decides from one observation at a time:
 //
@@ -10,7 +10,10 @@
 //   - Before every send it stops if auto-cycle is no longer active (B1) or a paused line was written since the
 //     claim, needs herdr's agent_status idle, and waits while the pane is focused.
 //   - Before /clear it needs herdr to report the old session and the old transcript to hold no user or assistant
-//     entry past the Stop's length. It removes this pane's restore file, sends /clear once, and only then appends
+//     entry timestamped at or after the Stop hook's start (typedAfter; an entry with no time counts). The file is
+//     read from the Stop's byte length on, and only to find such entries: it is written asynchronously, so an entry
+//     past that length can be the turn's own final message, which carries a time before the Stop (K2-R16). A file
+//     that cannot be read, or is now shorter than that length, pauses rather than clears (RB2). It removes this pane's restore file, sends /clear once, and only then appends
 //     `auto-cycle: cycle <n> tree <hash>` (LN12: the line records a sent /clear, never an intended one).
 //   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
 //     to report that id within 30 s, and sends the resume line once.
@@ -21,7 +24,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, TYPER_TIMES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
+import { typerStep, typedAfter, TYPER_TIMES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
@@ -31,7 +34,7 @@ import {
 if (process.env.DCTR_VIEW_REQUEST_DIR) process.exit(0)
 let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
-if (!a?.pane || !a.session || !a.record || !a.transcript || !Number.isFinite(a.length)) process.exit(0)
+if (!a?.pane || !a.session || !a.record || !a.transcript || !Number.isFinite(a.length) || !Number.isFinite(a.stopAt)) process.exit(0)
 const log = (m) => hookLog(a.session, `auto-cycle typer: ${m}`)
 let times = TYPER_TIMES
 try { times = { ...TYPER_TIMES, ...JSON.parse(process.env.DCTR_TYPER_TIMES || '{}') } } catch { /* the defaults */ }
@@ -52,7 +55,6 @@ function entriesFrom(file, from = 0) {
   } catch (e) { log(`the transcript ${file} could not be read (${e.code || e.message})`); return null }
   return text.split('\n').flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
 }
-const isTurn = (e) => e?.type === 'user' || e?.type === 'assistant'
 
 function pausing(reason) {
   const { written } = appendPaused(a.record, reason)
@@ -100,7 +102,7 @@ try {
     notIdleSince = pane && !pane.error && pane.focused === false && pane.status !== 'idle' ? (notIdleSince ?? now) : null
     const step = typerStep({
       stage, active, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
-      grew: stage === 'clear' ? ((es) => (es === null ? null : es.some(isTurn)))(entriesFrom(a.transcript, a.length)) : false,
+      grew: stage === 'clear' ? ((es) => (es === null ? null : es.some((e) => typedAfter(e, a.stopAt))))(entriesFrom(a.transcript, a.length)) : false,
       firstTurn: stage === 'confirm' && (entriesFrom(restore.transcript) || []).some((e) => e?.type === 'assistant'),
       waited: now - stageStart, notIdle: notIdleSince ? now - notIdleSince : 0, sessionWait: restoreSeen ? now - restoreSeen : 0,
     })

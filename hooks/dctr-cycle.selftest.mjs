@@ -279,7 +279,7 @@ const toasts = (f) => calls(f).filter((c) => c[0] === 'notification')
 const show = (f, r) => `code ${r.code} msg ${JSON.stringify(r.msg)} err ${r.err.trim()} paused ${JSON.stringify(paused(f))} calls ${JSON.stringify(calls(f))}`
 
 // The all-true fixtures launch.
-const good = fixture('all-true'), goodR = run(good)
+const good = fixture('all-true'), goodBefore = Date.now(), goodR = run(good), goodAfter = Date.now()
 const goodT = fixture('all-true-tracked', { tracked: true }), goodTR = run(goodT)
 const goodS = fixture('all-true-sibling', { sibling: true }), goodSR = run(goodS)
 clause('clause 2a — all preconditions true: the typer is launched with its facts, the launch message printed, no paused line (E8-D7)',
@@ -516,9 +516,9 @@ const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'ut
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
 for (const deadline = Date.now() + 30000; Date.now() < deadline && !launchers.every((f) => stubbed(f).length); ) await new Promise((r) => setTimeout(r, 50))
 const ga = stubbed(good)[0]
-clause('clause 2q — the typer is spawned only for the launching fixtures, with the pane, session, transcript length, record, tree hash and cycle number',
+clause('clause 2q — the typer is spawned only for the launching fixtures, with the pane, session, transcript length, the Stop\'s start time, record, tree hash and cycle number',
   stubbed(good).length === 1 && ga.pane === 'w9:p1' && ga.session === good.session && ga.length === fs.statSync(good.transcript).size &&
-  ga.record === good.record && /^[0-9a-f]{40}$/.test(ga.hash) && ga.n === 1 && ga.project === good.proj && ga.phase === 'e8-fixture' &&
+  ga.record === good.record && /^[0-9a-f]{40}$/.test(ga.hash) && ga.n === 1 && ga.project === good.proj && ga.phase === 'e8-fixture' && ga.stopAt >= goodBefore && ga.stopAt <= goodAfter &&
   negs.every(({ f }) => stubbed(f).length === 0) && stubbed(capF).length === 0 && stubbed(npF).length === 0 && stubbed(pgF).length === 1 && stubbed(goodS).length === 1,
   JSON.stringify(ga))
 

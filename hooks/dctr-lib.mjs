@@ -1081,6 +1081,16 @@ export function cycleDecision(f) {
   return { act: 'launch', n: p.n, reason: `cycle ${p.n} of ${p.cap}` }
 }
 
+/**
+ * Whether an old-transcript entry is the user's own turn after the Stop (E8-D15, K2-R16): a user or assistant entry
+ * whose timestamp is not before `stopAt`, the moment the Stop hook started. Judged by the entry's own time, never by
+ * where it sits in the file: Claude Code writes the transcript asynchronously, so the turn's final assistant entry
+ * can land past the byte length the Stop read, and it carries a time before the Stop. An entry with no readable
+ * time counts as new, the direction that pauses rather than clears. System entries never count.
+ */
+export const typedAfter = (e, stopAt) =>
+  (e?.type === 'user' || e?.type === 'assistant') && !(Date.parse(e.timestamp) < stopAt)
+
 /** The typer's timings in ms (E8-D15): poll, how long a pane may read not idle once unfocused, how long to wait
  *  for the restore file, for herdr to report the new session (30 s), and for the first turn (2 min). */
 export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 30000, firstTurn: 120000 }

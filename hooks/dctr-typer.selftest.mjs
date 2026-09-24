@@ -18,7 +18,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-typer-'))
 process.env.TMPDIR = tmp
-const { typerStep, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
+const { typerStep, typedAfter, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
 const { restoreFile, claimFile, reserveMarker, autoCycleDir } = await import('./dctr-state.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 
@@ -52,6 +52,12 @@ clause('clause 1e2 — typerStep: agent_status idle and done are both ready; wor
 clause('clause 1e3 — typerStep: a reply with no Claude session is a failed lookup, never a changed session (ST2)',
   ts({ pane: { ...idle, session: undefined } }).reason === 'could not type into the pane: herdr could not read the pane' &&
   ts({ stage: 'resume', restore: NEW, pane: { ...idle, session: null } }).code === 'R17', 'read as R16')
+clause('clause 1e5 — typedAfter: a user or assistant entry at or after the Stop\'s start is typing, one before it is not, a system entry never, an entry with no time always (K2-R16)',
+  typedAfter({ type: 'user', timestamp: '2026-09-24T07:04:09Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
+  typedAfter({ type: 'assistant', timestamp: '2026-09-24T07:04:08Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
+  !typedAfter({ type: 'assistant', timestamp: '2026-09-24T07:04:07.999Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
+  !typedAfter({ type: 'system', timestamp: '2026-09-24T07:05:00Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
+  typedAfter({ type: 'user' }, Date.parse('2026-09-24T07:04:08Z')), 'wrong')
 clause('clause 1e4 — typerStep: an old transcript that could not be read, or has shrunk, pauses with R17 and never clears (RB2)',
   ts({ grew: null }).reason === 'could not type into the pane: the transcript could not be read', JSON.stringify(ts({ grew: null })))
 clause('clause 1f — typerStep after /clear: no restore file waits, then pauses with R14',
@@ -111,7 +117,7 @@ const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, D
 for (const k of ['HERDR_PANE_ID', 'HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete env[k]
 
 /** One typer run in its own project, session and pane. `st` is the shim's script; `pre` edits the fixture first. */
-function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same' } = {}) {
+function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noStopAt = false } = {}) {
   const dir = path.join(tmp, name)
   const proj = path.join(dir, 'proj'); fs.mkdirSync(path.join(proj, '.git'), { recursive: true })
   const recRoot = recordRepo === 'same' ? proj : path.join(dir, 'track')
@@ -124,11 +130,12 @@ function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same' } = 
   const length = fs.statSync(transcript).size
   const newTranscript = path.join(dir, 'new.jsonl'); write(newTranscript, '')
   const shimState = path.join(dir, 'shim.json'), shimLog = path.join(dir, 'shim.log')
-  const f = { dir, proj, recRoot, record, session, pane, transcript, length, newTranscript, shimLog }
+  const stopAt = Date.parse('2026-09-24T07:04:08.432Z')
+  const f = { dir, proj, recRoot, record, session, pane, transcript, length, newTranscript, shimLog, stopAt }
   fs.mkdirSync(autoCycleDir(), { recursive: true })
   fs.writeFileSync(shimState, JSON.stringify({ session, newSession: `${session}-new`, status: 'idle', restoreFile: restoreFile(pane), onClear: 'write', reply: true, newTranscript, ...st }))
   pre?.(f)
-  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture' }
+  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', ...(noStopAt ? {} : { stopAt }) }
   const r = spawnSync('node', [typer, JSON.stringify(args)], { env: { ...env, SHIM_STATE: shimState, SHIM_LOG: shimLog, ...extraEnv }, encoding: 'utf8', timeout: 20000 })
   const calls = fs.existsSync(shimLog) ? fs.readFileSync(shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
   const runs = calls.filter((c) => c.args[0] === 'pane' && c.args[1] === 'run')
@@ -180,8 +187,18 @@ const shrunk = typerCase('shrunk-transcript', {}, { pre: (f) => fs.writeFileSync
 clause('clause 2e4 — an old transcript that cannot be read, or is shorter than at the Stop: no /clear, paused with R17 (RB2)',
   [unread, shrunk].every((c) => sends(c) === '0,0' && JSON.stringify(c.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]'),
   `${detail(unread)} | ${detail(shrunk)}`)
-const grew = typerCase('grew', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'user', message: { content: 'hi' } })) })
-clause('clause 2f — the old transcript gained a user entry since the Stop: nothing sent, paused with R16', sends(grew) === '0,0' &&
+const grew = typerCase('grew', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'user', timestamp: new Date(f.stopAt + 50).toISOString(), message: { content: 'hi' } })) })
+// K2-R16: the turn's own final assistant entry, written after the Stop read the file's length but timestamped before
+// the Stop began, as the asynchronous transcript writer lands it.
+const lagging = typerCase('lagging-final-entry', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'assistant', timestamp: new Date(f.stopAt - 101).toISOString(), message: { content: 'done\nauto-cycle: ready' } })) })
+clause('clause 2f2 — the turn\'s final assistant entry landing past the Stop\'s length with a time before the Stop is not typing: /clear once, resume once, no R16 (K2-R16)',
+  sends(lagging) === '1,1' && lagging.paused.length === 0, detail(lagging))
+const untimed = typerCase('untimed-user-entry', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'user', message: { content: 'hi' } })) })
+const noStop = typerCase('no-stop-time', {}, { noStopAt: true })
+clause('clause 2f3 — a user entry past the length with no readable time counts as typing (R16, nothing sent); a launch with no Stop time sends and writes nothing',
+  sends(untimed) === '0,0' && JSON.stringify(untimed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]' &&
+  noStop.calls.length === 0 && noStop.paused.length === 0 && noStop.cycled.length === 0, `${detail(untimed)} | ${detail(noStop)}`)
+clause('clause 2f — the old transcript gained a user entry timestamped after the Stop began: nothing sent, paused with R16', sends(grew) === '0,0' &&
   JSON.stringify(grew.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(grew))
 const focused = typerCase('focused', { focusedGets: 3 })
 const firstRun = focused.calls.findIndex((c) => c.args[1] === 'run')
@@ -193,8 +210,9 @@ clause('clause 2h — the record switched off while the pane is focused: nothing
   offWhile.paused.length === 0 && offWhile.cycled.length === 0 && offWhile.code === 0, detail(offWhile))
 const sys = typerCase('system-entries', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'system', subtype: 'stop_hook_summary' }, { type: 'system', subtype: 'turn_duration' })) })
 clause('clause 2i — stop_hook_summary and turn_duration entries after the Stop do not count: /clear once, resume once', sends(sys) === '1,1', detail(sys))
-// Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear.
-const late = typerCase('late-session', { newSessionAfterGets: 3 })
+// Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear. The
+// typer's 30 s wait is kept at a minute here, so three reads never outrun it however loaded the host is.
+const late = typerCase('late-session', { newSessionAfterGets: 3 }, { extraEnv: { DCTR_TYPER_TIMES: JSON.stringify({ ...T, session: 60000 }) } })
 clause('clause 2j — herdr reports the new session id a while after the restore file: /clear once, resume once, after it is reported',
   sends(late) === '1,1' && late.calls.some((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session && c.args[1] === 'get'), detail(late))
 const fail = typerCase('lookup-fails', { fail: true })
@@ -237,6 +255,9 @@ clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const entriesAfter = (file, from) => fs.readFileSync(file).subarray(from).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+clause('clause 3a4 — without the typer: the lagging entry sits past the Stop\'s length and is timestamped before the Stop; the grew entry after it',
+  entriesAfter(lagging.transcript, lagging.length).length === 1 && Date.parse(entriesAfter(lagging.transcript, lagging.length)[0].timestamp) < lagging.stopAt &&
+  Date.parse(entriesAfter(grew.transcript, grew.length)[0].timestamp) > grew.stopAt && !('timestamp' in entriesAfter(untimed.transcript, untimed.length)[0]), 'K2 fixtures wrong')
 clause('clause 3a2 — without the typer: the unreadable fixture has no transcript, the shrunk one is shorter than the recorded length',
   !fs.existsSync(unread.transcript) && fs.statSync(shrunk.transcript).size < shrunk.length, 'RB2 fixtures wrong')
 clause('clause 3a — without the typer: the grew fixture holds a user entry past the Stop\'s length, the system one only system entries',

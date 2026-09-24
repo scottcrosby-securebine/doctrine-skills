@@ -35,6 +35,9 @@ let sessionId = null, event = 'Stop'
 const stand_down = (why) => standDown(event, 'auto-cycle', () => sessionId)(why)
 
 try {
+  // The moment this Stop began: the typer judges new typing by entry time against it, never by the byte length
+  // read below, which the asynchronous transcript writer can still be short of (K2-R16).
+  const stopAt = Date.now()
   let payload
   try { payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}') } catch { stand_down('hook payload was not readable JSON') }
   event = payload.hook_event_name || 'none'
@@ -110,7 +113,7 @@ try {
       try { length = fs.statSync(payload.transcript_path).size } catch { /* unreadable: the typer could not tell new entries */ }
       if (length === null) pause(pauseReason('R17', R17_WHY.transcript))
       else {
-        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase }
+        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt }
         const script = process.env.DCTR_TYPER_SCRIPT || path.join(import.meta.dirname, 'dctr-typer.mjs')
         spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
         messages.push(LAUNCH_MESSAGE)
