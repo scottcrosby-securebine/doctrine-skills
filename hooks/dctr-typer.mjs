@@ -17,7 +17,9 @@
 //     entry timestamped at or after the Stop hook's start (typedAfter; an entry with no time counts). The file is
 //     read from the Stop's byte length on, and only to find such entries: it is written asynchronously, so an entry
 //     past that length can be the turn's own final message, which carries a time before the Stop (K2-R16). A file
-//     that cannot be read, or is now shorter than that length, pauses rather than clears (RB2). It removes this
+//     that cannot be read, or is now shorter than that length, or holds a damaged line before its last, pauses rather
+//     than clears (RB2); a last line still being written holds every send until it completes, and pauses with R17 if
+//     it outlasts the idle grace (RB6-1). It removes this
 //     pane's restore file, sends /clear once, and only then appends `auto-cycle: cycle <n> tree <hash>` (LN12: the
 //     line records a sent /clear, never an intended one).
 //   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
@@ -35,7 +37,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, typedAfter, userTyped, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
+import { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
@@ -51,8 +53,9 @@ const log = (m) => hookLog(a.session, `auto-cycle typer: ${m}`)
 let times = TYPER_TIMES
 try { times = { ...TYPER_TIMES, ...JSON.parse(process.env.DCTR_TYPER_TIMES || '{}') } } catch { /* the defaults */ }
 
-/** Entries appended to a transcript at or after byte `from`, parsed; a line that does not parse is skipped. Null
- *  when the file could not be read or is now shorter than `from`: neither says there are no new entries (RB2). */
+/** Entries appended to a transcript at or after byte `from`, as transcriptEntries reads them: `{ entries, partial }`.
+ *  Null when the file could not be read, is now shorter than `from`, or holds a damaged line before its last: none
+ *  says there are no new entries (RB2, RB6-1). */
 function entriesFrom(file, from = 0) {
   let text = ''
   try {
@@ -65,7 +68,9 @@ function entriesFrom(file, from = 0) {
       text = buf.toString('utf8')
     } finally { fs.closeSync(fd) }
   } catch (e) { log(`the transcript ${file} could not be read (${e.code || e.message})`); return null }
-  return text.split('\n').flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
+  const read = transcriptEntries(text)
+  if (read === null) log(`the transcript ${file} holds a line that does not parse before its last line`)
+  return read
 }
 
 function pausing(reason) {
@@ -97,6 +102,8 @@ try {
     } catch (e) { log(`herdr pane get failed (${String(e.message).split('\n')[0]})`) }
     return { error: true }
   }
+  // A restore file that cannot be read or parsed, a half-written one included, is no restore yet: the typer waits for
+  // it and then pauses with R14, and never resumes on it.
   const readRestore = () => {
     try {
       const r = JSON.parse(fs.readFileSync(restoreFile(a.pane), 'utf8'))
@@ -105,7 +112,7 @@ try {
   }
 
   // The typer's clock: poll intervals waited, not wall time (RB2-4).
-  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0
+  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const stopRepo = stopFileRepo(repos, fs.existsSync)
@@ -116,13 +123,17 @@ try {
     if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
-    // The new session's transcript, read once per poll after the /clear: typing into it (DP-1) and its first turn.
+    // The old transcript before the /clear, the new session's after it, read once per poll: typing into either (K2-R16,
+    // DP-1) and the first turn. A last line still being written holds the step until it completes (RB6-1).
+    const old = stage === 'clear' ? entriesFrom(a.transcript, a.length) : null
     const fresh = stage !== 'clear' && restore ? entriesFrom(restore.transcript) : null
+    partialSince = old?.partial || fresh?.partial ? (partialSince ?? now) : null
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
-      grew: stage === 'clear' ? ((es) => (es === null ? null : es.some((e) => typedAfter(e, a.stopAt))))(entriesFrom(a.transcript, a.length)) : false,
-      typedNew: fresh === null ? null : fresh.some(userTyped),
-      firstTurn: stage === 'confirm' && Boolean(fresh?.some((e) => e?.type === 'assistant')),
+      midWrite: partialSince === null ? null : now - partialSince,
+      grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
+      typedNew: fresh === null ? null : fresh.entries.some(userTyped),
+      firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }

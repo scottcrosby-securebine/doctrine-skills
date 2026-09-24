@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { wrapperValue, parseRecord } from './dctr-record.mjs'
+import { wrapperValue, parseRecord, unwrapLine } from './dctr-record.mjs'
 
 // Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
 // (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
@@ -1060,8 +1060,9 @@ export function pausingStates(entries) {
   return { blocked, alarm, question: question && { id: question.id, text: question.text } }
 }
 
-/** The last line of an assistant message is the ready line. */
-export const endsReady = (message) => String(message ?? '').trimEnd().split('\n').at(-1).trim() === READY_LINE
+/** The last line of an assistant message is the ready line, bare or as an agent may wrap it (unwrapLine: a list
+ *  marker, inline code, bold or italics around the whole line), with nothing else on that line (K4-RL). */
+export const endsReady = (message) => unwrapLine(String(message ?? '').trimEnd().split('\n').at(-1)) === READY_LINE
 
 /** A Stop payload field that lists live work (`background_tasks`, `session_crons`): non-empty as an array, an
  *  object with keys, or any other present value. Absent, null, [] and {} are empty. */
@@ -1179,6 +1180,21 @@ export function userTyped(e) {
   return !text.startsWith('<command-name>/clear</command-name>') && text !== RESUME_LINE
 }
 
+/**
+ * The entries of a transcript's text (RB6-1), for the typer's reads. An unparseable line is never absence: one before
+ * the last line makes the read unreadable (null), which never authorizes a send (RB2); a last line with no newline
+ * that does not parse yet is a write in progress, `partial`, neither typing nor nothing. Blank lines are skipped.
+ */
+export function transcriptEntries(text) {
+  const lines = String(text).split('\n'), last = lines.pop(), entries = []
+  for (const l of lines) {
+    if (!l.trim()) continue
+    try { entries.push(JSON.parse(l)) } catch { return null }
+  }
+  if (!last.trim()) return { entries, partial: false }
+  try { entries.push(JSON.parse(last)); return { entries, partial: false } } catch { return { entries, partial: true } }
+}
+
 /** The typer's timings in ms (E8-D15): poll, how long a pane may read not idle once unfocused, how long to wait
  *  for the restore file, for herdr to report the new session (30 s), and for the first turn (2 min). */
 export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 30000, firstTurn: 120000 }
@@ -1189,7 +1205,10 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * `{ error }` when the lookup failed. `o.grew` is whether the old transcript holds a user or assistant entry the
  * user typed after the Stop (typedAfter), and null when it could not be read or is shorter than the Stop's length.
  * `o.stopRepo` is the repo holding the stop file, or null. `o.waited` is ms in this stage, `o.notIdle` ms unfocused and not idle,
- * `o.sessionWait` ms since the restore file was seen. `o.typedNew`, after the /clear, is whether the new session's
+ * `o.sessionWait` ms since the restore file was seen. `o.midWrite` is how long the transcript being read has ended in
+ * a line still being written (transcriptEntries' `partial`), null when it does not: the step waits a poll while it
+ * does, and pauses with R17 once that outlasts the idle grace, so neither a partial entry nor a damaged one ever
+ * reads as nothing typed (RB6-1). `o.typedNew`, after the /clear, is whether the new session's
  * transcript holds an entry the user typed (userTyped), and null when it could not be read: before the resume and
  * before a first turn counts, typing pauses with R16, and an unreadable transcript never reads as nothing typed, so
  * it sends nothing (DP-1, RB2). Returns `{ act, code?, reason }`, act one of `wait`,
@@ -1205,6 +1224,9 @@ export function typerStep(o) {
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
   if (o.stopRepo) return pause('R1', o.stopRepo)
   if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
+  if (o.midWrite !== null && o.midWrite !== undefined) {
+    return o.midWrite < t.idle ? { act: 'wait', reason: 'the transcript ends in a line still being written' } : pause('R17', R17_WHY.transcript)
+  }
   if (o.stage === 'confirm') {
     if (o.typedNew) return pause('R16')
     if (o.firstTurn) return { act: 'confirm', reason: 'the new session took its first turn' }
@@ -1237,14 +1259,15 @@ export function typerStep(o) {
 /**
  * B6's reason for a Notification or StopFailure event while auto-cycle is active (E8-D18), or null. `event` is
  * `StopFailure` or the notification type. idle_prompt pauses only when no live claim is held for this pane,
- * nothing is live, and the last Stop's persisted facts say its background tasks were empty and its message did
- * not end with the ready line; a missing record of the last Stop is not a known-empty one. Its R8 line is then
+ * nothing is live, and the last Stop's persisted facts say its background tasks and its session crons were empty
+ * (E8-D7's live-work test, E8-R22) and its message did not end with the ready line; a missing record of the last
+ * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then
  * written only while no paused line stands, which the dedup decides (pauseStands, E8-R28).
  */
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown')
   if (event === 'permission_prompt') return pauseReason('R7')
   if (event !== 'idle_prompt') return null
-  if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.ready !== false) return null
+  if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.cronsEmpty !== true || f.lastStop?.ready !== false) return null
   return pauseReason('R8')
 }

@@ -531,9 +531,13 @@ export function writeSessionStart(recordPath) {
 }
 
 /** The record's line count at this session's latest Stop, from its Stop facts (E8-R29), or 0 when no Stop is known:
- *  a missing or unreadable facts file never frees a line from the dedup. */
-export function stopLine(sessionId) {
-  try { const n = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')).line; return Number.isInteger(n) ? n : 0 } catch { return 0 }
+ *  a missing or unreadable facts file, or one written for another record (a kickoff that switched records, RB6-2),
+ *  never frees a line from the dedup. */
+export function stopLine(sessionId, recordPath) {
+  try {
+    const f = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8'))
+    return f.record === path.resolve(recordPath) && Number.isInteger(f.line) ? f.line : 0
+  } catch { return 0 }
 }
 
 /** The line count the last recorded session start saw, or 0 when none was recorded or it cannot be read. */
@@ -574,7 +578,7 @@ export function appendRecordLine(recordPath, line) {
  *  R7, R8 or R9 line from before that session's latest Stop does not count (E8-R29); the typer passes none, so its
  *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
 export function appendPaused(recordPath, reason, sessionId = null) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? stopLine(sessionId) : 0)) return { written: false }
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? stopLine(sessionId, recordPath) : 0)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }

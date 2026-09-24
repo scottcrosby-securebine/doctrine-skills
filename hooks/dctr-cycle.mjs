@@ -72,9 +72,13 @@ try {
   }
 
   if (event === 'Stop') {
-    // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down, and the
-    // record's line count before this Stop writes any line: the dedup's latest Stop (E8-R29).
-    writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message), line: recordLineCount(recordPath) })
+    // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down: the
+    // payload's two live-work lists (RB6-3) and its ready line; and the record's path and line count before this Stop
+    // writes any line, the dedup's latest Stop for that record (E8-R29, RB6-2).
+    writeMarker(stopFactsFile(sessionId), {
+      backgroundEmpty: !nonEmpty(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
+      record: path.resolve(recordPath), line: recordLineCount(recordPath),
+    })
 
     const keyLine = claimKey(record.entries)
     const warned = Boolean(sessionWarned(record.entries, sessionId))
