@@ -211,10 +211,10 @@ const QUOTED = ['- `auto-cycle paused: R7` means the hook saw a permission promp
   '- *auto-cycle: ready* and *more*']
 const quoted = parseRecord(QUOTED.join('\n')).entries
 const wr = parseRecord(WRAPPED.join('\n')).entries, wrNot = parseRecord(WRAPPED_NOT.join('\n')).entries
-clause('clause 1m — the agent-written auto-cycle forms parse wrapped in inline code, bold or italics, with or without a list marker; hook-written forms and a wrapped line with other words do not (K4-RL)',
+clause('clause 1o — the agent-written auto-cycle forms parse wrapped in inline code, bold or italics, with or without a list marker; hook-written forms and a wrapped line with other words do not (K4-RL)',
   JSON.stringify(wr.map((e) => e.sub)) === '["ready","ready","off","ready","on","paused"]' && wr[4].cap === 12 && wr[5].reason === 'question: which way?' && wrNot.length === 0,
   JSON.stringify([wr, wrNot]))
-clause('clause 1m2 — prose quoting an agent-written form (on, off, ready, paused) in two spans of the same delimiter parses to nothing (DSP7-B1)',
+clause('clause 1o2 — prose quoting an agent-written form (on, off, ready, paused) in two spans of the same delimiter parses to nothing (DSP7-B1)',
   quoted.length === 0, JSON.stringify(quoted))
 
 // ---------------------------------------------------------------- clause 2: known-good stays quiet

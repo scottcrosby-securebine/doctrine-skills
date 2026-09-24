@@ -242,6 +242,10 @@ clause('clause 2v — a half-written user entry in the new transcript holds the 
   sends(damagedNew) === '1,0' && JSON.stringify(damagedNew.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]' &&
   sends(partOld) === '0,0' && JSON.stringify(partOld.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]',
   `${detail(partNew)} | ${detail(damagedNew)} | ${detail(partOld)}`)
+// RB8-1: a paused line appended after the Stop's key line and before the typer first reads the record aborts it.
+const pausedBefore = typerCase('paused-before-first-read', {}, { pre: (f) => fs.appendFileSync(f.record, '- auto-cycle paused: waiting for your permission approval\n') })
+clause('clause 2r2 — a paused line written after the Stop\'s key line and before the typer\'s first read: nothing sent, no herdr read, no second paused line (RB8-1)',
+  sends(pausedBefore) === '0,0' && pausedBefore.calls.length === 0 && pausedBefore.paused.length === 1, detail(pausedBefore))
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -360,6 +364,8 @@ clause('clause 3c4 — without the typer: the partial-new transcript holds the u
   JSON.parse(fs.readFileSync(path.join(partNew.dir, 'shim.json'), 'utf8')).appendAt?.n === 4 && lines(partNew.newTranscript)[3].startsWith(PART) &&
   lines(damagedNew.newTranscript).some((l) => { try { JSON.parse(l); return false } catch { return l.length > 0 } }) &&
   fs.statSync(partOld.transcript).size > partOld.length && fs.readFileSync(partOld.transcript, 'utf8').endsWith(PART), 'fixtures wrong')
+clause('clause 3c5 — without the typer: the paused-before record\'s paused line comes after its key line 5, the ready line',
+  (() => { const es = parseRecord(fs.readFileSync(pausedBefore.record, 'utf8')).entries; return es.find((e) => e.sub === 'ready')?.line === 5 && es.find((e) => e.sub === 'paused')?.line > 5 })(), fs.readFileSync(pausedBefore.record, 'utf8'))
 clause('clause 3c — without the typer: the record-repo stop file sits outside the session\'s repo',
   !fs.existsSync(path.join(stoppedRec.proj, '.doctrine/auto-cycle.stop')) && fs.existsSync(path.join(stoppedRec.recRoot, '.doctrine/auto-cycle.stop')) &&
   fs.existsSync(path.join(stoppedRec.recRoot, '.git')), 'stop fixture wrong')

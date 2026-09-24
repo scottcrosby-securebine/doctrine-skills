@@ -810,7 +810,8 @@ clause('clause 2c15 — a turn ended by a StopFailure or a submitted prompt: a r
 // ruling and a prose line quoting a paused line in two code spans (DSP7-B1), which is no pause, walked depth first with the state files
 // snapshotted and restored between siblings. An interrupt is a turn that ends with no event, so it is the empty step:
 // every sequence without one already covers it. The oracle reads the record's own lines and keeps its own turn end and
-// Stop facts, per E8-D18 as amended by E8-R27 to E8-R31, and never calls the code under test:
+// Stop facts, per E8-D18 as amended by E8-R27 to E8-R31; its judgements of what a line is and what stands never call the
+// code under test, which it uses only to spell the expected token (pausedToken) and to read the token's seam (d):
 //   a. a permission_prompt or StopFailure writes its line unless one of the same event stands after the latest turn
 //      end (Stop, StopFailure, UserPromptSubmit), a StopFailure's own turn end taken before its line;
 //   b. an idle_prompt writes R8 only when the last Stop said ready false, no background task and no cron, and no
@@ -924,6 +925,12 @@ const linkHooks = path.join(tmp, 'linked-hooks'); fs.symlinkSync(import.meta.dir
 const viaLink = spawnSync('node', [path.join(linkHooks, 'dctr-cycle.mjs')], { input: JSON.stringify({ hook_event_name: 'Bogus', session_id: 's-link' }), env: baseEnv, encoding: 'utf8' })
 clause('clause 2s — run through a symlinked hooks directory, the hook still runs: a bogus event prints its stand-down line (ORC7-1)',
   viaLink.status === 0 && viaLink.stderr.includes('auto-cycle skipped — not a Stop, Notification, StopFailure or UserPromptSubmit event (Bogus)'), JSON.stringify([viaLink.status, viaLink.stdout, viaLink.stderr]))
+// RB8-2: stdin that cannot be read (a directory) stands the hook down with exit 0, as every other failure does.
+const dirFd = fs.openSync(tmp, 'r')
+const badIn = spawnSync('node', [hook], { stdio: [dirFd, 'pipe', 'pipe'], env: baseEnv, encoding: 'utf8' })
+fs.closeSync(dirFd)
+clause('clause 2t — stdin that cannot be read stands the hook down with exit 0 and a reason, never a stack (RB8-2)',
+  badIn.status === 0 && badIn.stderr.includes('auto-cycle skipped — hook payload was not readable') && !badIn.stderr.includes('    at '), JSON.stringify([badIn.status, badIn.stderr]))
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
