@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync, execFileSync } from 'node:child_process'
+import crypto from 'node:crypto'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -746,9 +747,9 @@ note(s4, 'idle_prompt')
 clause('clause 2p — every Stop persists its background tasks and ready line for the next idle_prompt (S4): the first explains the idle, the second does not',
   s4a?.backgroundEmpty === false && s4a?.ready === true && JSON.stringify(paused(s4)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify([s4a, paused(s4)]))
 
-// RB5-2 end to end: a second permission prompt and a second API error after the session's next Stop are written and
-// toasted, and not before it; an idle stop after an R7 from an earlier turn is written, after an R3 it is not; with
-// no Stop facts at all a second R7 is refused.
+// RB5-2 end to end: a permission prompt, a second one with no turn end between (refused), a Stop, a third (written);
+// an API error, a Stop, a second API error (written; two in a row are clause 2c15's); an idle stop after an R7 from an
+// earlier turn is written, after an R3 it is not; with no turn end known a second R7 is refused.
 const rb52 = fixture('rb5-2'), rb52Pane = { HERDR_PANE_ID: 'w9:prb52' }
 const perm = { hook_event_name: 'Notification', notification_type: 'permission_prompt' }, fail = { hook_event_name: 'StopFailure', error: 'overloaded' }
 const turn = { last_assistant_message: 'working' }
@@ -764,7 +765,7 @@ clause('clause 2c14 — a second permission prompt after the session\'s next Sto
 // RB6-3: each of E8-D7's live-work conditions, carried from a Stop to the next idle_prompt, writes no R8.
 const liveBehind = [['seat', {}, seatUp], ['gate', {}, gateLive], ['codex job', {}, codexLive], ['background task', { background_tasks: [{ id: 'b1' }] }], ['session cron', { session_crons: [{ id: 'c1' }] }]]
   .map(([n, more, pre], i) => { const f = fixture(`idle-live-${i}`); pre?.(f); const env = { HERDR_PANE_ID: `w9:plive${i}` }
-    run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f } })
+    run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, more } })
 clause('clause 2o2 — a seat, a gate, a codex job, a background task or a session cron live at the Stop: the next idle_prompt writes no paused line (E8-D7, E8-D18, RB6-3)',
   liveBehind.every(({ f }) => paused(f).length === 0), JSON.stringify(liveBehind.map(({ n, f }) => [n, paused(f)])))
 // RB6-2: a turn end recorded for another record never frees a line in this one.
@@ -802,6 +803,121 @@ clause('clause 2c15 — a turn ended by a StopFailure or a submitted prompt: a r
   upsSubR.out === '' && !fs.existsSync(state.turnEndFile(upsSub.session)) && calls(upsSub).length === 0 &&
   upsQuietR.out === '' && calls(upsQuiet).length === 0 && fs.existsSync(state.turnEndFile(upsQuiet.session)),
   `${show(sf, { code: 0, msg: '', err: '' })} || ${show(it, itUps)} || ${JSON.stringify(itFacts)} || ${JSON.stringify(paused(nb))} || ${upsOffR.out}|${upsSubR.out}`)
+// Clause 1x (TA2): hook-event sequences, driven through the real hook in-process (runHook in dctr-cycle.mjs, with
+// process.exit, stdout and stderr stubbed and herdr a tripwire on PATH: no pane is set, so the hook makes no herdr
+// call and its token is read through its one seam, autocycleToken). Every sequence of up to EV_LEN steps over
+// EV_STEPS, from a record Open with auto-cycle on and no warned line, the record-side steps a warned line, an alarm, a
+// ruling and a prose line quoting a paused line in two code spans (DSP7-B1), which is no pause, walked depth first with the state files
+// snapshotted and restored between siblings. An interrupt is a turn that ends with no event, so it is the empty step:
+// every sequence without one already covers it. The oracle reads the record's own lines and keeps its own turn end and
+// Stop facts, per E8-D18 as amended by E8-R27 to E8-R31, and never calls the code under test:
+//   a. a permission_prompt or StopFailure writes its line unless one of the same event stands after the latest turn
+//      end (Stop, StopFailure, UserPromptSubmit), a StopFailure's own turn end taken before its line;
+//   b. an idle_prompt writes R8 only when the last Stop said ready false, no background task and no cron, and no
+//      pause stands but an R7, R8 or R9 at or before the latest turn end;
+//   c. each line an event writes is shown in that event's pane message and nowhere else, and alerted once;
+//   d. the token names the last standing pause while any stands, else reads the cycle count;
+//   e. a UserPromptSubmit writes nothing, alerts nothing and prints nothing.
+// "Stands" here: a paused line after the latest on or warned line, an alarm pause not answered by a later ruling line.
+const { runHook } = await import('./dctr-cycle.mjs')
+const EV_LEN = 4
+const EV_STEPS = [
+  ['S', { last_assistant_message: 'working' }], ['Sb', { last_assistant_message: 'working', background_tasks: [{ id: 'b1' }] }],
+  ['Sc', { last_assistant_message: 'working', session_crons: [{ id: 'c1' }] }], ['Sr', { last_assistant_message: 'Handoff written.\nauto-cycle: ready' }],
+  ['F', { hook_event_name: 'StopFailure', error: 'overloaded' }], ['U', { hook_event_name: 'UserPromptSubmit', prompt: 'go on' }],
+  ['P', { hook_event_name: 'Notification', notification_type: 'permission_prompt' }], ['I', { hook_event_name: 'Notification', notification_type: 'idle_prompt' }],
+  ['W', null], ['A', null], ['R', null], ['Q', null],
+]
+const ev = fixture('event-enum', { warned: false, latch: false })
+const evHash = crypto.createHash('sha1').update(path.resolve(ev.record)).digest('hex').slice(0, 16)
+const evMarkers = () => fs.readdirSync(autoCycleDir()).filter((n) => n.startsWith(`alerted-${evHash}-`) || n.startsWith(`shown-${evHash}-`))
+const evFiles = [stopFactsFile(ev.session), state.turnEndFile(ev.session)]
+const evSnap = () => ({ record: fs.readFileSync(ev.record, 'utf8'), files: evFiles.map((f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null)), markers: new Set(evMarkers()) })
+const evRestore = (s) => {
+  fs.writeFileSync(ev.record, s.record)
+  evFiles.forEach((f, i) => (s.files[i] === null ? fs.rmSync(f, { force: true }) : fs.writeFileSync(f, s.files[i])))
+  for (const n of evMarkers()) if (!s.markers.has(n)) fs.rmSync(path.join(autoCycleDir(), n))
+}
+const EXIT = Symbol('exit')
+const saved = { exit: process.exit, out: process.stdout.write, err: process.stderr.write, env: { ...process.env } }
+const trip = path.join(tmp, 'ev-bin'); fs.mkdirSync(trip)
+fs.writeFileSync(path.join(trip, 'herdr'), `#!/bin/sh\necho "$@" >> ${path.join(tmp, 'ev-herdr.log')}\nexit 1\n`); fs.chmodSync(path.join(trip, 'herdr'), 0o755)
+for (const k of ['HERDR_PANE_ID', 'HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete process.env[k]
+process.env.PATH = `${trip}:${process.env.PATH}`
+const hookEvent = (more) => {
+  let out = ''
+  process.exit = () => { throw EXIT }
+  process.stdout.write = (c) => { out += c; return true }
+  process.stderr.write = () => true
+  try { runHook(JSON.stringify(payload(ev, more))) } catch (e) { if (e !== EXIT) throw e } finally {
+    process.exit = saved.exit; process.stdout.write = saved.out; process.stderr.write = saved.err
+  }
+  let j = null
+  try { j = out ? JSON.parse(out) : null } catch { /* reported below */ }
+  return { out, shown: (j?.systemMessage || '').split('\n').filter((l) => l.startsWith('doctrine auto-cycle paused: ')) }
+}
+// The oracle's reading of the record: its own classification, never the code under test's.
+const evCode = (r) => (r === 'waiting for your permission approval' ? 'R7' : r === 'session idle, waiting for you' ? 'R8' : /^Claude API error: /.test(r) ? 'R9' : /alarm fired, ruling needed$/.test(r) ? 'R3' : 'other')
+const evRead = () => {
+  const lines = fs.readFileSync(ev.record, 'utf8').replace(/\n$/, '').split('\n')
+  const anchor = lines.reduce((a, l, i) => (/^- auto-cycle: (on|warned) /.test(l) ? i + 1 : a), 0)
+  const pauses = lines.map((l, i) => ({ l, line: i + 1 })).filter(({ l }) => l.startsWith('- auto-cycle paused: ')).map(({ l, line }) => ({ line, reason: l.slice(21), code: evCode(l.slice(21)) }))
+  const ruled = (p) => lines.some((l, i) => i + 1 > p.line && l.startsWith('- ruling: '))
+  return { count: lines.length, pauses, standing: pauses.filter((p) => p.line > anchor && !(p.code === 'R3' && ruled(p))) }
+}
+const evBad = { a: [], b: [], c: [], d: [], e: [] }
+let evCount = 0
+const evNote = (k, seq, what) => { if (evBad[k].length < 3) evBad[k].push(`[${seq.join(' ')}] ${what}`) }
+const walk = (seq, model) => {
+  if (seq.length === EV_LEN) return
+  const snap = evSnap()
+  for (const [name, more] of EV_STEPS) {
+    const s = [...seq, name], before = evRead(), m = { ...model }
+    if (more === null) {
+      fs.appendFileSync(ev.record, { W: `- auto-cycle: warned ${ev.session} 60%\n`, A: '- alarm: round fired 2026-09-24T01:00:00Z count 4\n', R: '- ruling: R9 2026-09-24T02:00:00Z go on\n',
+        Q: '- `auto-cycle paused: R7` means the hook saw a permission prompt; I approved it with `yes`\n' }[name])
+    } else {
+      const ends = name.startsWith('S') || name === 'F' || name === 'U'
+      if (ends) m.turnEnd = before.count
+      const markersBefore = new Set(evMarkers())
+      const r = hookEvent(more)
+      evCount++
+      const after = evRead(), wrote = after.pauses.filter((p) => p.line > before.count)
+      const standsSince = (code) => before.standing.some((p) => p.code === code && p.line > m.turnEnd)
+      if (name === 'P' || name === 'F') {
+        const code = name === 'P' ? 'R7' : 'R9', want = !standsSince(code)
+        if ((wrote.length === 1 && wrote[0].code === code) !== want || wrote.length > 1) evNote('a', s, `wrote ${JSON.stringify(wrote.map((p) => p.reason))}, expected ${want ? code : 'nothing'}`)
+      }
+      if (name === 'I') {
+        const f = m.facts, want = Boolean(f) && f.ready === false && f.bg === false && f.cron === false &&
+          !before.standing.some((p) => !(['R7', 'R8', 'R9'].includes(p.code) && p.line <= m.turnEnd))
+        if ((wrote.length === 1 && wrote[0].code === 'R8') !== want || wrote.length > 1) evNote('b', s, `wrote ${JSON.stringify(wrote.map((p) => p.reason))}, expected ${want ? 'R8' : 'nothing'}`)
+      }
+      if (name === 'U' && (wrote.length || r.out !== '' || evMarkers().length !== markersBefore.size)) evNote('e', s, `wrote ${wrote.length}, printed ${JSON.stringify(r.out)}`)
+      if (name !== 'U') {
+        const shownReasons = r.shown.map((l) => l.slice('doctrine auto-cycle paused: '.length))
+        if (wrote.length > 1 || shownReasons.length !== wrote.length || !wrote.every((p) => shownReasons.some((x) => x.startsWith(`${p.reason}. `))))
+          evNote('c', s, `wrote ${JSON.stringify(wrote.map((p) => p.reason))} shown ${JSON.stringify(shownReasons)}`)
+        for (const p of wrote) if (!fs.existsSync(path.join(autoCycleDir(), `alerted-${evHash}-${p.line}`)) || !fs.existsSync(path.join(autoCycleDir(), `shown-${evHash}-${p.line}`))) evNote('c', s, `line ${p.line} not marked alerted and shown`)
+      }
+      if (name.startsWith('S')) m.facts = { ready: name === 'Sr', bg: name === 'Sb', cron: name === 'Sc' }
+    }
+    const now = evRead(), token = autocycleToken(parseRecord(fs.readFileSync(ev.record, 'utf8')).entries, 0)
+    if (now.standing.length ? token !== pausedToken(now.standing.at(-1).reason) : !token.startsWith('auto-cycle on·')) evNote('d', s, `token ${token} with ${JSON.stringify(now.standing.map((p) => p.reason))}`)
+    walk(s, m)
+    evRestore(snap)
+  }
+}
+try { walk([], { turnEnd: 0, facts: null }) } finally { process.env = saved.env }
+const evTrip = fs.existsSync(path.join(tmp, 'ev-herdr.log'))
+clause(`clause 1x — hook-event sequences of up to ${EV_LEN} steps over Stop (ready or not, with background tasks, with crons), StopFailure, UserPromptSubmit, the two prompts, and warned, alarm, ruling and quoting prose lines (${evCount} hook events): the oracle's writes, alerts, messages and token hold, and herdr is never called (E8-D18, E8-R27 to E8-R31, TA2)`,
+  evCount > 0 && !evTrip && Object.values(evBad).every((v) => v.length === 0), JSON.stringify({ ...evBad, herdr: evTrip }))
+// RB7-3: a StopFailure's own R9 holds the idle rule until a turn ends after it: an idle_prompt right after it, the
+// last Stop's facts idle-eligible, writes no R8.
+const sfIdle = fixture('stopfailure-then-idle'), sfIdlePane = { HERDR_PANE_ID: 'w9:psfi' }
+run(sfIdle, { last_assistant_message: 'working' }, sfIdlePane); run(sfIdle, fail, sfIdlePane); note(sfIdle, 'idle_prompt', {}, sfIdlePane)
+clause('clause 2c16 — a StopFailure then an idle_prompt in the same turn: the R9 is written and the idle stop writes no R8 behind it (E8-R28, E8-R31, RB7-3)',
+  JSON.stringify(paused(sfIdle)) === '["- auto-cycle paused: Claude API error: overloaded"]', show(sfIdle, { code: 0, msg: '', err: '' }))
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
@@ -889,14 +1005,20 @@ clause('clause 3a13 — the idle-after fixtures\' turn end carries a record line
     !fs.existsSync(stopFactsFile(noFacts.session)) && !fs.existsSync(state.turnEndFile(noFacts.session)),
   JSON.stringify([idle7, idle3].map((f) => fs.existsSync(stopFactsFile(f.session)) && fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
 clause('clause 3a14 — without the hook: the live-work fixtures carry their condition (a seat, gate or codex marker, or a Stop with a background task or a cron), and each Stop said its message was not ready',
-  liveBehind.every(({ n, f }) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
-    return facts.ready === false && (n === 'background task' ? facts.backgroundEmpty === false : n === 'session cron' ? facts.backgroundEmpty === true : fs.readdirSync(seatsDir(f.session)).length === 1) }),
+  liveBehind.every(({ n, f, more }) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
+    return facts.ready === false && (n === 'background task' ? more.background_tasks?.length === 1 && facts.backgroundEmpty === false
+      : n === 'session cron' ? more.session_crons?.length === 1 && facts.cronsEmpty === false && facts.backgroundEmpty === true : fs.readdirSync(seatsDir(f.session)).length === 1) }),
   JSON.stringify(liveBehind.map(({ f }) => fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
 clause('clause 3a15 — without the hook: the StopFailure fixture had no Stop (no Stop facts), the prompt fixture\'s Stop facts were written by this suite before any event, the off fixture ends switched off, and the quiet fixture\'s typer pause stands after its warned line',
   !fs.existsSync(stopFactsFile(sf.session)) && JSON.stringify(Object.keys(itFacts)) === '["backgroundEmpty","cronsEmpty","ready"]' &&
   parseRecord(fs.readFileSync(upsOff.record, 'utf8')).entries.filter((e) => e.sub === 'on' || e.sub === 'off').at(-1).sub === 'off' &&
   (() => { const es = parseRecord(fs.readFileSync(upsQuiet.record, 'utf8')).entries; return es.find((e) => e.sub === 'paused').line > es.find((e) => e.sub === 'warned').line })(),
   'turn-end fixtures wrong')
+const evHead = fs.readFileSync(ev.record, 'utf8').split('\n'), evQ = '- `auto-cycle paused: R7` means the hook saw a permission prompt; I approved it with `yes`'
+clause('clause 3a16 — without the hook: the event-enumeration record, as restored, holds State Open and an on line and no warned or paused line, its session has no gauge latch (so a ready Stop never launches), its quoting line is not a paused line by its own text, and the herdr tripwire is executable',
+  evHead.includes('- State: Open') && evHead.some((l) => /^- auto-cycle: on /.test(l)) && !evHead.some((l) => /^- auto-cycle: warned|^- auto-cycle paused: /.test(l)) &&
+  !fs.existsSync(path.join(stateDir(ev.session), 'gauge.json')) && !evQ.startsWith('- auto-cycle paused: ') && evQ.split('`').length - 1 === 4 &&
+  (fs.statSync(path.join(trip, 'herdr')).mode & 0o111) !== 0, evHead.join(' | '))
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
