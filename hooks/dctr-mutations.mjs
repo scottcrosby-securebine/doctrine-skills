@@ -1805,7 +1805,7 @@ const MUTATIONS = [
     from: "mark?.sub === 'warned' && mark.line > startLine ?",
     to: "mark?.sub === 'warned' ?" },
   { name: "the toast takes the question's action from its text alone (RB5-1)", file: "dctr-state.mjs",
-    clause: "clause 2c13",
+    clause: "clause 2j",
     from: "pauseToastArgs(repo, phase, p.reason, pauseActionAt(p, entries, start))",
     to: "pauseToastArgs(repo, phase, p.reason)" },
   { name: "the pane message takes the question's action from its text alone (RB5-1)", file: "dctr-state.mjs",

@@ -386,7 +386,8 @@ clause('clause 2i — a second Stop, and a later session, write no second paused
 // B3: a paused line the agent wrote is alerted too, with its written form.
 const agent = negs.find((x) => x.name === 'paused after warned')
 clause('clause 2j — a paused line the agent wrote is alerted once, naming its reason and its action (B3, E8-D19, S4-1)',
-  agent.r.msg === 'doctrine auto-cycle paused: question: which way?. answer in the pane, then /clear and type resume' && toasts(agent.f).length === 1 && metas(agent.f).length === 1, show(agent.f, agent.r))
+  agent.r.msg === 'doctrine auto-cycle paused: question: which way?. answer in the pane, then /clear and type resume' &&
+  toasts(agent.f)[0]?.[4] === 'question: which way?. answer in the pane, then /clear and type resume' && toasts(agent.f).length === 1 && metas(agent.f).length === 1, show(agent.f, agent.r))
 
 // E8-R25: a resolved R2, R3 or R4 pause lets the same session cycle again.
 const R2L = ['- State: Blocked. waits', '- auto-cycle paused: phase Blocked: State: Blocked. waits']
