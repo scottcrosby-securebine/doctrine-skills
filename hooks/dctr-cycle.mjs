@@ -8,7 +8,7 @@
 //
 // On Stop it runs B2's ordered steps (cycleDecision in dctr-lib.mjs): a pausing state writes one paused line; an
 // ordinary turn, or live work, writes nothing; a stall, the cap or no progress writes one paused line; otherwise
-// it hashes the tree and spawns the typer (dctr-typer.mjs) detached, which types /clear and the resume line once
+// it hashes the tree and spawns the typer (dctr-typer.mjs) detached, which types /clear and the doctrine-resume command once
 // the user moves focus off the pane. On Notification and StopFailure, while auto-cycle is active, it pauses on a
 // permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision). A Stop, a StopFailure
 // and a UserPromptSubmit each record the record's line count as the session's turn end (writeTurnEnd), so a second
@@ -27,7 +27,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
-  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
+  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -89,7 +89,7 @@ try {
     // S4: what an idle_prompt later needs to know about this Stop, persisted by Stop alone, so a StopFailure or a
     // submitted prompt never replaces them with unknowns: the payload's two live-work lists (RB6-3) and its ready line.
     writeMarker(stopFactsFile(sessionId), {
-      backgroundEmpty: !nonEmpty(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
+      backgroundEmpty: !backgroundLive(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
     })
 
     const keyLine = claimKey(record.entries)
@@ -101,7 +101,7 @@ try {
       ...pausingStates(record.entries),
       warned,
       pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
-      backgroundTasks: nonEmpty(payload.background_tasks),
+      backgroundTasks: backgroundLive(payload.background_tasks),
       liveWork: liveWork(sessionId),
       sessionCrons: nonEmpty(payload.session_crons),
       ready: endsReady(payload.last_assistant_message),

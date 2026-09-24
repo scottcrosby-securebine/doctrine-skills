@@ -90,9 +90,8 @@ clause('clause 1j6 — userTyped: the typer\'s own /doctrine:doctrine-resume ent
   !userTyped(ownCmd) && userTyped(cmdWith('/doctrine:doctrine-resume', 'go')) && userTyped(cmdWith('/doctrine:doctrine-resume', '')) &&
   userTyped(cmdWith('/grill-me', '(typed by doctrine auto-cycle, not a ruling)')) && userTyped({ type: 'user', message: { content: 'resume (typed by doctrine auto-cycle, not a ruling)' } }) &&
   userTyped({ type: 'user', message: { content: `${ownCmd.message.content} and more` } }), 'misread')
-clause('clause 1j — userTyped: /clear\'s own entries, the resume line, a tool result and an assistant entry are not typing; a prompt as a string or as text parts is (DP-1)',
-  CLEAR_ENTRIES.every((e) => !userTyped(e)) && !userTyped({ type: 'user', message: { content: RESUME_LINE } }) &&
-  !userTyped({ type: 'user', message: { content: [{ type: 'text', text: RESUME_LINE }] } }) &&
+clause('clause 1j — userTyped: /clear\'s own entries, the typer\'s resume command entry, a tool result and an assistant entry are not typing; a prompt as a string or as text parts is (DP-1)',
+  CLEAR_ENTRIES.every((e) => !userTyped(e)) && !userTyped(ownCmd) &&
   !userTyped({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'x' }] } }) && !userTyped({ type: 'assistant', message: { content: 'hi' } }) &&
   userTyped({ type: 'user', message: { content: 'what does foo.js do?' } }) && userTyped({ type: 'user', message: { content: [{ type: 'text', text: 'and bar?' }] } }), 'misread')
 const NEWP = { ...idle, session: 'new' }

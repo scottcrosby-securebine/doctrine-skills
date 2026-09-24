@@ -849,8 +849,11 @@ export function gaugeContext({ warn = false, used, window, tier, tierText, facts
 export const STOP_FILE = '.doctrine/auto-cycle.stop'
 /** The last line of the assistant message that says the handoff is done and the session may be cleared. */
 export const READY_LINE = 'auto-cycle: ready'
-/** The line the typer sends after /clear (E8-R24): it starts with resume and says it is not a ruling. */
-export const RESUME_LINE = 'resume (typed by doctrine auto-cycle, not a ruling)'
+export const RESUME_COMMAND = '/doctrine:doctrine-resume'
+export const RESUME_ARGS = '(typed by doctrine auto-cycle, not a ruling)'
+/** What the typer types after /clear (E8-R24, E8-R32): the doctrine-resume skill's slash command, so the new session
+ *  runs doctrine-resume, with an argument saying it is not a ruling. */
+export const RESUME_LINE = `${RESUME_COMMAND} ${RESUME_ARGS}`
 /** What the Stop hook prints in the pane when it launches the typer (E8-R23). */
 export const LAUNCH_MESSAGE = 'doctrine auto-cycle: will type /clear and resume here once you move focus off this pane'
 /** The sidebar token's source and lifetime (E8-R23): its own source, apart from the orchestrator's custom:doctrine. */
@@ -1065,8 +1068,15 @@ export function pausingStates(entries) {
  *  marker, inline code, bold or italics around the whole line), with nothing else on that line (K4-RL). */
 export const endsReady = (message) => unwrapLine(String(message ?? '').trimEnd().split('\n').at(-1)) === READY_LINE
 
-/** A Stop payload field that lists live work (`background_tasks`, `session_crons`): non-empty as an array, an
- *  object with keys, or any other present value. Absent, null, [] and {} are empty. */
+/** A Stop payload field that lists live work (`session_crons`): non-empty as an array, an object with keys, or any
+ *  other present value. Absent, null, [] and {} are empty. */
+/** The statuses a background task has once it has ended (E8-R33). */
+const BACKGROUND_ENDED = ['completed', 'failed', 'killed']
+/** Whether a Stop's `background_tasks` holds live work (E8-D7, E8-R33): an entry whose status is not completed,
+ *  failed or killed, a missing or unknown status and a non-object entry included. A list of only ended tasks, an
+ *  empty one and an absent one are not live; a present value that is not a list is live when nonEmpty. */
+export const backgroundLive = (tasks) => (Array.isArray(tasks)
+  ? tasks.some((t) => !(t && typeof t === 'object' && BACKGROUND_ENDED.includes(t.status))) : nonEmpty(tasks))
 export const nonEmpty = (v) => (v === undefined || v === null ? false : Array.isArray(v) ? v.length > 0 : typeof v === 'object' ? Object.keys(v).length > 0 : Boolean(v))
 
 /**
@@ -1170,7 +1180,10 @@ export const typedAfter = (e, stopAt) =>
 /**
  * Whether a new-session transcript entry is the user's own typing (E8-D15, DP-1): a `user` entry that is not meta,
  * carries no tool result, and is neither the entry /clear itself writes (`<command-name>/clear</command-name>`) nor
- * the typer's own resume line. /clear also writes a meta `user` entry and a `system` entry, and no assistant entry.
+ * the entry the typer's own resume command leaves (E8-R32): a `user` entry holding exactly its `<command-message>`,
+ * `<command-name>` and `<command-args>` tags, as Claude Code writes a typed slash command, the skill's loaded text
+ * following as meta. /clear also writes a meta `user` entry and a `system` entry, and no assistant entry. Any other
+ * slash command, or that one with other arguments, is typing.
  */
 export function userTyped(e) {
   if (e?.type !== 'user' || e.isMeta) return false
@@ -1178,7 +1191,14 @@ export function userTyped(e) {
   const parts = typeof c === 'string' ? [c] : Array.isArray(c) ? c : []
   if (parts.some((x) => x?.type === 'tool_result')) return false
   const text = parts.map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')).join('').trim()
-  return !text.startsWith('<command-name>/clear</command-name>') && text !== RESUME_LINE
+  return !text.startsWith('<command-name>/clear</command-name>') && !ownResume(text)
+}
+
+/** The typer's own resume command as Claude Code records it: the three command tags and nothing else. */
+const ownResume = (text) => {
+  const tag = (t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(text)?.[1]
+  return tag('command-name') === RESUME_COMMAND && tag('command-message') === RESUME_COMMAND.slice(1) &&
+    tag('command-args')?.trim() === RESUME_ARGS && !text.replace(/<(command-message|command-name|command-args)>[^<]*<\/\1>/g, '').trim()
 }
 
 /**

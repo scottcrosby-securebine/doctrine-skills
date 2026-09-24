@@ -23,8 +23,9 @@
 //     pane's restore file, sends /clear once, and only then appends `auto-cycle: cycle <n> tree <hash>` (LN12: the
 //     line records a sent /clear, never an intended one).
 //   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
-//     to report that id within 30 s, and sends the resume line once, only while the new session's transcript holds
-//     no entry the user typed (userTyped: /clear's own entries and the resume line are not typing); typing pauses
+//     to report that id within 30 s, and sends the resume line once (RESUME_LINE: the /doctrine:doctrine-resume
+//     command, E8-R32), only while the new session's transcript holds no entry the user typed (userTyped: /clear's
+//     own entries and the resume command's are not typing); typing pauses
 //     with R16, and a transcript still unreadable when the 30 s end pauses with R17, never sends (DP-1).
 //   - It confirms the first turn from the new transcript within 2 minutes, resends once, then pauses; typing into
 //     the new session before the first turn pauses with R16, and an unreadable transcript with R17.
