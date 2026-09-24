@@ -138,6 +138,9 @@ const progBad = P.filter(([, es, h, pause, n]) => cycleProgress(es, h).pause !==
 clause('clause 1h — cycleProgress: only the cap, the bookkeeping-only and the leftover-dirty fixtures pause, and the count continues across session ids (E8-D17, T3)',
   progBad.length === 0, JSON.stringify(progBad.map(([name, es, h]) => [name, cycleProgress(es, h)])))
 
+clause('clause 1h4 — endsReady takes the ready line wrapped in inline code, bold or italics or behind a list marker, as the whole last line, and never inside a sentence (K4-RL)',
+  endsReady('Done.\n\n`auto-cycle: ready`') && endsReady('x\n**auto-cycle: ready**\n') && endsReady('x\n- auto-cycle: ready') && endsReady('x\n  *auto-cycle: ready*  ') &&
+  !endsReady('The next line says `auto-cycle: ready`') && !endsReady('x\n`auto-cycle: ready` done') && !endsReady('x\n`auto-cycle: ready*'), 'wrong')
 clause('clause 1h2 — endsReady reads the message\'s last line only; nonEmpty counts a listed task or cron and never an empty list or object',
   endsReady('done\nauto-cycle: ready\n') && !endsReady('auto-cycle: ready\nthen more') && !endsReady(undefined) &&
   nonEmpty([{ id: 1 }]) && nonEmpty({ a: 1 }) && !nonEmpty([]) && !nonEmpty({}) && !nonEmpty(null) && !nonEmpty(undefined), 'wrong')
@@ -145,12 +148,16 @@ clause('clause 1h3 — seatLive: a gate is live until its result file, a codex s
   seatLive({ role: 'gate' }, false, null) && !seatLive({ role: 'gate' }, true, null) && seatLive({ codexJob: '/j' }, false, 'running') &&
   seatLive({ codexJob: '/j' }, false, null) && !seatLive({ codexJob: '/j' }, false, 'completed') && seatLive({ agent: 'x' }, false, null), 'wrong')
 
-const idleOk = { claimHeld: false, liveWork: null, lastStop: { backgroundEmpty: true, ready: false } }
+const idleOk = { claimHeld: false, liveWork: null, lastStop: { backgroundEmpty: true, cronsEmpty: true, ready: false } }
 clause('clause 1i — notifyDecision: permission_prompt is R7, StopFailure R9 with its error, an unexplained idle_prompt R8 (E8-D18, T5)',
   notifyDecision('permission_prompt', {}) === 'waiting for your permission approval' && notifyDecision('StopFailure', { error: 'rate_limit' }) === 'Claude API error: rate_limit' &&
   notifyDecision('idle_prompt', idleOk) === 'session idle, waiting for you' && notifyDecision('auth_success', idleOk) === null, 'wrong')
+clause('clause 1j5 — notifyDecision: idle_prompt is nothing when the last Stop had session crons, or its facts do not say (E8-D7, E8-R22, RB6-3)',
+  notifyDecision('idle_prompt', { ...idleOk, lastStop: { backgroundEmpty: true, ready: false } }) === null &&
+  notifyDecision('idle_prompt', { ...idleOk, lastStop: { backgroundEmpty: true, cronsEmpty: false, ready: false } }) === null &&
+  notifyDecision('idle_prompt', idleOk) === 'session idle, waiting for you', 'wrong')
 clause('clause 1j — notifyDecision: idle_prompt is nothing while a claim is held, work is live, the last Stop had background tasks, ended ready, or is unknown',
-  [{ claimHeld: true }, { liveWork: 'gate x is live' }, { lastStop: { backgroundEmpty: false, ready: false } }, { lastStop: { backgroundEmpty: true, ready: true } }, { lastStop: null }]
+  [{ claimHeld: true }, { liveWork: 'gate x is live' }, { lastStop: { backgroundEmpty: false, cronsEmpty: true, ready: false } }, { lastStop: { backgroundEmpty: true, cronsEmpty: true, ready: true } }, { lastStop: null }]
     .every((o) => notifyDecision('idle_prompt', { ...idleOk, ...o }) === null), 'idle paused when explained')
 
 // T6: the state helpers.
@@ -287,10 +294,13 @@ const show = (f, r) => `code ${r.code} msg ${JSON.stringify(r.msg)} err ${r.err.
 
 // The all-true fixtures launch.
 const good = fixture('all-true'), goodBefore = Date.now(), goodR = run(good), goodAfter = Date.now()
+const codeReady = fixture('ready-in-code'), codeReadyR = run(codeReady, { last_assistant_message: 'Handoff written.\n\n`auto-cycle: ready`' })
 const goodT = fixture('all-true-tracked', { tracked: true }), goodTR = run(goodT)
 const goodS = fixture('all-true-sibling', { sibling: true }), goodSR = run(goodS)
 clause('clause 2a — all preconditions true: the typer is launched with its facts, the launch message printed, no paused line (E8-D7)',
   launched(goodR) && paused(good).length === 0 && reads(good) === 1 && goodR.code === 0, show(good, goodR))
+clause('clause 2a3 — all true, the message ending in the ready line wrapped in inline code: the typer is launched (K4-RL)',
+  launched(codeReadyR) && paused(codeReady).length === 0, show(codeReady, codeReadyR))
 clause('clause 2b — all true with the handoff and memory file tracked and committed, and with the record in a second repo: launched (E8-D7)',
   launched(goodTR) && launched(goodSR), `${show(goodT, goodTR)} | ${show(goodS, goodSR)}`)
 
@@ -696,7 +706,7 @@ clause('clause 2l2 — a tracked repo whose memory file, handoffs, auto-cycle fi
 const note = (f, type, more = {}, env = {}) => run(f, { hook_event_name: 'Notification', notification_type: type, ...more }, env)
 const stopFacts = (f, facts) => { fs.mkdirSync(autoCycleDir(), { recursive: true }); fs.writeFileSync(stopFactsFile(f.session), JSON.stringify(facts)) }
 const nPerm = fixture('n-perm'); note(nPerm, 'permission_prompt')
-const nIdle = fixture('n-idle'); stopFacts(nIdle, { backgroundEmpty: true, ready: false }); note(nIdle, 'idle_prompt')
+const nIdle = fixture('n-idle'); stopFacts(nIdle, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(nIdle, 'idle_prompt')
 const nFail = fixture('n-fail'); run(nFail, { hook_event_name: 'StopFailure', error: 'rate_limit', error_details: 'x' })
 clause('clause 2m — permission_prompt, an unexplained idle_prompt and StopFailure each write their paused line and alert it (E8-D18)',
   JSON.stringify(paused(nPerm)) === '["- auto-cycle paused: waiting for your permission approval"]' &&
@@ -704,7 +714,7 @@ clause('clause 2m — permission_prompt, an unexplained idle_prompt and StopFail
   JSON.stringify(paused(nFail)) === '["- auto-cycle paused: Claude API error: rate_limit"]' &&
   [nPerm, nIdle, nFail].every((f) => toasts(f).length === 1), [nPerm, nIdle, nFail].map((f) => JSON.stringify(paused(f))).join(' '))
 const offs = ['permission_prompt', 'idle_prompt', 'StopFailure'].map((t) => {
-  const f = fixture(`n-off-${t}`, { lines: ['- auto-cycle: off'] }); stopFacts(f, { backgroundEmpty: true, ready: false })
+  const f = fixture(`n-off-${t}`, { lines: ['- auto-cycle: off'] }); stopFacts(f, { backgroundEmpty: true, cronsEmpty: true, ready: false })
   if (t === 'StopFailure') run(f, { hook_event_name: 'StopFailure', error: 'x' }); else note(f, t)
   return f
 })
@@ -713,16 +723,16 @@ clause('clause 2n — each with auto-cycle off does nothing and calls no herdr (
 const nStop = fixture('n-stop'); write(path.join(nStop.proj, '.doctrine/auto-cycle.stop'), ''); note(nStop, 'permission_prompt')
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
-const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
+const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
 const idleBehind = [['R7', ['- auto-cycle paused: waiting for your permission approval']], ['R2', R2L], ['R3', R3L], ['R4', R4L], ['question', ['- auto-cycle paused: question: which way?']]]
-  .map(([n, lines]) => { const f = fixture(`i-behind-${n}`, { lines }); stopFacts(f, { backgroundEmpty: true, ready: false }); note(f, 'idle_prompt', {}, { HERDR_PANE_ID: `w9:pidle${n}` }); return { n, f } })
-const iClaim = fixture('i-claim'); stopFacts(iClaim, { backgroundEmpty: true, ready: false })
+  .map(([n, lines]) => { const f = fixture(`i-behind-${n}`, { lines }); stopFacts(f, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(f, 'idle_prompt', {}, { HERDR_PANE_ID: `w9:pidle${n}` }); return { n, f } })
+const iClaim = fixture('i-claim'); stopFacts(iClaim, { backgroundEmpty: true, cronsEmpty: true, ready: false })
 write(claimFile('s-the-old-session'), JSON.stringify({ pid: process.pid, pane: 'w9:p1', session: 's-the-old-session' })); note(iClaim, 'idle_prompt')
 const claimSeen = paused(iClaim).length
 fs.rmSync(claimFile('s-the-old-session'))
-const iGate = fixture('i-gate'); stopFacts(iGate, { backgroundEmpty: true, ready: false }); gateLive(iGate); note(iGate, 'idle_prompt')
-const iReady = fixture('i-ready'); stopFacts(iReady, { backgroundEmpty: true, ready: true }); note(iReady, 'idle_prompt')
-const iBg = fixture('i-bg'); stopFacts(iBg, { backgroundEmpty: false, ready: false }); note(iBg, 'idle_prompt')
+const iGate = fixture('i-gate'); stopFacts(iGate, { backgroundEmpty: true, cronsEmpty: true, ready: false }); gateLive(iGate); note(iGate, 'idle_prompt')
+const iReady = fixture('i-ready'); stopFacts(iReady, { backgroundEmpty: true, cronsEmpty: true, ready: true }); note(iReady, 'idle_prompt')
+const iBg = fixture('i-bg'); stopFacts(iBg, { backgroundEmpty: false, cronsEmpty: true, ready: false }); note(iBg, 'idle_prompt')
 clause('clause 2o — idle_prompt writes nothing while any paused line stands (R8, R7, R2, R3, R4, the skills\' question), while a claim for this pane is held under another session id (F9), while a gate is live, after a ready Stop, or after a Stop with background tasks; behind none it writes R8 (E8-R28)',
   paused(iPaused).length === 1 && JSON.stringify(paused(nIdle)) === '["- auto-cycle paused: session idle, waiting for you"]' && idleBehind.every(({ f }) => paused(f).length === 1 && toasts(f).length === 1 && !paused(f).some((l) => l.includes('session idle'))) && claimSeen === 0 && paused(iGate).length === 0 && paused(iReady).length === 0 && paused(iBg).length === 0,
   JSON.stringify([paused(iPaused), idleBehind.map(({ n, f }) => [n, paused(f), toasts(f).length]), claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
@@ -751,6 +761,22 @@ clause('clause 2c14 — a second permission prompt or API error after the sessio
   toasts(rb52).length === 4 && paused(idle7).at(-1) === `- auto-cycle paused: ${R8R}` && paused(idle7).length === 2 &&
   !paused(idle3).some((l) => l.includes('session idle')) && paused(noFacts).length === 1,
   `${show(rb52, { code: 0, msg: '', err: '' })} || ${JSON.stringify([paused(idle7), paused(idle3), paused(noFacts)])}`)
+// RB6-3: each of E8-D7's live-work conditions, carried from a Stop to the next idle_prompt, writes no R8.
+const liveBehind = [['seat', {}, seatUp], ['gate', {}, gateLive], ['codex job', {}, codexLive], ['background task', { background_tasks: [{ id: 'b1' }] }], ['session cron', { session_crons: [{ id: 'c1' }] }]]
+  .map(([n, more, pre], i) => { const f = fixture(`idle-live-${i}`); pre?.(f); const env = { HERDR_PANE_ID: `w9:plive${i}` }
+    run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f } })
+clause('clause 2o2 — a seat, a gate, a codex job, a background task or a session cron live at the Stop: the next idle_prompt writes no paused line (E8-D7, E8-D18, RB6-3)',
+  liveBehind.every(({ f }) => paused(f).length === 0), JSON.stringify(liveBehind.map(({ n, f }) => [n, paused(f)])))
+// RB6-2: Stop facts written for another record never free a line in this one.
+const rbA = path.join(tmp, 'rb62', 'a.md'), rbB = path.join(tmp, 'rb62', 'b.md')
+write(rbB, `- State: Open\n- auto-cycle: on cap 10 tier 60%\n- auto-cycle: warned s 60%\n${R7P}\n`)
+fs.mkdirSync(autoCycleDir(), { recursive: true })
+fs.writeFileSync(stopFactsFile('s-rb62'), JSON.stringify({ backgroundEmpty: true, cronsEmpty: true, ready: false, record: path.resolve(rbA), line: 99 }))
+const rb62Other = appendPaused(rbB, R7R, 's-rb62')
+fs.writeFileSync(stopFactsFile('s-rb62'), JSON.stringify({ backgroundEmpty: true, cronsEmpty: true, ready: false, record: path.resolve(rbB), line: 4 }))
+const rb62Same = appendPaused(rbB, R7R, 's-rb62')
+clause('clause 1w — the dedup reads the Stop facts\' line only for the record they name: facts for another record free nothing, facts for this one free its earlier R7 (E8-R29, RB6-2)',
+  rb62Other.written === false && rb62Same.written === true, JSON.stringify([rb62Other, rb62Same, fs.readFileSync(rbB, 'utf8')]))
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
@@ -834,6 +860,10 @@ clause('clause 3a13 — the idle-after fixtures\' Stop facts carry a record line
   [idle7, idle3].every((f) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8')); const p = parseRecord(fs.readFileSync(f.record, 'utf8')).entries.find((e) => e.sub === 'paused')
     return Number.isInteger(facts.line) && facts.line >= p.line && facts.backgroundEmpty === true && facts.ready === false }) && !fs.existsSync(stopFactsFile(noFacts.session)),
   JSON.stringify([idle7, idle3].map((f) => fs.existsSync(stopFactsFile(f.session)) && fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
+clause('clause 3a14 — without the hook: the live-work fixtures carry their condition (a seat, gate or codex marker, or a Stop with a background task or a cron), and each Stop said its message was not ready',
+  liveBehind.every(({ n, f }) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8'))
+    return facts.ready === false && (n === 'background task' ? facts.backgroundEmpty === false : n === 'session cron' ? facts.backgroundEmpty === true : fs.readdirSync(seatsDir(f.session)).length === 1) }),
+  JSON.stringify(liveBehind.map(({ f }) => fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&

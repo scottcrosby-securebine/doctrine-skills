@@ -18,7 +18,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-typer-'))
 process.env.TMPDIR = tmp
-const { typerStep, typedAfter, userTyped, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
+const { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
 const { restoreFile, claimFile, reserveMarker, autoCycleDir } = await import('./dctr-state.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 
@@ -95,6 +95,17 @@ clause('clause 1j2 — typerStep after /clear: typing into the new session pause
   ts({ stage: 'confirm', restore: NEW, firstTurn: true, typedNew: true, resumes: 1 }).code === 'R16' &&
   ts({ stage: 'confirm', restore: NEW, typedNew: null, waited: 400, resumes: 1, pane: NEWP }).reason === 'could not type into the pane: the transcript could not be read' &&
   ts({ stage: 'confirm', restore: NEW, typedNew: false, waited: 400, resumes: 1, pane: NEWP }).act === 'resume', 'wrong')
+// RB6-1: an unparseable line is never absence.
+const PART = '{"type":"user","message":{"content":"stop, I am taking over"'
+const te = (t) => transcriptEntries(t)
+clause('clause 1j3 — transcriptEntries: well-formed lines are entries; a last line with no newline that does not parse is partial, beside the entries before it; a damaged line before the last makes the read unreadable (RB6-1)',
+  te('{"type":"user"}\n\n{"type":"assistant"}\n')?.entries.length === 2 && te('{"type":"user"}\n\n{"type":"assistant"}\n').partial === false &&
+  te(`{"type":"system"}\n${PART}`)?.partial === true && te(`{"type":"system"}\n${PART}`).entries.length === 1 &&
+  te(`{"type":"system"}\n${PART}\n{"type":"assistant"}\n`) === null && te('{"type":"user"}')?.partial === false && te('')?.entries.length === 0,
+  JSON.stringify([te(`{"type":"system"}\n${PART}`), te(`{"type":"system"}\n${PART}\n{"type":"assistant"}\n`)]))
+clause('clause 1j4 — typerStep: a transcript ending in a line still being written waits a poll in every stage, then pauses with R17 once that outlasts the idle grace; it never clears or resumes (RB6-1)',
+  ts({ midWrite: 0 }).act === 'wait' && ts({ midWrite: 100 }).act === 'wait' && ts({ midWrite: 500 }).reason === 'could not type into the pane: the transcript could not be read' &&
+  ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: false, midWrite: 40 }).act === 'wait' && ts({ midWrite: null }).act === 'clear', 'wrong')
 clause('clause 1i — the typer\'s default timings are the spec\'s: 30 s for the new session, 2 min for the first turn',
   TYPER_TIMES.session === 30000 && TYPER_TIMES.firstTurn === 120000 && RESUME_LINE === 'resume (typed by doctrine auto-cycle, not a ruling)', JSON.stringify(TYPER_TIMES))
 
@@ -221,6 +232,16 @@ clause('clause 2u — typing into the cleared session: /clear once, no resume, p
   sends(clearOnly) === '1,1' && clearOnly.paused.length === 0 &&
   sends(newGone) === '1,0' && JSON.stringify(newGone.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]',
   `${detail(takeover)} | ${detail(clearOnly)} | ${detail(newGone)}`)
+// RB6-1 end to end: a user entry half-written into the new transcript, completed on herdr's fourth read; a damaged line
+// in the middle of the new transcript; a half-written user entry left at the end of the old transcript.
+const partNew = typerCase('partial-new', {}, { pre: (f) => { write(f.newTranscript, clearJl() + PART); setShim(f, () => ({ appendAt: { n: 4, file: f.newTranscript, line: '}}' } })) } })
+const damagedNew = typerCase('damaged-new', {}, { pre: (f) => write(f.newTranscript, `${clearJl()}{"type":"user","mess\n${JSON.stringify({ type: 'assistant', message: { content: 'x' } })}\n`) })
+const partOld = typerCase('partial-old', {}, { pre: (f) => fs.appendFileSync(f.transcript, PART) })
+clause('clause 2v — a half-written user entry in the new transcript holds the resume until it completes, then pauses with R16; a damaged line sends no resume and pauses with R17; a half-written entry left in the old transcript sends nothing and pauses with R17 (RB6-1)',
+  sends(partNew) === '1,0' && JSON.stringify(partNew.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]' &&
+  sends(damagedNew) === '1,0' && JSON.stringify(damagedNew.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]' &&
+  sends(partOld) === '0,0' && JSON.stringify(partOld.paused) === '["- auto-cycle paused: could not type into the pane: the transcript could not be read"]',
+  `${detail(partNew)} | ${detail(damagedNew)} | ${detail(partOld)}`)
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -333,6 +354,12 @@ clause('clause 3c3 — without the typer: the takeover transcript holds /clear\'
   fs.readFileSync(takeover.newTranscript, 'utf8').trim().split('\n').slice(0, 5).map((l) => JSON.parse(l).type).join(',') === 'user,user,system,user,assistant' &&
   fs.readFileSync(clearOnly.newTranscript, 'utf8').trim().split('\n').filter((l) => JSON.parse(l).type === 'user' && !JSON.parse(l).isMeta).length === 1 &&
   !fs.existsSync(path.join(tmp, 'no-such-dir', 'new.jsonl')), fs.readFileSync(takeover.newTranscript, 'utf8'))
+const lines = (file) => fs.readFileSync(file, 'utf8').split('\n')
+clause('clause 3c4 — without the typer: the partial-new transcript holds the user entry half-written after /clear\'s entries, which parses only once the shim completes it on its fourth read; the damaged one holds a line that does not parse before a well-formed last line; the partial-old one ends past the Stop\'s length in text that does not parse',
+  (() => { try { JSON.parse(PART); return false } catch { return true } })() && JSON.parse(`${PART}}}`).type === 'user' &&
+  JSON.parse(fs.readFileSync(path.join(partNew.dir, 'shim.json'), 'utf8')).appendAt?.n === 4 && lines(partNew.newTranscript)[3].startsWith(PART) &&
+  lines(damagedNew.newTranscript).some((l) => { try { JSON.parse(l); return false } catch { return l.length > 0 } }) &&
+  fs.statSync(partOld.transcript).size > partOld.length && fs.readFileSync(partOld.transcript, 'utf8').endsWith(PART), 'fixtures wrong')
 clause('clause 3c — without the typer: the record-repo stop file sits outside the session\'s repo',
   !fs.existsSync(path.join(stoppedRec.proj, '.doctrine/auto-cycle.stop')) && fs.existsSync(path.join(stoppedRec.recRoot, '.doctrine/auto-cycle.stop')) &&
   fs.existsSync(path.join(stoppedRec.recRoot, '.git')), 'stop fixture wrong')

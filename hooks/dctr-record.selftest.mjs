@@ -200,6 +200,16 @@ clause('clause 1k — a record with no state line and no wrapper line reads null
   parseRecord('# nothing\n\nprose only').state === null && parseRecord('# nothing').wrapper === null,
   JSON.stringify(parseRecord('# nothing\n\nprose only')))
 
+// K4-RL: the auto-cycle lines an agent writes (on, off, ready, paused) parse when a list marker and inline code, bold or
+// italics wrap the whole line; a hook-written line (warned, cycle) is read only as written; a wrapped line with other
+// words beside it is prose.
+const WRAPPED = ['- `auto-cycle: ready`', '`auto-cycle: ready`', '**auto-cycle: off**', '- *auto-cycle: ready*', '- **`auto-cycle: on cap 12 tier 60%`**', '- `auto-cycle paused: question: which way?`']
+const WRAPPED_NOT = ['- `auto-cycle: warned s1 60%`', '`auto-cycle: cycle 2 tree ab`', 'Done: `auto-cycle: ready`', '- `auto-cycle: ready` then more', '- `auto-cycle: ready*']
+const wr = parseRecord(WRAPPED.join('\n')).entries, wrNot = parseRecord(WRAPPED_NOT.join('\n')).entries
+clause('clause 1k — the agent-written auto-cycle forms parse wrapped in inline code, bold or italics, with or without a list marker; hook-written forms and a wrapped line with other words do not (K4-RL)',
+  JSON.stringify(wr.map((e) => e.sub)) === '["ready","ready","off","ready","on","paused"]' && wr[4].cap === 12 && wr[5].reason === 'question: which way?' && wrNot.length === 0,
+  JSON.stringify([wr, wrNot]))
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
@@ -224,6 +234,9 @@ clause('clause 3e — without the parser: the record holds two wrapper lines wit
 clause('clause 3b — without the parser: the record has more than one state line and the last differs from the first',
   lines.filter((l) => STATE_LINE.test(l.trim())).length === 4 && lines.at(-1) !== '- State: Open',
   'if the record held one state line, "last" in clause 1i would prove nothing')
+
+clause('clause 3f — without the parser: each wrapped fixture line carries a wrapper character beside its form, and each refused one a form key',
+  WRAPPED.every((l) => /[`*]/.test(l) && /auto-cycle/.test(l)) && WRAPPED_NOT.every((l) => /auto-cycle/.test(l) && /[`*]/.test(l)), 'fixtures wrong')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),
