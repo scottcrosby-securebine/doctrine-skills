@@ -20,7 +20,7 @@ import path from 'node:path'
 import {
   gaugeSkip, followKickoff, lastOnOffEntry, autoCycleActive, stopFileRepo, repoOf, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
 } from './dctr-lib.mjs'
-import { hookLog, stateDir, standDown, writeMarker } from './dctr-state.mjs'
+import { hookLog, stateDir, standDown, writeMarker, appendRecordLine } from './dctr-state.mjs'
 import { readBridge } from './dctr-bridge.mjs'
 
 /** How much of the transcript's end each read covers, growing until a usage entry is found: one tool result can
@@ -83,10 +83,9 @@ try {
   if (stepped.warn) {
     // When it warned, for the auto-cycle Stop hook's test that the handoff was written after the warning (B2 step 5).
     stepped.latch.warnedAt = Date.now()
-    const line = `- auto-cycle: warned ${sessionId} ${stepped.warnedTier}\n`
+    const line = `- auto-cycle: warned ${sessionId} ${stepped.warnedTier}`
     try {
-      const text = fs.readFileSync(recordPath, 'utf8')
-      fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line)
+      appendRecordLine(recordPath, line)
     } catch (e) {
       facts.push(`the warned line could not be appended to ${recordPath} (${e.code || e.message})`)
     }

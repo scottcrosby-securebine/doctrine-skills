@@ -17,7 +17,7 @@
 
 import fs from 'node:fs'
 import { restoreSkip, followKickoff, restoreContext } from './dctr-lib.mjs'
-import { hookLog, standDown, autoCycleDir, restoreFile, writeMarker } from './dctr-state.mjs'
+import { hookLog, standDown, restoreFile, writeMarker } from './dctr-state.mjs'
 
 let sessionId = null
 const stand_down = standDown('SessionStart', 'restore', () => sessionId)
@@ -42,7 +42,6 @@ try {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }))
   if (process.env.HERDR_PANE_ID) {
     try {
-      fs.mkdirSync(autoCycleDir(), { recursive: true })
       writeMarker(restoreFile(process.env.HERDR_PANE_ID), { session_id: sessionId, transcript_path: payload.transcript_path || null })
     } catch (e) { hookLog(sessionId, `SessionStart restore file not written (${e.code || e.message})`) }
   }

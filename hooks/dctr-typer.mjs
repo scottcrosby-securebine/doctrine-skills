@@ -21,10 +21,10 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, TYPER_TIMES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf } from './dctr-lib.mjs'
+import { typerStep, TYPER_TIMES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
-  herdr, autoCycleDir, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
+  herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
   hookLog, sleepMs,
 } from './dctr-state.mjs'
 
@@ -36,48 +36,51 @@ const log = (m) => hookLog(a.session, `auto-cycle typer: ${m}`)
 let times = TYPER_TIMES
 try { times = { ...TYPER_TIMES, ...JSON.parse(process.env.DCTR_TYPER_TIMES || '{}') } } catch { /* the defaults */ }
 
-/** Entries appended to a transcript at or after byte `from`, parsed; a line that does not parse is skipped. */
+/** Entries appended to a transcript at or after byte `from`, parsed; a line that does not parse is skipped. Null
+ *  when the file could not be read or is now shorter than `from`: neither says there are no new entries (RB2). */
 function entriesFrom(file, from = 0) {
   let text = ''
   try {
     const fd = fs.openSync(file, 'r')
     try {
       const size = fs.fstatSync(fd).size
+      if (size < from) { log(`the transcript ${file} is ${size} bytes, shorter than the ${from} recorded at the Stop`); return null }
       const buf = Buffer.alloc(Math.max(0, size - from))
       fs.readSync(fd, buf, 0, buf.length, from)
       text = buf.toString('utf8')
     } finally { fs.closeSync(fd) }
-  } catch { return [] }
+  } catch (e) { log(`the transcript ${file} could not be read (${e.code || e.message})`); return null }
   return text.split('\n').flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
 }
 const isTurn = (e) => e?.type === 'user' || e?.type === 'assistant'
 
 function pausing(reason) {
   const { written } = appendPaused(a.record, reason)
-  const message = alertPaused({ recordPath: a.record, repo: path.basename(path.resolve(a.project || '.')), phase: a.phase, paneId: a.pane, log })
-  log(`${written ? 'paused' : 'pause not written, already paused'}: ${reason}${message ? '; alerted' : ''}`)
+  // The toast and token only: the pane message is printed by the next Stop, Notification or StopFailure hook (SP1).
+  const alerted = alertPaused({ recordPath: a.record, repo: path.basename(path.resolve(a.project || '.')), phase: a.phase, paneId: a.pane, log })
+  log(`${written ? 'paused' : 'pause not written, already paused'}: ${reason}${alerted ? '; alerted' : ''}`)
   process.exit(0)
 }
 
 try {
-  fs.mkdirSync(autoCycleDir(), { recursive: true })
   try { reserveMarker(claimFile(a.session)) } catch { log('the claim is already taken; nothing sent'); process.exit(0) }
-  writeMarker(claimFile(a.session), { pid: process.pid, pane: a.pane, session: a.session })
+  writeMarker(claimFile(a.session), { pid: process.pid, pane: a.pane })
   const claimText = fs.readFileSync(a.record, 'utf8')
   const claimLine = claimText.split('\n').length - (claimText.endsWith('\n') ? 1 : 0)
   const repos = [a.project, repoOf(a.record, fs.existsSync)]
 
   const send = (text) => {
     try { herdr(['pane', 'run', a.pane, text]) } // herdr-lint: a failed send pauses with R17 and nothing follows it; nothing is closed
-    catch (e) { pausing(`could not type into the pane: herdr pane run failed (${String(e.message).split('\n')[0]})`) }
+    catch (e) { log(`herdr pane run failed (${String(e.message).split('\n')[0]})`); pausing(pauseReason('R17', R17_WHY.send)) }
   }
   const readPane = () => {
     try {
       const reply = herdr(['pane', 'get', a.pane]) // herdr-lint: a failed read pauses with R17; nothing is sent or closed on it
       const p = reply?.result?.pane
-      if (p === undefined || p === null) return { error: 'the reply carried no pane' }
-      return { status: p.agent_status, focused: p.focused, session: p.agent_session?.value }
-    } catch (e) { return { error: String(e.message).split('\n')[0] } }
+      if (p !== undefined && p !== null) return { status: p.agent_status, focused: p.focused, session: p.agent_session?.value }
+      log('herdr pane get carried no pane')
+    } catch (e) { log(`herdr pane get failed (${String(e.message).split('\n')[0]})`) }
+    return { error: true }
   }
   const readRestore = () => {
     try {
@@ -97,8 +100,8 @@ try {
     notIdleSince = pane && !pane.error && pane.focused === false && pane.status !== 'idle' ? (notIdleSince ?? now) : null
     const step = typerStep({
       stage, active, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
-      grew: stage === 'clear' && entriesFrom(a.transcript, a.length).some(isTurn),
-      firstTurn: stage === 'confirm' && entriesFrom(restore.transcript).some((e) => e?.type === 'assistant'),
+      grew: stage === 'clear' ? ((es) => (es === null ? null : es.some(isTurn)))(entriesFrom(a.transcript, a.length)) : false,
+      firstTurn: stage === 'confirm' && (entriesFrom(restore.transcript) || []).some((e) => e?.type === 'assistant'),
       waited: now - stageStart, notIdle: notIdleSince ? now - notIdleSince : 0, sessionWait: restoreSeen ? now - restoreSeen : 0,
     })
     if (step.act === 'wait') { sleepMs(times.poll); continue }
@@ -119,5 +122,5 @@ try {
   }
 } catch (e) {
   log(`typer error (${String(e?.message || e).split('\n')[0]})`)
-  try { pausing(`could not type into the pane: ${String(e?.message || e).split('\n')[0]}`) } catch { process.exit(0) }
+  try { pausing(pauseReason('R17', R17_WHY.error)) } catch { process.exit(0) }
 }

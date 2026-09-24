@@ -21,26 +21,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
-  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty,
-  cycleDecision, cycleProgress, notifyDecision, latestAutoCycle, onToken, LAUNCH_MESSAGE,
+  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
+  cycleDecision, cycleProgress, notifyDecision, standingPause, unresolvedPauseAfter, onToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
-  hookLog, standDown, stateDir, writeMarker, herdr, autoCycleDir, claimFile, stopFactsFile, paneClaimHeld,
-  appendPaused, alertPaused, publishToken, liveWork, treeHash, handoffLanded,
+  hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, paneClaimHeld,
+  appendPaused, alertPaused, pauseMessageOnce, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure']
 let sessionId = null, event = 'Stop'
 const stand_down = (why) => standDown(event, 'auto-cycle', () => sessionId)(why)
-
-/** The paths the tree hash leaves out in one repo (B7): the memory file, the handoffs, the auto-cycle files, the
- *  record and a run-state file, the record only in the repo that holds it. */
-const excludesFor = (recordPath) => (repo) => {
-  const rel = path.relative(repo, recordPath)
-  return ['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*', ':(glob)**/*run-state*',
-    ...(rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? [rel] : [])]
-}
 
 try {
   let payload
@@ -74,8 +66,7 @@ try {
 
   if (event === 'Stop') {
     // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down.
-    fs.mkdirSync(autoCycleDir(), { recursive: true })
-    writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message), at: Date.now() })
+    writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
 
     const mine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1)
     let hash = null
@@ -84,7 +75,7 @@ try {
       stopRepo,
       ...pausingStates(record.entries),
       warned: Boolean(mine),
-      pausedAfterWarned: Boolean(mine) && record.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > mine.line),
+      pausedAfterWarned: Boolean(mine) && unresolvedPauseAfter(record.entries, mine.line),
       backgroundTasks: nonEmpty(payload.background_tasks),
       liveWork: liveWork(sessionId),
       sessionCrons: nonEmpty(payload.session_crons),
@@ -97,15 +88,17 @@ try {
       contained,
       stopHookActive: payload.stop_hook_active === true,
       paneSession: () => {
-        if (!paneId) return { error: 'this session is not in a herdr pane' }
+        if (!paneId) return { error: 'noPane' }
         try {
           const reply = herdr(['pane', 'get', paneId]) // herdr-lint: a failed read pauses with R17; nothing is closed or typed on it
           const value = reply?.result?.pane?.agent_session?.value
-          return typeof value === 'string' ? value : { error: 'herdr reported no Claude session for the pane' }
-        } catch (e) { return { error: `herdr could not read the pane (${String(e.message).split('\n')[0]})` } }
+          if (typeof value === 'string') return value
+          log('herdr reported no Claude session for the pane')
+        } catch (e) { log(`herdr pane get failed (${String(e.message).split('\n')[0]})`) }
+        return { error: 'lookup' }
       },
       progress: () => {
-        try { hash = treeHash(repos, excludesFor(recordPath)) } catch (e) { return { error: `the working tree could not be hashed (${String(e.message).split('\n')[0]})` } }
+        try { hash = treeHash(repos, (repo) => treeExcludes(recordPath, repo)) } catch (e) { log(`tree hash failed (${String(e.message).split('\n')[0]})`); return { error: 'hash' } }
         return cycleProgress(record.entries, hash)
       },
       claimTaken: fs.existsSync(claimFile(sessionId)),
@@ -115,7 +108,7 @@ try {
     if (decision.act === 'launch') {
       let length = null
       try { length = fs.statSync(payload.transcript_path).size } catch { /* unreadable: the typer could not tell new entries */ }
-      if (length === null) pause(`could not type into the pane: the transcript ${payload.transcript_path} could not be read`)
+      if (length === null) pause(pauseReason('R17', R17_WHY.transcript))
       else {
         const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase }
         const script = process.env.DCTR_TYPER_SCRIPT || path.join(import.meta.dirname, 'dctr-typer.mjs')
@@ -136,13 +129,13 @@ try {
     log(`auto-cycle is not active (the stop file in ${stopRepo})`)
   }
 
-  const alerted = alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, log })
-  if (alerted) messages.push(alerted)
-  else if (active && paneId) {
-    const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries
-    if (latestAutoCycle(entries)?.sub !== 'paused') {
-      publishToken(paneId, onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, lastOnOffEntry(entries).cap), log)
-    }
+  alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, log })
+  const shown = pauseMessageOnce(recordPath)
+  if (shown) messages.push(shown)
+  // The on token while no pause stands, so a resolved pause stops showing paused (LB2, E8-R25).
+  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries
+  if (active && paneId && !standingPause(entries)) {
+    publishToken(paneId, onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, on.cap), log)
   }
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)

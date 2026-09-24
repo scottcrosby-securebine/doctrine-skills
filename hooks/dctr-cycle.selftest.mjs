@@ -22,7 +22,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPause, unresolvedPauseAfter } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -173,7 +173,11 @@ function repo(dir, ignore = 'SESSION_MEMORY.md\ndocs/handoffs/\n') {
   git(dir, 'add', '-A'); git(dir, 'commit', '-q', '-m', 'init')
   return dir
 }
-const EX = ['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*', ':(glob)**/*run-state*', '.doctrine/records/r.md']
+const EX = (repo) => treeExcludes(path.join(repo, '.doctrine/records/r.md'), repo)
+clause('clause 1l2 — treeExcludes: the memory file, the handoffs and the auto-cycle files in every repo; the record and its own run-state sibling only in the repo holding it (B7, SP4)',
+  JSON.stringify(treeExcludes('/w/p/.doctrine/records/r.md', '/w/p')) === JSON.stringify(['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*', '.doctrine/records/r.md', ':(glob).doctrine/records/r-run-state*']) &&
+  JSON.stringify(treeExcludes('/w/track/.doctrine/records/r.md', '/w/p')) === JSON.stringify(['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*']),
+  JSON.stringify(treeExcludes('/w/p/.doctrine/records/r.md', '/w/p')))
 const h1 = path.join(tmp, 'hash1')
 repo(h1, '')
 write(path.join(h1, 'SESSION_MEMORY.md'), 'm1'); write(path.join(h1, 'docs/handoffs/a.md'), 'h1'); write(path.join(h1, '.doctrine/records/r.md'), 'r1')
@@ -181,20 +185,30 @@ git(h1, 'add', '-A'); git(h1, 'commit', '-q', '-m', 'docs(session): one')
 write(path.join(h1, 'leftover.txt'), 'dirty')
 const indexView = () => `${git(h1, 'status', '--porcelain')}|${git(h1, 'diff', '--cached', '--name-only')}|${git(h1, 'ls-files', '--stage')}`
 const viewBefore = indexView()
-const hA = treeHash([h1], () => EX)
+const hA = treeHash([h1], EX)
 const viewAfter = indexView()
 write(path.join(h1, 'SESSION_MEMORY.md'), 'm2'); write(path.join(h1, 'docs/handoffs/b.md'), 'h2'); write(path.join(h1, '.doctrine/records/r.md'), 'r2')
 write(path.join(h1, '.doctrine/auto-cycle.stop'), ''); write(path.join(h1, '.doctrine/records/r-run-state.md'), 'c')
 git(h1, 'add', '-A'); git(h1, 'commit', '-q', '-m', 'docs(session): two'); fs.rmSync(path.join(h1, '.doctrine/auto-cycle.stop'))
-const hB = treeHash([h1], () => EX)
-write(path.join(h1, 'src.txt'), 'two\n')
-const hC = treeHash([h1], () => EX)
-clause('clause 1m — treeHash: a docs(session) commit of the memory file, a handoff, the record, a run-state file and the stop file changes nothing, a leftover dirty file stays the same, a new edit changes it (B7)',
+const hB = treeHash([h1], EX)
+write(path.join(h1, 'src.txt'), 'two\n'); fs.utimesSync(path.join(h1, 'src.txt'), 1700000000, 1700000000)
+const hC = treeHash([h1], EX)
+// RB4: an edit of the same size with the same mtime as the content staged in the real index, which that index's stat
+// cache cannot see (ctime left out of the comparison, so the case does not hang on which second the write lands in).
+git(h1, 'config', 'core.trustctime', 'false'); git(h1, 'add', 'src.txt')
+const srcStat = fs.statSync(path.join(h1, 'src.txt'))
+write(path.join(h1, 'src.txt'), 'six\n'); fs.utimesSync(path.join(h1, 'src.txt'), 1700000000, 1700000000)
+const hD = treeHash([h1], EX)
+write(path.join(h1, 'notes/run-state.md'), 'real work')
+const hE = treeHash([h1], EX)
+clause('clause 1m — treeHash: a docs(session) commit of the memory file, a handoff, the record, its run-state file and the stop file changes nothing, a leftover dirty file stays the same, a new edit changes it (B7)',
   /^[0-9a-f]{40}$/.test(hA) && hA === hB && hB !== hC, `${hA} ${hB} ${hC}`)
+clause('clause 1m2 — treeHash: a same-size edit with the same mtime changes the hash, and so does a file named run-state that is not the record\'s (RB4, SP4)',
+  hD !== hC && hE !== hD && fs.statSync(path.join(h1, 'src.txt')).mtimeMs === srcStat.mtimeMs && fs.statSync(path.join(h1, 'src.txt')).size === srcStat.size, `${hC} ${hD} ${hE}`)
 clause('clause 1n — treeHash leaves the real index alone: status, staged names and the index\'s entries are the same after it',
   viewBefore === viewAfter && viewBefore.startsWith('?? leftover.txt|'), `${viewBefore} || ${viewAfter}`)
 const h2 = repo(path.join(tmp, 'hash2'))
-const hTwo = treeHash([h1, h2], () => EX), hSecond = treeHash([h2], () => [])
+const hTwo = treeHash([h1, h2], EX), hSecond = treeHash([h2], () => [])
 const notObject = (r, id) => { try { git(r, 'cat-file', '-e', id); return false } catch { return true } }
 clause('clause 1o — treeHash over two repos is the sha1 of both tree ids, not a git object in either (F7)',
   /^[0-9a-f]{40}$/.test(hTwo) && hTwo !== hC && hTwo !== hSecond && notObject(h1, hTwo) && notObject(h2, hTwo) && !notObject(h1, hC),
@@ -210,7 +224,7 @@ const args = process.argv.slice(2)
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(args) + '\\n')
 if (args[0] === 'pane' && args[1] === 'get') {
   if (process.env.SHIM_FAIL) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: 'idle', focused: true, agent_session: { value: process.env.SHIM_SESSION } } } }))
+  console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: 'idle', focused: true, ...(process.env.SHIM_NOSESSION ? {} : { agent_session: { value: process.env.SHIM_SESSION } }) } } }))
 }
 process.exit(0)
 `)
@@ -299,6 +313,13 @@ const NEG = [
   ['contained', {}, {}, { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'bridge') }, 'pause', 'could not cycle: contained session'],
   ['stop_hook_active', {}, { stop_hook_active: true }, {}, 'pause', 'could not cycle: another Stop hook kept the session running'],
   ['another session in the pane', {}, {}, { SHIM_SESSION: 'someone-else' }, 'pause', 'could not cycle: this pane now runs a different Claude session'],
+  ['transcript unreadable at launch', {}, { transcript_path: '/nonexistent/doctrine/t.jsonl' }, {}, 'pause', 'could not type into the pane: the transcript could not be read'],
+  ['herdr reports no Claude session (ST2)', {}, {}, { SHIM_NOSESSION: '1' }, 'pause', 'could not type into the pane: herdr could not read the pane'],
+  ['R5 after the warned line', { lines: ['- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: on cap 20 tier 60%'] }, {}, {}, 'none', null],
+  ['R10 after the warned line', { lines: ['- auto-cycle paused: could not cycle: handoff not written'] }, {}, {}, 'none', null],
+  ['R2 still Blocked', { lines: ['- State: Blocked. waits', '- auto-cycle paused: phase Blocked: State: Blocked. waits'] }, {}, {}, 'none', null],
+  ['R3 with no ruling yet', { lines: ['- alarm: round fired 2026-09-24T01:00:00Z count 4', '- auto-cycle paused: round alarm fired, ruling needed'] }, {}, {}, 'none', null],
+  ['R4 unanswered', { lines: ['- question: Q5 opened 2026-09-24T01:00:00Z which?', '- auto-cycle paused: open question Q5: which?'] }, {}, {}, 'none', null],
   ['an unreadable seat marker', {}, {}, {}, 'wait', null, (f) => write(path.join(seatsDir(f.session), 'dctr-x-1.json'), '{')],
   ['no gauge latch, so no warning time', { latch: false }, {}, {}, 'pause', 'could not cycle: handoff not written'],
   ["another session's warned line only", { warned: false, lines: ['- auto-cycle: warned s-other 60%'] }, {}, {}, 'none', null],
@@ -313,7 +334,7 @@ const negBad = negs.filter(({ name, f, r, want, reason }) => {
   if (launched(r) || r.code !== 0) return true
   const p = paused(f)
   if (want === 'pause') return p.length !== 1 || !p[0].startsWith(`- auto-cycle paused: ${reason}`)
-  return p.length !== (NEG.find(([n]) => n === name)[1].lines || []).filter((l) => l.startsWith('- auto-cycle paused')).length
+  return p.length !== (NEG.find(([n]) => n === name)[1].lines || []).filter((l) => l.startsWith('- auto-cycle paused')).length || (!reason && name.startsWith('R') && r.msg.includes(LAUNCH_MESSAGE))
 })
 clause('clause 2c — each E8-D7 precondition alone false launches no typer; the pausing ones write exactly their paused line, the rest none',
   negBad.length === 0, negBad.map(({ name, f, r }) => `${name}: ${show(f, r)}`).join(' || '))
@@ -324,8 +345,8 @@ clause('clause 2c2 — a paused line before this session\'s warned line does not
 const contOrd = negs.find((n) => n.name === 'contained, an ordinary turn')
 clause('clause 2c3 — contained, an ordinary turn with auto-cycle active: no autocycle token, no herdr call at all',
   calls(contOrd.f).length === 0 && contOrd.r.out === '', show(contOrd.f, contOrd.r))
-const readsBad = negs.filter(({ name, f }) => reads(f) !== (name === 'another session in the pane' ? 1 : 0))
-clause('clause 2d — no negative fixture reads the pane from herdr except the one whose precondition is the pane\'s session (E8-D7)',
+const readsBad = negs.filter(({ name, f }) => reads(f) !== (['another session in the pane', 'herdr reports no Claude session (ST2)', 'transcript unreadable at launch'].includes(name) ? 1 : 0))
+clause('clause 2d — no negative fixture reads the pane from herdr except those that get past the pane session check (E8-D7)',
   readsBad.length === 0, readsBad.map(({ name, f }) => `${name}: ${reads(f)}`).join('; '))
 const cont = negs.find((n) => n.name === 'contained')
 clause('clause 2e — contained: the paused line is written, the pane message printed, and herdr called zero times (E8-D26)',
@@ -360,6 +381,46 @@ const agent = negs.find((x) => x.name === 'paused after warned')
 clause('clause 2j — a paused line the agent wrote is alerted once, naming its reason and an answer in the pane (B3, E8-D19)',
   agent.r.msg === 'doctrine auto-cycle paused: question: which way?. answer in the pane' && toasts(agent.f).length === 1 && metas(agent.f).length === 1, show(agent.f, agent.r))
 
+// E8-R25: a resolved R2, R3 or R4 pause lets the same session cycle again.
+const R2L = ['- State: Blocked. waits', '- auto-cycle paused: phase Blocked: State: Blocked. waits']
+const R3L = ['- alarm: time fired 2026-09-24T01:00:00Z count 1', '- auto-cycle paused: time alarm fired, ruling needed']
+const R4L = ['- question: Q5 opened 2026-09-24T01:00:00Z which?', '- auto-cycle paused: open question Q5: which?']
+const pr = (...ls) => { const es = rec(...ls); return pauseResolved(es.filter((e) => e.sub === 'paused').at(-1), es) }
+clause('clause 1p — pauseResolved: R2 once the last state line is not Blocked, R3 once a ruling follows the alarm, R4 once its id is answered; R5, R10 and the skills\' question form never (E8-R25)',
+  !pr(...R2L) && pr(...R2L, '- State: Open') && !pr(...R3L) && pr(...R3L, '- ruling: R9 2026-09-24T02:00:00Z go') &&
+  !pr('- alarm: round fired 2026-09-24T01:00:00Z count 4', '- auto-cycle paused: round alarm fired, ruling needed', '- alarm: time fired 2026-09-24T01:30:00Z count 1') &&
+  !pr(...R4L) && pr(...R4L, '- question: Q5 answered 2026-09-24T02:00:00Z this') && !pr(...R4L, '- question: Q6 answered 2026-09-24T02:00:00Z that') &&
+  !pr('- State: Open', '- auto-cycle paused: cycle cap 10 reached') && !pr('- auto-cycle paused: could not cycle: handoff not written') &&
+  !pr('- question: Q5 answered 2026-09-24T02:00:00Z x', '- auto-cycle paused: question: which way?'), 'a branch misread')
+clause('clause 1q — standingPause and unresolvedPauseAfter: a resolved pause neither stands nor holds step 3; an unresolved one does both (E8-R25)',
+  standingPause(rec(...R2L)) !== null && standingPause(rec(...R2L, '- State: Open')) === null &&
+  unresolvedPauseAfter(rec('- auto-cycle: warned s 60%', ...R3L), 1) && !unresolvedPauseAfter(rec('- auto-cycle: warned s 60%', ...R3L, '- ruling: R9 2026-09-24T02:00:00Z go'), 1) &&
+  !unresolvedPauseAfter(rec('- auto-cycle paused: cycle cap 10 reached', '- auto-cycle: warned s 60%'), 2), 'wrong')
+const resolved = [['R2', [...R2L, '- State: Open']], ['R3', [...R3L, '- ruling: R9 2026-09-24T02:00:00Z go']], ['R4', [...R4L, '- question: Q5 answered 2026-09-24T02:00:00Z this']]]
+  .map(([n, lines]) => { const f = fixture(`resolved-${n}`, { lines }); return { n, f, r: run(f) } })
+clause('clause 2c4 — a resolved R2, R3 or R4 pause after the warned line: the next ready Stop launches and writes no paused line (E8-R25)',
+  resolved.every(({ f, r }) => launched(r) && paused(f).length === 1), resolved.map(({ f, r }) => show(f, r)).join(' || '))
+const fresh = fixture('fresh-after-resolved', { lines: [...R3L, '- ruling: R9 2026-09-24T02:00:00Z go', '- alarm: round fired 2026-09-24T03:00:00Z count 8'] })
+run(fresh)
+clause('clause 2c5 — a new alarm after a resolved pause writes a fresh paused line: dedup holds only against a pause still standing (E8-R25)',
+  JSON.stringify(paused(fresh)) === JSON.stringify(['- auto-cycle paused: time alarm fired, ruling needed', '- auto-cycle paused: round alarm fired, ruling needed']), JSON.stringify(paused(fresh)))
+const tokR = fixture('token-resolved', { warned: false, lines: R2L.slice(0, 1) })
+const tokRRun = () => run(tokR, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pres' })
+tokRRun()
+fs.appendFileSync(tokR.record, '- State: Open\n'); tokRRun()
+clause('clause 2c6 — once the pause resolves, the next event republishes the on token though the paused line is still the latest auto-cycle line (E8-R25)',
+  JSON.stringify(metas(tokR).map((c) => c[6])) === JSON.stringify(['autocycle=auto-cycle paused·phase Blocked: State: Blocked. waits', 'autocycle=auto-cycle on·cycle 0 of 10']),
+  JSON.stringify(metas(tokR).map((c) => c[6])))
+
+// SP1: a pause the detached typer wrote gets its toast from the typer and its pane message from the next hook event.
+const sp1 = fixture('typer-pause', { lines: ['- auto-cycle paused: resume typed twice, no reply from the new session'] })
+state.alertPaused({ recordPath: sp1.record, repo: 'proj', phase: 'e8-fixture', paneId: null })
+const sp1a = run(sp1, { hook_event_name: 'Notification', notification_type: 'idle_prompt' })
+const sp1b = run(sp1, { hook_event_name: 'Notification', notification_type: 'idle_prompt' })
+clause('clause 2c7 — a typer pause (R15) prints its pane message at the next Notification, once; the toast is not raised again (SP1, E8-R23)',
+  sp1a.msg === 'doctrine auto-cycle paused: resume typed twice, no reply from the new session. check the pane' && sp1b.msg === '' && toasts(sp1).length === 0 && paused(sp1).length === 1,
+  `${show(sp1, sp1a)} | ${sp1b.msg}`)
+
 // B3: the on token, republished only when its value changes; a resolved pause shows on again (LB2).
 // Its own pane, since the value last published is tracked per pane and every other fixture shares w9:p1.
 const tok = fixture('token', { warned: false })
@@ -376,17 +437,37 @@ clause('clause 2k — the autocycle token reads on·cycle while active, is not r
 // E8-D17 end to end: the cap and no progress, with real tree hashes.
 const capF = fixture('cap', { lines: [cyc(10, 'aa')] }), capR = run(capF)
 const npF = fixture('no-progress')
-const hNow = treeHash([npF.proj], () => EX)
+const hNow = treeHash([npF.proj], EX)
 fs.appendFileSync(npF.record, `${cyc(1, hNow)}\n${backupWave}\n${cyc(2, hNow)}\n${backupWave}\n`)
 const npR = run(npF)
 const pgF = fixture('progress')
-const hOld = treeHash([pgF.proj], () => EX)
+const hOld = treeHash([pgF.proj], EX)
 fs.appendFileSync(pgF.record, `${cyc(1, hOld)}\n${cyc(2, hOld)}\n`)
 write(path.join(pgF.proj, 'src.txt'), 'edited\n')
 const pgR = run(pgF)
 clause('clause 2l — the cap pauses with R5, two cycles of bookkeeping over an unchanged tree pause with R6, a new edit launches (E8-D17)',
   JSON.stringify(paused(capF)) === '["- auto-cycle paused: cycle cap 10 reached"]' && !launched(capR) &&
   JSON.stringify(paused(npF)) === '["- auto-cycle paused: no progress in 2 cycles"]' && !launched(npR) && launched(pgR), `${show(capF, capR)} | ${show(npF, npR)} | ${show(pgF, pgR)}`)
+
+// ST1: end to end over a tracked repo, each excluded path changed and committed between cycles: no progress. The
+// same with a file named run-state that is not the record's is progress (SP4).
+function bookkeeping(name, extra) {
+  const f = fixture(name, { tracked: true })
+  const h = treeHash([f.proj], (repo) => treeExcludes(f.record, repo))
+  fs.appendFileSync(f.record, `${cyc(1, h)}\n${cyc(2, h)}\n`)
+  write(path.join(f.proj, 'SESSION_MEMORY.md'), '# Session memory\n\n## Next Session Kickoff\nhandoff: docs/handoffs/h.md | state: open\nmore\n')
+  write(path.join(f.proj, 'docs/handoffs/h0.md'), 'an older handoff moved in\n')
+  write(path.join(f.proj, '.doctrine/auto-cycle.note'), 'x')
+  write(path.join(f.proj, '.doctrine/records/r-run-state.md'), 'counters')
+  extra?.(f)
+  git(f.proj, 'add', '-A'); git(f.proj, 'commit', '-q', '-m', 'docs(session): backup')
+  return { f, h, r: run(f) }
+}
+const bk = bookkeeping('bookkeeping-tracked')
+const bkWork = bookkeeping('run-state-elsewhere', (f) => write(path.join(f.proj, 'notes/run-state.md'), 'real work'))
+clause('clause 2l2 — a tracked repo whose memory file, handoffs, auto-cycle files, record and run-state file changed and were committed shows no progress (R6); a file named run-state elsewhere is progress (ST1, SP4)',
+  JSON.stringify(paused(bk.f)) === '["- auto-cycle paused: no progress in 2 cycles"]' && !launched(bk.r) && launched(bkWork.r) && paused(bkWork.f).length === 0,
+  `${show(bk.f, bk.r)} | ${show(bkWork.f, bkWork.r)}`)
 
 // Notification and StopFailure (E8-D18).
 const note = (f, type, more = {}, env = {}) => run(f, { hook_event_name: 'Notification', notification_type: type, ...more }, env)
@@ -422,15 +503,18 @@ clause('clause 2o — idle_prompt writes nothing after a paused line, while a cl
   JSON.stringify([paused(iPaused), claimSeen, paused(iGate), paused(iReady), paused(iBg)]))
 const s4 = fixture('s4')
 run(s4, { background_tasks: [{ id: 'b' }] })
-const s4a = JSON.parse(fs.readFileSync(stopFactsFile(s4.session), 'utf8'))
+let s4a = null
+try { s4a = JSON.parse(fs.readFileSync(stopFactsFile(s4.session), 'utf8')) } catch { /* the clause reports it */ }
 note(s4, 'idle_prompt')
 run(s4, { last_assistant_message: 'Asked Scott a question.' })
 note(s4, 'idle_prompt')
 clause('clause 2p — every Stop persists its background tasks and ready line for the next idle_prompt (S4): the first explains the idle, the second does not',
-  s4a.backgroundEmpty === false && s4a.ready === true && JSON.stringify(paused(s4)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify([s4a, paused(s4)]))
+  s4a?.backgroundEmpty === false && s4a?.ready === true && JSON.stringify(paused(s4)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify([s4a, paused(s4)]))
 
-await new Promise((r) => setTimeout(r, 400))
+// The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
+const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
+for (const deadline = Date.now() + 30000; Date.now() < deadline && !launchers.every((f) => stubbed(f).length); ) await new Promise((r) => setTimeout(r, 50))
 const ga = stubbed(good)[0]
 clause('clause 2q — the typer is spawned only for the launching fixtures, with the pane, session, transcript length, record, tree hash and cycle number',
   stubbed(good).length === 1 && ga.pane === 'w9:p1' && ga.session === good.session && ga.length === fs.statSync(good.transcript).size &&
@@ -445,6 +529,11 @@ clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification wi
   hj.Notification[0].matcher === 'permission_prompt|idle_prompt' && hj.StopFailure?.length === 1 && runsCycle(hj.StopFailure[0]),
   JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure]))
 
+const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description
+clause('clause 2r2 — hooks.json says what the stop file does: the Stop hook writes a paused line naming it and alerts, the other two write nothing (RB3)',
+  hjd.includes('With a .doctrine/auto-cycle.stop in the session\'s repo or the record\'s, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure write nothing.') &&
+  !/stands down unless auto-cycle is active/.test(hjd), hjd.slice(-900))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const gitQuiet = (repoDir, ...a) => { try { return git(repoDir, ...a) } catch { return null } }
@@ -458,6 +547,11 @@ const beforeC = negs.find((n) => n.name === 'tracked handoff committed only befo
 clause('clause 3a2 — without the hook: the early-commit fixture\'s handoff is committed, clean, written after the warning and committed before it',
   Number(git(beforeC.proj, 'log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md')) * 1000 < T0 && git(beforeC.proj, 'status', '--porcelain', '--', 'docs/handoffs/h.md') === '' &&
   fs.statSync(path.join(beforeC.proj, 'docs/handoffs/h.md')).mtimeMs > T0, 'early-commit fixture wrong')
+clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
+  ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
+    .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
+  git(bkWork.f.proj, 'log', '-1', '--format=%s', '--', 'notes/run-state.md') === 'docs(session): backup',
+  'bookkeeping fixtures wrong')
 clause('clause 3b — without the hook: the early handoff\'s mtime is before the latch\'s warning time, and the good one\'s after',
   fs.statSync(path.join(early.proj, 'docs/handoffs/h.md')).mtimeMs < T0 && fs.statSync(path.join(good.proj, 'docs/handoffs/h.md')).mtimeMs > T0, 'mtimes wrong')
 const q1 = negs.find((n) => n.name.startsWith('stop file in the record')).f

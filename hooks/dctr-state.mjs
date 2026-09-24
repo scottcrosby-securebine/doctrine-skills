@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, latestAutoCycle, pauseMessage, pausedToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPause, pauseMessage, pausedToken,
   autocycleTokenArgs, pauseToastArgs, seatLive,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -502,8 +502,12 @@ export function readMeta(file, retryMs = 200) {
 
 /** Where auto-cycle's working files live (B0): beside dctr-panes and dctr-gates, never under dctr-<session>/,
  *  which SessionEnd empties (F8). The claims, the restore files, the alerted markers, the token values last
- *  published and the persisted Stop facts all sit here. */
-export const autoCycleDir = () => path.join(tmpRoot(), `${PREFIX}-autocycle`)
+ *  published and the persisted Stop facts all sit here. Created on first use, so no caller makes it. */
+export const autoCycleDir = () => {
+  const dir = path.join(tmpRoot(), `${PREFIX}-autocycle`)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
 export const claimFile = (sessionId) => path.join(autoCycleDir(), `${sessionId}.claim`)
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
 export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
@@ -534,10 +538,11 @@ export function appendRecordLine(recordPath, line) {
   fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
 }
 
-/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is already a
- *  paused line (E8-D18). Never a state line: the record's last state line is left as it was. `{ written }`. */
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless its latest auto-cycle line is a paused line
+ *  still standing, one not resolved (E8-D18, E8-R25). Never a state line: the record's last state line is left as
+ *  it was. `{ written }`. */
 export function appendPaused(recordPath, reason) {
-  if (latestAutoCycle(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)?.sub === 'paused') return { written: false }
+  if (standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }
@@ -549,32 +554,45 @@ export function publishToken(paneId, value, log = () => {}) {
   try { if (JSON.parse(fs.readFileSync(tokenFile(paneId), 'utf8')) === value) return false } catch { /* none published yet */ }
   try {
     herdr(autocycleTokenArgs(paneId, value)) // herdr-lint: display only; a failed publish is logged and retried at the next event
-    fs.mkdirSync(autoCycleDir(), { recursive: true })
     writeMarker(tokenFile(paneId), value)
     return true
   } catch (e) { log(`autocycle token not published (${e.message.split('\n')[0]})`); return false }
 }
 
+/** The standing pause's marker name in the auto-cycle dir: `<kind>-<hash of record path>-<line>`. */
+const pauseMarker = (kind, recordPath, line) =>
+  path.join(autoCycleDir(), `${kind}-${crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)}-${line}`)
+
 /**
- * Alert the record's latest auto-cycle line once, if it is a paused line (B3, E8-D26), whoever wrote it. The
- * alerted marker `alerted-<hash of record path>-<line>` is taken first, exclusively, and outlives the session, so
- * a later session or a concurrent hook never alerts that line again (F2). Given a herdr pane it publishes the
- * paused token and raises the toast; in every case it returns the pane message, which the hook prints as a
- * systemMessage. The caller passes no pane in a contained session, which is the one guard keeping herdr out of it.
- * Null when there is nothing to alert.
+ * Raise the toast and the paused token once for the record's standing pause (B3, E8-D26), whoever wrote its line.
+ * The alerted marker is taken first, exclusively, and outlives the session, so a later session, a concurrent hook
+ * or the typer never raises the same line again (F2). herdr is called only given a pane: the hook passes none in a
+ * contained session, which is the one guard keeping herdr out of it. True when this call raised it.
  */
 export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
-  const latest = latestAutoCycle(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
-  if (latest?.sub !== 'paused') return null
-  const hash = crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)
-  fs.mkdirSync(autoCycleDir(), { recursive: true })
-  try { reserveMarker(path.join(autoCycleDir(), `alerted-${hash}-${latest.line}`)) } catch { return null }
+  const standing = standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  if (!standing) return false
+  try { reserveMarker(pauseMarker('alerted', recordPath, standing.line)) } catch { return false }
   if (paneId) {
-    publishToken(paneId, pausedToken(latest.reason), log)
-    try { herdr(pauseToastArgs(repo, phase, latest.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
+    publishToken(paneId, pausedToken(standing.reason), log)
+    try { herdr(pauseToastArgs(repo, phase, standing.reason)) } // herdr-lint: display only; the paused line and the pane message stand without it
     catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
   }
-  return pauseMessage(latest.reason)
+  return true
+}
+
+/**
+ * The pane message for the record's standing pause, once (E8-R23): `doctrine auto-cycle paused: <reason>. <what to
+ * do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of them to run after the
+ * line is written. Its own marker, apart from the toast's: the detached typer raises the toast and has no pane
+ * output of its own, so one marker for both left its pauses with no pane message (SP1). Null when there is nothing
+ * to print or it was printed already.
+ */
+export function pauseMessageOnce(recordPath) {
+  const standing = standingPause(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  if (!standing) return null
+  try { reserveMarker(pauseMarker('shown', recordPath, standing.line)) } catch { return null }
+  return pauseMessage(standing.reason)
 }
 
 /** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,
@@ -593,19 +611,18 @@ export function liveWork(sessionId) {
 }
 
 /**
- * B7's tree hash (E8-D17): for each repo, `git add -A` into a temporary index copied from the real one, the
- * excluded paths then removed from it, then `git write-tree`. One repo gives its tree id; two
+ * B7's tree hash (E8-D17): for each repo, `git add -A` into a fresh temporary index, the excluded paths then removed
+ * from it, then `git write-tree`. Fresh, not copied from the real index: a copy carries the real index's stat cache,
+ * and an edit of the same size in the same second as that cache's entry is invisible to `git add` (RB4). One repo gives its tree id; two
  * give the sha1 of both ids, which is not a git object (F7). `excludes(repo)` returns that repo's pathspecs, each a
  * path relative to it or a `:(glob)` pattern. Throws when git cannot answer.
  */
 export function treeHash(repos, excludes) {
   const ids = [...new Set(repos)].map((repo) => {
     const git = (args, env = {}) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-    const real = path.resolve(repo, git(['rev-parse', '--git-path', 'index']))
-    fs.mkdirSync(autoCycleDir(), { recursive: true })
+    // ponytail: every file is read and hashed on each call; only a cycle's Stop reaches this, once per cycle.
     const tmp = path.join(autoCycleDir(), `index.${process.pid}.${Date.now()}`)
     try {
-      if (fs.existsSync(real)) fs.copyFileSync(real, tmp)
       const env = { GIT_INDEX_FILE: tmp }
       // Add everything, then take the excluded paths back out: an excluded path named in the add itself makes git
       // refuse when that path is ignored, and one left in the copied index would carry its committed content.
