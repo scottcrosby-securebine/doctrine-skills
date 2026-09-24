@@ -85,8 +85,6 @@ try {
   // Taken: another typer holds or has used this record state, and it records its own outcome.
   try { reserveMarker(claimFile(a.session, a.keyLine)) } catch { log('the claim is already taken; nothing sent'); process.exit(0) }
   writeMarker(claimFile(a.session, a.keyLine), { pid: process.pid, pane: a.pane })
-  const claimText = fs.readFileSync(a.record, 'utf8')
-  const claimLine = claimText.split('\n').length - (claimText.endsWith('\n') ? 1 : 0)
   const repos = [a.project, repoOf(a.record, fs.existsSync)]
 
   const send = (text) => {
@@ -119,7 +117,9 @@ try {
     // The record's own half of B1, without the stop file: an off or closed record aborts whether or not the stop file
     // exists too, and only an active one pauses on it (RB4-1).
     const active = autoCycleActive(rec.entries, false)
-    const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > claimLine)
+    // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
+    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
+    const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > a.keyLine)
     if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null

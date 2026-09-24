@@ -38,8 +38,10 @@ import {
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
 
-/** The hook, over one event's payload text; every path ends in process.exit. Run as a script it reads stdin; the cycle
- *  selftest's event enumeration (clause 1x) calls it in-process with process.exit and stdout stubbed. */
+/** The hook, over one event's payload: `input` is its text or a function that reads it, called inside the guarded
+ *  path so a read that fails stands down with exit 0 (RB8-2). Every path ends in process.exit. Run as a script it
+ *  reads stdin; the cycle selftest's event enumeration (clause 1x) calls it in-process with process.exit and stdout
+ *  stubbed. */
 export function runHook(input) {
 let sessionId = null, event = 'Stop'
 const stand_down = (why) => standDown(event, 'auto-cycle', () => sessionId)(why)
@@ -49,7 +51,7 @@ try {
   // read below, which the asynchronous transcript writer can still be short of (K2-R16).
   const stopAt = Date.now()
   let payload
-  try { payload = JSON.parse(input || '{}') } catch { stand_down('hook payload was not readable JSON') }
+  try { payload = JSON.parse((typeof input === 'function' ? input() : input) || '{}') } catch { stand_down('hook payload was not readable') }
   event = payload.hook_event_name || 'none'
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
@@ -167,4 +169,4 @@ try {
 // Run as the script: both paths through realpath, since Node resolves symlinks in import.meta.url and a symlinked
 // plugin or config dir would otherwise make every event a silent no-op (ORC7-1). A failed realpath is not the script.
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) } catch { return false } })()
-if (isMain) runHook(fs.readFileSync(0, 'utf8'))
+if (isMain) runHook(() => fs.readFileSync(0, 'utf8'))
