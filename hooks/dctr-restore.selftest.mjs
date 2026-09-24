@@ -104,8 +104,10 @@ clause('clause 2f — with HERDR_PANE_ID set and the facts injected, the restore
 // RB3-2: the session start the auto-cycle pause model anchors on, written on every injection, pane or no pane.
 const startFile = (recordAbs) => path.join(tmp, 'dctr-autocycle', `start-${crypto.createHash('sha1').update(path.resolve(recordAbs)).digest('hex').slice(0, 16)}`)
 const lineCount = (file) => { const t = fs.readFileSync(file, 'utf8'); return t.split('\n').length - (t.endsWith('\n') ? 1 : 0) }
+let started = null
+try { started = JSON.parse(fs.readFileSync(startFile(openIn.recordAbs), 'utf8')) } catch { /* the clause reports it */ }
 clause('clause 2g — an injection records the session start as the record\'s line count; a stand-down records none (RB3-2)',
-  JSON.parse(fs.readFileSync(startFile(openIn.recordAbs), 'utf8')) === lineCount(openIn.recordAbs) && !fs.existsSync(startFile(exited.recordAbs)),
+  started === lineCount(openIn.recordAbs) && !fs.existsSync(startFile(exited.recordAbs)),
   `${fs.existsSync(startFile(openIn.recordAbs))} ${fs.existsSync(startFile(exited.recordAbs))}`)
 
 // ---------------------------------------------------------------- clause 1: every reason to stand down
