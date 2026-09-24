@@ -166,6 +166,28 @@ export function movedGatePath(marker) {
   return path.join(gatesDir(path.dirname(state)), movedGateName(base.slice(PREFIX.length + 1), path.basename(marker, '.json')))
 }
 
+/** The gate names this session id holds in the unowned directory, readable or not: a name is taken
+ *  by the file, whatever is in it. A directory not there yet holds none. */
+export function movedGateNames(sessionId) {
+  let names
+  try { names = fs.readdirSync(gatesDir()) }
+  catch (e) { if (e.code === 'ENOENT') return []; throw e }
+  const prefix = `${sessionId}.`
+  return names.filter((f) => f.startsWith(prefix) && f.endsWith('.json')).map((f) => f.slice(prefix.length, -'.json'.length))
+}
+
+/** Why sideOccupants could not observe the column, naming the file where a file is the cause.
+ *  sideOccupants answers null and throws the reason away, and a log line naming no file is one the
+ *  operator cannot act on. Read again only on the failure. */
+export function sideColumnReason() {
+  try { interactivePanes() } catch (e) { return e.message }
+  try {
+    const { unreadable } = movedGates()
+    if (unreadable.length) return `moved gate marker(s) could not be read: ${unreadable.join(', ')}`
+  } catch (e) { return `moved gates could not be listed (${e.message})` }
+  return 'the layout could not be read'
+}
+
 /** The moved gate markers, each carrying its file name as `moved`, and the ones that could not be
  *  read, kept apart as liveSeatsPartial keeps them. A directory not there yet is none of either. */
 export function movedGates() {

@@ -57,11 +57,8 @@ import { spawn } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS } from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, interactivePanes, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason } from './dctr-state.mjs'
 
-/** Why the column could not be observed. sideOccupants answers null and throws the reason away, and
- *  a log line naming no file is one the operator cannot act on. Read again only on the failure. */
-const sideColumnReason = () => { try { interactivePanes(); return 'the layout could not be read' } catch (e) { return e.message } }
 
 const self = path.resolve(process.argv[1])
 const argv = process.argv.slice(2)
@@ -181,17 +178,23 @@ if (argv[0] === '--run') {
     //
     // The marker may have MOVED while the check ran: a SessionEnd in this gate's session renames a
     // running gate's marker into the unowned directory (E8-R13). So the drop looks at the original
-    // path first and then at the moved one, both under that directory's lock, which every move takes,
-    // so no move can fall between the two reads. A lock it cannot take drops nothing: the record
-    // stays, and a later placement's server-wide lookup drops it.
+    // path and at the moved one, both under that directory's lock, which every move takes, so no move
+    // can fall between the two reads. It removes a record only when that record names THIS gate's pane
+    // or tab: a resumed session keeps its id, so its own new gate can hold the original path while
+    // this one's record sits moved. A lock it cannot take drops nothing, and the record stays for
+    // whatever reaches it next: SessionEnd or a stale-marker sweep for one at the original path, a
+    // placement's server-wide lookup for a moved one.
     const dropMarker = () => {
       if (!marker) return
       const moved = movedGatePath(marker)
       if (!moved) { try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ } return }
       try {
         withDirLock(path.dirname(moved), () => {
-          const found = [marker, moved].find((f) => fs.existsSync(f))
-          if (found) fs.rmSync(found, { force: true })
+          for (const f of [marker, moved]) {
+            let rec = null
+            try { rec = JSON.parse(fs.readFileSync(f, 'utf8')) } catch { continue }
+            if (rec.paneId === paneId && (rec.tabId || '') === (tabId || '')) fs.rmSync(f, { force: true })
+          }
         })
       } catch { /* the record stays for a placement to judge */ }
     }
@@ -323,7 +326,10 @@ if (argv[0] === '--run') {
         try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
       }
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
-      const taken = seats.map((s) => s.agent)
+      // This session id's MOVED gate names are taken too. `claude --resume` keeps the id, this seats
+      // directory starts empty again, and a reused name would collide with a moved record whose gate
+      // may still be running.
+      const taken = seats.map((s) => s.agent).concat(movedGateNames(sessionId))
       let n = nextIndex(GATE_ROLE, taken)
       let marker = null, name = null, fatal = null
       // EEXIST is the name being taken, and it is the ONLY reason to try the next one. Every other

@@ -908,6 +908,55 @@ const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Dat
   fs.rmSync(path.join(tmp, 'dctr-other-session'), { recursive: true, force: true }); fs.rmSync(panes, { recursive: true, force: true })
 }
 
+console.log('clause 1 — a move that FAILS keeps the gate\'s record and the state directory (R1-S1)')
+{
+  // A session id long enough that its moved name exceeds NAME_MAX, while its own state directory does
+  // not: the rename itself throws, with the gate directory's lock taken and nothing at the destination.
+  const LONG = 'r'.repeat(250)
+  const longState = path.join(tmp, `dctr-${LONG}`), longSeats = path.join(longState, 'seats')
+  fs.rmSync(gatesDir, { recursive: true, force: true }); fs.rmSync(longState, { recursive: true, force: true })
+  fs.mkdirSync(longSeats, { recursive: true }); fs.writeFileSync(calls, '')
+  const out = path.join(tmp, 'long-gate.out'); fs.rmSync(`${out}.result`, { force: true })
+  fs.writeFileSync(path.join(longSeats, 'dctr-gate-1.json'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:gL', tabId: null, file: out }))
+  fs.writeFileSync(path.join(longSeats, 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', agent_id: 'x', role: 'Explore', paneId: 'w1:sL', tabId: null, file: '/t/x.jsonl' }))
+  run({ hook_event_name: 'SessionEnd', session_id: LONG })
+  check('the running gate\'s marker and the state directory both survive a rename that failed',
+    fs.existsSync(path.join(longSeats, 'dctr-gate-1.json')) && fs.existsSync(path.join(longState, 'hook.log')),
+    fs.existsSync(longState) ? fs.readdirSync(longState).join(',') : 'state directory gone')
+  check('and the running gate\'s pane was not closed', !called(/^pane close w1:gL$/m))
+  fs.rmSync(longState, { recursive: true, force: true }); fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a RESUMED session id never overwrites its own earlier moved gate (R1-P1)')
+{
+  // `claude --resume` keeps the session id, and gate names restart from an emptied seats directory, so
+  // the ending session's dctr-gate-1 can meet a still-live `<session>.dctr-gate-1.json` moved earlier.
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  fs.writeFileSync(movedFile(SESSION, 'dctr-gate-1'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', paneId: 'w1:gOLD', tabId: null }))
+  gate('dctr-gate-1', { paneId: 'w1:gNEW' }, false); seat('dctr-explore-1', 'w1:s1')
+  const before = JSON.parse(fs.readFileSync(movedFile(SESSION, 'dctr-gate-1'), 'utf8')).paneId
+  run({ hook_event_name: 'SessionEnd' })
+  let after = null; try { after = JSON.parse(fs.readFileSync(movedFile(SESSION, 'dctr-gate-1'), 'utf8')).paneId } catch { /* checked below */ }
+  check('the earlier moved record still names its own pane: an occupied destination is a failed move, not a replace',
+    before === 'w1:gOLD' && after === 'w1:gOLD', `before ${before}, after ${after}`)
+  check('and the new gate keeps its marker and the state directory, with neither gate\'s pane closed',
+    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !called(/^pane close w1:g(NEW|OLD)$/m),
+    callLines(/close/).join(' | '))
+  fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a column that cannot be observed because of a moved marker says which file (R1-C2)')
+{
+  reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
+  const broken = path.join(gatesDir, 'other.dctr-gate-7.json'); fs.writeFileSync(broken, 'not json')
+  run({ hook_event_name: 'SubagentStart', agent_id: 'a3', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' })
+  let logText = ''; try { logText = fs.readFileSync(path.join(stateDir, 'hook.log'), 'utf8') } catch { /* checked below */ }
+  let parses = true; try { JSON.parse(fs.readFileSync(broken, 'utf8')) } catch { parses = false }
+  check('the seat hook\'s log names the unreadable moved marker, not an unreadable layout',
+    !parses && logText.includes(broken) && called(/^tab create /m), logText.split('\n').filter((l) => /side column/.test(l)).join(' | '))
+  fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
 console.log('clause 1 — SessionEnd exits inside its budget when the lock is busy, and a detached sweep finishes the job (B5)')
 {
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true })
@@ -1057,9 +1106,15 @@ console.log('clause 3 — the fixtures really carry their defects, proved withou
     { env: { ...process.env, DCTR_TEST_REPLACE_ON_GET: 'w9:gP', DCTR_TEST_REPLACE_FILE: probe, DCTR_TEST_STEAL_RECORD: '{"paneId":"after"}' } })
   check('the replace-on-get fixture really rewrites the moved marker during the lookup', JSON.parse(fs.readFileSync(probe, 'utf8')).paneId === 'after')
   check('the held-lock fixture names a pid that is really alive, so no waiter may steal it', live)
-  const out = path.join(tmp, 'probe-gate'); gate('dctr-gate-9', { paneId: 'w1:g9' }, true)
-  check('the finished-gate fixture really has its result file, and a running one really has none',
-    fs.existsSync(`${out}.result`) === false && fs.existsSync(path.join(tmp, 'dctr-gate-9.out.result')))
+  gate('dctr-gate-8', { paneId: 'w1:g8' }, false); gate('dctr-gate-9', { paneId: 'w1:g9' }, true)
+  const recordOf = (a) => JSON.parse(fs.readFileSync(path.join(seatsDir, `${a}.json`), 'utf8')).file
+  check('the finished-gate fixture really has its result file, and a running one really has none, at the paths their records name',
+    !fs.existsSync(`${recordOf('dctr-gate-8')}.result`) && fs.existsSync(`${recordOf('dctr-gate-9')}.result`),
+    `${recordOf('dctr-gate-8')} / ${recordOf('dctr-gate-9')}`)
+  const longDest = path.join(tmp, `${'r'.repeat(250)}.dctr-gate-1.json`), longSrc = path.join(tmp, 'long-src.json')
+  fs.writeFileSync(longSrc, '{}')
+  let longCode = null; try { fs.renameSync(longSrc, longDest) } catch (e) { longCode = e.code }
+  check('a moved name built from a 250-character session id really cannot be renamed into, proved without the hook', longCode === 'ENAMETOOLONG', String(longCode))
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

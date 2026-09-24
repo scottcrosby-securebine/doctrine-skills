@@ -34,7 +34,7 @@ import {
   PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName } from './dctr-lib.mjs'
-import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, interactivePanes, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
 
 /**
  * SessionEnd's sweep, run inline by the hook under SESSION_END_WAIT_MS and by the detached `--sweep`
@@ -64,7 +64,14 @@ function sweepSession(sessionId, waitMs, log) {
         withDirLock(gatesDir(), () => {
           for (const seat of moving) {
             try {
-              fs.renameSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), path.join(gatesDir(), movedGateName(sessionId, seat.agent)))
+              // NEVER over an existing record. `claude --resume` keeps the session id and gate names
+              // restart in an emptied seats directory, so this name can already hold a gate from this
+              // id's earlier SessionEnd whose pane is still live; replacing it leaves that pane counted
+              // by nothing. Checked under this directory's lock, which every move takes, so nothing can
+              // appear between the check and the rename. An occupied name is a failed move.
+              const dest = path.join(gatesDir(), movedGateName(sessionId, seat.agent))
+              if (fs.existsSync(dest)) throw new Error(`${dest} already holds a moved gate`)
+              fs.renameSync(path.join(seatsDir(sessionId), `${seat.agent}.json`), dest)
               log(`SessionEnd: gate ${seat.agent} is still running; its marker moved to ${gatesDir()} and its ${seat.tabId ? 'tab' : 'pane'} stays`)
             } catch (e) { failed += 1; log(`SessionEnd: could not move running gate ${seat.agent} (${String(e.message).split('\n')[0]}); keeping its record`) }
           }
@@ -455,9 +462,7 @@ try {
       if (!occupants) {
         // Name the cause. A malformed marker in the shared directory stops every placement on the
         // host, and a line that does not say which file leaves the operator nothing to remove.
-        let why = 'the layout could not be read'
-        try { interactivePanes() } catch (e) { why = e.message }
-        log(`could not observe the side column (${why}); taking the tab path rather than splitting blind`)
+        log(`could not observe the side column (${sideColumnReason()}); taking the tab path rather than splitting blind`)
       }
       if (occupants && seatPlacement(occupants, process.env.HERDR_PANE_ID) === 'pane') {
         // herdr-lint: creation. The catch logs and retries; the retry sets paneId null for the tab path.
