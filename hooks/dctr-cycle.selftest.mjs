@@ -546,6 +546,15 @@ clause('clause 1s — alertPaused reads the recorded session start: a pause from
   f1Alert === false && f1Alert2 === true, JSON.stringify([f1Alert, f1Alert2]))
 clause('clause 1s2 — pauseMessageOnce reads the recorded session start: a pause from before it is not shown, the new session\'s own pause is shown alone (F1)',
   f1Shown === null && f1Shown2 === 'doctrine auto-cycle paused: waiting for your permission approval. approve or deny in the pane', JSON.stringify([f1Shown, f1Shown2]))
+// RB5-2, E8-R29: in the dedup, an R7, R8 or R9 line written before this session's latest Stop no longer counts, for
+// the same-event rule and the idle rule; every other pause counts as before, and with no Stop known every one does.
+const WR = '- auto-cycle: warned s 60%', R7P = '- auto-cycle paused: waiting for your permission approval', R8R = 'session idle, waiting for you'
+const es7 = rec(WR, R7P), es9 = rec(WR, '- auto-cycle paused: Claude API error: overloaded'), es3 = rec(WR, '- alarm: round fired 2026-09-24T01:00:00Z count 4', '- auto-cycle paused: round alarm fired, ruling needed')
+clause('clause 1v — pauseStands with the latest Stop\'s line: a second R7 or R9 after a Stop is written, one with no Stop between is not, the idle pause behind an R7 from an earlier turn is written, behind an R3 from an earlier turn it is not, and with no Stop known every line counts (E8-R29, RB5-2)',
+  pauseStands(es7, 0, R7R, 2) === false && pauseStands(es7, 0, R7R, 1) === true && pauseStands(es7, 0, R7R, 0) === true && pauseStands(es7, 0, R7R) === true &&
+  pauseStands(es9, 0, 'Claude API error: rate_limit', 2) === false && pauseStands(es9, 0, 'Claude API error: rate_limit', 1) === true &&
+  pauseStands(es7, 0, R8R, 2) === false && pauseStands(es7, 0, R8R, 0) === true && pauseStands(es3, 0, R8R, 3) === true &&
+  pauseStands(rec(WR, '- auto-cycle paused: phase Blocked: x'), 0, 'phase Blocked: y', 5) === true && standingPauses(es7, 0).length === 1, 'wrong')
 // RB5-1: the skills' question asks for a /clear only where it holds step 3, after this session's warned line.
 const QP = '- auto-cycle paused: question: Memory is stale — resync it?'
 const qAct = (start, ...ls) => { const es = rec(...ls); return pauseActionAt(es.filter((e) => e.sub === 'paused').at(-1), es, start) }
@@ -727,6 +736,21 @@ note(s4, 'idle_prompt')
 clause('clause 2p — every Stop persists its background tasks and ready line for the next idle_prompt (S4): the first explains the idle, the second does not',
   s4a?.backgroundEmpty === false && s4a?.ready === true && JSON.stringify(paused(s4)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify([s4a, paused(s4)]))
 
+// RB5-2 end to end: a second permission prompt and a second API error after the session's next Stop are written and
+// toasted, and not before it; an idle stop after an R7 from an earlier turn is written, after an R3 it is not; with
+// no Stop facts at all a second R7 is refused.
+const rb52 = fixture('rb5-2'), rb52Pane = { HERDR_PANE_ID: 'w9:prb52' }
+const perm = { hook_event_name: 'Notification', notification_type: 'permission_prompt' }, fail = { hook_event_name: 'StopFailure', error: 'overloaded' }
+const turn = { last_assistant_message: 'working' }
+for (const p of [perm, perm, turn, perm, fail, fail, turn, fail]) run(rb52, p, rb52Pane)
+const idleAfter = (name, lines) => { const f = fixture(name, { lines }); run(f, turn, { HERDR_PANE_ID: `w9:p${name}` }); note(f, 'idle_prompt', {}, { HERDR_PANE_ID: `w9:p${name}` }); return f }
+const idle7 = idleAfter('idle-after-r7', [R7P]), idle3 = idleAfter('idle-after-r3', R3L)
+const noFacts = fixture('no-stop-facts', { lines: [R7P] }); run(noFacts, perm, { HERDR_PANE_ID: 'w9:pnofacts' })
+clause('clause 2c14 — a second permission prompt or API error after the session\'s next Stop is written and toasted, and not before it; an idle stop behind an R7 from an earlier turn is written, behind an R3 not; with no Stop known a second R7 is refused (E8-R29, RB5-2)',
+  JSON.stringify(paused(rb52)) === JSON.stringify(['- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: waiting for your permission approval', '- auto-cycle paused: Claude API error: overloaded', '- auto-cycle paused: Claude API error: overloaded']) &&
+  toasts(rb52).length === 4 && paused(idle7).at(-1) === `- auto-cycle paused: ${R8R}` && paused(idle7).length === 2 &&
+  !paused(idle3).some((l) => l.includes('session idle')) && paused(noFacts).length === 1,
+  `${show(rb52, { code: 0, msg: '', err: '' })} || ${JSON.stringify([paused(idle7), paused(idle3), paused(noFacts)])}`)
 // The typer stub is spawned detached, so wait for the launching fixtures' records, however loaded the host is.
 const stubbed = (f) => fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 const launchers = [good, goodT, goodS, pgF, pb, bkWork.f, ...resolved.map((x) => x.f)]
@@ -806,6 +830,10 @@ clause('clause 3a12 — without the hook: the pre-warning question sits after th
   (() => { const es = parseRecord(fs.readFileSync(qpre.record, 'utf8')).entries, qp = es.find((e) => /^question: /.test(e.reason || ''))
     return qp.line > JSON.parse(fs.readFileSync(state.sessionStartFile(qpre.record), 'utf8')) && qp.line > es.find((e) => e.sub === 'cycle').line && !es.some((e) => e.sub === 'warned' && e.line > qp.line) })(),
   fs.readFileSync(qpre.record, 'utf8'))
+clause('clause 3a13 — the idle-after fixtures\' Stop facts carry a record line at or after their earlier pause, and the no-facts fixture has none',
+  [idle7, idle3].every((f) => { const facts = JSON.parse(fs.readFileSync(stopFactsFile(f.session), 'utf8')); const p = parseRecord(fs.readFileSync(f.record, 'utf8')).entries.find((e) => e.sub === 'paused')
+    return Number.isInteger(facts.line) && facts.line >= p.line && facts.backgroundEmpty === true && facts.ready === false }) && !fs.existsSync(stopFactsFile(noFacts.session)),
+  JSON.stringify([idle7, idle3].map((f) => fs.existsSync(stopFactsFile(f.session)) && fs.readFileSync(stopFactsFile(f.session), 'utf8'))))
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&
