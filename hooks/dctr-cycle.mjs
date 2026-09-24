@@ -16,7 +16,7 @@
 // pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
 // SP1). While auto-cycle is active the `autocycle` sidebar token names the last standing pause, or reads the cycle
 // count when none stands, republished only when its value changes. The typer it launches is keyed by the record's
-// latest ready line, so one ready line launches once. With DCTR_VIEW_REQUEST_DIR set it writes the line and prints
+// latest auto-cycle line, so one record state launches once. With DCTR_VIEW_REQUEST_DIR set it writes the line and prints
 // the message and calls herdr zero times. It always exits 0.
 
 import fs from 'node:fs'
@@ -24,12 +24,12 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, standingPauses, unresolvedPausesAfter, onToken, pausedToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, standingPauses, claimKey, unresolvedPausesAfter, onToken, pausedToken, pauseReason, R17_WHY, LAUNCH_MESSAGE,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, publishToken, liveWork, treeHash, handoffLanded,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure']
@@ -73,7 +73,7 @@ try {
     // S4: what an idle_prompt later needs to know about this Stop, persisted on every Stop past the stand-down.
     writeMarker(stopFactsFile(sessionId), { backgroundEmpty: !nonEmpty(payload.background_tasks), ready: endsReady(payload.last_assistant_message) })
 
-    const readyLine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'ready').at(-1)?.line ?? 0
+    const keyLine = claimKey(record.entries)
     const mine = record.entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1)
     let hash = null
     const decision = cycleDecision({
@@ -107,7 +107,7 @@ try {
         try { hash = treeHash(repos, (repo) => treeExcludes(recordPath, repo)) } catch (e) { log(`tree hash failed (${String(e.message).split('\n')[0]})`); return { error: 'hash' } }
         return cycleProgress(record.entries, hash)
       },
-      claimTaken: fs.existsSync(claimFile(sessionId, readyLine)),
+      claimTaken: fs.existsSync(claimFile(sessionId, keyLine)),
     })
     log(`Stop decided ${decision.act}${decision.code ? ` ${decision.code}` : ''}: ${decision.reason}`)
     if (decision.act === 'pause') pause(decision.reason)
@@ -116,7 +116,7 @@ try {
       try { length = fs.statSync(payload.transcript_path).size } catch { /* unreadable: the typer could not tell new entries */ }
       if (length === null) pause(pauseReason('R17', R17_WHY.transcript))
       else {
-        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt, readyLine }
+        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt, keyLine }
         const script = process.env.DCTR_TYPER_SCRIPT || path.join(import.meta.dirname, 'dctr-typer.mjs')
         spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
         messages.push(LAUNCH_MESSAGE)
@@ -140,7 +140,7 @@ try {
   if (shown) messages.push(shown)
   // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries
-  const standing = standingPauses(entries)
+  const standing = standingPauses(entries, sessionStartLine(recordPath))
   if (active && paneId) {
     publishToken(paneId, standing.length ? pausedToken(standing.at(-1).reason)
       : onToken(entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, on.cap), log)

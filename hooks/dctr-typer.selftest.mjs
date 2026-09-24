@@ -58,6 +58,8 @@ clause('clause 1e5 — typedAfter: a user or assistant entry at or after the Sto
   !typedAfter({ type: 'assistant', timestamp: '2026-09-24T07:04:07.999Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
   !typedAfter({ type: 'system', timestamp: '2026-09-24T07:05:00Z' }, Date.parse('2026-09-24T07:04:08Z')) &&
   typedAfter({ type: 'user' }, Date.parse('2026-09-24T07:04:08Z')), 'wrong')
+clause('clause 1e6 — typerStep: a stop file pauses with R1 before any other check, even with auto-cycle then inactive (RN3-3)',
+  ts({ stopRepo: '/w/p', active: false }).reason === 'stopped by .doctrine/auto-cycle.stop in /w/p' && ts({ stopRepo: null, active: false }).act === 'abort', 'wrong')
 clause('clause 1e4 — typerStep: an old transcript that could not be read, or has shrunk, pauses with R17 and never clears (RB2)',
   ts({ grew: null }).reason === 'could not type into the pane: the transcript could not be read', JSON.stringify(ts({ grew: null })))
 clause('clause 1f — typerStep after /clear: no restore file waits, then pauses with R14',
@@ -96,7 +98,7 @@ if (args[0] === 'pane' && args[1] === 'get') {
   const session = st.clearedAt && st.getsSinceClear > (st.newSessionAfterGets || 0) ? st.newSession : st.session
   const status = st.clearedAt && st.statusAfterClear && st.getsSinceClear <= st.statusAfterClear.length ? st.statusAfterClear[st.getsSinceClear - 1] : (st.status || 'idle')
   const focused = st.gets <= (st.focusedGets || 0)
-  logged.session = session; logged.focused = focused
+  logged.session = session; logged.focused = focused; logged.status = status
   fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n')
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: status, focused, ...(st.noSession ? {} : { agent_session: { value: session } }) } } }))
   process.exit(0)
@@ -137,7 +139,7 @@ function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noS
   fs.mkdirSync(autoCycleDir(), { recursive: true })
   fs.writeFileSync(shimState, JSON.stringify({ session, newSession: `${session}-new`, status: 'idle', restoreFile: restoreFile(pane), onClear: 'write', reply: true, newTranscript, ...st }))
   pre?.(f)
-  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', readyLine: 5, ...(noStopAt ? {} : { stopAt }) }
+  const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', keyLine: 5, ...(noStopAt ? {} : { stopAt }) }
   const r = spawnSync('node', [typer, JSON.stringify(args)], { env: { ...env, SHIM_STATE: shimState, SHIM_LOG: shimLog, ...extraEnv }, encoding: 'utf8', timeout: 20000 })
   const calls = fs.existsSync(shimLog) ? fs.readFileSync(shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
   const runs = calls.filter((c) => c.args[0] === 'pane' && c.args[1] === 'run')
@@ -171,8 +173,18 @@ const taken = typerCase('taken', {}, { pre: (f) => { reserveMarker(claimFile(f.s
 clause('clause 2b — the claim already taken: nothing sent, no herdr call, no line (E8-D15)', sends(taken) === '0,0' && taken.calls.length === 0 && taken.paused.length === 0, detail(taken))
 const stopped = typerCase('stopfile', {}, { pre: (f) => write(path.join(f.proj, '.doctrine/auto-cycle.stop'), '') })
 const stoppedRec = typerCase('stopfile-rec', {}, { recordRepo: 'other', pre: (f) => write(path.join(f.recRoot, '.doctrine/auto-cycle.stop'), '') })
-clause('clause 2c — the stop file in the session\'s repo, or only in the record\'s repo (Q1): nothing sent, no line',
-  sends(stopped) === '0,0' && sends(stoppedRec) === '0,0' && stopped.cycled.length === 0 && stoppedRec.cycled.length === 0, `${detail(stopped)} | ${detail(stoppedRec)}`)
+clause('clause 2c — the stop file in the session\'s repo, or only in the record\'s repo (Q1): nothing sent, no cycle line, paused with R1 naming that repo (RN3-3)',
+  sends(stopped) === '0,0' && sends(stoppedRec) === '0,0' && stopped.cycled.length === 0 && stoppedRec.cycled.length === 0 &&
+  JSON.stringify(stopped.paused) === JSON.stringify([`- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in ${stopped.proj}`]) &&
+  JSON.stringify(stoppedRec.paused) === JSON.stringify([`- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in ${stoppedRec.recRoot}`]), `${detail(stopped)} | ${detail(stoppedRec)}`)
+// RN3-3: a stop file created while the typer waits on a focused pane: R1 is written, nothing is sent.
+const stopLate = typerCase('stopfile-while-waiting', { focusedGets: 100000 }, { pre: (f) => {
+  fs.mkdirSync(path.join(f.proj, '.doctrine'), { recursive: true })
+  setShim(f, () => ({ appendAt: { n: 3, file: path.join(f.proj, '.doctrine/auto-cycle.stop'), line: '' } }))
+} })
+clause('clause 2c2 — a stop file created while the typer waits: nothing sent, paused with R1, the toast raised (RN3-3, E8-D16)',
+  sends(stopLate) === '0,0' && JSON.stringify(stopLate.paused) === JSON.stringify([`- auto-cycle paused: stopped by .doctrine/auto-cycle.stop in ${stopLate.proj}`]) &&
+  stopLate.alerts === 2 && stopLate.calls.filter((c) => c.args[1] === 'get').length >= 3, detail(stopLate))
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -262,6 +274,11 @@ clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const entriesAfter = (file, from) => fs.readFileSync(file).subarray(from).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+const served = doneWait.calls.slice(doneWait.calls.findIndex((c) => c.args[3] === '/clear') + 1).filter((c) => c.args[1] === 'get').map((c) => c.status)
+clause('clause 3a5 — without the typer: after /clear the done-then-working shim served done twelve times, then working twice, then idle (RN2-2)',
+  JSON.stringify(served.slice(0, 15)) === JSON.stringify([...Array(12).fill('done'), 'working', 'working', 'idle']), JSON.stringify(served))
+clause('clause 3a6 — without the typer: the late stop file exists only in the session\'s repo and was not there at launch (the shim made it on read 3)',
+  fs.existsSync(path.join(stopLate.proj, '.doctrine/auto-cycle.stop')) && stopLate.calls.filter((c) => c.args[1] === 'get').length >= 3, 'stop fixture wrong')
 clause('clause 3a4 — without the typer: the lagging entry sits past the Stop\'s length and is timestamped before the Stop; the grew entry after it',
   entriesAfter(lagging.transcript, lagging.length).length === 1 && Date.parse(entriesAfter(lagging.transcript, lagging.length)[0].timestamp) < lagging.stopAt &&
   Date.parse(entriesAfter(grew.transcript, grew.length)[0].timestamp) > grew.stopAt && !('timestamp' in entriesAfter(untimed.transcript, untimed.length)[0]), 'K2 fixtures wrong')

@@ -9,6 +9,7 @@
 // helpers the hook routes through are pinned here too, since the hook is their only caller.
 
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -90,7 +91,7 @@ clause('clause 2e — a 5,000-character state line is cut, and the other facts s
 // B5, T8: the restore file the auto-cycle typer waits for, written only when the hook injected and HERDR_PANE_ID is set.
 const restored = (pane) => path.join(tmp, 'dctr-autocycle', `pane-${pane}.restored`)
 const rNoPane = run(clear(openIn.proj))
-const noPaneFiles = fs.existsSync(path.join(tmp, 'dctr-autocycle')) ? fs.readdirSync(path.join(tmp, 'dctr-autocycle')) : []
+const noPaneFiles = fs.existsSync(path.join(tmp, 'dctr-autocycle')) ? fs.readdirSync(path.join(tmp, 'dctr-autocycle')).filter((f) => f.endsWith('.restored')) : []
 const rPane = run(clear(openIn.proj, { session_id: 'sess-new', transcript_path: '/new.jsonl' }), { HERDR_PANE_ID: 'w7:p3' })
 let rf = null
 try { rf = JSON.parse(fs.readFileSync(restored('w7_p3'), 'utf8')) } catch { /* the clause reports it */ }
@@ -99,6 +100,13 @@ clause('clause 2f — with HERDR_PANE_ID set and the facts injected, the restore
   facts(rNoPane, openIn, 'Open') && noPaneFiles.length === 0 && rPane.out.includes('additionalContext') &&
   rf?.session_id === 'sess-new' && rf?.transcript_path === '/new.jsonl' && rSkip.out === '' && !fs.existsSync(restored('w7_p4')),
   `noPane ${JSON.stringify(noPaneFiles)} file ${JSON.stringify(rf)} skip ${rSkip.out}`)
+
+// RB3-2: the session start the auto-cycle pause model anchors on, written on every injection, pane or no pane.
+const startFile = (recordAbs) => path.join(tmp, 'dctr-autocycle', `start-${crypto.createHash('sha1').update(path.resolve(recordAbs)).digest('hex').slice(0, 16)}`)
+const lineCount = (file) => { const t = fs.readFileSync(file, 'utf8'); return t.split('\n').length - (t.endsWith('\n') ? 1 : 0) }
+clause('clause 2g — an injection records the session start as the record\'s line count; a stand-down records none (RB3-2)',
+  JSON.parse(fs.readFileSync(startFile(openIn.recordAbs), 'utf8')) === lineCount(openIn.recordAbs) && !fs.existsSync(startFile(exited.recordAbs)),
+  `${fs.existsSync(startFile(openIn.recordAbs))} ${fs.existsSync(startFile(exited.recordAbs))}`)
 
 // ---------------------------------------------------------------- clause 1: every reason to stand down
 

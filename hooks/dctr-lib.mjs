@@ -915,7 +915,7 @@ export const autocycleTokenArgs = (paneId, value) =>
 export const pauseToastArgs = (repo, phase, reason) =>
   ['notification', 'show', `${repo} ${phase || 'unnamed phase'}: doctrine auto-cycle paused`, '--body', `${reason}. ${pauseAction(reason)}`, '--sound', 'request']
 
-/** The last auto-cycle entry of any sub-form, or null. A paused line is current only while it is this one. */
+/** The last auto-cycle entry of any sub-form, or null. The dedup and the claim key read it. */
 export const latestAutoCycle = (entries) => (entries || []).filter((e) => e.kind === 'auto-cycle').at(-1) || null
 
 /**
@@ -941,23 +941,33 @@ export const unresolvedPausesAfter = (entries, after) =>
   (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > after && !pauseResolved(e, entries))
 
 /**
- * The standing pauses, in record order: the unresolved paused lines after the record's latest `warned` or `cycle`
- * line, or, when it has neither, its latest auto-cycle line when that is an unresolved paused line. A ready line
- * after a pause hides nothing. The token reads paused while any stands, naming the last; each is alerted once.
+ * The standing pauses, in record order: the unresolved paused lines after the latest anchor, which is the later of
+ * the record's latest `warned`, `cycle` or `auto-cycle: on` line and `startLine`, the record's line count when the
+ * restore hook saw this session start after a /clear (RB3-2; 0 when none was recorded). An on line is an anchor
+ * because R5's action appends one; a session start is, because R1, R5, R6 and R10 to R17 ask for a /clear and a typed
+ * resume, and the new session must not inherit the old one's pauses. With no anchor at all, the latest auto-cycle
+ * line when it is an unresolved paused line. A ready line after a pause hides nothing. The token reads paused while
+ * any stands, naming the last; each is alerted once.
  */
-export function standingPauses(entries) {
+export function standingPauses(entries, startLine = 0) {
   const es = entries || []
-  const anchor = es.filter((e) => e.kind === 'auto-cycle' && (e.sub === 'warned' || e.sub === 'cycle')).at(-1)
-  if (anchor) return unresolvedPausesAfter(es, anchor.line)
+  const marked = es.filter((e) => e.kind === 'auto-cycle' && ['warned', 'cycle', 'on'].includes(e.sub)).at(-1)?.line ?? 0
+  const anchor = Math.max(marked, startLine)
+  if (anchor > 0) return unresolvedPausesAfter(es, anchor)
   const latest = latestAutoCycle(es)
   return latest?.sub === 'paused' && !pauseResolved(latest, es) ? [latest] : []
 }
 
 /** The dedup (E8-D18, E8-R25): no new paused line while the latest auto-cycle line is a standing pause. */
-export const pauseStands = (entries) => {
+export const pauseStands = (entries, startLine = 0) => {
   const latest = latestAutoCycle(entries)
-  return latest?.sub === 'paused' && standingPauses(entries).includes(latest)
+  return latest?.sub === 'paused' && standingPauses(entries, startLine).includes(latest)
 }
+
+/** The typer's claim key (RB3-1): the line number of the record's latest auto-cycle line of any kind at launch, 0
+ *  with none. Any auto-cycle line written after a claim, a pause included, makes a new key, so a session whose pause
+ *  resolved can launch again, while the same record state launches once. */
+export const claimKey = (entries) => latestAutoCycle(entries)?.line ?? 0
 
 /** The directory holding `.git` at or above `file`'s directory, or that directory when none does. `exists` is
  *  injected so this stays pure. The record's repo is found this way, with no git process. */
@@ -1109,15 +1119,19 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
 /**
  * B4's next action from one observation (E8-D15). The typer is a loop around it. `o.stage` is `clear` before the
  * /clear, `resume` after it and before the first resume, `confirm` after a resume. `o.pane` is herdr's reading,
- * `{ error }` when the lookup failed. `o.grew` is whether the old transcript gained a user or
- * assistant entry past the Stop's length, and null when it could not be read or is shorter than that length. `o.waited` is ms in this stage, `o.notIdle` ms unfocused and not idle,
+ * `{ error }` when the lookup failed. `o.grew` is whether the old transcript holds a user or assistant entry the
+ * user typed after the Stop (typedAfter), and null when it could not be read or is shorter than the Stop's length.
+ * `o.stopRepo` is the repo holding the stop file, or null. `o.waited` is ms in this stage, `o.notIdle` ms unfocused and not idle,
  * `o.sessionWait` ms since the restore file was seen. Returns `{ act, code?, reason }`, act one of `wait`,
- * `clear`, `resume`, `confirm` (the first turn is there: done), `abort` (auto-cycle ended; nothing written) and
- * `pause`. Ready means an agent_status in READY_STATUSES.
+ * `clear`, `resume`, `confirm` (the first turn is there: done), `abort` and `pause`. An abort writes nothing,
+ * and each is a stop someone else already recorded: the record switched off or no longer Open or Blocked, or a
+ * paused line written since the claim. A stop file pauses with R1 (RN3-3, E8-D16). Ready means an agent_status in
+ * READY_STATUSES.
  */
 export function typerStep(o) {
   const t = o.times || TYPER_TIMES
   const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+  if (o.stopRepo) return pause('R1', o.stopRepo)
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
   if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
   if (o.stage === 'confirm') {

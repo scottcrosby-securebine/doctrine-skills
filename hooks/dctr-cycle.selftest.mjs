@@ -22,7 +22,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -234,7 +234,7 @@ const stub = path.join(tmp, 'typer-stub.mjs')
 fs.writeFileSync(stub, `import fs from 'node:fs'
 const { claimFile, reserveMarker } = await import(${JSON.stringify(path.join(import.meta.dirname, 'dctr-state.mjs'))})
 const a = JSON.parse(process.argv[2])
-try { reserveMarker(claimFile(a.session, a.readyLine)) } catch { process.exit(0) }
+try { reserveMarker(claimFile(a.session, a.keyLine)) } catch { process.exit(0) }
 fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
 `)
 
@@ -439,6 +439,35 @@ clause('clause 2c8 — R10, R7 or the skills\' question pause followed by the re
   hidden.every(({ f, r, line }) => !launched(r) && paused(f).length === 1 && toasts(f).length === 1 &&
     r.msg === pauseMessage(line.slice('- auto-cycle paused: '.length)) && metas(f).at(-1)?.[6] === `autocycle=${pausedToken(line.slice('- auto-cycle paused: '.length))}`),
   hidden.map(({ f, r }) => show(f, r)).join(' || '))
+// RB3-2: an on line and a recorded session start are anchors too, so a manual /clear and resume, or R5's own new on
+// line, leaves the old pauses behind.
+const R10P = '- auto-cycle paused: could not cycle: handoff not written'
+const R5P = '- auto-cycle paused: cycle cap 10 reached'
+clause('clause 1q2 — standingPauses anchors on the latest warned, cycle or on line, or on the recorded session start, whichever is later (RB3-2)',
+  standingPauses(rec('- auto-cycle: warned s 60%', R5P, '- auto-cycle: on cap 20 tier 60%')).length === 0 &&
+  standingPauses(rec('- auto-cycle: warned s 60%', R10P), 2).length === 0 &&
+  JSON.stringify(standingPauses(rec('- auto-cycle: warned s 60%', R10P, '- auto-cycle paused: waiting for your permission approval'), 2).map((e) => e.line)) === '[3]' &&
+  standingPauses(rec('- auto-cycle: warned s 60%', R10P), 1).length === 1 && standingPauses(rec(R10P)).length === 1 &&
+  !pauseStands(rec('- auto-cycle: warned s 60%', R10P), 2) && pauseStands(rec('- auto-cycle: warned s 60%', R10P), 1),
+  'an anchor was missed')
+// The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
+// ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
+const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')
+const mc = fixture('manual-clear', { lines: [R10P] })
+const mcPane = { HERDR_PANE_ID: 'w9:pmc' }
+const mcOld = run(mc, { last_assistant_message: 'waiting' }, mcPane)
+spawnSync('node', [restoreHook], { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'clear', session_id: 's-mc-new', transcript_path: mc.transcript, cwd: mc.proj }), env: { ...baseEnv, ...mcPane }, encoding: 'utf8' })
+const mcNew = run(mc, { session_id: 's-mc-new', last_assistant_message: 'resumed' }, mcPane)
+const mcPerm = run(mc, { session_id: 's-mc-new', hook_event_name: 'Notification', notification_type: 'permission_prompt' }, mcPane)
+clause('clause 2c10 — after a manual /clear and resume the old R10 no longer stands: the token reads the cycle count, and the new session\'s permission prompt is written, alerted and shown paused (RB3-2)',
+  metas(mc).map((c) => c[6]).join(' | ') === `autocycle=${pausedToken('could not cycle: handoff not written')} | autocycle=auto-cycle on·cycle 0 of 10 | autocycle=${pausedToken('waiting for your permission approval')}` &&
+  paused(mc).at(-1) === '- auto-cycle paused: waiting for your permission approval' && toasts(mc).length === 2 && mcNew.msg === '' &&
+  mcPerm.msg === 'doctrine auto-cycle paused: waiting for your permission approval. approve or deny in the pane' && mcOld.msg.includes('handoff not written'),
+  `${metas(mc).map((c) => c[6]).join(' | ')} || ${show(mc, mcPerm)}`)
+const r5 = fixture('r5-new-on-line', { lines: [R5P, '- auto-cycle: on cap 20 tier 60%'] })
+const r5R = run(r5, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pr5' })
+clause('clause 2c11 — R5 followed by the new on line its action asks for no longer stands: the token reads the cycle count of the new cap, and nothing is shown (RB3-2)',
+  metas(r5).at(-1)?.[6] === 'autocycle=auto-cycle on·cycle 0 of 20' && r5R.msg === '' && toasts(r5).length === 0, show(r5, r5R))
 const tokR = fixture('token-resolved', { warned: false, lines: R2L.slice(0, 1) })
 const tokRRun = () => run(tokR, { last_assistant_message: 'working' }, { HERDR_PANE_ID: 'w9:pres' })
 tokRRun()
@@ -447,25 +476,27 @@ clause('clause 2c6 — once the pause resolves, the next event republishes the o
   JSON.stringify(metas(tokR).map((c) => c[6])) === JSON.stringify(['autocycle=auto-cycle paused·phase Blocked: State: Blocked. waits', 'autocycle=auto-cycle on·cycle 0 of 10']),
   JSON.stringify(metas(tokR).map((c) => c[6])))
 
-// RB2-2: the claim is single use per ready line. A typer that used the claim for one ready line (its pid now dead)
-// does not block the next ready line after a resolved pause; the same ready line never launches twice.
-const readyLineOf = (f) => parseRecord(fs.readFileSync(f.record, 'utf8')).entries.filter((e) => e.sub === 'ready').at(-1).line
+// RB2-2, RB3-1: the claim is single use per record state, keyed by the record's latest auto-cycle line. A typer that
+// used the claim (its pid now dead) and then a resolved R4 pause: the agent's next turn ends ready with no new record
+// ready line, and still launches, under the paused line's key. The same record state never launches twice.
+const keyOf = (f) => claimKey(parseRecord(fs.readFileSync(f.record, 'utf8')).entries)
 const stubLog = (f) => (fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [])
 const waitStub = async (f, n) => { for (const end = Date.now() + 30000; Date.now() < end && stubLog(f).length < n; ) await new Promise((r) => setTimeout(r, 50)) }
 const cl = fixture('claim-per-ready', { lines: [RDY] })
-const firstReady = readyLineOf(cl)
-write(claimFile(cl.session, firstReady), JSON.stringify({ pid: Number(deadPid), pane: 'w9:p1' }))
+const firstKey = keyOf(cl)
+write(claimFile(cl.session, firstKey), JSON.stringify({ pid: Number(deadPid), pane: 'w9:p1' }))
 const clUsed = run(cl)
-fs.appendFileSync(cl.record, `${R4L.join('\n')}\n- question: Q5 answered 2026-09-24T02:00:00Z this\n${RDY}\n`)
+fs.appendFileSync(cl.record, `${R4L.join('\n')}\n- question: Q5 answered 2026-09-24T02:00:00Z this\n`)
 const clNew = run(cl)
+const clPausedLine = parseRecord(fs.readFileSync(cl.record, 'utf8')).entries.filter((e) => e.sub === 'paused').at(-1).line
 await waitStub(cl, 1)
 const tw = fixture('same-ready-twice', { lines: [RDY] })
 const tw1 = run(tw)
 await waitStub(tw, 1)
 const tw2 = run(tw)
-clause('clause 2c9 — a used claim holds its own ready line only: after a typer abort and a resolved R4, a new ready line launches under a new key; one ready line launches once (RB2-2)',
-  !launched(clUsed) && launched(clNew) && stubLog(cl).length === 1 && stubLog(cl)[0].readyLine === readyLineOf(cl) && readyLineOf(cl) > firstReady &&
-  launched(tw1) && !launched(tw2) && stubLog(tw).length === 1 && fs.existsSync(claimFile(tw.session, readyLineOf(tw))),
+clause('clause 2c9 — a used claim holds its own record state only: after a typer abort and a resolved R4, a ready turn with no new record ready line launches under the paused line\'s key; one record state launches once (RB2-2, RB3-1)',
+  !launched(clUsed) && launched(clNew) && stubLog(cl).length === 1 && stubLog(cl)[0].keyLine === clPausedLine && clPausedLine > firstKey &&
+  launched(tw1) && !launched(tw2) && stubLog(tw).length === 1 && fs.existsSync(claimFile(tw.session, keyOf(tw))),
   `${show(cl, clUsed)} || ${show(cl, clNew)} || ${show(tw, tw2)}`)
 
 // SP1: a pause the detached typer wrote gets its toast from the typer and its pane message from the next hook event.
@@ -603,6 +634,20 @@ const beforeC = negs.find((n) => n.name === 'tracked handoff committed only befo
 clause('clause 3a2 — without the hook: the early-commit fixture\'s handoff is committed, clean, written after the warning and committed before it',
   Number(git(beforeC.proj, 'log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md')) * 1000 < T0 && git(beforeC.proj, 'status', '--porcelain', '--', 'docs/handoffs/h.md') === '' &&
   fs.statSync(path.join(beforeC.proj, 'docs/handoffs/h.md')).mtimeMs > T0, 'early-commit fixture wrong')
+clause('clause 3a5 — without the hook: the claim fixture\'s first claim existed with a dead pid, and after the append its latest auto-cycle line is the R4 paused line, with no ready line after it',
+  fs.existsSync(claimFile(cl.session, firstKey)) && !claimHeld(claimFile(cl.session, firstKey)) &&
+  parseRecord(fs.readFileSync(cl.record, 'utf8')).entries.filter((e) => e.kind === 'auto-cycle').at(-1).line === clPausedLine,
+  'claim fixture wrong')
+clause('clause 3a6 — without the hook: each ready-after fixture\'s record holds its paused line after this session\'s warned line and the ready line as its last auto-cycle line',
+  hidden.every(({ f, line }) => {
+    const es = parseRecord(fs.readFileSync(f.record, 'utf8')).entries.filter((e) => e.kind === 'auto-cycle')
+    const p = es.findIndex((e) => e.sub === 'paused'), w = es.findIndex((e) => e.sub === 'warned')
+    return w >= 0 && p > w && es.at(-1).sub === 'ready' && `- auto-cycle paused: ${es[p].reason}` === line
+  }), 'ready-after fixtures wrong')
+clause('clause 3a7 — without the hook: the manual-clear record\'s R10 sits before the recorded session start, and the start file names the line count at the /clear',
+  JSON.parse(fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')) >= parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.find((e) => e.sub === 'paused').line &&
+  JSON.parse(fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')) < parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.filter((e) => e.sub === 'paused').at(-1).line,
+  `start ${fs.readFileSync(state.sessionStartFile(mc.record), 'utf8')} paused ${JSON.stringify(parseRecord(fs.readFileSync(mc.record, 'utf8')).entries.filter((e) => e.sub === 'paused'))}`)
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
   ['SESSION_MEMORY.md', 'docs/handoffs/h0.md', '.doctrine/auto-cycle.note', '.doctrine/records/r.md', '.doctrine/records/r-run-state.md']
     .every((p) => git(bk.f.proj, 'log', '-1', '--format=%s', '--', p) === 'docs(session): backup') &&

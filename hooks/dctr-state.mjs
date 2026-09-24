@@ -508,10 +508,27 @@ export const autoCycleDir = () => {
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
-/** The typer's claim, single use per ready line (RB2-2): keyed by the session id and the line number of the record's
- *  latest `auto-cycle: ready` line at launch (0 when it has none), so a new ready line after a resolved pause gets a
- *  claim of its own while the same ready line never launches twice. */
-export const claimFile = (sessionId, readyLine) => path.join(autoCycleDir(), `${sessionId}.${readyLine}.claim`)
+/** The typer's claim, single use per record state (RB3-1): keyed by the session id and claimKey, the line number of
+ *  the record's latest auto-cycle line at launch, so a pause written after a claim gives the resolved session a new
+ *  claim while the same record state never launches twice. */
+export const claimFile = (sessionId, key) => path.join(autoCycleDir(), `${sessionId}.${key}.claim`)
+
+/** A record path's short hash, which names its markers and its session start file. */
+const recordHash = (recordPath) => crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)
+
+/** Where the restore hook records a session start (RB3-2): the record's line count when a session began after /clear. */
+export const sessionStartFile = (recordPath) => path.join(autoCycleDir(), `start-${recordHash(recordPath)}`)
+
+/** Record that a session starts now, as the record's current line count. */
+export function writeSessionStart(recordPath) {
+  const text = fs.readFileSync(recordPath, 'utf8')
+  writeMarker(sessionStartFile(recordPath), text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
+}
+
+/** The line count the last recorded session start saw, or 0 when none was recorded or it cannot be read. */
+export function sessionStartLine(recordPath) {
+  try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
+}
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
 export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
 const tokenFile = (paneId) => path.join(autoCycleDir(), `token-${paneToken(paneId)}.txt`)
@@ -545,7 +562,7 @@ export function appendRecordLine(recordPath, line) {
  *  pause (pauseStands, E8-D18, E8-R25). Never a state line: the record's last state line is left as it was.
  *  `{ written }`. */
 export function appendPaused(recordPath, reason) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)) return { written: false }
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
   return { written: true }
 }
@@ -564,7 +581,7 @@ export function publishToken(paneId, value, log = () => {}) {
 
 /** A paused line's marker name in the auto-cycle dir: `<kind>-<hash of record path>-<line>`. */
 const pauseMarker = (kind, recordPath, line) =>
-  path.join(autoCycleDir(), `${kind}-${crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)}-${line}`)
+  path.join(autoCycleDir(), `${kind}-${recordHash(recordPath)}-${line}`)
 
 /**
  * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
@@ -574,7 +591,7 @@ const pauseMarker = (kind, recordPath, line) =>
  * one guard keeping herdr out of it. True when this call raised any.
  */
 export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
-  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))
   const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
   if (!fresh.length) return false
   if (paneId) {
@@ -595,7 +612,7 @@ export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} })
  * there is nothing to print.
  */
 export function pauseMessageOnce(recordPath) {
-  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries)
+  const standing = standingPauses(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath))
   const fresh = standing.filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
   return fresh.length ? fresh.map((p) => pauseMessage(p.reason)).join('\n') : null
 }
