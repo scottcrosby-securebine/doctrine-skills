@@ -247,7 +247,7 @@ Neither degrades into a weaker version of itself.
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
 plugin, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
-`doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
+`doctrine-pane` and auto-cycle, below. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
 Auto-cycle is off by default and switched on per phase in its record. Using it needs these set up
