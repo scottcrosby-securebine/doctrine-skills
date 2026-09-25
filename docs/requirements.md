@@ -20,12 +20,13 @@ The README states the requirement. The detail it leaves out: inside a container 
 process on the host, so a contained session refuses for the same reason a non-herdr one does. See
 [watching a run](watching-a-run.md).
 
-For everything else the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
+For everything else except auto-cycle, below, the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
 
 ## Auto-cycle setup
 
-Auto-cycle is off by default, and a phase switches it on in its own record. These two are needed only to use it:
+Auto-cycle is off by default, and a phase switches it on in its own record. These are needed only to use it:
 
+- **herdr**, with the session running in a herdr pane. Auto-cycle types `/clear` and the resume command into that pane, and it asks herdr which Claude session the pane runs, which herdr reports once its Claude integration is installed: `herdr integration install claude`. Outside a herdr pane, the Stop that would cycle pauses instead and writes `auto-cycle paused: could not type into the pane: this session is not in a herdr pane` to the record. The [`$autocycle` sidebar row](watching-a-run.md) shows the pause at a glance.
 - **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
 - **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
 

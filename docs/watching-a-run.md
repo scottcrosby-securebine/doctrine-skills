@@ -24,6 +24,8 @@ Up to six panes stack beside your session, which keeps the bigger share of the s
 
 **Epic, phase and a ruling owed.** In a repo tracked by [`doctrine-project`](skills/doctrine-project.md), the orchestrator also publishes `$epic`, the current epic's ID, and `$phase`, the phase it is running, both on its own pane and both 24 characters at most. It adds the suffix `·owed` to `$doctrine` while a decision waits on you: an alarm has fired and has no ruling yet, a direction question is open, or a closing round has finished. The suffix clears when you rule. Each session's orchestrator is the one writer of its pane's tokens, and it re-publishes them within the hour, so a quiet phase keeps its row. For attention it relies on herdr's own `blocked` and `done` states and the `state_icon` they drive; doctrine never registers itself as the pane's agent reporter, since a reporter would replace that detection.
 
+**The auto-cycle token.** While a phase runs with auto-cycle on, the auto-cycle hook publishes one more token, `$autocycle`, on the session's own pane under its own source, `custom:autocycle`, apart from the orchestrator's. It reads `auto-cycle on·cycle <n> of <cap>`, the cycles run so far against the cap on the record's on line, and `auto-cycle paused·<reason>` while a pause stands, naming the latest one with its reason cut to 40 characters; the pane message and the toast carry it in full. Once no pause stands it reads the count again. The rule on its row in the example below shows it red while paused. It is published again only when its value changes, and each publish lasts 24 hours, so a value that stops changing disappears a day later. It needs the session in a herdr pane: outside one there is no pane to carry it, and auto-cycle pauses instead of cycling ([requirements](requirements.md#auto-cycle-setup)).
+
 ```toml
 [ui.sidebar.agents]
 rows = [
@@ -35,6 +37,9 @@ rows = [
     { contains = "·e0·", fg = "#f55", bold = true },
   ] }],
   [{ token = "$epic" }, { token = "$phase" }],
+  [{ token = "$autocycle", rules = [
+    { contains = "paused·", fg = "#f55", bold = true },
+  ] }],
 ]
 ```
 
