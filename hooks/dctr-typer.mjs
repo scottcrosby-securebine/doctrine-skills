@@ -1,40 +1,17 @@
 // doctrine — the auto-cycle typer (E8-D15).
 //
-// Spawned detached by dctr-cycle.mjs's Stop when every precondition holds, with one JSON argument: the pane id, the
-// session id, the Stop's transcript path and byte length, the moment the Stop hook started, the record path, the
-// tree hash, the session's repo, the cycle number, the phase, and the claim key (claimKey: the line number of the
-// record's latest auto-cycle line).
-// It never reads the screen (E8-R12). It is a loop around typerStep in dctr-lib.mjs, which decides from one
-// observation at a time:
-//
-//   - It takes the claim `<autocycle dir>/<session>.<key>.claim` with reserveMarker and writes its pid into it (S3);
-//     a claim already taken ends it with nothing sent. The claim is single use per record state (RB3-1).
-//   - Before every send it stops, writing nothing, if the record is switched off or no longer Open or Blocked, or a
-//     paused line was written since the claim; on a record still active it pauses with R1 if the stop file exists in
-//     either repo (RB4-1). It needs herdr's agent_status ready (idle or done, READY_STATUSES), and waits while the
-//     pane is focused.
-//   - Before /clear it needs herdr to report the old session and the old transcript to hold no user or assistant
-//     entry timestamped at or after the Stop hook's start (typedAfter; an entry with no time counts). The file is
-//     read from the Stop's byte length on, and only to find such entries: it is written asynchronously, so an entry
-//     past that length can be the turn's own final message, which carries a time before the Stop (K2-R16). A file
-//     that cannot be read, or is now shorter than that length, or holds a damaged line before its last, pauses rather
-//     than clears (RB2); a last line still being written holds every send until it completes, and pauses with R17 if
-//     it outlasts the idle grace (RB6-1). It removes this
-//     pane's restore file, sends /clear once, and only then appends `auto-cycle: cycle <n> tree <hash>` (LN12: the
-//     line records a sent /clear, never an intended one).
-//   - After /clear it waits for the restore hook's restore file carrying a different session id (F1), needs herdr
-//     to report that id within 30 s, and sends the resume line once (RESUME_LINE: the /doctrine:doctrine-resume
-//     command, E8-R32), only while the new session's transcript holds no entry the user typed (userTyped: /clear's
-//     own entries and the resume command's are not typing); typing pauses
-//     with R16, and a transcript still unreadable when the 30 s end pauses with R17, never sends (DP-1).
-//   - It confirms the first turn from the new transcript within 2 minutes, resends once, then pauses; typing into
-//     the new session before the first turn pauses with R16, and an unreadable transcript with R17.
-//
-// Every wait is counted in polls, never read off the wall clock (RB2-4): each wait adds one poll interval to the
-// typer's clock, so a loaded host stretches a wait in real time and never shortens it in polls. Every pause appends
-// one paused line and raises its toast and token; its pane message is printed by the next Stop, Notification or
-// StopFailure hook (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no herdr: a contained
-// session is never cycled.
+// Spawned detached by dctr-cycle.mjs's Stop with one JSON argument: the pane, the session, the Stop's transcript path
+// and byte length, the Stop's start time, the record, the tree hash, the session's repo, the cycle number, the phase
+// and the claim key (claimKey at launch). It never reads the screen (E8-R12). It reserves the claim
+// `<autocycle dir>/<session>.<key>.claim` and writes its pid into it, ending with nothing sent when the claim is
+// already taken (one launch per record state, RB3-1). Then it loops: each poll it gathers what typerStep in
+// dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
+// typerStep decides, which owns every condition: wait, abort with nothing written, pause, send /clear, send the resume
+// line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. Only after a sent
+// /clear does it append `auto-cycle: cycle <n> tree <hash>` (LN12). Waits are counted in polls, never read off the wall
+// clock (RB2-4). A pause appends one paused line and raises its toast and token; the next Stop, Notification or
+// StopFailure prints its pane message (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no
+// herdr.
 
 import fs from 'node:fs'
 import path from 'node:path'

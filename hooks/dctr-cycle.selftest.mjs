@@ -966,9 +966,17 @@ clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification wi
   JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure, hj.UserPromptSubmit]))
 
 const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description
-clause('clause 2r2 — hooks.json says what the stop file does (Stop writes a paused line naming it and alerts, the other two append nothing), names UserPromptSubmit, and does not state the idle rule without E8-R30\'s exception (RB3, DS6-B1)',
-  hjd.includes('With a .doctrine/auto-cycle.stop in the session\'s repo or the record\'s, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure append nothing.') &&
-  !/stands down unless auto-cycle is active/.test(hjd) && !hjd.includes('(no paused line stands,') && hjd.includes('UserPromptSubmit'), hjd.slice(-900))
+// DR11: the description points at cycleDecision and notifyDecision for the order and conditions and restates none of
+// them: no pause reason as the D2 table writes it and no idle or stall condition, so a future restatement fails here.
+const RESTATED = [...Object.entries(PAUSES).map(([c, p]) => (p.match ? p.match.source.replace(/^\^|\\|\$$/g, '').split(/[(\[]/)[0].trim() : p.reason())),
+  'Blocked phase', 'alarm without a ruling', 'open question', 'handoff is not written', 'cycle cap', 'no progress', 'another Stop hook',
+  'cannot be hashed', 'no typer claim', 'ready line', 'not yet completed', 'no paused line stands'].filter((t) => t.length > 6)
+const restated = RESTATED.filter((t) => hjd.toLowerCase().includes(t.toLowerCase()))
+clause('clause 2r2 — hooks.json names the four events, says each stands down unless auto-cycle is on for the kickoff\'s record, points at cycleDecision and notifyDecision, says UserPromptSubmit only records the turn end and a contained session calls no herdr, and restates no pause reason or condition those functions own (RB3, DS6-B1, DR11)',
+  hjd.includes('Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit run dctr-cycle.mjs') &&
+  hjd.includes('unless that record is Open or Blocked and its last auto-cycle on/off line is on') && hjd.includes('cycleDecision in hooks/dctr-lib.mjs') &&
+  hjd.includes('notifyDecision') && hjd.includes('UserPromptSubmit only records where the session\'s turn ended.') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
+  !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0, `restated ${JSON.stringify(restated)} | ${hjd.slice(-1400)}`)
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 

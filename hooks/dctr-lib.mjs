@@ -1224,7 +1224,8 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * B4's next action from one observation (E8-D15). The typer is a loop around it. `o.stage` is `clear` before the
  * /clear, `resume` after it and before the first resume, `confirm` after a resume. `o.pane` is herdr's reading,
  * `{ error }` when the lookup failed. `o.grew` is whether the old transcript holds a user or assistant entry the
- * user typed after the Stop (typedAfter), and null when it could not be read or is shorter than the Stop's length.
+ * user typed after the Stop (typedAfter), and null when it could not be read, is shorter than the Stop's length, or
+ * holds a damaged line before its last.
  * `o.stopRepo` is the repo holding the stop file, or null. `o.waited` is ms in this stage, `o.notIdle` ms unfocused and not idle,
  * `o.sessionWait` ms since the restore file was seen. `o.midWrite` is how long the transcript being read has ended in
  * a line still being written (transcriptEntries' `partial`), null when it does not: the step waits a poll while it
@@ -1280,8 +1281,9 @@ export function typerStep(o) {
 /**
  * B6's reason for a Notification or StopFailure event while auto-cycle is active (E8-D18), or null. `event` is
  * `StopFailure` or the notification type. idle_prompt pauses only when no live claim is held for this pane,
- * nothing is live, and the last Stop's persisted facts say its background tasks and its session crons were empty
- * (E8-D7's live-work test, E8-R22) and its message did not end with the ready line; a missing record of the last
+ * nothing is live, and the last Stop's persisted facts say none of its background tasks was live (backgroundLive: each
+ * one completed, failed or killed, E8-R33), its session crons were empty (E8-D7's live-work test, E8-R22) and its
+ * message did not end with the ready line; a missing record of the last
  * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then written only while no paused
  * line stands but a permission prompt, idle stop or API error the session has ended a turn since, which the dedup
  * decides (pauseStands, E8-R28, E8-R30).

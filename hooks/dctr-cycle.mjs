@@ -1,26 +1,21 @@
 // doctrine — the auto-cycle hook (E8-D7, E8-D16, E8-D17, E8-D18, E8-D26).
 //
-// Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit in hooks.json, one script. It stands
-// down in its first lines unless the record the kickoff chain reaches (SESSION_MEMORY.md's kickoff, the handoff's
-// `record:` line, the record: the chain the restore hook and the gauge follow) is Open or Blocked and its last
-// auto-cycle on/off line is on. The stop file `.doctrine/auto-cycle.stop`, in the session's repo or the record's,
-// is tested after that, so its pause is reachable (LB7).
+// Runs on Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit (hooks.json),
+// one script. It stands down unless the record the kickoff chain reaches (SESSION_MEMORY.md's kickoff, the handoff's
+// `record:` line: the chain the restore hook and the gauge follow) is Open or Blocked and its last auto-cycle on/off
+// line is on; a subagent's event always stands down.
 //
-// On Stop it runs B2's ordered steps (cycleDecision in dctr-lib.mjs): a pausing state writes one paused line; an
-// ordinary turn, or live work, writes nothing; a stall, the cap or no progress writes one paused line; otherwise
-// it hashes the tree and spawns the typer (dctr-typer.mjs) detached, which types /clear and the doctrine-resume command once
-// the user moves focus off the pane. On Notification and StopFailure, while auto-cycle is active, it pauses on a
-// permission prompt, an API error, or an idle prompt nothing else explains (notifyDecision). A Stop, a StopFailure
-// and a UserPromptSubmit each record the record's line count as the session's turn end (writeTurnEnd), so a second
-// prompt, idle stop or error of a kind already paused is written once a turn has ended since (pauseStands, E8-R29,
-// E8-R31); UserPromptSubmit does only that.
+// On Stop it does what cycleDecision in dctr-lib.mjs decides, which owns the order and every condition: it appends
+// one paused line, writes nothing, or launches dctr-typer.mjs detached with the facts it needs (pausing instead when
+// the transcript it would hand the typer cannot be read). On Notification and StopFailure it appends the paused line
+// notifyDecision returns, if any. Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
+// StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
+// UserPromptSubmit does nothing else.
 //
-// On every event past the stand-down but UserPromptSubmit it alerts each standing pause once (standingPauses in dctr-lib.mjs, the one
-// pause model), whoever wrote its line: the toast, and the pane's systemMessage, each tracked by its own marker (B3,
-// SP1). While auto-cycle is active the `autocycle` sidebar token names the last standing pause, or reads the cycle
-// count when none stands, republished only when its value changes. The typer it launches is keyed by the record's
-// latest auto-cycle line, so one record state launches once. With DCTR_VIEW_REQUEST_DIR set it writes the line and prints
-// the message and calls herdr zero times. It always exits 0.
+// Every other event past the stand-down alerts each standing pause once (standingPauses, the one pause model): the
+// toast and the pane's systemMessage, each tracked by its own marker; while auto-cycle is active it publishes the
+// `autocycle` sidebar token (autocycleToken). With DCTR_VIEW_REQUEST_DIR set it calls herdr zero times. It always
+// exits 0.
 
 import fs from 'node:fs'
 import path from 'node:path'
