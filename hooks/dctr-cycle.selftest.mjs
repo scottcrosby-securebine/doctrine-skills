@@ -966,8 +966,8 @@ clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification wi
   JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure, hj.UserPromptSubmit]))
 
 const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description
-clause('clause 2r2 — hooks.json says what the stop file does (Stop writes a paused line naming it and alerts, the other two write nothing), names UserPromptSubmit, and does not state the idle rule without E8-R30\'s exception (RB3, DS6-B1)',
-  hjd.includes('With a .doctrine/auto-cycle.stop in the session\'s repo or the record\'s, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure write nothing.') &&
+clause('clause 2r2 — hooks.json says what the stop file does (Stop writes a paused line naming it and alerts, the other two append nothing), names UserPromptSubmit, and does not state the idle rule without E8-R30\'s exception (RB3, DS6-B1)',
+  hjd.includes('With a .doctrine/auto-cycle.stop in the session\'s repo or the record\'s, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure append nothing.') &&
   !/stands down unless auto-cycle is active/.test(hjd) && !hjd.includes('(no paused line stands,') && hjd.includes('UserPromptSubmit'), hjd.slice(-900))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it

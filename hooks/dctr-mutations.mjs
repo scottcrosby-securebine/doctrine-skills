@@ -1568,7 +1568,7 @@ const MUTATIONS = [
     to: "  } else if (true) {" },
   { name: "the hooks.json description says the entries stand down on the stop file (RB3)", file: "hooks.json",
     clause: "clause 2r2",
-    from: "With a .doctrine/auto-cycle.stop in the session's repo or the record's, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure write nothing.",
+    from: "With a .doctrine/auto-cycle.stop in the session's repo or the record's, Stop appends one paused line naming that file and alerts it, and Notification and StopFailure append nothing.",
     to: "They stand down unless auto-cycle is active, meaning no .doctrine/auto-cycle.stop exists." },
   { name: "the typer leaves an earlier restore file in place before /clear", file: "dctr-typer.mjs",
     clause: "clause 2o",
