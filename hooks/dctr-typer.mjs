@@ -6,8 +6,9 @@
 // `<autocycle dir>/<session>.<key>.claim` and writes its pid into it, ending with nothing sent when the claim is
 // already taken (one launch per record state, RB3-1). Then it loops: each poll it gathers what typerStep in
 // dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
-// typerStep decides, which owns every condition: wait, abort with nothing written, pause, send /clear, send the resume
-// line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. Only after a sent
+// typerStep decides, which decides every step: wait, abort with nothing written, pause, send /clear, send the resume
+// line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. The typer itself
+// pauses with R17 when a send fails and on an unexpected error. Only after a sent
 // /clear does it append `auto-cycle: cycle <n> tree <hash>` (LN12). Waits are counted in polls, never read off the wall
 // clock (RB2-4). A pause appends one paused line and raises its toast and token; the next Stop, Notification or
 // StopFailure prints its pane message (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no

@@ -966,17 +966,29 @@ clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification wi
   JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure, hj.UserPromptSubmit]))
 
 const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description
-// DR11: the description points at cycleDecision and notifyDecision for the order and conditions and restates none of
-// them: no pause reason as the D2 table writes it and no idle or stall condition, so a future restatement fails here.
-const RESTATED = [...Object.entries(PAUSES).map(([c, p]) => (p.match ? p.match.source.replace(/^\^|\\|\$$/g, '').split(/[(\[]/)[0].trim() : p.reason())),
+// DR11, RB12-1: the description points at cycleDecision and notifyDecision for the order and conditions and restates
+// none of them. FORBIDDEN is every D2 pause reason as PAUSES writes it, from PAUSES[code].reason(sample) with a
+// representative argument for each code that takes one (R3 with both 'round' and 'time'), plus, for each code that
+// takes one, the fixed text around its argument (from a sentinel argument, each piece of 8 characters or more), plus
+// a hand list of stall and idle condition phrases. restatedIn(text) returns the forbidden texts a description holds,
+// ignoring case. The clause asserts the description holds none, and that the guard itself flags every D2 reason when it
+// is appended to the description, so a guard that lost its PAUSES half fails here too.
+const SAMPLE = { R1: ['/w/p'], R2: ['State: Blocked. waits'], R3: ['round', 'time'], R4: [{ id: 'Q5', text: 'which?' }], R5: [10], R9: ['overloaded'], R17: ['herdr could not read the pane'] }
+const SENTINEL = '\u0001'
+const D2_REASONS = Object.keys(PAUSES).flatMap((c) => (SAMPLE[c] || [undefined]).map((a) => PAUSES[c].reason(a)))
+const D2_FIXED = Object.keys(SAMPLE).flatMap((c) => PAUSES[c].reason(c === 'R4' ? { id: SENTINEL, text: SENTINEL } : SENTINEL).split(SENTINEL).map((t) => t.trim()).filter((t) => t.length >= 8))
+const FORBIDDEN = [...D2_REASONS, ...D2_FIXED,
   'Blocked phase', 'alarm without a ruling', 'open question', 'handoff is not written', 'cycle cap', 'no progress', 'another Stop hook',
-  'cannot be hashed', 'no typer claim', 'ready line', 'not yet completed', 'no paused line stands'].filter((t) => t.length > 6)
-const restated = RESTATED.filter((t) => hjd.toLowerCase().includes(t.toLowerCase()))
-clause('clause 2r2 — hooks.json names the four events, says each stands down unless auto-cycle is on for the kickoff\'s record, points at cycleDecision and notifyDecision, says UserPromptSubmit only records the turn end and a contained session calls no herdr, and restates no pause reason or condition those functions own (RB3, DS6-B1, DR11)',
+  'cannot be hashed', 'no typer claim', 'ready line', 'not yet completed', 'no paused line stands']
+const restatedIn = (text) => FORBIDDEN.filter((t) => text.toLowerCase().includes(t.toLowerCase()))
+const guardMisses = D2_REASONS.filter((r) => restatedIn(`${hjd} ${r}`).length === 0)
+const restated = restatedIn(hjd)
+clause('clause 2r2 — hooks.json names the four events, says each stands down unless auto-cycle is on for the kickoff\'s record, points at cycleDecision and notifyDecision, says UserPromptSubmit only records the turn end and a contained session calls no herdr, and restates no pause reason or condition those functions own, and the guard flags every D2 reason (RB3, DS6-B1, DR11, RB12-1)',
   hjd.includes('Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit run dctr-cycle.mjs') &&
   hjd.includes('unless that record is Open or Blocked and its last auto-cycle on/off line is on') && hjd.includes('cycleDecision in hooks/dctr-lib.mjs') &&
   hjd.includes('notifyDecision') && hjd.includes('UserPromptSubmit only records where the session\'s turn ended.') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
-  !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0, `restated ${JSON.stringify(restated)} | ${hjd.slice(-1400)}`)
+  !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0 && D2_REASONS.length >= 18 && guardMisses.length === 0,
+  `restated ${JSON.stringify(restated)} guard misses ${JSON.stringify(guardMisses)} | ${hjd.slice(-1400)}`)
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
