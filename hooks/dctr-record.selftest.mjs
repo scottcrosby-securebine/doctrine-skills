@@ -200,6 +200,23 @@ clause('clause 1k — a record with no state line and no wrapper line reads null
   parseRecord('# nothing\n\nprose only').state === null && parseRecord('# nothing').wrapper === null,
   JSON.stringify(parseRecord('# nothing\n\nprose only')))
 
+// K4-RL: the auto-cycle lines an agent writes (on, off, ready, paused) parse when a list marker and inline code, bold or
+// italics wrap the whole line; a hook-written line (warned, cycle) is read only as written; a wrapped line with other
+// words beside it is prose.
+const WRAPPED = ['- `auto-cycle: ready`', '`auto-cycle: ready`', '**auto-cycle: off**', '- *auto-cycle: ready*', '- **`auto-cycle: on cap 12 tier 60%`**', '- `auto-cycle paused: question: which way?`']
+const WRAPPED_NOT = ['- `auto-cycle: warned s1 60%`', '`auto-cycle: cycle 2 tree ab`', 'Done: `auto-cycle: ready`', '- `auto-cycle: ready` then more', '- `auto-cycle: ready*']
+// DSP7-B1: prose quoting each agent-written form in two spans, which a greedy unwrap read as one wrapped line.
+const QUOTED = ['- `auto-cycle paused: R7` means the hook saw a permission prompt; I approved it with `yes`',
+  '- `auto-cycle: on cap 10 tier 60%` and `auto-cycle: off`', '`auto-cycle: off` then `on`', '- **auto-cycle: ready** or **not**',
+  '- *auto-cycle: ready* and *more*']
+const quoted = parseRecord(QUOTED.join('\n')).entries
+const wr = parseRecord(WRAPPED.join('\n')).entries, wrNot = parseRecord(WRAPPED_NOT.join('\n')).entries
+clause('clause 1o — the agent-written auto-cycle forms parse wrapped in inline code, bold or italics, with or without a list marker; hook-written forms and a wrapped line with other words do not (K4-RL)',
+  JSON.stringify(wr.map((e) => e.sub)) === '["ready","ready","off","ready","on","paused"]' && wr[4].cap === 12 && wr[5].reason === 'question: which way?' && wrNot.length === 0,
+  JSON.stringify([wr, wrNot]))
+clause('clause 1o2 — prose quoting an agent-written form (on, off, ready, paused) in two spans of the same delimiter parses to nothing (DSP7-B1)',
+  quoted.length === 0, JSON.stringify(quoted))
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
@@ -224,6 +241,10 @@ clause('clause 3e — without the parser: the record holds two wrapper lines wit
 clause('clause 3b — without the parser: the record has more than one state line and the last differs from the first',
   lines.filter((l) => STATE_LINE.test(l.trim())).length === 4 && lines.at(-1) !== '- State: Open',
   'if the record held one state line, "last" in clause 1i would prove nothing')
+
+clause('clause 3f — without the parser: each wrapped fixture line carries a wrapper character beside its form, each refused one a form key, and each quoted one opens and closes with the same delimiter and holds it at least four times',
+  WRAPPED.every((l) => /[`*]/.test(l) && /auto-cycle/.test(l)) && WRAPPED_NOT.every((l) => /auto-cycle/.test(l) && /[`*]/.test(l)) &&
+  QUOTED.every((l) => { const t = l.replace(/^- /, ''), d = t.startsWith('**') ? '**' : t[0]; return t.endsWith(d) && t.split(d).length - 1 >= 4 && /auto-cycle: (on|off|ready)|auto-cycle paused:/.test(t) }), 'fixtures wrong')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),

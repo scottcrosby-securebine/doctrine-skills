@@ -247,15 +247,17 @@ Neither degrades into a weaker version of itself.
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
 plugin, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
-`doctrine-pane`. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
+`doctrine-pane` and auto-cycle, below. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
-Auto-cycle is off by default and switched on per phase in its record. Using it needs two things set
-up once: auto-compaction off, with `claude config set -g autoCompactEnabled false` (a global config
+Auto-cycle is off by default and switched on per phase in its record. Using it needs these set up
+once: herdr, with the session running in a herdr pane and herdr's Claude integration installed
+(`herdr integration install claude`); auto-compaction off, with `claude config set -g autoCompactEnabled false` (a global config
 key in `~/.claude.json`, not settings.json), since the phase resets by `/clear` and a compaction
 mid-phase discards the session's context and the gauge's reading; and the statusline bridge, installed
 with `node <plugin-root>/hooks/dctr-bridge.mjs install` and re-run after every plugin update. [docs/requirements.md](docs/requirements.md#auto-cycle-setup) says what each one
-does.
+does, and [docs/watching-a-run.md](docs/watching-a-run.md) gives the `$autocycle` sidebar row that shows
+whether it is cycling or paused.
 
 ## Watching it work
 

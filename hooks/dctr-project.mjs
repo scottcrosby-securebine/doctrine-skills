@@ -576,7 +576,10 @@ export function readCodex(root, stateDir = codexStateDir()) {
 
 // ---------------------------------------------------------------- CLI
 
-if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
+// Both through realpath: Node resolves symlinks in import.meta.filename, so a symlinked plugin dir dispatched nothing
+// (ORC7-1). A failed realpath is not the script.
+const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(import.meta.filename) } catch { return false } })()
+if (isMain) {
   const [cmd, ...rest] = process.argv.slice(2)
   if (!['check', 'status'].includes(cmd) || rest.length > 1 || rest.some((a) => a.startsWith('-'))) {
     console.error('usage: node dctr-project.mjs check|status [<repo-root>]')

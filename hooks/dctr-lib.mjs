@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { wrapperValue, parseRecord } from './dctr-record.mjs'
+import { wrapperValue, parseRecord, unwrapLine } from './dctr-record.mjs'
 
 // Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
 // (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
@@ -708,7 +708,7 @@ export function gaugeSkip(p) {
 }
 
 /** The record's last `auto-cycle` on or off entry, or null (E8-R10: auto-cycle is on only while that entry is on). */
-export const autoCycleOn = (entries) =>
+export const lastOnOffEntry = (entries) =>
   (entries || []).filter((e) => e.kind === 'auto-cycle' && (e.sub === 'on' || e.sub === 'off')).at(-1) || null
 
 /**
@@ -841,4 +841,457 @@ export function gaugeContext({ warn = false, used, window, tier, tierText, facts
   if (!head) return full.slice(0, GAUGE_MAX - 1) + '…'
   const room = GAUGE_MAX - head.length - 2
   return room > 0 ? `${head} ${tail.slice(0, room)}…`.slice(0, GAUGE_MAX) : head.slice(0, GAUGE_MAX)
+}
+
+// ---------------------------------------------------------------- auto-cycle (E8-D7, E8-D15, E8-D16, E8-D17, E8-D18, E8-D26)
+
+/** The file that stops auto-cycle, looked for in the session's repo and in the record's repo; either stops (Q1). */
+export const STOP_FILE = '.doctrine/auto-cycle.stop'
+/** The last line of the assistant message that says the handoff is done and the session may be cleared. */
+export const READY_LINE = 'auto-cycle: ready'
+export const RESUME_COMMAND = '/doctrine:doctrine-resume'
+export const RESUME_ARGS = '(typed by doctrine auto-cycle, not a ruling)'
+/** What the typer types after /clear (E8-R24, E8-R32): the doctrine-resume skill's slash command, so the new session
+ *  runs doctrine-resume, with an argument saying it is not a ruling. */
+export const RESUME_LINE = `${RESUME_COMMAND} ${RESUME_ARGS}`
+/** What the Stop hook prints in the pane when it launches the typer (E8-R23). */
+export const LAUNCH_MESSAGE = 'doctrine auto-cycle: will type /clear and resume here once you move focus off this pane'
+/** The sidebar token's source and lifetime (E8-R23): its own source, apart from the orchestrator's custom:doctrine. */
+export const AUTOCYCLE_SOURCE = 'custom:autocycle'
+export const AUTOCYCLE_TTL_MS = 24 * 3600 * 1000
+/** How much of a pause reason the sidebar token carries. */
+export const TOKEN_REASON_MAX = 40
+
+/**
+ * The pause reasons and what to do about each, verbatim from the D2 table (Scott). Each paused line is
+ * `auto-cycle paused: <reason>`; the pane message and the toast add the action. A reason already written is
+ * recognised by `match` where the reason carries an argument, and by equality where it carries none, so an alert
+ * raised for a line another process wrote still names its action.
+ */
+export const PAUSES = {
+  R1: { reason: (repo) => `stopped by .doctrine/auto-cycle.stop in ${repo}`, action: 'delete it, then /clear and type resume', match: /^stopped by \.doctrine\/auto-cycle\.stop in / },
+  R2: { reason: (line) => `phase Blocked: ${line}`, action: 'answer in the pane', match: /^phase Blocked: / },
+  R3: { reason: (which) => `${which} alarm fired, ruling needed`, action: 'rule in the pane', match: /^(round|time) alarm fired, ruling needed$/ },
+  R4: { reason: (q) => `open question ${q.id}: ${q.text}`, action: 'answer in the pane', match: /^open question / },
+  R5: { reason: (cap) => `cycle cap ${cap} reached`, action: 'add an on line with a higher cap, then /clear and type resume', match: /^cycle cap \d+ reached$/ },
+  R6: { reason: () => 'no progress in 2 cycles', action: "read the record's last work, then /clear and type resume" },
+  R7: { reason: () => 'waiting for your permission approval', action: 'approve or deny in the pane' },
+  R8: { reason: () => 'session idle, waiting for you', action: 'reply in the pane' },
+  R9: { reason: (error) => `Claude API error: ${error}`, action: 'retry in the pane', match: /^Claude API error: / },
+  R10: { reason: () => 'could not cycle: handoff not written', action: 'run doctrine-handoff, then /clear and type resume' },
+  R11: { reason: () => 'could not cycle: another Stop hook kept the session running', action: '/clear and type resume by hand' },
+  R12: { reason: () => 'could not cycle: this pane now runs a different Claude session', action: 'check the pane' },
+  R13: { reason: () => 'could not cycle: contained session', action: '/clear and type resume by hand' },
+  R14: { reason: () => 'cleared, but the new session did not start doctrine', action: 'type resume' },
+  R15: { reason: () => 'resume typed twice, no reply from the new session', action: 'check the pane' },
+  R16: { reason: () => 'auto-cycle stopped: you typed in this pane', action: 'nothing, or /clear and type resume' },
+  R17: { reason: (why) => `could not type into the pane: ${why}`, action: '/clear and type resume by hand', match: /^could not type into the pane: / },
+}
+export const pauseReason = (code, arg) => PAUSES[code].reason(arg)
+/** R17's `<reason>`, one fixed phrase per failure (SP7): never a raw herdr status or error message, which go to
+ *  hook.log. No phrase says stall, typer, claim or blocked (D2). */
+export const R17_WHY = {
+  lookup: 'herdr could not read the pane',
+  busy: 'the session stayed busy',
+  send: 'herdr could not send to the pane',
+  transcript: 'the transcript could not be read',
+  session: 'herdr did not report the new session within 30 s',
+  noPane: 'this session is not in a herdr pane',
+  hash: 'the working tree could not be hashed',
+  error: 'an unexpected error',
+}
+/** herdr's agent_status values that mean ready for input (herdr 0.9.1: `idle` and `done` both do; `done` is an
+ *  unseen finish, which an unattended, unfocused pane reports after its turn). */
+export const READY_STATUSES = ['idle', 'done']
+/** The PAUSES code a reason as written matches, by `match` where the reason carries an argument and by equality
+ *  where it carries none, or null for a reason the table does not know. */
+export const pauseCode = (reason) => Object.keys(PAUSES).find((c) => (PAUSES[c].match ? PAUSES[c].match.test(reason) : PAUSES[c].reason() === reason)) || null
+/** Whether two reasons name the same pause (E8-R27): the same PAUSES code, so two R9 lines with different error text
+ *  are one pause, or, for a reason no code matches, the same text. */
+export const samePause = (a, b) => (pauseCode(a) ?? `text:${a}`) === (pauseCode(b) ?? `text:${b}`)
+/** The skills' `question: <text>` pause (doctrine-backup), which carries no id and so never resolves (pauseResolved). */
+const SKILL_QUESTION = /^question: /
+/** The action for a reason as written: the D2 table's for a reason it knows, else an answer in the pane. The skills'
+ *  question can need more, which only its place in the record decides (pauseActionAt). */
+export const pauseAction = (reason) => PAUSES[pauseCode(reason)]?.action || 'answer in the pane'
+export const pausedLine = (reason) => `- auto-cycle paused: ${reason}`
+/** The pane message and the toast body for a paused line (E8-R23): the reason, then what to do. */
+export const pauseMessage = (reason, action = pauseAction(reason)) => `doctrine auto-cycle paused: ${reason}. ${action}`
+export const pausedToken = (reason) => `auto-cycle paused·${String(reason).slice(0, TOKEN_REASON_MAX)}`
+export const onToken = (n, cap) => `auto-cycle on·cycle ${n} of ${cap}`
+/** The report-metadata call for the autocycle token (E8-D26, E8-R23). Never dctr-token: its own source. */
+export const autocycleTokenArgs = (paneId, value) =>
+  ['pane', 'report-metadata', paneId, '--source', AUTOCYCLE_SOURCE, '--token', `autocycle=${value}`, '--ttl-ms', String(AUTOCYCLE_TTL_MS)]
+/** The toast (E8-R24): `<repo> <phase>: doctrine auto-cycle paused`, the body the reason and the action. */
+export const pauseToastArgs = (repo, phase, reason, action = pauseAction(reason)) =>
+  ['notification', 'show', `${repo} ${phase || 'unnamed phase'}: doctrine auto-cycle paused`, '--body', `${reason}. ${action}`, '--sound', 'request']
+
+/** The last auto-cycle entry of any sub-form, or null. The claim key reads it, and standingPauses where the record
+ *  has no anchor. */
+export const latestAutoCycle = (entries) => (entries || []).filter((e) => e.kind === 'auto-cycle').at(-1) || null
+
+/**
+ * THE PAUSE MODEL (E8-R25), stated once; step 3, the dedup, the sidebar token and the alerts all read it.
+ *
+ * A paused line P is resolved only when it is an R2, R3 or R4 pause, whoever wrote it, and a line AFTER P answers
+ * it: a state line not reading Blocked (R2), a ruling line (R3), a `question: <id> answered` line for its id (R4).
+ * It is judged against the lines after P and never the whole record, so a later alarm or Blocked of the same kind
+ * never makes an old, answered pause stand again. Every other paused line never resolves, the skills' `question:
+ * <text>` form included, which carries no id.
+ */
+export function pauseResolved(paused, entries) {
+  const after = (entries || []).filter((e) => e.line > paused.line), reason = paused?.reason || ''
+  if (PAUSES.R2.match.test(reason)) return after.some((e) => e.kind === 'state' && !/^Blocked\b/i.test(e.value || ''))
+  if (PAUSES.R3.match.test(reason)) return after.some((e) => e.kind === 'ruling')
+  const q = /^open question (\S+): /.exec(reason)
+  if (q) return after.some((e) => e.kind === 'question-answered' && e.id === q[1])
+  return false
+}
+
+/** The unresolved paused lines after line `after` (E8-R25). */
+export const unresolvedPausesAfter = (entries, after) =>
+  (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > after && !pauseResolved(e, entries))
+
+/** The latest `warned`, `cycle` or `auto-cycle: on` line before line `before`, or null: the record's own anchors. */
+const latestMark = (entries, before = Infinity) =>
+  (entries || []).filter((e) => e.kind === 'auto-cycle' && ['warned', 'cycle', 'on'].includes(e.sub) && e.line < before).at(-1) || null
+
+/**
+ * The standing pauses, in record order: the unresolved paused lines after the latest anchor, which is the later of
+ * the record's latest `warned`, `cycle` or `auto-cycle: on` line and `startLine`, the record's line count when the
+ * restore hook saw this session start after a /clear (RB3-2; 0 when none was recorded). An on line is an anchor
+ * because R5's action appends one; a session start is, because a /clear and a resume start a new session, which must
+ * not inherit the old one's pauses, whoever typed them: many pause actions ask the user for them, and the typer types
+ * them itself. With no anchor at all, the latest auto-cycle line when it is an unresolved paused line. A ready line after a pause hides
+ * nothing. The dedup (pauseStands), the token (autocycleToken, paused while any stands, naming the last) and the
+ * alerts (each line once) read this one set; step 3 (pausedAfterWarned) refuses on every one of them after this
+ * session's warned line.
+ */
+export function standingPauses(entries, startLine = 0) {
+  const es = entries || []
+  const anchor = Math.max(latestMark(es)?.line ?? 0, startLine)
+  if (anchor > 0) return unresolvedPausesAfter(es, anchor)
+  const latest = latestAutoCycle(es)
+  return latest?.sub === 'paused' && !pauseResolved(latest, es) ? [latest] : []
+}
+
+/** The event pauses (E8-D18): a permission prompt, an idle stop and an API error, each answered by the session going on. */
+const EVENT_PAUSES = ['R7', 'R8', 'R9']
+
+/** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
+ *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for
+ *  that reason; any other pause that differs from every standing one is written. `turnEnd` is the record's line count
+ *  at this session's latest turn end (a Stop, a StopFailure or the next submitted prompt, E8-R31), 0 when none is
+ *  known: an R7, R8 or R9 line at or before it was answered by the turn that ended there, so it counts for neither
+ *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Every other
+ *  pause counts whatever the Stop, and step 3, the token and the alerts read standingPauses unchanged. */
+export const pauseStands = (entries, startLine, reason, turnEnd = 0) => {
+  const standing = standingPauses(entries, startLine).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))
+  return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
+}
+
+/** This session's latest warned line, or null: B2 step 2's warning and step 3's anchor both read it. */
+export const sessionWarned = (entries, sessionId) =>
+  (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1) || null
+
+/** B2 step 3 (E8-R25): an unresolved paused line follows this session's latest warned line, whatever anchor follows
+ *  it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False with no such line.
+ *  Every pause standingPauses returns after that warned line is one of these. */
+export function pausedAfterWarned(entries, sessionId) {
+  const mine = sessionWarned(entries, sessionId)
+  return Boolean(mine) && unresolvedPausesAfter(entries, mine.line).length > 0
+}
+
+/** The action for paused line `p` of `entries` (RB5-1). The D2 table's for a reason it knows. The skills' question
+ *  never resolves, so where the latest anchor before it is a warned line of the session still running (no session
+ *  start after that line), step 3 holds that session and the question asks, once answered, for a /clear and a typed
+ *  resume; before the warning the next warned line moves the anchor past it, so it asks only for an answer. */
+export function pauseActionAt(p, entries, startLine = 0) {
+  if (!SKILL_QUESTION.test(p.reason)) return pauseAction(p.reason)
+  const mark = latestMark(entries, p.line)
+  return mark?.sub === 'warned' && mark.line > startLine ? 'answer in the pane, then /clear and type resume' : 'answer in the pane'
+}
+
+/** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, else the latest cycle line's
+ *  count (0 with none) of the last on line's cap. */
+export function autocycleToken(entries, startLine = 0) {
+  const es = entries || [], standing = standingPauses(es, startLine)
+  if (standing.length) return pausedToken(standing.at(-1).reason)
+  return onToken(es.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, lastOnOffEntry(es)?.cap ?? 10)
+}
+
+/** The typer's claim key (RB3-1): the line number of the record's latest auto-cycle line of any kind at launch, 0
+ *  with none. Any auto-cycle line written after a claim, a pause included, makes a new key, so a session whose pause
+ *  resolved can launch again, while the same record state launches once. */
+export const claimKey = (entries) => latestAutoCycle(entries)?.line ?? 0
+
+/** The directory holding `.git` at or above `file`'s directory, or that directory when none does. `exists` is
+ *  injected so this stays pure. The record's repo is found this way, with no git process. */
+export function repoOf(file, exists) {
+  const start = path.dirname(path.resolve(file))
+  for (let d = start; ; d = path.dirname(d)) {
+    if (exists(path.join(d, '.git'))) return d
+    if (path.dirname(d) === d) return start
+  }
+}
+
+/** The first of `repos` holding the stop file, or null (Q1: either repo stops). */
+export const stopFileRepo = (repos, exists) => [...new Set(repos.filter(Boolean))].find((r) => exists(path.join(r, STOP_FILE))) || null
+
+/**
+ * B1, the one definition of "auto-cycle is active" (U4): the record's last state line is Open or Blocked, its
+ * last auto-cycle on/off line is on, and no stop file exists. The gauge and the Stop, Notification and StopFailure
+ * hook ask this with `stopFilePresent`, the caller's look in both repos. The typer asks it with false, the record's
+ * own half, and tests the stop file after it, so an off or closed record never gets an R1 line (RB4-1).
+ */
+export function autoCycleActive(entries, stopFilePresent) {
+  const state = (entries || []).filter((e) => e.kind === 'state').at(-1)
+  return Boolean(restoreState(state?.value)) && lastOnOffEntry(entries)?.sub === 'on' && !stopFilePresent
+}
+
+/**
+ * The record's pausing states (B2 step 1), each null when absent: `blocked`, the last state line without its list
+ * marker when it reads Blocked; `alarm`, which alarm fired with no ruling line after it; `question`, the last
+ * question opened with no answer line for its id after it.
+ */
+export function pausingStates(entries) {
+  const es = entries || []
+  const state = es.filter((e) => e.kind === 'state').at(-1)
+  const blocked = /^Blocked\b/i.test(state?.value || '') ? state.raw.replace(/^-\s+/, '') : null
+  const alarm = es.filter((e) => e.kind === 'alarm' && !es.some((r) => r.kind === 'ruling' && r.line > e.line)).at(-1)?.which || null
+  const question = es.filter((e) => e.kind === 'question-opened' &&
+    !es.some((a) => a.kind === 'question-answered' && a.id === e.id && a.line > e.line)).at(-1) || null
+  return { blocked, alarm, question: question && { id: question.id, text: question.text } }
+}
+
+/** The last line of an assistant message is the ready line, bare or as an agent may wrap it (unwrapLine: a list
+ *  marker, inline code, bold or italics around the whole line), with nothing else on that line (K4-RL). */
+export const endsReady = (message) => unwrapLine(String(message ?? '').trimEnd().split('\n').at(-1)) === READY_LINE
+
+/** A Stop payload field that lists live work (`session_crons`): non-empty as an array, an object with keys, or any
+ *  other present value. Absent, null, [] and {} are empty. */
+/** The statuses a background task has once it has ended (E8-R33). */
+const BACKGROUND_ENDED = ['completed', 'failed', 'killed']
+/** Whether a Stop's `background_tasks` holds live work (E8-D7, E8-R33): an entry whose status is not completed,
+ *  failed or killed, a missing or unknown status and a non-object entry included. A list of only ended tasks, an
+ *  empty one and an absent one are not live; a present value that is not a list is live when nonEmpty. */
+export const backgroundLive = (tasks) => (Array.isArray(tasks)
+  ? tasks.some((t) => !(t && typeof t === 'object' && BACKGROUND_ENDED.includes(t.status))) : nonEmpty(tasks))
+export const nonEmpty = (v) => (v === undefined || v === null ? false : Array.isArray(v) ? v.length > 0 : typeof v === 'object' ? Object.keys(v).length > 0 : Boolean(v))
+
+/**
+ * Whether one seat marker is live work (E8-D7, E8-R8): a gate while its result file is missing, a codex seat
+ * while its job's status is not terminal (an unreadable status is not terminal), and any other seat, since its
+ * marker goes at SubagentStop.
+ */
+export function seatLive(seat, resultExists, jobStatus) {
+  if (seat?.role === GATE_ROLE) return !resultExists
+  if (seat?.codexJob) return !codexTerminal(jobStatus)
+  return true
+}
+
+/** A record line that counts as progress (B7, E8-R9): a wave, round, finding raised, finding cleared or ruling
+ *  line, a wave the continuity skills dispatched excepted. */
+const isWork = (e) => ['wave', 'round', 'finding-raised', 'finding-cleared', 'ruling'].includes(e.kind) && !(e.kind === 'wave' && e.via)
+
+/**
+ * The paths B7's tree hash leaves out of one repo (E8-D17), as pathspecs relative to it: the memory file, the
+ * handoffs, the auto-cycle files, and, in the repo holding the record, the record and its run-state file. No skill
+ * names a record's run-state file, so it is the record's sibling named by its basename with `-run-state` (SP4); a
+ * file named run-state anywhere else is work like any other.
+ */
+export function treeExcludes(recordPath, repo) {
+  const rel = path.relative(repo, recordPath)
+  const inRepo = rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+  return ['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*',
+    ...(inRepo ? [rel, `:(glob)${rel.replace(/\.md$/, '')}-run-state*`] : [])]
+}
+
+/**
+ * B7's count and pause (E8-D17): `n` is the next cycle's number, the last cycle line's plus one wherever it sits,
+ * so the count continues across session ids and across on lines; `cap` is the last on line's. It pauses with
+ * `cap <cap>` when `n` would exceed the cap, and `no progress` when the last two cycle intervals, cycle to cycle
+ * and cycle to now, each show neither a work line nor a changed tree hash. With fewer than two cycle lines there
+ * is no second interval to judge.
+ */
+export function cycleProgress(entries, hashNow) {
+  const es = entries || []
+  const cap = lastOnOffEntry(es)?.cap ?? 10
+  const cycles = es.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle')
+  const n = (cycles.at(-1)?.n ?? 0) + 1
+  if (n > cap) return { n, cap, pause: `cap ${cap}` }
+  if (cycles.length >= 2) {
+    const [a, b] = cycles.slice(-2)
+    const workIn = (lo, hi) => es.some((e) => e.line > lo && e.line < hi && isWork(e))
+    if (!workIn(a.line, b.line) && a.hash === b.hash && !workIn(b.line, Infinity) && hashNow === b.hash) return { n, cap, pause: 'no progress' }
+  }
+  return { n, cap, pause: null }
+}
+
+/**
+ * B2's ordered steps over plain facts; the first that applies decides. Returns `{ act, code?, reason }`, act one of
+ * `none`, `wait`, `pause` or `launch`. `handoffLanded`, `paneSession` and `progress` may be functions, called
+ * only when their step is reached, so a case decided earlier costs no git and no herdr read: `paneSession()`
+ * returns the session id herdr reports for the pane, or `{ error }`; `progress()` returns cycleProgress's value,
+ * or `{ error }` when the tree could not be hashed. Each `error` is an R17_WHY key.
+ */
+export function cycleDecision(f) {
+  const v = (x) => (typeof x === 'function' ? x() : x)
+  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+  // 1. Pausing states.
+  if (f.stopRepo) return pause('R1', f.stopRepo)
+  if (f.blocked) return pause('R2', f.blocked)
+  if (f.alarm) return pause('R3', f.alarm)
+  if (f.question) return pause('R4', f.question)
+  // 2, 3. An ordinary turn, or an unresolved pause after this session's warning (E8-R25).
+  if (!f.warned) return { act: 'none', reason: 'no warned line for this session' }
+  if (f.pausedAfterWarned) return { act: 'none', reason: "an unresolved paused line follows this session's warned line" }
+  // 4. Live work: wait for the next Stop.
+  if (f.backgroundTasks) return { act: 'wait', reason: 'background tasks are running' }
+  if (f.liveWork) return { act: 'wait', reason: f.liveWork }
+  if (f.sessionCrons) return { act: 'wait', reason: 'session crons are scheduled' }
+  if (!f.ready) return { act: 'wait', reason: 'the last assistant message does not end with the ready line' }
+  // 5. A stall: idle_prompt is suppressed here (E8-D18), so nothing else would ever alert.
+  if (!v(f.handoffLanded)) return pause('R10')
+  if (f.contained) return pause('R13')
+  if (f.stopHookActive) return pause('R11')
+  const session = v(f.paneSession)
+  if (session?.error) return pause('R17', R17_WHY[session.error] || R17_WHY.error)
+  if (session !== f.sessionId) return pause('R12')
+  // 6. Cap and no progress.
+  const p = v(f.progress)
+  if (p?.error) return pause('R17', R17_WHY[p.error] || R17_WHY.error)
+  if (p.pause === 'no progress') return pause('R6')
+  if (p.pause) return pause('R5', p.cap)
+  if (f.claimTaken) return { act: 'none', reason: "the claim for this ready line is already taken" }
+  return { act: 'launch', n: p.n, reason: `cycle ${p.n} of ${p.cap}` }
+}
+
+/**
+ * Whether an old-transcript entry is the user's own turn after the Stop (E8-D15, K2-R16): a user or assistant entry
+ * whose timestamp is not before `stopAt`, the moment the Stop hook started. Judged by the entry's own time, never by
+ * where it sits in the file: Claude Code writes the transcript asynchronously, so the turn's final assistant entry
+ * can land past the byte length the Stop read, and it carries a time before the Stop. An entry with no readable
+ * time counts as new, the direction that pauses rather than clears. System entries never count.
+ */
+export const typedAfter = (e, stopAt) =>
+  (e?.type === 'user' || e?.type === 'assistant') && !(Date.parse(e.timestamp) < stopAt)
+
+/**
+ * Whether a new-session transcript entry is the user's own typing (E8-D15, DP-1): a `user` entry that is not meta,
+ * carries no tool result, and is neither the entry /clear itself writes (`<command-name>/clear</command-name>`) nor
+ * the entry the typer's own resume command leaves (E8-R32): a `user` entry holding exactly its `<command-message>`,
+ * `<command-name>` and `<command-args>` tags, as Claude Code writes a typed slash command, the skill's loaded text
+ * following as meta. /clear also writes a meta `user` entry and a `system` entry, and no assistant entry. Any other
+ * slash command, or that one with other arguments, is typing.
+ */
+export function userTyped(e) {
+  if (e?.type !== 'user' || e.isMeta) return false
+  const c = e.message?.content
+  const parts = typeof c === 'string' ? [c] : Array.isArray(c) ? c : []
+  if (parts.some((x) => x?.type === 'tool_result')) return false
+  const text = parts.map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')).join('').trim()
+  return !text.startsWith('<command-name>/clear</command-name>') && !ownResume(text)
+}
+
+/** The typer's own resume command as Claude Code records it: the three command tags and nothing else. */
+const ownResume = (text) => {
+  const tag = (t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(text)?.[1]
+  return tag('command-name') === RESUME_COMMAND && tag('command-message') === RESUME_COMMAND.slice(1) &&
+    tag('command-args')?.trim() === RESUME_ARGS && !text.replace(/<(command-message|command-name|command-args)>[^<]*<\/\1>/g, '').trim()
+}
+
+/**
+ * The entries of a transcript's text (RB6-1), for the typer's reads. An unparseable line is never absence: one before
+ * the last line makes the read unreadable (null), which never authorizes a send (RB2); a last line with no newline
+ * that does not parse yet is a write in progress, `partial`, neither typing nor nothing. Blank lines are skipped.
+ */
+export function transcriptEntries(text) {
+  const lines = String(text).split('\n'), last = lines.pop(), entries = []
+  for (const l of lines) {
+    if (!l.trim()) continue
+    try { entries.push(JSON.parse(l)) } catch { return null }
+  }
+  if (!last.trim()) return { entries, partial: false }
+  try { entries.push(JSON.parse(last)); return { entries, partial: false } } catch { return { entries, partial: true } }
+}
+
+/** The typer's timings in ms (E8-D15): poll, how long a pane may read not idle once unfocused, how long to wait
+ *  for the restore file, for herdr to report the new session (30 s), and for the first turn (2 min). */
+export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 30000, firstTurn: 120000 }
+
+/**
+ * B4's next action from one observation (E8-D15). The typer is a loop around it. `o.stage` is `clear` before the
+ * /clear, `resume` after it and before the first resume, `confirm` after a resume. `o.pane` is herdr's reading,
+ * `{ error }` when the lookup failed. `o.grew` is whether the old transcript holds a user or assistant entry the
+ * user typed after the Stop (typedAfter), and null when it could not be read, is shorter than the Stop's length, or
+ * holds a damaged line before its last.
+ * `o.stopRepo` is the repo holding the stop file, or null. `o.waited` is ms in this stage, `o.notIdle` ms unfocused and not idle,
+ * `o.sessionWait` ms since the restore file was seen. `o.midWrite` is how long the transcript being read has ended in
+ * a line still being written (transcriptEntries' `partial`), null when it does not: the step waits a poll while it
+ * does, and pauses with R17 once that outlasts the idle grace, so neither a partial entry nor a damaged one ever
+ * reads as nothing typed (RB6-1). `o.typedNew`, after the /clear, is whether the new session's
+ * transcript holds an entry the user typed (userTyped), and null when it could not be read: before the resume and
+ * before a first turn counts, typing pauses with R16, and an unreadable transcript never reads as nothing typed, so
+ * it sends nothing (DP-1, RB2). Returns `{ act, code?, reason }`, act one of `wait`,
+ * `clear`, `resume`, `confirm` (the first turn is there: done), `abort` and `pause`. `o.active` is the record's
+ * own half of B1, its last on/off line on and its last state line Open or Blocked, without the stop file. An abort
+ * writes nothing, and each is a stop someone else already recorded: the record switched off or no longer Open or
+ * Blocked, whether or not a stop file exists too, or a paused line written since the claim. Only on a record still
+ * active does a stop file pause with R1 (RN3-3, E8-D16, RB4-1). Ready means an agent_status in READY_STATUSES.
+ */
+export function typerStep(o) {
+  const t = o.times || TYPER_TIMES
+  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+  if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
+  if (o.stopRepo) return pause('R1', o.stopRepo)
+  if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
+  if (o.midWrite !== null && o.midWrite !== undefined) {
+    return o.midWrite < t.idle ? { act: 'wait', reason: 'the transcript ends in a line still being written' } : pause('R17', R17_WHY.transcript)
+  }
+  if (o.stage === 'confirm') {
+    if (o.typedNew) return pause('R16')
+    if (o.firstTurn) return { act: 'confirm', reason: 'the new session took its first turn' }
+    if (o.waited < t.firstTurn) return { act: 'wait', reason: 'waiting for the first turn' }
+    if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
+    if (o.resumes >= 2) return pause('R15')
+  }
+  if (o.stage === 'resume' && !o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
+  // A reply with no Claude session is a failed lookup, never a changed session (ST2).
+  if (!o.pane || o.pane.error || typeof o.pane.session !== 'string') return pause('R17', R17_WHY.lookup)
+  if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
+  if (!READY_STATUSES.includes(o.pane.status)) {
+    return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
+  }
+  if (o.stage === 'clear') {
+    // A transcript that could not be read, or is now shorter than at the Stop, says nothing about new entries (RB2).
+    if (o.grew === null) return pause('R17', R17_WHY.transcript)
+    if (o.pane.session !== o.oldSession || o.grew) return pause('R16')
+    return { act: 'clear', reason: 'idle, unfocused, the same session, no new entries' }
+  }
+  if (o.pane.session === o.restore.session) {
+    if (o.typedNew) return pause('R16')
+    if (o.typedNew === null) return o.sessionWait < t.session ? { act: 'wait', reason: 'the new transcript could not be read yet' } : pause('R17', R17_WHY.transcript)
+    return { act: 'resume', reason: 'herdr reports the new session, and nothing was typed into it' }
+  }
+  if (o.pane.session !== o.oldSession) return pause('R16')
+  return o.sessionWait < t.session ? { act: 'wait', reason: 'herdr still reports the old session' } : pause('R17', R17_WHY.session)
+}
+
+/**
+ * B6's reason for a Notification or StopFailure event while auto-cycle is active (E8-D18), or null. `event` is
+ * `StopFailure` or the notification type. idle_prompt pauses only when no live claim is held for this pane,
+ * nothing is live, and the last Stop's persisted facts say none of its background tasks was live (backgroundLive: each
+ * one completed, failed or killed, E8-R33), its session crons were empty (E8-D7's live-work test, E8-R22) and its
+ * message did not end with the ready line; a missing record of the last
+ * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then written only while no paused
+ * line stands but a permission prompt, idle stop or API error the session has ended a turn since, which the dedup
+ * decides (pauseStands, E8-R28, E8-R30).
+ */
+export function notifyDecision(event, f = {}) {
+  if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown')
+  if (event === 'permission_prompt') return pauseReason('R7')
+  if (event !== 'idle_prompt') return null
+  if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.cronsEmpty !== true || f.lastStop?.ready !== false) return null
+  return pauseReason('R8')
 }

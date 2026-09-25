@@ -8,8 +8,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { PREFIX, parseHerdr, movedGateName, movedGateVerdict } from './dctr-lib.mjs'
+import {
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
+  autocycleTokenArgs, pauseToastArgs, seatLive,
+} from './dctr-lib.mjs'
+import { parseRecord } from './dctr-record.mjs'
 
 const tmpRoot = () => process.env.TMPDIR || os.tmpdir()
 export const stateDir = (sessionId) => path.join(tmpRoot(), `${PREFIX}-${sessionId}`)
@@ -491,4 +496,209 @@ export function readMeta(file, retryMs = 200) {
     sleepMs(retryMs)
   }
   return null
+}
+
+// ---------------------------------------------------------------- auto-cycle (E8-D15, E8-D16, E8-D17, E8-D26)
+
+/** Where auto-cycle's working files live (B0): beside dctr-panes and dctr-gates, never under dctr-<session>/,
+ *  which SessionEnd empties (F8). The claims, the restore files, the alerted markers, the token values last
+ *  published, the persisted Stop facts and each session's turn end all sit here. Created on first use, so no caller makes it. */
+export const autoCycleDir = () => {
+  const dir = path.join(tmpRoot(), `${PREFIX}-autocycle`)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+/** The typer's claim, single use per record state (RB3-1): keyed by the session id and claimKey, the line number of
+ *  the record's latest auto-cycle line at launch, so a pause written after a claim gives the resolved session a new
+ *  claim while the same record state never launches twice. */
+export const claimFile = (sessionId, key) => path.join(autoCycleDir(), `${sessionId}.${key}.claim`)
+
+/** A record path's short hash, which names its markers and its session start file. */
+const recordHash = (recordPath) => crypto.createHash('sha1').update(path.resolve(recordPath)).digest('hex').slice(0, 16)
+
+/** Where the restore hook records a session start (RB3-2): the record's line count when a session began after /clear. */
+export const sessionStartFile = (recordPath) => path.join(autoCycleDir(), `start-${recordHash(recordPath)}`)
+
+/** The record's line count, the number of its last line. */
+export function recordLineCount(recordPath) {
+  const text = fs.readFileSync(recordPath, 'utf8')
+  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+}
+
+/** Record that a session starts now, as the record's current line count. */
+export function writeSessionStart(recordPath) {
+  writeMarker(sessionStartFile(recordPath), recordLineCount(recordPath))
+}
+
+/** Where the session's latest turn end is kept: the record's path and line count when it ended (E8-R29, E8-R31). */
+export const turnEndFile = (sessionId) => path.join(autoCycleDir(), `turn-end-${sessionId}.json`)
+
+/** Record that this session's turn ended now, at a Stop, a StopFailure, or the next submitted prompt (E8-R31): the
+ *  record's path and line count, taken before the event writes any line. The one writer of the turn end. */
+export function writeTurnEnd(sessionId, recordPath) {
+  writeMarker(turnEndFile(sessionId), { record: path.resolve(recordPath), line: recordLineCount(recordPath) })
+}
+
+/** The record's line count at this session's latest turn end (E8-R29, E8-R31), or 0 when none is known: a missing or
+ *  unreadable turn end, or one written for another record (a kickoff that switched records, RB6-2), never frees a
+ *  line from the dedup. */
+export function turnEndLine(sessionId, recordPath) {
+  try {
+    const f = JSON.parse(fs.readFileSync(turnEndFile(sessionId), 'utf8'))
+    return f.record === path.resolve(recordPath) && Number.isInteger(f.line) ? f.line : 0
+  } catch { return 0 }
+}
+
+/** The line count the last recorded session start saw, or 0 when none was recorded or it cannot be read. */
+export function sessionStartLine(recordPath) {
+  try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
+}
+export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
+const tokenFile = (paneId) => path.join(autoCycleDir(), `token-${paneToken(paneId)}.txt`)
+
+/** A claim is held when its file exists and the pid written into it is alive (S3). A claim whose pid is not
+ *  written yet, or whose writer died, is not held. */
+export function claimHeld(file) {
+  let c
+  try { c = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return false }
+  return pidAlive(String(c?.pid ?? ''))
+}
+
+/** Any held claim naming this pane, whatever session took it: the typer's claim is keyed by the old session id,
+ *  and the Notification that asks comes from the new one (F9). */
+export function paneClaimHeld(paneId) {
+  let names
+  try { names = fs.readdirSync(autoCycleDir()) } catch { return false }
+  return names.filter((f) => f.endsWith('.claim')).some((f) => {
+    const file = path.join(autoCycleDir(), f)
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')).pane === paneId && claimHeld(file) } catch { return false }
+  })
+}
+
+/** Append one line to a record, starting it on a line of its own. */
+export function appendRecordLine(recordPath, line) {
+  const text = fs.readFileSync(recordPath, 'utf8')
+  fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
+}
+
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause, or,
+ *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
+ *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31); the typer passes none, so its
+ *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
+export function appendPaused(recordPath, reason, sessionId = null) {
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0)) return { written: false }
+  appendRecordLine(recordPath, pausedLine(reason))
+  return { written: true }
+}
+
+/** Publish the autocycle token only when its value differs from the one last published for this pane (LB2). A
+ *  failed call is left unrecorded, so the next event tries again. Display only: nothing is decided from it. */
+export function publishToken(paneId, value, log = () => {}) {
+  if (!paneId) return false
+  try { if (JSON.parse(fs.readFileSync(tokenFile(paneId), 'utf8')) === value) return false } catch { /* none published yet */ }
+  try {
+    herdr(autocycleTokenArgs(paneId, value)) // herdr-lint: display only; a failed publish is logged and retried at the next event
+    writeMarker(tokenFile(paneId), value)
+    return true
+  } catch (e) { log(`autocycle token not published (${e.message.split('\n')[0]})`); return false }
+}
+
+/** A paused line's marker name in the auto-cycle dir: `<kind>-<hash of record path>-<line>`. */
+const pauseMarker = (kind, recordPath, line) =>
+  path.join(autoCycleDir(), `${kind}-${recordHash(recordPath)}-${line}`)
+
+/**
+ * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
+ * whoever wrote the line, and publish the paused token naming the last of them. Each line's alerted marker is taken
+ * first, exclusively, and outlives the session, so a later session, a concurrent hook or the typer never raises
+ * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
+ * one guard keeping herdr out of it. True when this call raised any.
+ */
+export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
+  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
+  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
+  if (!fresh.length) return false
+  if (paneId) {
+    publishToken(paneId, autocycleToken(entries, start), log)
+    for (const p of fresh) {
+      try { herdr(pauseToastArgs(repo, phase, p.reason, pauseActionAt(p, entries, start))) } // herdr-lint: display only; the paused line and the pane message stand without it
+      catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
+    }
+  }
+  return true
+}
+
+/**
+ * The pane message for each standing pause not yet shown (E8-R23), one line each: `doctrine auto-cycle paused:
+ * <reason>. <what to do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of
+ * them to run after the line is written. Its own marker, apart from the toast's: the detached typer raises the toast
+ * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
+ * there is nothing to print.
+ */
+export function pauseMessageOnce(recordPath) {
+  const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
+  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
+  return fresh.length ? fresh.map((p) => pauseMessage(p.reason, pauseActionAt(p, entries, start))).join('\n') : null
+}
+
+/** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,
+ *  a gate without its result file, a codex seat whose job is not terminal. Markers that cannot be read are live:
+ *  an unknown count is never an empty one. */
+export function liveWork(sessionId) {
+  let found
+  try { found = liveSeatsPartial(sessionId) } catch (e) { return `the seat markers could not be read (${e.message})` }
+  if (found.unreadable.length) return `a seat marker could not be read: ${found.unreadable[0]}`
+  for (const s of found.seats) {
+    let status = null
+    if (s.codexJob) { try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* not terminal */ } }
+    if (seatLive(s, Boolean(s.file) && fs.existsSync(`${s.file}.result`), status)) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
+  }
+  return null
+}
+
+/**
+ * B7's tree hash (E8-D17): for each repo, `git add -A` into a fresh temporary index, the excluded paths then removed
+ * from it, then `git write-tree`. Fresh, not copied from the real index: a copy carries the real index's stat cache,
+ * and an edit of the same size in the same second as that cache's entry is invisible to `git add` (RB4). One repo gives its tree id; two
+ * give the sha1 of both ids, which is not a git object (F7). `excludes(repo)` returns that repo's pathspecs, each a
+ * path relative to it or a `:(glob)` pattern. Throws when git cannot answer.
+ */
+export function treeHash(repos, excludes) {
+  const ids = [...new Set(repos)].map((repo) => {
+    const git = (args, env = {}) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    // ponytail: every file is read and hashed on each call; only a cycle's Stop reaches this, once per cycle.
+    const tmp = path.join(autoCycleDir(), `index.${process.pid}.${Date.now()}`)
+    try {
+      const env = { GIT_INDEX_FILE: tmp }
+      // Add everything, then take the excluded paths back out: an excluded path named in the add itself makes git
+      // refuse when that path is ignored.
+      git(['add', '-A', '--', '.'], env)
+      const ex = excludes(repo)
+      if (ex.length) git(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...ex], env)
+      return git(['write-tree'], env)
+    } finally { fs.rmSync(tmp, { force: true }) }
+  })
+  return ids.length === 1 ? ids[0] : crypto.createHash('sha1').update(ids.join('\n')).digest('hex')
+}
+
+/**
+ * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
+ * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
+ * touching it was made at or after that second and it and the memory file carry no uncommitted change. Outside a
+ * git work tree the file and the kickoff line naming it are the landing. False when `warnedAt` is unknown.
+ */
+export function handoffLanded({ handoffPath, memoryPath, warnedAt }) {
+  if (!Number.isFinite(warnedAt)) return false
+  let st
+  try { st = fs.statSync(handoffPath) } catch { return false }
+  if (st.mtimeMs < warnedAt) return false
+  const git = (args) => execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  try { git(['rev-parse', '--is-inside-work-tree']) } catch { return true }
+  try { git(['check-ignore', '-q', handoffPath]); return true } catch { /* not ignored: it needs its commit */ }
+  try {
+    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
+    if (!ct || ct < Math.floor(warnedAt / 1000)) return false
+    return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''
+  } catch { return false }
 }
