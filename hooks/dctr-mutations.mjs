@@ -2010,6 +2010,11 @@ const MUTATIONS = [
     clause: "clause 1s2",
     from: "const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('shown'",
     to: "const fresh = standingPauses(entries).filter((p) => { try { reserveMarker(pauseMarker('shown'" },
+  // e8-repair (2026-09-26): one entry per repair.
+  { name: "a wave handle is one token, so the handles driven phases wrote parse to nothing (E8-D24)", file: "dctr-record.mjs",
+    clause: "clause 1p",
+    from: "handle\\\\s+(\\\\S.*?)(?:",
+    to: "handle\\\\s+(\\\\S+)(?:" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

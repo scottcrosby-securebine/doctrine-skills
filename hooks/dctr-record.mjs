@@ -37,7 +37,9 @@ const AGENT = true
 /** Each form: its regex and how its captures become fields. The tier is kept as written, since judging a
  *  malformed tier is the gauge's job (E8-D11) and a parser that dropped the line would hide it. */
 const FORMS = [
-  [form(`wave:\\s+${TIME}\\s+seat\\s+(\\S+)\\s+handle\\s+(\\S+)(?:\\s+via\\s+(doctrine-handoff|doctrine-backup))?\\s*`),
+  // The handle is the rest of the line, trimmed, with a trailing via split off (E8-D24): drives write
+  // `handle agent:<id> (worktree <path>, branch <name>)` and `handle worktree <path> branch <name>`.
+  [form(`wave:\\s+${TIME}\\s+seat\\s+(\\S+)\\s+handle\\s+(\\S.*?)(?:\\s+via\\s+(doctrine-handoff|doctrine-backup))?\\s*`),
     (m) => ({ kind: 'wave', time: m[1], seat: m[2], handle: m[3], via: m[4] ? m[4].toLowerCase() : null })],
   [form(`round:\\s+(\\d+)\\s+closed\\s+${TIME}\\s+at\\s+(\\S+)\\s+blockers\\s+(\\d+)\\s+alarm\\s+(\\d+)\\s*`),
     (m) => ({ kind: 'round', n: num(m[1]), time: m[2], revision: m[3], blockers: num(m[4]), alarm: num(m[5]) })],
