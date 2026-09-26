@@ -195,11 +195,14 @@ file its step 5 hands the red team `git show HEAD:<memory file>` where HEAD hold
 it, else the file as it stands on disk where the kickoff line is unchanged, else
 none.
 
-Otherwise, when the repo and the file disagree, ask, or pause under
-`doctrine-backup`'s rule "Under auto-cycle, a question pauses the run": "Memory is stale — resync it?" On yes,
+Otherwise, when the repo and the file disagree and auto-cycle is off, ask: "Memory is stale — resync it?" On yes,
 run `doctrine-backup`, which updates the file in place and carries forward Gotchas
 and any unresolved 🔴 row. That closes the loop so the next session starts from
 truth instead of inheriting the same stale file.
+
+With auto-cycle on (doctrine step 5 defines when), neither ask nor pause:
+name the drift in step 4's report and in one prose line in the record's
+orchestrator-only part, and leave the resync to the backup the cycle's handoff runs.
 
 ## Done when
 
