@@ -8,8 +8,8 @@
 // dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
 // typerStep decides, which decides every step: wait, abort with nothing written, pause, send /clear, send the resume
 // line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. The typer itself
-// pauses with R17 when a send fails and on an unexpected error. Only after a sent
-// /clear does it append `auto-cycle: cycle <n> tree <hash>` (LN12). Waits are counted in polls, never read off the wall
+// pauses with R17 when a send fails and on an unexpected error. It appends `auto-cycle: cycle <n> tree <hash>` only
+// once the restore file names a session other than the old one, never on the /clear send (LN12, E8-D28). Waits are counted in polls, never read off the wall
 // clock (RB2-4). A pause appends one paused line and raises its toast and token; the next Stop, Notification or
 // StopFailure prints its pane message (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no
 // herdr.
@@ -99,7 +99,14 @@ try {
     // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
     // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
     const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > a.keyLine)
-    if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
+    if (stage === 'resume' && !restore) {
+      restore = readRestore()
+      if (restore) {
+        restoreSeen = now
+        appendRecordLine(a.record, `- auto-cycle: cycle ${a.n} tree ${a.hash}`)
+        log(`the new session ${restore.session} started, cycle ${a.n}`)
+      }
+    }
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
     // The old transcript before the /clear, the new session's after it, read once per poll: typing into either (K2-R16,
@@ -118,13 +125,12 @@ try {
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     // An abort writes nothing because its stop is already recorded: the user's own off line, a state line no longer
     // Open or Blocked (with or without a stop file), or a paused line written since the claim. A confirm is success.
-    // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R17 for a failure (RN3-3, RB4-1).
+    // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R18 for a failure (RN3-3, RB4-1).
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
       fs.rmSync(restoreFile(a.pane), { force: true })
       send('/clear')
-      appendRecordLine(a.record, `- auto-cycle: cycle ${a.n} tree ${a.hash}`)
       log(`sent /clear, cycle ${a.n}`)
       stage = 'resume'; stageStart = now
     } else if (step.act === 'resume') {

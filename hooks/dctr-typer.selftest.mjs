@@ -29,6 +29,7 @@ const idle = { status: 'idle', focused: false, session: 'old' }
 const base = { stage: 'clear', active: true, pausedSinceClaim: false, pane: idle, oldSession: 'old', grew: false, restore: null, waited: 0, notIdle: 0, sessionWait: 0, resumes: 0, firstTurn: false, times: T }
 const ts = (o) => typerStep({ ...base, ...o })
 const NEW = { session: 'new', transcript: '/n.jsonl' }
+const NEWP = { ...idle, session: 'new' }
 clause('clause 1a — typerStep before /clear: idle, unfocused, the old session and no new entries clear',
   ts({}).act === 'clear', JSON.stringify(ts({})))
 clause('clause 1b — typerStep: auto-cycle no longer active, or a paused line since the claim, aborts before any other check',
@@ -63,8 +64,11 @@ clause('clause 1e6 — typerStep: an off or closed record aborts whether or not 
   ts({ stopRepo: '/w/p', pane: { error: 'x' } }).reason === 'stopped by .doctrine/auto-cycle.stop in /w/p', 'wrong')
 clause('clause 1e4 — typerStep: an old transcript that could not be read, or has shrunk, pauses with R17 and never clears (RB2)',
   ts({ grew: null }).reason === 'could not type into the pane: the transcript could not be read', JSON.stringify(ts({ grew: null })))
-clause('clause 1f — typerStep after /clear: no restore file waits, then pauses with R14',
-  ts({ stage: 'resume', waited: 100 }).act === 'wait' && ts({ stage: 'resume', waited: 500 }).reason === 'cleared, but the new session did not start doctrine', 'wrong')
+clause('clause 1f — typerStep after /clear: no restore file waits, then, with herdr reporting another session, pauses with R14',
+  ts({ stage: 'resume', waited: 100, pane: NEWP }).act === 'wait' && ts({ stage: 'resume', waited: 500, pane: NEWP }).reason === 'cleared, but the new session did not start doctrine', 'wrong')
+clause('clause 1f2 — typerStep after /clear: no restore file and herdr still reporting the old session waits, then pauses with R18 naming it: the /clear did not take (E8-D28)',
+  ts({ stage: 'resume', waited: 100 }).act === 'wait' && ts({ stage: 'resume', waited: 500 }).code === 'R18' &&
+  ts({ stage: 'resume', waited: 500 }).reason === '/clear did not take: session old still running', JSON.stringify(ts({ stage: 'resume', waited: 500 })))
 clause('clause 1g — typerStep after /clear: herdr still on the old session waits up to 30 s, then R17; the new session resumes; a third session is R16',
   ts({ stage: 'resume', restore: NEW, sessionWait: 100 }).act === 'wait' &&
   ts({ stage: 'resume', restore: NEW, sessionWait: 500 }).reason === 'could not type into the pane: herdr did not report the new session within 30 s' &&
@@ -94,7 +98,6 @@ clause('clause 1j — userTyped: /clear\'s own entries, the typer\'s resume comm
   CLEAR_ENTRIES.every((e) => !userTyped(e)) && !userTyped(ownCmd) &&
   !userTyped({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'x' }] } }) && !userTyped({ type: 'assistant', message: { content: 'hi' } }) &&
   userTyped({ type: 'user', message: { content: 'what does foo.js do?' } }) && userTyped({ type: 'user', message: { content: [{ type: 'text', text: 'and bar?' }] } }), 'misread')
-const NEWP = { ...idle, session: 'new' }
 clause('clause 1j2 — typerStep after /clear: typing into the new session pauses with R16 before the resume and before a first turn counts; an unreadable new transcript waits, then pauses with R17, and never resumes (DP-1)',
   ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: true }).code === 'R16' && ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: false }).act === 'resume' &&
   ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: null, sessionWait: 100 }).act === 'wait' &&
@@ -207,7 +210,7 @@ const setShim = (f, more) => {
 }
 
 const normal = typerCase('normal')
-clause('clause 2a — normal: /clear once, then the resume line once, the cycle line appended, no paused line (E8-D15)',
+clause('clause 2a — normal: /clear once, then the resume line once, the cycle line appended, no paused line (E8-D15, E8-D28)',
   sends(normal) === '1,1' && JSON.stringify(normal.cycled) === '["- auto-cycle: cycle 3 tree abc123"]' && normal.paused.length === 0 &&
   normal.state === '- State: Open', detail(normal))
 const clearIdx = normal.calls.findIndex((c) => c.args[3] === '/clear')
@@ -319,9 +322,15 @@ clause('clause 2l — DCTR_VIEW_REQUEST_DIR set: no herdr call at all, no claim 
   !fs.existsSync(claimFile(contained.session, 5)) && containedClaims().length === 0 && contained.paused.length === 0 && contained.cycled.length === 0,
   `${detail(contained)} claims ${JSON.stringify(containedClaims())}`)
 const noRestore = typerCase('no-restore', { onClear: 'none' })
-clause('clause 2m — no restore file: /clear once, no resume, the cycle line, then paused with R14',
-  sends(noRestore) === '1,0' && noRestore.cycled.length === 1 &&
+clause('clause 2m — no restore file, herdr reporting another session: /clear once, no resume, no cycle line, then paused with R14 (E8-D28)',
+  sends(noRestore) === '1,0' && noRestore.cycled.length === 0 &&
   JSON.stringify(noRestore.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]', detail(noRestore))
+// E8-D28: a draft in the pane merged with the /clear, so the old session runs on: no restore file, herdr still
+// reporting the old session at every read.
+const didNotTake = typerCase('clear-did-not-take', { onClear: 'none', newSessionAfterGets: 1e9 })
+clause('clause 2m2 — a /clear that did not take: /clear once, resume never, no cycle line, and paused with R18 naming the old session (E8-D28)',
+  sends(didNotTake) === '1,0' && didNotTake.cycled.length === 0 &&
+  JSON.stringify(didNotTake.paused) === `["- auto-cycle paused: /clear did not take: session ${didNotTake.session} still running"]`, detail(didNotTake))
 const stale = typerCase('stale-restore', { onClear: 'stale' })
 clause('clause 2n — a restore file carrying the old session id is stale (F1): /clear once, no resume, paused with R14',
   sends(stale) === '1,0' && JSON.stringify(stale.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]', detail(stale))
@@ -340,14 +349,14 @@ const pausedSince = typerCase('paused-since-claim', { focusedGets: 3 }, { pre: (
 clause('clause 2r — a paused line written since the claim: nothing sent, and no second paused line', sends(pausedSince) === '0,0' &&
   JSON.stringify(pausedSince.paused) === '["- auto-cycle paused: question: which way?"]', detail(pausedSince))
 clause('clause 2s — every pause the typer wrote was alerted once: one report-metadata and one notification each',
-  [changed, working, grew, fail, noRestore, stale, silent].every((c) => c.alerts === 2) && normal.alerts === 0 && pausedSince.alerts === 0,
-  JSON.stringify([changed, working, grew, fail, noRestore, stale, silent, normal].map((c) => c.alerts)))
+  [changed, working, grew, fail, noRestore, didNotTake, stale, silent].every((c) => c.alerts === 2) && normal.alerts === 0 && pausedSince.alerts === 0,
+  JSON.stringify([changed, working, grew, fail, noRestore, didNotTake, stale, silent, normal].map((c) => c.alerts)))
 const phrases = Object.values(R17_WHY).map((w) => `- auto-cycle paused: could not type into the pane: ${w}`)
 const r17 = [working, fail, runFails, noSess, unread, shrunk].flatMap((c) => c.paused)
 clause('clause 2s2 — every R17 line the typer wrote is one of the fixed phrases: no raw herdr status or error text (SP7)',
   r17.length === 6 && r17.every((l) => phrases.includes(l)) && !r17.some((l) => /Command failed|blocked|working|boom/.test(l)), JSON.stringify(r17))
 clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
-  [changed, working, grew, fail, noRestore, stale, silent, runFails].every((c) => c.state === '- State: Open'), 'a state line moved')
+  [changed, working, grew, fail, noRestore, didNotTake, stale, silent, runFails].every((c) => c.state === '- State: Open'), 'a state line moved')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
@@ -388,6 +397,10 @@ clause('clause 3c5 — without the typer: the paused-before record\'s paused lin
 clause('clause 3c — without the typer: the record-repo stop file sits outside the session\'s repo',
   !fs.existsSync(path.join(stoppedRec.proj, '.doctrine/auto-cycle.stop')) && fs.existsSync(path.join(stoppedRec.recRoot, '.doctrine/auto-cycle.stop')) &&
   fs.existsSync(path.join(stoppedRec.recRoot, '.git')), 'stop fixture wrong')
+const afterClear = (c) => c.calls.slice(c.calls.findIndex((x) => x.args[3] === '/clear') + 1).filter((x) => x.args[1] === 'get')
+clause('clause 3d2 — without the typer: after /clear the did-not-take shim answered the old session on every read and wrote no restore file; the no-restore one answered another session (E8-D28)',
+  afterClear(didNotTake).length >= 2 && afterClear(didNotTake).every((c) => c.session === didNotTake.session) && !fs.existsSync(restoreFile(didNotTake.pane)) &&
+  afterClear(noRestore).length >= 2 && afterClear(noRestore).every((c) => c.session === `${noRestore.session}-new`), JSON.stringify(afterClear(didNotTake).map((c) => c.session)))
 clause('clause 3d — without the typer: the late-session shim answered the old session after /clear at least once, and the silent one wrote no reply',
   late.calls.filter((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session).length === 3 &&
   fs.readFileSync(silent.newTranscript, 'utf8') === '' && fs.readFileSync(normal.newTranscript, 'utf8').includes('"assistant"'), 'shim fixtures wrong')

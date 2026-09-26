@@ -886,6 +886,7 @@ export const PAUSES = {
   R15: { reason: () => 'resume typed twice, no reply from the new session', action: 'check the pane' },
   R16: { reason: () => 'auto-cycle stopped: you typed in this pane', action: 'nothing, or /clear and type resume' },
   R17: { reason: (why) => `could not type into the pane: ${why}`, action: '/clear and type resume by hand', match: /^could not type into the pane: / },
+  R18: { reason: (id) => `/clear did not take: session ${id} still running`, action: 'clear your draft, then /clear and type resume', match: /^\/clear did not take: session \S+ still running$/ },
 }
 export const pauseReason = (code, arg) => PAUSES[code].reason(arg)
 /** R17's `<reason>`, one fixed phrase per failure (SP7): never a raw herdr status or error message, which go to
@@ -1256,7 +1257,11 @@ export function typerStep(o) {
     if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
     if (o.resumes >= 2) return pause('R15')
   }
-  if (o.stage === 'resume' && !o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
+  if (o.stage === 'resume' && !o.restore) {
+    if (o.waited < t.restore) return { act: 'wait', reason: 'waiting for the restore file' }
+    // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
+    return o.pane && !o.pane.error && o.pane.session === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
+  }
   // A reply with no Claude session is a failed lookup, never a changed session (ST2).
   if (!o.pane || o.pane.error || typeof o.pane.session !== 'string') return pause('R17', R17_WHY.lookup)
   if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }

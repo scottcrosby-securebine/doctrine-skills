@@ -65,10 +65,11 @@ const TABLE = [
   ['R15', null, 'resume typed twice, no reply from the new session', 'check the pane'],
   ['R16', null, 'auto-cycle stopped: you typed in this pane', 'nothing, or /clear and type resume'],
   ['R17', 'boom', 'could not type into the pane: boom', '/clear and type resume by hand'],
+  ['R18', '4a9392da-bd72', '/clear did not take: session 4a9392da-bd72 still running', 'clear your draft, then /clear and type resume'],
 ]
 const tableBad = TABLE.filter(([c, arg, reason, action]) => pauseReason(c, arg) !== reason || pauseAction(reason) !== action)
-clause('clause 1c — every pause reason R1 to R17 reads verbatim as the D2 table has it, and each reason maps back to its action',
-  tableBad.length === 0 && Object.keys(PAUSES).length === 17, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
+clause('clause 1c — every pause reason R1 to R18 reads verbatim as the D2 table has it, and each reason maps back to its action',
+  tableBad.length === 0 && Object.keys(PAUSES).length === 18, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
 clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; from its text alone, each of the skills\' own pauses asks for an answer in the pane (its place decides more, clause 1t)',
   TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane' &&
   pauseAction('first action ambiguous: two phases') === 'answer in the pane' &&
@@ -1007,7 +1008,7 @@ const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.jso
 // a hand list of stall and idle condition phrases. restatedIn(text) returns the forbidden texts a description holds,
 // ignoring case. The clause asserts the description holds none, and that the guard itself flags every D2 reason when it
 // is appended to the description, so a guard that lost its PAUSES half fails here too.
-const SAMPLE = { R1: ['/w/p'], R2: ['State: Blocked. waits'], R3: ['round', 'time'], R4: [{ id: 'Q5', text: 'which?' }], R5: [10], R9: ['overloaded'], R17: ['herdr could not read the pane'] }
+const SAMPLE = { R1: ['/w/p'], R2: ['State: Blocked. waits'], R3: ['round', 'time'], R4: [{ id: 'Q5', text: 'which?' }], R5: [10], R9: ['overloaded'], R17: ['herdr could not read the pane'], R18: ['4a9392da-bd72'] }
 const SENTINEL = '\u0001'
 const D2_REASONS = Object.keys(PAUSES).flatMap((c) => (SAMPLE[c] || [undefined]).map((a) => PAUSES[c].reason(a)))
 const D2_FIXED = Object.keys(SAMPLE).flatMap((c) => PAUSES[c].reason(c === 'R4' ? { id: SENTINEL, text: SENTINEL } : SENTINEL).split(SENTINEL).map((t) => t.trim()).filter((t) => t.length >= 8))
