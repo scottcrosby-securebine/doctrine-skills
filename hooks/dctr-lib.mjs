@@ -735,11 +735,10 @@ export function readUsage(transcriptText, lastUuid) {
 }
 
 /** The handoff cost the floor adds to a session's first reading (SC5): the tokens from the gauge's warning to the
- *  ready line, measured by E8-D22's drive on 2026-09-23 (run d22-1d, claude-haiku-4-5, a 200,000-token window, tier
- *  60%): 23,320, rounded up to the thousand. On claude-opus-5 with a doctrine gate step in flight the same span ran
- *  47,538 to 91,687 (the E8-D12 runs), which the floor does not bound: a tier is safe only where it leaves the
- *  window room for that span, which the 90% check does not know. */
-export const HANDOFF_COST_TOKENS = 24000
+ *  ready line, as E8-D22's opus drive in E8-X1 measured them: 64,268, rounded up to the thousand (E8-R42). With a
+ *  doctrine gate step in flight the same span ran 47,538 to 91,687 (the E8-D12 runs), which the floor does not bound:
+ *  a tier is safe only where it leaves the window room for that span, which the 90% check does not know. */
+export const HANDOFF_COST_TOKENS = 65000
 
 /**
  * The tier the gauge warns at (E8-D11): `<n>` tokens, `<n>%` of the window, or `default`, which is 60% of it

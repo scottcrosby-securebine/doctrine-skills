@@ -101,6 +101,9 @@ clause('clause 1l2 — resolveTier: the 90% check reads the tier after the floor
   rt('60%', W, FU).tier === FU + HANDOFF_COST_TOKENS && rt('60%', W, FU).errors.includes('tier above 90% of the window') &&
   !rt('20000', W, 10000).errors.includes('tier above 90% of the window'),
   JSON.stringify([rt('60%', W, FU), rt('20000', W, 10000)]))
+clause('clause 1m0 — the handoff cost is E8-D22\'s opus measurement, 64,268 tokens rounded up to the thousand: a first reading of 10000 floors a 20000 tier at 75000 (E8-D11, E8-R42)',
+  HANDOFF_COST_TOKENS === 65000 && rt('20000', W, 10000).tier === 75000 && rt('20000', W, 10000).tierText === '75000',
+  JSON.stringify([HANDOFF_COST_TOKENS, rt('20000', W, 10000)]))
 clause('clause 1m — resolveTier: a tier below the floor (first reading plus the handoff cost) is raised to the floor, with the error',
   rt('20000', W, 10000).tier === 10000 + HANDOFF_COST_TOKENS &&
   rt('20000', W, 10000).errors.includes(`tier 20000 below the floor ${10000 + HANDOFF_COST_TOKENS}, raised to the floor`) &&

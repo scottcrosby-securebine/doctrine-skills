@@ -2028,6 +2028,10 @@ const MUTATIONS = [
     clause: "clause 1f2",
     from: "o.pane.session === o.oldSession ? pause('R18', o.oldSession) : pause('R14')",
     to: "o.pane.session === o.oldSession ? pause('R14') : pause('R14')" },
+  { name: "the handoff cost is the haiku drive's 24,000, not the opus measurement (E8-D11, E8-R42)", file: "dctr-lib.mjs",
+    clause: "clause 1m0",
+    from: "export const HANDOFF_COST_TOKENS = 65000",
+    to: "export const HANDOFF_COST_TOKENS = 24000" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
