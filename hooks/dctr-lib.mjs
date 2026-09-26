@@ -735,11 +735,10 @@ export function readUsage(transcriptText, lastUuid) {
 }
 
 /** The handoff cost the floor adds to a session's first reading (SC5): the tokens from the gauge's warning to the
- *  ready line, measured by E8-D22's drive on 2026-09-23 (run d22-1d, claude-haiku-4-5, a 200,000-token window, tier
- *  60%): 23,320, rounded up to the thousand. On claude-opus-5 with a doctrine gate step in flight the same span ran
- *  47,538 to 91,687 (the E8-D12 runs), which the floor does not bound: a tier is safe only where it leaves the
- *  window room for that span, which the 90% check does not know. */
-export const HANDOFF_COST_TOKENS = 24000
+ *  ready line, as E8-D22's opus drive in E8-X1 measured them: 64,268, rounded up to the thousand (E8-R42). With a
+ *  doctrine gate step in flight the same span ran 47,538 to 91,687 (the E8-D12 runs), which the floor does not bound:
+ *  a tier is safe only where it leaves the window room for that span, which the 90% check does not know. */
+export const HANDOFF_COST_TOKENS = 65000
 
 /**
  * The tier the gauge warns at (E8-D11): `<n>` tokens, `<n>%` of the window, or `default`, which is 60% of it
@@ -829,7 +828,9 @@ export function gaugeContext({ warn = false, used, window, tier, tierText, facts
       ? `doctrine gauge: this session has used ${used} tokens of a ${win ? `${windowText} (${Math.round((used / win) * 100)}%)` : windowText}, reaching the auto-cycle tier ${tierText}${Number.isFinite(tier) && String(tier) !== tierText ? ` (${tier} tokens)` : ''}.`
       : `doctrine gauge: three context readings in a row were unknown, so the used tokens of a ${windowText} are unknown and the auto-cycle warning fires as tier unknown.`,
     'Doctrine step 5 states what follows this warning while auto-cycle is on.',
-    'The current step is finished first.',
+    'No new wave, round or repair is started.',
+    'The seats already out are waited for.',
+    'Their returns are integrated and their record lines written.',
     'The record\'s state line is written next.',
     'doctrine-handoff is run after that.',
     'The ready line `- auto-cycle: ready` is appended to the record.',
@@ -886,6 +887,7 @@ export const PAUSES = {
   R15: { reason: () => 'resume typed twice, no reply from the new session', action: 'check the pane' },
   R16: { reason: () => 'auto-cycle stopped: you typed in this pane', action: 'nothing, or /clear and type resume' },
   R17: { reason: (why) => `could not type into the pane: ${why}`, action: '/clear and type resume by hand', match: /^could not type into the pane: / },
+  R18: { reason: (id) => `/clear did not take: session ${id} still running`, action: 'clear your draft, then /clear and type resume', match: /^\/clear did not take: session \S+ still running$/ },
 }
 export const pauseReason = (code, arg) => PAUSES[code].reason(arg)
 /** R17's `<reason>`, one fixed phrase per failure (SP7): never a raw herdr status or error message, which go to
@@ -1239,8 +1241,24 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * writes nothing, and each is a stop someone else already recorded: the record switched off or no longer Open or
  * Blocked, whether or not a stop file exists too, or a paused line written since the claim. Only on a record still
  * active does a stop file pause with R1 (RN3-3, E8-D16, RB4-1). Ready means an agent_status in READY_STATUSES.
+ *
+ * After the /clear, with `o.cycled` false, any step but an abort also carries `cycle: true` when this observation is
+ * the first to show the /clear took: a restore file (`o.restore`, whose session is never the old one) or herdr
+ * naming a session other than the old one. The typer appends the cycle line before acting on that step, and never
+ * otherwise, so a /clear nobody saw take counts no cycle (E8-D17, E8-D28).
  */
 export function typerStep(o) {
+  const step = typerAct(o)
+  const s = paneSession(o.pane)
+  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession)
+  return o.stage !== 'clear' && !o.cycled && step.act !== 'abort' && took ? { ...step, cycle: true } : step
+}
+
+/** The session herdr reported, or null when the reading failed, is missing or names none: a session is a non-empty
+ *  string, and an empty one is no answer (RT2-B1). */
+const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' && pane.session !== '' ? pane.session : null)
+
+function typerAct(o) {
   const t = o.times || TYPER_TIMES
   const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
@@ -1256,9 +1274,16 @@ export function typerStep(o) {
     if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
     if (o.resumes >= 2) return pause('R15')
   }
-  if (o.stage === 'resume' && !o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
+  if (o.stage === 'resume' && !o.restore) {
+    if (o.waited < t.restore) return { act: 'wait', reason: 'waiting for the restore file' }
+    const s = paneSession(o.pane)
+    // No reading names either session, so neither R14 nor R18 can be claimed (E8-D28).
+    if (s === null) return pause('R17', R17_WHY.lookup)
+    // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
+    return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
+  }
   // A reply with no Claude session is a failed lookup, never a changed session (ST2).
-  if (!o.pane || o.pane.error || typeof o.pane.session !== 'string') return pause('R17', R17_WHY.lookup)
+  if (paneSession(o.pane) === null) return pause('R17', R17_WHY.lookup)
   if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
   if (!READY_STATUSES.includes(o.pane.status)) {
     return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
@@ -1269,7 +1294,7 @@ export function typerStep(o) {
     if (o.pane.session !== o.oldSession || o.grew) return pause('R16')
     return { act: 'clear', reason: 'idle, unfocused, the same session, no new entries' }
   }
-  if (o.pane.session === o.restore.session) {
+  if (o.pane.session === o.restore?.session) {
     if (o.typedNew) return pause('R16')
     if (o.typedNew === null) return o.sessionWait < t.session ? { act: 'wait', reason: 'the new transcript could not be read yet' } : pause('R17', R17_WHY.transcript)
     return { act: 'resume', reason: 'herdr reports the new session, and nothing was typed into it' }

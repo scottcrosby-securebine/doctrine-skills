@@ -65,10 +65,11 @@ const TABLE = [
   ['R15', null, 'resume typed twice, no reply from the new session', 'check the pane'],
   ['R16', null, 'auto-cycle stopped: you typed in this pane', 'nothing, or /clear and type resume'],
   ['R17', 'boom', 'could not type into the pane: boom', '/clear and type resume by hand'],
+  ['R18', '4a9392da-bd72', '/clear did not take: session 4a9392da-bd72 still running', 'clear your draft, then /clear and type resume'],
 ]
 const tableBad = TABLE.filter(([c, arg, reason, action]) => pauseReason(c, arg) !== reason || pauseAction(reason) !== action)
-clause('clause 1c — every pause reason R1 to R17 reads verbatim as the D2 table has it, and each reason maps back to its action',
-  tableBad.length === 0 && Object.keys(PAUSES).length === 17, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
+clause('clause 1c — every pause reason R1 to R18 reads verbatim as the D2 table has it, and each reason maps back to its action',
+  tableBad.length === 0 && Object.keys(PAUSES).length === 18, JSON.stringify(tableBad.map(([c, arg]) => [c, pauseReason(c, arg)])))
 clause('clause 1d — no reason or message says stall, typer, claim, blocked or dctr; from its text alone, each of the skills\' own pauses asks for an answer in the pane (its place decides more, clause 1t)',
   TABLE.every(([, , r, a]) => !/\b(stall|typer|claim|blocked|dctr)\b/.test(`${r}. ${a}`)) && pauseAction('question: which way?') === 'answer in the pane' &&
   pauseAction('first action ambiguous: two phases') === 'answer in the pane' &&
@@ -384,6 +385,48 @@ const pausedFx = negs.filter((n) => n.want === 'pause')
 clause('clause 2g — every paused line leaves the record\'s last state line as it was, and is not a state line (E8-D16)',
   pausedFx.every(({ f, name }) => parseRecord(fs.readFileSync(f.record, 'utf8')).state.raw === (name === 'Blocked' ? '- State: Blocked. Q2 waits on Scott' : '- State: Open')),
   pausedFx.map(({ f }) => parseRecord(fs.readFileSync(f.record, 'utf8')).state.raw).join('; '))
+
+// E8-D16, Q-B: the ambiguous-first-action pause is written by the agent from doctrine-resume's template, so no hook
+// fixture writes it. The template is read verbatim from the skill (the mutation gate links skills/ beside its copies),
+// instantiated, and put to each reader over an Open and a Blocked record. The control is the same template written as
+// a state line, which status must then read differently: clause 3a18.
+const TEMPLATE = /`(- auto-cycle paused: first action ambiguous: <[^>`]+>)`/.exec(fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine-resume', 'SKILL.md'), 'utf8'))?.[1] ?? null
+const SECTION5 = 'Run node --test test/limiter.test.js and record its result.'
+const projectCli = path.join(import.meta.dirname, 'dctr-project.mjs')
+const openRecords = (root) => {
+  const out = spawnSync('node', [projectCli, 'status', root], { encoding: 'utf8', env: { ...process.env, HERDR_ENV: '' } }).stdout.split('\n')
+  const i = out.indexOf('open records:')
+  return i < 0 ? null : out.slice(i + 1, out.findIndex((l, j) => j > i && !l.startsWith('  '))).join('\n')
+}
+/** Every reader's view of `template` instantiated and appended to an Open and a Blocked record. */
+const firstActionPause = (template, tag) => ['- State: Open', '- State: Blocked. Q2 waits on Scott'].map((stateLine, k) => {
+  const root = path.join(tmp, `first-action-${tag}-${k}`), file = path.join(root, 'records', 'phase.md')
+  write(path.join(root, 'docs', 'PROJECT.md'), '# P\n\nState: Ruled\nRecords: records\n')
+  const base = ['# e8 phase', stateLine, '- auto-cycle: on cap 10 tier 60%', '- auto-cycle: cycle 1 tree 9f2c1ab'].join('\n') + '\n'
+  write(file, base)
+  const before = openRecords(root)
+  const line = template.replace(/<[^>]+>/, SECTION5)
+  fs.appendFileSync(file, line + '\n')
+  const es = parseRecord(fs.readFileSync(file, 'utf8')).entries, last = es.at(-1), standing = standingPauses(es)
+  return {
+    line, before, after: openRecords(root),
+    paused: last?.kind === 'auto-cycle' && last.sub === 'paused' && last.reason === `first action ambiguous: ${SECTION5}`,
+    standing: standing.length === 1 && standing[0].line === last.line,
+    action: standing.length === 1 && pauseAction(standing[0].reason) === 'answer in the pane' && pauseActionAt(standing[0], es) === 'answer in the pane',
+  }
+})
+const fap = TEMPLATE && firstActionPause(TEMPLATE, 'template')
+const fapOk = (rs) => rs.every((x) => x.paused && x.standing && x.action && x.before && x.after === x.before)
+clause('clause 2g2 — doctrine-resume\'s ambiguous-first-action template, instantiated: parsed as a paused line, status lists the Open and the Blocked phase as before, and it stands as a pause whose action is an answer in the pane (E8-D16, Q-B)',
+  Boolean(fap) && fapOk(fap), JSON.stringify(fap ?? `no template in the resume skill`))
+
+// RT2-B1: an empty session string is no session. herdr answering the Stop with `agent_session.value: ''` takes the
+// failed-lookup path, R17, and never reads as another session (R12).
+const emptySess = fixture('empty-session')
+const emptyRun = run(emptySess, {}, { SHIM_SESSION: '' })
+clause('clause 2c18 — herdr answering the Stop with an empty session string: paused with R17 as a failed lookup, never R12, and no typer launched (RT2-B1)',
+  JSON.stringify(paused(emptySess)) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]' && !launched(emptyRun) &&
+  reads(emptySess) === 1 && !fs.existsSync(emptySess.stubLog), `${JSON.stringify(paused(emptySess))} ${emptyRun.msg} ${emptyRun.err}`)
 
 // E8-D26: three stop reasons alert once each.
 const alertBad = ['Blocked', 'round alarm with no ruling', 'handoff before the warning'].map((n) => negs.find((x) => x.name === n)).filter(({ f, r }) => {
@@ -973,7 +1016,7 @@ const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.jso
 // a hand list of stall and idle condition phrases. restatedIn(text) returns the forbidden texts a description holds,
 // ignoring case. The clause asserts the description holds none, and that the guard itself flags every D2 reason when it
 // is appended to the description, so a guard that lost its PAUSES half fails here too.
-const SAMPLE = { R1: ['/w/p'], R2: ['State: Blocked. waits'], R3: ['round', 'time'], R4: [{ id: 'Q5', text: 'which?' }], R5: [10], R9: ['overloaded'], R17: ['herdr could not read the pane'] }
+const SAMPLE = { R1: ['/w/p'], R2: ['State: Blocked. waits'], R3: ['round', 'time'], R4: [{ id: 'Q5', text: 'which?' }], R5: [10], R9: ['overloaded'], R17: ['herdr could not read the pane'], R18: ['4a9392da-bd72'] }
 const SENTINEL = '\u0001'
 const D2_REASONS = Object.keys(PAUSES).flatMap((c) => (SAMPLE[c] || [undefined]).map((a) => PAUSES[c].reason(a)))
 const D2_FIXED = Object.keys(SAMPLE).flatMap((c) => PAUSES[c].reason(c === 'R4' ? { id: SENTINEL, text: SENTINEL } : SENTINEL).split(SENTINEL).map((t) => t.trim()).filter((t) => t.length >= 8))
@@ -1067,6 +1110,15 @@ clause('clause 3a16 — without the hook: the event-enumeration record, as resto
   evHead.includes('- State: Open') && evHead.some((l) => /^- auto-cycle: on /.test(l)) && !evHead.some((l) => /^- auto-cycle: warned|^- auto-cycle paused: /.test(l)) &&
   !fs.existsSync(path.join(stateDir(ev.session), 'gauge.json')) && !evQ.startsWith('- auto-cycle paused: ') && evQ.split('`').length - 1 === 4 &&
   (fs.statSync(path.join(trip, 'herdr')).mode & 0o111) !== 0, evHead.join(' | '))
+const fapControl = TEMPLATE && firstActionPause(TEMPLATE.replace('auto-cycle paused:', 'State: Paused.'), 'control')
+clause('clause 3a18 — the control: the same template written as `State: Paused` is read by none of clause 2g2\'s readers as that pause, and status no longer lists either phase as it did (E8-D16)',
+  Boolean(fapControl) && !fapOk(fapControl) && fapControl.every((x) => !x.paused && /^  e8 phase: - State: (Open|Blocked)/.test(x.before) && x.after === '  (none)'),
+  JSON.stringify(fapControl))
+
+const emptyReply = JSON.parse(execFileSync(path.join(bin, 'herdr'), ['pane', 'get', 'w9:p1'], { env: { ...baseEnv, SHIM_LOG: path.join(tmp, 'empty-probe.log'), SHIM_SESSION: '' }, encoding: 'utf8' }))
+clause('clause 3a19 — without the hook: the shim, given an empty session, answers a pane whose agent_session.value is the empty string',
+  emptyReply.result.pane.agent_session?.value === '', JSON.stringify(emptyReply))
+
 clause('clause 3a17 — without the hook: the linked hooks directory is a symlink whose real path is this suite\'s own',
   fs.lstatSync(linkHooks).isSymbolicLink() && fs.realpathSync(linkHooks) === fs.realpathSync(import.meta.dirname) && linkHooks !== import.meta.dirname, linkHooks)
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',

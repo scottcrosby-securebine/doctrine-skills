@@ -8,8 +8,8 @@
 // dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
 // typerStep decides, which decides every step: wait, abort with nothing written, pause, send /clear, send the resume
 // line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. The typer itself
-// pauses with R17 when a send fails and on an unexpected error. Only after a sent
-// /clear does it append `auto-cycle: cycle <n> tree <hash>` (LN12). Waits are counted in polls, never read off the wall
+// pauses with R17 when a send fails and on an unexpected error. It appends `auto-cycle: cycle <n> tree <hash>` once,
+// when typerStep says the observation first shows the /clear took, never on the /clear send (LN12, E8-D28). Waits are counted in polls, never read off the wall
 // clock (RB2-4). A pause appends one paused line and raises its toast and token; the next Stop, Notification or
 // StopFailure prints its pane message (SP1). With DCTR_VIEW_REQUEST_DIR set it exits in its first lines and calls no
 // herdr.
@@ -80,7 +80,8 @@ try {
     return { error: true }
   }
   // A restore file that cannot be read or parsed, a half-written one included, is no restore yet: the typer waits for
-  // it and then pauses with R14, and never resumes on it.
+  // it, never resumes on it, and past the wait pauses as typerStep decides from herdr's reading: R18 on the old
+  // session, R14 on another, R17 on no reading.
   const readRestore = () => {
     try {
       const r = JSON.parse(fs.readFileSync(restoreFile(a.pane), 'utf8'))
@@ -89,7 +90,7 @@ try {
   }
 
   // The typer's clock: poll intervals waited, not wall time (RB2-4).
-  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null
+  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null, cycled = false
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const stopRepo = stopFileRepo(repos, fs.existsSync)
@@ -108,23 +109,27 @@ try {
     const fresh = stage !== 'clear' && restore ? entriesFrom(restore.transcript) : null
     partialSince = old?.partial || fresh?.partial ? (partialSince ?? now) : null
     const step = typerStep({
-      stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times,
+      stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
       midWrite: partialSince === null ? null : now - partialSince,
       grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
       typedNew: fresh === null ? null : fresh.entries.some(userTyped),
       firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
+    if (step.cycle) {
+      appendRecordLine(a.record, `- auto-cycle: cycle ${a.n} tree ${a.hash}`)
+      cycled = true
+      log(`the /clear took, cycle ${a.n}`)
+    }
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     // An abort writes nothing because its stop is already recorded: the user's own off line, a state line no longer
     // Open or Blocked (with or without a stop file), or a paused line written since the claim. A confirm is success.
-    // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R17 for a failure (RN3-3, RB4-1).
+    // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R18 for a failure (RN3-3, RB4-1).
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
       fs.rmSync(restoreFile(a.pane), { force: true })
       send('/clear')
-      appendRecordLine(a.record, `- auto-cycle: cycle ${a.n} tree ${a.hash}`)
       log(`sent /clear, cycle ${a.n}`)
       stage = 'resume'; stageStart = now
     } else if (step.act === 'resume') {

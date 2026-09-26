@@ -112,7 +112,8 @@ try {
         try {
           const reply = herdr(['pane', 'get', paneId]) // herdr-lint: a failed read pauses with R17; nothing is closed or typed on it
           const value = reply?.result?.pane?.agent_session?.value
-          if (typeof value === 'string') return value
+          // An empty string names no session, as no value does (RT2-B1).
+          if (typeof value === 'string' && value !== '') return value
           log('herdr reported no Claude session for the pane')
         } catch (e) { log(`herdr pane get failed (${String(e.message).split('\n')[0]})`) }
         return { error: 'lookup' }

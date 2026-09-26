@@ -64,6 +64,7 @@ const NEAR = [
   '- auto-cycle: sometimes',
   '- auto-cycle paused:',
   '* wave: 2026-09-23T10:38:00Z seat H handle none',
+  `- wave: ${T} seat H handle`,
 ]
 const PROSE = ['# e8-restore record', '', 'Anchor: "go kickoff".', 'wrapper: doctrine-draft', 'wrapper: doctrine-code', 'Some prose about the round.']
 const RECORD = [...PROSE, ...FORMS.slice(0, 10), ...NEAR, ...FORMS.slice(10, 19), '- State: Open', ...FORMS.slice(19), `- State: Blocked. Q1 open`].join('\n')
@@ -217,6 +218,30 @@ clause('clause 1o — the agent-written auto-cycle forms parse wrapped in inline
 clause('clause 1o2 — prose quoting an agent-written form (on, off, ready, paused) in two spans of the same delimiter parses to nothing (DSP7-B1)',
   quoted.length === 0, JSON.stringify(quoted))
 
+// E8-D24: the wave lines driven phases wrote (the e8 exit pass's d24 drives), each copied verbatim: a handle that runs
+// to the end of the line and holds spaces, and an indented list item. The last two add a via to a multi-word handle.
+const DRIVE = [
+  '- wave: 2026-09-25T06:47:05Z seat builder-limiter-reset handle agent:wave1-builder (worktree .doctrine/wt/wave1, branch wave1-limiter-reset)',
+  '- wave: 2026-09-25T07:27:00Z seat builder-w1 handle worktree .worktrees/w1 branch phase/limiter-reset-w1',
+  '  - wave: 2026-09-25T07:31:00Z seat simplify-reuse-simplification handle agent a85a6588ca552b170',
+  '- wave: 2026-09-25T07:33:00Z seat review-standards handle agent af1122132fc3e649c',
+  `- wave: ${T} seat backup-2 handle agent b77 (worktree wt/b) via doctrine-backup`,
+  `  - wave: ${T} seat handoff-1 handle worktree wt/h branch h via doctrine-handoff`,
+]
+const DRIVE_WANT = [
+  { kind: 'wave', time: '2026-09-25T06:47:05Z', seat: 'builder-limiter-reset', handle: 'agent:wave1-builder (worktree .doctrine/wt/wave1, branch wave1-limiter-reset)', via: null },
+  { kind: 'wave', time: '2026-09-25T07:27:00Z', seat: 'builder-w1', handle: 'worktree .worktrees/w1 branch phase/limiter-reset-w1', via: null },
+  { kind: 'wave', time: '2026-09-25T07:31:00Z', seat: 'simplify-reuse-simplification', handle: 'agent a85a6588ca552b170', via: null },
+  { kind: 'wave', time: '2026-09-25T07:33:00Z', seat: 'review-standards', handle: 'agent af1122132fc3e649c', via: null },
+  { kind: 'wave', time: T, seat: 'backup-2', handle: 'agent b77 (worktree wt/b)', via: 'doctrine-backup' },
+  { kind: 'wave', time: T, seat: 'handoff-1', handle: 'worktree wt/h branch h', via: 'doctrine-handoff' },
+]
+const drive = parseRecord(['# drive record', ...DRIVE, 'prose after'].join('\n')).entries.map(({ line, ...e }) => e)
+let driveOk = true, driveWhy = ''
+try { deepStrictEqual(drive, DRIVE_WANT) } catch (e) { driveOk = false; driveWhy = String(e.message).slice(0, 600) }
+clause('clause 1p — every wave form a driven phase wrote parses, the handle the rest of the line with any via split off, an indented item like any other (E8-D24)',
+  driveOk, driveWhy)
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
@@ -245,6 +270,11 @@ clause('clause 3b — without the parser: the record has more than one state lin
 clause('clause 3f — without the parser: each wrapped fixture line carries a wrapper character beside its form, each refused one a form key, and each quoted one opens and closes with the same delimiter and holds it at least four times',
   WRAPPED.every((l) => /[`*]/.test(l) && /auto-cycle/.test(l)) && WRAPPED_NOT.every((l) => /auto-cycle/.test(l) && /[`*]/.test(l)) &&
   QUOTED.every((l) => { const t = l.replace(/^- /, ''), d = t.startsWith('**') ? '**' : t[0]; return t.endsWith(d) && t.split(d).length - 1 >= 4 && /auto-cycle: (on|off|ready)|auto-cycle paused:/.test(t) }), 'fixtures wrong')
+
+clause('clause 3g — without the parser: each drive wave line\'s handle holds a space, which a one-token handle cannot read, one line is indented, and two carry a via after the handle',
+  DRIVE.every((l) => /\S\s+\S/.test(l.slice(l.indexOf(' handle ') + 8).replace(/\s+via\s+doctrine-(handoff|backup)$/, ''))) &&
+  DRIVE.some((l) => /^\s+- wave:/.test(l)) && DRIVE.filter((l) => / via doctrine-(handoff|backup)$/.test(l)).length === 2 &&
+  DRIVE.length === DRIVE_WANT.length, 'a drive fixture whose handles were single tokens would let clause 1p pass against the old parser')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),

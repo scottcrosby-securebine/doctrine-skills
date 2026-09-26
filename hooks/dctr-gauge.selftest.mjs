@@ -101,6 +101,9 @@ clause('clause 1l2 — resolveTier: the 90% check reads the tier after the floor
   rt('60%', W, FU).tier === FU + HANDOFF_COST_TOKENS && rt('60%', W, FU).errors.includes('tier above 90% of the window') &&
   !rt('20000', W, 10000).errors.includes('tier above 90% of the window'),
   JSON.stringify([rt('60%', W, FU), rt('20000', W, 10000)]))
+clause('clause 1m0 — the handoff cost is E8-D22\'s opus measurement, 64,268 tokens rounded up to the thousand: a first reading of 10000 floors a 20000 tier at 75000 (E8-D11, E8-R42)',
+  HANDOFF_COST_TOKENS === 65000 && rt('20000', W, 10000).tier === 75000 && rt('20000', W, 10000).tierText === '75000',
+  JSON.stringify([HANDOFF_COST_TOKENS, rt('20000', W, 10000)]))
 clause('clause 1m — resolveTier: a tier below the floor (first reading plus the handoff cost) is raised to the floor, with the error',
   rt('20000', W, 10000).tier === 10000 + HANDOFF_COST_TOKENS &&
   rt('20000', W, 10000).errors.includes(`tier 20000 below the floor ${10000 + HANDOFF_COST_TOKENS}, raised to the floor`) &&
@@ -141,16 +144,73 @@ const ctx = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, ti
 const ctxLong = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, tierText: '120000', facts: ['y'.repeat(3000)] })
 clause('clause 1t — gaugeContext: the warning names used tokens, the window, the percent, the tier, doctrine step 5 as the rule\'s source and each action, both ready-line placements included, as facts, under the limit (SC8, SC14)',
   ctx.includes('130000') && ctx.includes('200000') && ctx.includes('65%') && ctx.includes('120000') && ctx.includes('window unknown') &&
-  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && /current step/.test(ctx) &&
+  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && ['No new wave, round or repair is started.', 'The seats already out are waited for.', 'Their returns are integrated and their record lines written.'].every((t) => ctx.includes(t)) && !/current step/.test(ctx) &&
   /step 5/.test(ctx) && /`- auto-cycle: ready` is appended to the record/.test(ctx) && /last line of the assistant message/.test(ctx) &&
   !/\b(you must|must|system:|SYSTEM)\b/.test(ctx) && ctx.length <= GAUGE_MAX && ctxLong.length <= GAUGE_MAX && ctxLong.includes('auto-cycle: ready'),
   ctx)
+// The class check (DR6-B1, RT7-B1). Hub step 5 states the actions on the warning and the gauge's warning restates them.
+// Prose cannot be split into actions mechanically, so this checks two narrower things, and says so:
+// - the pin: hub step 5's warning sentence is held here verbatim, and any edit to it fails, naming where it changed,
+//   until a maintainer re-checks gaugeContext's warning against the new sentence and updates HUB_PIN;
+// - the keys: the warning carries each key phrase below exactly once, in this order, one key per action of the pinned
+//   sentence (the integrate verb and the final-message placement included).
+// Its limit: an action added only to the warning, or worded without a key, is not seen, so a new hub action needs a
+// new key when the pin is updated. The skill is read at ../skills, which the mutation gate links.
+const HUB = fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine', 'SKILL.md'), 'utf8')
+const HUB_WARNING = /On the gauge's warning while auto-cycle is on,[^]*?as the message's last line\./.exec(HUB)?.[0] ?? ''
+const HUB_PIN = "On the gauge's warning while auto-cycle is on, start no new wave, round or repair, wait for the seats already out, integrate their returns and write their record lines, then write the record's state line, run `doctrine-handoff`, append the ready line (one of the auto-cycle lines above) to the record, and end the turn with `auto-cycle: ready` as the message's last line."
+const WARNING_KEYS = ['no new wave, round or repair', 'seats already out', 'integrat', 'record lines', 'state line', 'doctrine-handoff', 'ready line', 'last line']
+/** Where `sentence` departs from the pin, or '' when it is the pinned sentence. */
+const hubDrift = (sentence) => {
+  if (sentence === HUB_PIN) return ''
+  let i = 0
+  while (i < sentence.length && sentence[i] === HUB_PIN[i]) i++
+  return `hub step 5's warning sentence changed at character ${i}: now "${sentence.slice(i, i + 60)}", pinned "${HUB_PIN.slice(i, i + 60)}"; ` +
+    're-check gaugeContext\'s warning against the new sentence, then update HUB_PIN and WARNING_KEYS'
+}
+/** The keys `text` does not carry exactly once in WARNING_KEYS order, lowercased; empty when every one is. */
+const warningDrift = (text) => {
+  const t = text.toLowerCase(), bad = []
+  let at = -1
+  for (const k of WARNING_KEYS) {
+    const i = t.indexOf(k)
+    if (i < 0 || t.indexOf(k, i + 1) >= 0 || i < at) bad.push(k)
+    else at = i
+  }
+  return bad
+}
+const warningOf = (c) => c.slice(0, c.indexOf('doctrine gauge facts:') < 0 ? c.length : c.indexOf('doctrine gauge facts:'))
+const B853 = warningOf(ctx).replace(/No new wave, round or repair is started\. The seats already out are waited for\. Their returns are integrated and their record lines written\./,
+  'The work in hand is finished first, and no new wave, round or repair is started.')
+clause('clause 1t2 — hub step 5\'s warning sentence is the pinned one, and the gauge\'s warning carries each key phrase exactly once in order (no new wave, round or repair; seats already out; integrat; record lines; state line; doctrine-handoff; ready line; last line); an action only in the warning, or worded without a key, is not seen (DR6-B1, RT7-B1)',
+  HUB_WARNING !== '' && hubDrift(HUB_WARNING) === '' && warningDrift(HUB_PIN).length === 0 && warningDrift(warningOf(ctx)).length === 0,
+  `${hubDrift(HUB_WARNING) || 'pin holds'}; the pin lacks ${JSON.stringify(warningDrift(HUB_PIN))}; the warning lacks ${JSON.stringify(warningDrift(warningOf(ctx)))}`)
+clause('clause 1t3 — the keys trip on the warning as it stood before the seats were waited for: it lacks the seats already out (DR6-B1)',
+  B853 !== warningOf(ctx) && B853.includes('The work in hand is finished first') && warningDrift(B853).includes('seats already out'), B853)
+// RT7-B1: the red team's drifts. Two hub edits (an added action, a changed verb) and a warning whose final-message
+// sentence moved before the handoff sentence.
+const HUB_ADDED = HUB_WARNING.replace(', then write the record\'s state line', ', run the full test suite, then write the record\'s state line')
+const HUB_VERB = HUB_WARNING.replace('integrate their returns and write their record lines', 'write their returns and their record lines')
+const LAST = 'The turn ends with `auto-cycle: ready` as the last line of the assistant message.'
+const MOVED = warningOf(ctx).replace(` ${LAST}`, '').replace('doctrine-handoff is run after that.', `${LAST} doctrine-handoff is run after that.`)
+clause('clause 1t4 — the pin trips on an action added to the hub sentence and on its integrate verb changed, each named (RT7-B1)',
+  /changed at character \d+: now "run the full test suite/.test(hubDrift(HUB_ADDED)) && /changed at character \d+: now "write their returns/.test(hubDrift(HUB_VERB)),
+  JSON.stringify([hubDrift(HUB_ADDED), hubDrift(HUB_VERB)]))
+clause('clause 1t5 — the keys trip on the final-message sentence moved before the handoff sentence (RT7-B1)',
+  JSON.stringify(warningDrift(MOVED)) === '["last line"]', `${JSON.stringify(warningDrift(MOVED))} ${MOVED}`)
+
 const ctxU = gaugeContext({ warn: true, used: null, window: null, tier: null, tierText: 'unknown', facts: [] })
 clause('clause 1u — gaugeContext: an unknown warning says the reading is unknown and never states a token count',
   /unknown/.test(ctxU) && !/\b\d{4,}\b/.test(ctxU) && ctxU.includes('auto-cycle: ready'), ctxU)
 const ctxUW = gaugeContext({ warn: true, used: null, window: W, tier: null, tierText: 'unknown', facts: [] })
 clause('clause 1u2 — gaugeContext: an unknown warning names the window when the bridge knows it, and unknown otherwise (SC8)',
   ctxUW.includes('200000-token context window') && /context window of unknown size/.test(ctxU), `${ctxUW} | ${ctxU}`)
+
+clause('clause 3u — without the check: the hub fixtures differ from the shipped sentence, one carrying the added suite run and one lacking the integrate verb, and the moved warning puts its last-line sentence before the handoff sentence',
+  HUB_ADDED !== HUB_WARNING && HUB_ADDED.includes('run the full test suite, then write') && HUB_VERB !== HUB_WARNING && !HUB_VERB.includes('integrate') &&
+  MOVED.includes(LAST) && MOVED.indexOf(LAST) < MOVED.indexOf('doctrine-handoff is run') && MOVED.length === warningOf(ctx).length, `${HUB_ADDED.length} ${HUB_VERB.length} ${MOVED}`)
+clause('clause 3t — without the gauge: the hub sentence the class check read opens on the warning and tells the agent to wait for the seats already out',
+  HUB_WARNING.startsWith("On the gauge's warning while auto-cycle is on,") && /wait for the seats already out/.test(HUB_WARNING), HUB_WARNING.slice(0, 300))
 
 // ---------------------------------------------------------------- clause 2: the hook end to end
 
