@@ -209,14 +209,15 @@ orchestrator-only part, and leave the resync to the backup the cycle's handoff r
 With auto-cycle on (doctrine step 5 defines when), the report does not end the
 turn. Carry on with the phase in the same turn, under the wrapper step 1b
 invoked: take the first action where step 1b found it due, and otherwise
-continue from where the record and the handoff say the phase stands. The
-exceptions are the stops doctrine step 5 already makes: step 1b paused the run,
-the record reads Blocked, an alarm line has no ruling line after it, or a
-`question: <id> opened` line has no answered line for the same id.
+continue from where the record and the handoff say the phase stands. Stop
+instead only where a rule already stops the run: step 1b's ambiguous first
+action, a Blocked record, and where doctrine step 5 (its pauses and the gauge's
+warning) or `doctrine-backup` ends the turn.
 
 ## Done when
 
 Every drift check has run, every bare-`#N` cell is hydrated and every skipped
 cell named, the kickoff is quoted or its absence flagged, its first line was
-acted on before anything else, and step 1b's interrupted-backup and first-action
-checks ran.
+acted on before anything else, step 1b's interrupted-backup and first-action
+checks ran, and, with auto-cycle on, step 6 carried the phase on or stopped where
+it says.
