@@ -204,6 +204,14 @@ With auto-cycle on (doctrine step 5 defines when), neither ask nor pause:
 name the drift in step 4's report and in one prose line in the record's
 orchestrator-only part, and leave the resync to the backup the cycle's handoff runs.
 
+## 6. Carry on under auto-cycle
+
+With auto-cycle on (doctrine step 5 defines when), the report does not end the
+turn. Unless step 1b paused the run or the record reads Blocked, carry on with
+the phase in the same turn, under the wrapper step 1b invoked: take the first
+action where step 1b found it due, and otherwise continue from where the record
+and the handoff say the phase stands.
+
 ## Done when
 
 Every drift check has run, every bare-`#N` cell is hydrated and every skipped
