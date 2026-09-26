@@ -1239,8 +1239,23 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * writes nothing, and each is a stop someone else already recorded: the record switched off or no longer Open or
  * Blocked, whether or not a stop file exists too, or a paused line written since the claim. Only on a record still
  * active does a stop file pause with R1 (RN3-3, E8-D16, RB4-1). Ready means an agent_status in READY_STATUSES.
+ *
+ * After the /clear, with `o.cycled` false, any step but an abort also carries `cycle: true` when this observation is
+ * the first to show the /clear took: a restore file (`o.restore`, whose session is never the old one) or herdr
+ * naming a session other than the old one. The typer appends the cycle line before acting on that step, and never
+ * otherwise, so a /clear nobody saw take counts no cycle (E8-D17, E8-D28).
  */
 export function typerStep(o) {
+  const step = typerAct(o)
+  const s = paneSession(o.pane)
+  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession)
+  return o.stage !== 'clear' && !o.cycled && step.act !== 'abort' && took ? { ...step, cycle: true } : step
+}
+
+/** The session herdr reported, or null when the reading failed, is missing or names none. */
+const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' ? pane.session : null)
+
+function typerAct(o) {
   const t = o.times || TYPER_TIMES
   const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
@@ -1258,8 +1273,11 @@ export function typerStep(o) {
   }
   if (o.stage === 'resume' && !o.restore) {
     if (o.waited < t.restore) return { act: 'wait', reason: 'waiting for the restore file' }
+    const s = paneSession(o.pane)
+    // No reading names either session, so neither R14 nor R18 can be claimed (E8-D28).
+    if (s === null) return pause('R17', R17_WHY.lookup)
     // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
-    return o.pane && !o.pane.error && o.pane.session === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
+    return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   }
   // A reply with no Claude session is a failed lookup, never a changed session (ST2).
   if (!o.pane || o.pane.error || typeof o.pane.session !== 'string') return pause('R17', R17_WHY.lookup)
@@ -1273,7 +1291,7 @@ export function typerStep(o) {
     if (o.pane.session !== o.oldSession || o.grew) return pause('R16')
     return { act: 'clear', reason: 'idle, unfocused, the same session, no new entries' }
   }
-  if (o.pane.session === o.restore.session) {
+  if (o.pane.session === o.restore?.session) {
     if (o.typedNew) return pause('R16')
     if (o.typedNew === null) return o.sessionWait < t.session ? { act: 'wait', reason: 'the new transcript could not be read yet' } : pause('R17', R17_WHY.transcript)
     return { act: 'resume', reason: 'herdr reports the new session, and nothing was typed into it' }

@@ -64,6 +64,31 @@ clause('clause 1e6 — typerStep: an off or closed record aborts whether or not 
   ts({ stopRepo: '/w/p', pane: { error: 'x' } }).reason === 'stopped by .doctrine/auto-cycle.stop in /w/p', 'wrong')
 clause('clause 1e4 — typerStep: an old transcript that could not be read, or has shrunk, pauses with R17 and never clears (RB2)',
   ts({ grew: null }).reason === 'could not type into the pane: the transcript could not be read', JSON.stringify(ts({ grew: null })))
+// E8-D28, the class: the typer asserts nothing it did not observe. Stage resume and confirm, over the restore file
+// seen or not, each pane reading, below and past each wait, and cycled or not: (a) the cycle flag is set exactly on
+// the first observation that the /clear took, a restore file or herdr naming a session other than the old one, and
+// never once cycled; (b) R14 only where herdr reported another session, R18 only where it reported the old one.
+const PANES = [['old', idle], ['another', NEWP], ['error', { error: true }], ['missing', null], ['no session', { status: 'idle', focused: false }]]
+const classBad = []
+let classCount = 0
+for (const stage of ['resume', 'confirm']) for (const restore of [null, NEW]) for (const [pname, pane] of PANES)
+  for (const waited of [100, 500]) for (const sessionWait of [100, 500]) for (const cycled of [false, true]) {
+    classCount++
+    const r = ts({ stage, restore, pane, waited, sessionWait, cycled, resumes: 1, typedNew: false })
+    const took = Boolean(restore) || pname === 'another'
+    const tag = `${stage} restore=${Boolean(restore)} pane=${pname} waited=${waited} sessionWait=${sessionWait} cycled=${cycled}: ${JSON.stringify(r)}`
+    if (Boolean(r.cycle) !== (took && !cycled)) classBad.push(`(a) ${tag}`)
+    if (r.code === 'R14' && pname !== 'another') classBad.push(`(b) ${tag}`)
+    if (r.code === 'R18' && pname !== 'old') classBad.push(`(b) ${tag}`)
+  }
+clause('clause 1f3 — typerStep, every resume and confirm observation: the cycle flag exactly on the first sight of a session other than the old one, from the restore file or herdr, never twice; R14 only on herdr reporting another session, R18 only on the old one (E8-D28)',
+  classCount === 160 && classBad.length === 0, `${classCount} cases; ` + classBad.slice(0, 4).join(' || '))
+clause('clause 1f4 — typerStep before /clear never sets the cycle flag, even with herdr reporting another session, and an abort never does',
+  !ts({ pane: NEWP }).cycle && !ts({}).cycle && !ts({ stage: 'resume', restore: NEW, active: false }).cycle && !ts({ stage: 'resume', restore: NEW, pausedSinceClaim: true }).cycle,
+  JSON.stringify([ts({ pane: NEWP }), ts({ stage: 'resume', restore: NEW, active: false })]))
+clause('clause 1f5 — typerStep after /clear, no restore file past the wait: a failed, missing or session-less pane reading pauses with R17 as a failed lookup, never R14 (E8-D28)',
+  [{ error: true }, null, { status: 'idle', focused: false }].every((pane) => ts({ stage: 'resume', waited: 500, pane }).reason === 'could not type into the pane: herdr could not read the pane'),
+  JSON.stringify([{ error: true }, null].map((pane) => ts({ stage: 'resume', waited: 500, pane }))))
 clause('clause 1f — typerStep after /clear: no restore file waits, then, with herdr reporting another session, pauses with R14',
   ts({ stage: 'resume', waited: 100, pane: NEWP }).act === 'wait' && ts({ stage: 'resume', waited: 500, pane: NEWP }).reason === 'cleared, but the new session did not start doctrine', 'wrong')
 clause('clause 1f2 — typerStep after /clear: no restore file and herdr still reporting the old session waits, then pauses with R18 naming it: the /clear did not take (E8-D28)',
@@ -133,7 +158,7 @@ if (args[0] === 'pane' && args[1] === 'get') {
   st.gets = (st.gets || 0) + 1
   if (st.appendAt && st.gets === st.appendAt.n) fs.appendFileSync(st.appendAt.file, st.appendAt.line + '\\n')
   save()
-  if (st.fail) { fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n'); process.stderr.write('{"error":{"code":"server_error","message":"boom"}}\\n'); process.exit(1) }
+  if (st.fail || (st.failAfterClear && st.clearedAt)) { fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n'); process.stderr.write('{"error":{"code":"server_error","message":"boom"}}\\n'); process.exit(1) }
   if (st.clearedAt) st.getsSinceClear = (st.getsSinceClear || 0) + 1
   save()
   if (st.onClear === 'late' && st.getsSinceClear === st.restoreAfterGets) fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
@@ -322,8 +347,8 @@ clause('clause 2l — DCTR_VIEW_REQUEST_DIR set: no herdr call at all, no claim 
   !fs.existsSync(claimFile(contained.session, 5)) && containedClaims().length === 0 && contained.paused.length === 0 && contained.cycled.length === 0,
   `${detail(contained)} claims ${JSON.stringify(containedClaims())}`)
 const noRestore = typerCase('no-restore', { onClear: 'none' })
-clause('clause 2m — no restore file, herdr reporting another session: /clear once, no resume, no cycle line, then paused with R14 (E8-D28)',
-  sends(noRestore) === '1,0' && noRestore.cycled.length === 0 &&
+clause('clause 2m — no restore file, herdr reporting another session: /clear once, no resume, the cycle line once, then paused with R14 (E8-D17, E8-D28)',
+  sends(noRestore) === '1,0' && JSON.stringify(noRestore.cycled) === '["- auto-cycle: cycle 3 tree abc123"]' &&
   JSON.stringify(noRestore.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]', detail(noRestore))
 // E8-D28: a draft in the pane merged with the /clear, so the old session runs on: no restore file, herdr still
 // reporting the old session at every read.
@@ -331,6 +356,10 @@ const didNotTake = typerCase('clear-did-not-take', { onClear: 'none', newSession
 clause('clause 2m2 — a /clear that did not take: /clear once, resume never, no cycle line, and paused with R18 naming the old session (E8-D28)',
   sends(didNotTake) === '1,0' && didNotTake.cycled.length === 0 &&
   JSON.stringify(didNotTake.paused) === `["- auto-cycle paused: /clear did not take: session ${didNotTake.session} still running"]`, detail(didNotTake))
+const lookupLost = typerCase('lookup-fails-after-clear', { onClear: 'none', failAfterClear: true })
+clause('clause 2m3 — no restore file and every herdr read failing after /clear: /clear once, no resume, no cycle line, paused with R17 as a failed lookup (E8-D28)',
+  sends(lookupLost) === '1,0' && lookupLost.cycled.length === 0 &&
+  JSON.stringify(lookupLost.paused) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]', detail(lookupLost))
 const stale = typerCase('stale-restore', { onClear: 'stale' })
 clause('clause 2n — a restore file carrying the old session id is stale (F1): /clear once, no resume, paused with R14',
   sends(stale) === '1,0' && JSON.stringify(stale.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]', detail(stale))
@@ -352,9 +381,9 @@ clause('clause 2s — every pause the typer wrote was alerted once: one report-m
   [changed, working, grew, fail, noRestore, didNotTake, stale, silent].every((c) => c.alerts === 2) && normal.alerts === 0 && pausedSince.alerts === 0,
   JSON.stringify([changed, working, grew, fail, noRestore, didNotTake, stale, silent, normal].map((c) => c.alerts)))
 const phrases = Object.values(R17_WHY).map((w) => `- auto-cycle paused: could not type into the pane: ${w}`)
-const r17 = [working, fail, runFails, noSess, unread, shrunk].flatMap((c) => c.paused)
+const r17 = [working, fail, runFails, noSess, unread, shrunk, lookupLost].flatMap((c) => c.paused)
 clause('clause 2s2 — every R17 line the typer wrote is one of the fixed phrases: no raw herdr status or error text (SP7)',
-  r17.length === 6 && r17.every((l) => phrases.includes(l)) && !r17.some((l) => /Command failed|blocked|working|boom/.test(l)), JSON.stringify(r17))
+  r17.length === 7 && r17.every((l) => phrases.includes(l)) && !r17.some((l) => /Command failed|blocked|working|boom/.test(l)), JSON.stringify(r17))
 clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
   [changed, working, grew, fail, noRestore, didNotTake, stale, silent, runFails].every((c) => c.state === '- State: Open'), 'a state line moved')
 
@@ -398,9 +427,11 @@ clause('clause 3c — without the typer: the record-repo stop file sits outside 
   !fs.existsSync(path.join(stoppedRec.proj, '.doctrine/auto-cycle.stop')) && fs.existsSync(path.join(stoppedRec.recRoot, '.doctrine/auto-cycle.stop')) &&
   fs.existsSync(path.join(stoppedRec.recRoot, '.git')), 'stop fixture wrong')
 const afterClear = (c) => c.calls.slice(c.calls.findIndex((x) => x.args[3] === '/clear') + 1).filter((x) => x.args[1] === 'get')
-clause('clause 3d2 — without the typer: after /clear the did-not-take shim answered the old session on every read and wrote no restore file; the no-restore one answered another session (E8-D28)',
+clause('clause 3d2 — without the typer: after /clear the did-not-take shim answered the old session on every read and wrote no restore file; the no-restore one answered another session; the lookup-lost one saw the /clear, wrote no restore file and was read (E8-D28)',
   afterClear(didNotTake).length >= 2 && afterClear(didNotTake).every((c) => c.session === didNotTake.session) && !fs.existsSync(restoreFile(didNotTake.pane)) &&
-  afterClear(noRestore).length >= 2 && afterClear(noRestore).every((c) => c.session === `${noRestore.session}-new`), JSON.stringify(afterClear(didNotTake).map((c) => c.session)))
+  afterClear(noRestore).length >= 2 && afterClear(noRestore).every((c) => c.session === `${noRestore.session}-new`) &&
+  lookupLost.calls.filter((c) => c.args[1] === 'get').length >= 2 && !fs.existsSync(restoreFile(lookupLost.pane)) &&
+  JSON.parse(fs.readFileSync(path.join(lookupLost.dir, 'shim.json'), 'utf8')).clearedAt > 0, JSON.stringify(afterClear(didNotTake).map((c) => c.session)))
 clause('clause 3d — without the typer: the late-session shim answered the old session after /clear at least once, and the silent one wrote no reply',
   late.calls.filter((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session).length === 3 &&
   fs.readFileSync(silent.newTranscript, 'utf8') === '' && fs.readFileSync(normal.newTranscript, 'utf8').includes('"assistant"'), 'shim fixtures wrong')
