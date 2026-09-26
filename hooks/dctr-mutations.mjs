@@ -2058,8 +2058,12 @@ const MUTATIONS = [
     to: "          if (typeof value === 'string') return value\n" },
   { name: "the gauge's warning says the current step is finished first, a term nothing defines (DR4-N1)", file: "dctr-lib.mjs",
     clause: "clause 1t",
-    from: "    'The work in hand is finished first, and no new wave, round or repair is started.',",
+    from: "    'No new wave, round or repair is started.',\n    'The seats already out are waited for.',\n    'Their returns are integrated and their record lines written.',",
     to: "    'The current step is finished first.'," },
+  { name: "the gauge's warning drops the wait for the seats already out (DR6-B1)", file: "dctr-lib.mjs",
+    clause: "clause 1t2",
+    from: "    'The seats already out are waited for.',\n",
+    to: "" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

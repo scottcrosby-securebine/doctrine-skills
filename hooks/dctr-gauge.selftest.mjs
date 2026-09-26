@@ -144,16 +144,43 @@ const ctx = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, ti
 const ctxLong = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, tierText: '120000', facts: ['y'.repeat(3000)] })
 clause('clause 1t — gaugeContext: the warning names used tokens, the window, the percent, the tier, doctrine step 5 as the rule\'s source and each action, both ready-line placements included, as facts, under the limit (SC8, SC14)',
   ctx.includes('130000') && ctx.includes('200000') && ctx.includes('65%') && ctx.includes('120000') && ctx.includes('window unknown') &&
-  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && ctx.includes('The work in hand is finished first, and no new wave, round or repair is started.') && !/current step/.test(ctx) &&
+  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && ['No new wave, round or repair is started.', 'The seats already out are waited for.', 'Their returns are integrated and their record lines written.'].every((t) => ctx.includes(t)) && !/current step/.test(ctx) &&
   /step 5/.test(ctx) && /`- auto-cycle: ready` is appended to the record/.test(ctx) && /last line of the assistant message/.test(ctx) &&
   !/\b(you must|must|system:|SYSTEM)\b/.test(ctx) && ctx.length <= GAUGE_MAX && ctxLong.length <= GAUGE_MAX && ctxLong.includes('auto-cycle: ready'),
   ctx)
+// The class check (DR6-B1): the warning's actions are stated in hub step 5 and restated in the gauge's warning, and each
+// hub change has left the warning stale. Read the hub's sentence on the warning and require the warning to carry every
+// action it names, in its order. Each action is matched by a key phrase both texts carry, never by whole sentences, so
+// the two may word an action differently but neither may drop or reorder one. A hub sentence lacking a key fails too,
+// since then the table no longer describes the hub. The skill is read at ../skills, which the mutation gate links.
+const HUB = fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine', 'SKILL.md'), 'utf8')
+const HUB_WARNING = /On the gauge's warning while auto-cycle is on,[^]*?as the message's last line\./.exec(HUB)?.[0] ?? ''
+const WARNING_KEYS = ['no new wave, round or repair', 'seats already out', 'their returns', 'record lines', 'state line', 'doctrine-handoff', 'ready line']
+/** The keys `text` lacks or holds out of order, lowercased; empty when it carries every one in order. */
+const keysMissing = (text) => {
+  const t = text.toLowerCase(), bad = []
+  let at = -1
+  for (const k of WARNING_KEYS) { const i = t.indexOf(k, at + 1); if (i < 0) bad.push(k); else at = i }
+  return bad
+}
+const warningOf = (c) => c.slice(0, c.indexOf('doctrine gauge facts:') < 0 ? c.length : c.indexOf('doctrine gauge facts:'))
+const B853 = warningOf(ctx).replace(/No new wave, round or repair is started\. The seats already out are waited for\. Their returns are integrated and their record lines written\./,
+  'The work in hand is finished first, and no new wave, round or repair is started.')
+clause('clause 1t2 — the gauge\'s warning carries every action hub step 5 names on the warning, in the hub\'s order, matched by one key phrase per action (no new wave, round or repair; seats already out; their returns; record lines; state line; doctrine-handoff; ready line) (DR6-B1)',
+  HUB_WARNING !== '' && keysMissing(HUB_WARNING).length === 0 && keysMissing(warningOf(ctx)).length === 0,
+  `hub lacks ${JSON.stringify(keysMissing(HUB_WARNING))}, warning lacks ${JSON.stringify(keysMissing(warningOf(ctx)))}`)
+clause('clause 1t3 — the class check trips on the warning as it stood before the seats were waited for: it lacks the seats already out (DR6-B1)',
+  B853 !== warningOf(ctx) && B853.includes('The work in hand is finished first') && keysMissing(B853).includes('seats already out'), B853)
+
 const ctxU = gaugeContext({ warn: true, used: null, window: null, tier: null, tierText: 'unknown', facts: [] })
 clause('clause 1u — gaugeContext: an unknown warning says the reading is unknown and never states a token count',
   /unknown/.test(ctxU) && !/\b\d{4,}\b/.test(ctxU) && ctxU.includes('auto-cycle: ready'), ctxU)
 const ctxUW = gaugeContext({ warn: true, used: null, window: W, tier: null, tierText: 'unknown', facts: [] })
 clause('clause 1u2 — gaugeContext: an unknown warning names the window when the bridge knows it, and unknown otherwise (SC8)',
   ctxUW.includes('200000-token context window') && /context window of unknown size/.test(ctxU), `${ctxUW} | ${ctxU}`)
+
+clause('clause 3t — without the gauge: the hub sentence the class check read opens on the warning and tells the agent to wait for the seats already out',
+  HUB_WARNING.startsWith("On the gauge's warning while auto-cycle is on,") && /wait for the seats already out/.test(HUB_WARNING), HUB_WARNING.slice(0, 300))
 
 // ---------------------------------------------------------------- clause 2: the hook end to end
 
