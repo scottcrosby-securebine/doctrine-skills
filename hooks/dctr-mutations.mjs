@@ -2015,9 +2015,17 @@ const MUTATIONS = [
     clause: "clause 1p",
     from: "handle\\\\s+(\\\\S.*?)(?:",
     to: "handle\\\\s+(\\\\S+)(?:" },
+  { name: "project status reads an auto-cycle paused line as the record's state line (E8-D16)", file: "dctr-project.mjs",
+    clause: "clause 2g2",
+    from: "raw.map((l) => l.trim()).filter((l) => STATE_LINE.test(l))",
+    to: "raw.map((l) => l.trim()).filter((l) => STATE_LINE.test(l) || /^- auto-cycle paused:/.test(l))" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
+// Every copy sits one level under `work`, so a suite reading a skill's text at ../skills (the cycle suite reads
+// doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets skills/, so a link will do;
+// rmSync below removes the link, never what it points at.
+fs.symlinkSync(path.join(HERE, '..', 'skills'), path.join(work, 'skills'))
 const execFileAsync = promisify(execFile)
 
 /** How many mutations run at once. Each works on its own copy of the tree and touches nothing

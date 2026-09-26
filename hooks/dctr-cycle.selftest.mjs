@@ -385,6 +385,40 @@ clause('clause 2g — every paused line leaves the record\'s last state line as 
   pausedFx.every(({ f, name }) => parseRecord(fs.readFileSync(f.record, 'utf8')).state.raw === (name === 'Blocked' ? '- State: Blocked. Q2 waits on Scott' : '- State: Open')),
   pausedFx.map(({ f }) => parseRecord(fs.readFileSync(f.record, 'utf8')).state.raw).join('; '))
 
+// E8-D16, Q-B: the ambiguous-first-action pause is written by the agent from doctrine-resume's template, so no hook
+// fixture writes it. The template is read verbatim from the skill (the mutation gate links skills/ beside its copies),
+// instantiated, and put to each reader over an Open and a Blocked record. The control is the same template written as
+// a state line, which status must then read differently: clause 3a18.
+const TEMPLATE = /`(- auto-cycle paused: first action ambiguous: <[^>`]+>)`/.exec(fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine-resume', 'SKILL.md'), 'utf8'))?.[1] ?? null
+const SECTION5 = 'Run node --test test/limiter.test.js and record its result.'
+const projectCli = path.join(import.meta.dirname, 'dctr-project.mjs')
+const openRecords = (root) => {
+  const out = spawnSync('node', [projectCli, 'status', root], { encoding: 'utf8', env: { ...process.env, HERDR_ENV: '' } }).stdout.split('\n')
+  const i = out.indexOf('open records:')
+  return i < 0 ? null : out.slice(i + 1, out.findIndex((l, j) => j > i && !l.startsWith('  '))).join('\n')
+}
+/** Every reader's view of `template` instantiated and appended to an Open and a Blocked record. */
+const firstActionPause = (template, tag) => ['- State: Open', '- State: Blocked. Q2 waits on Scott'].map((stateLine, k) => {
+  const root = path.join(tmp, `first-action-${tag}-${k}`), file = path.join(root, 'records', 'phase.md')
+  write(path.join(root, 'docs', 'PROJECT.md'), '# P\n\nState: Ruled\nRecords: records\n')
+  const base = ['# e8 phase', stateLine, '- auto-cycle: on cap 10 tier 60%', '- auto-cycle: cycle 1 tree 9f2c1ab'].join('\n') + '\n'
+  write(file, base)
+  const before = openRecords(root)
+  const line = template.replace(/<[^>]+>/, SECTION5)
+  fs.appendFileSync(file, line + '\n')
+  const es = parseRecord(fs.readFileSync(file, 'utf8')).entries, last = es.at(-1), standing = standingPauses(es)
+  return {
+    line, before, after: openRecords(root),
+    paused: last?.kind === 'auto-cycle' && last.sub === 'paused' && last.reason === `first action ambiguous: ${SECTION5}`,
+    standing: standing.length === 1 && standing[0].line === last.line,
+    action: standing.length === 1 && pauseAction(standing[0].reason) === 'answer in the pane' && pauseActionAt(standing[0], es) === 'answer in the pane',
+  }
+})
+const fap = TEMPLATE && firstActionPause(TEMPLATE, 'template')
+const fapOk = (rs) => rs.every((x) => x.paused && x.standing && x.action && x.before && x.after === x.before)
+clause('clause 2g2 — doctrine-resume\'s ambiguous-first-action template, instantiated: parsed as a paused line, status lists the Open and the Blocked phase as before, and it stands as a pause whose action is an answer in the pane (E8-D16, Q-B)',
+  Boolean(fap) && fapOk(fap), JSON.stringify(fap ?? `no template in the resume skill`))
+
 // E8-D26: three stop reasons alert once each.
 const alertBad = ['Blocked', 'round alarm with no ruling', 'handoff before the warning'].map((n) => negs.find((x) => x.name === n)).filter(({ f, r }) => {
   const m = metas(f), t = toasts(f), p = paused(f)[0].slice('- auto-cycle paused: '.length)
@@ -1067,6 +1101,11 @@ clause('clause 3a16 — without the hook: the event-enumeration record, as resto
   evHead.includes('- State: Open') && evHead.some((l) => /^- auto-cycle: on /.test(l)) && !evHead.some((l) => /^- auto-cycle: warned|^- auto-cycle paused: /.test(l)) &&
   !fs.existsSync(path.join(stateDir(ev.session), 'gauge.json')) && !evQ.startsWith('- auto-cycle paused: ') && evQ.split('`').length - 1 === 4 &&
   (fs.statSync(path.join(trip, 'herdr')).mode & 0o111) !== 0, evHead.join(' | '))
+const fapControl = TEMPLATE && firstActionPause(TEMPLATE.replace('auto-cycle paused:', 'State: Paused.'), 'control')
+clause('clause 3a18 — the control: the same template written as `State: Paused` is read by none of clause 2g2\'s readers as that pause, and status no longer lists either phase as it did (E8-D16)',
+  Boolean(fapControl) && !fapOk(fapControl) && fapControl.every((x) => !x.paused && /^  e8 phase: - State: (Open|Blocked)/.test(x.before) && x.after === '  (none)'),
+  JSON.stringify(fapControl))
+
 clause('clause 3a17 — without the hook: the linked hooks directory is a symlink whose real path is this suite\'s own',
   fs.lstatSync(linkHooks).isSymbolicLink() && fs.realpathSync(linkHooks) === fs.realpathSync(import.meta.dirname) && linkHooks !== import.meta.dirname, linkHooks)
 clause('clause 3a3 — without the hook: the bookkeeping fixture committed a change to every excluded path, and the other a real run-state file too',
