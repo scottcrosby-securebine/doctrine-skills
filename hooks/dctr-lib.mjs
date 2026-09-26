@@ -1252,8 +1252,9 @@ export function typerStep(o) {
   return o.stage !== 'clear' && !o.cycled && step.act !== 'abort' && took ? { ...step, cycle: true } : step
 }
 
-/** The session herdr reported, or null when the reading failed, is missing or names none. */
-const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' ? pane.session : null)
+/** The session herdr reported, or null when the reading failed, is missing or names none: a session is a non-empty
+ *  string, and an empty one is no answer (RT2-B1). */
+const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' && pane.session !== '' ? pane.session : null)
 
 function typerAct(o) {
   const t = o.times || TYPER_TIMES
@@ -1280,7 +1281,7 @@ function typerAct(o) {
     return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   }
   // A reply with no Claude session is a failed lookup, never a changed session (ST2).
-  if (!o.pane || o.pane.error || typeof o.pane.session !== 'string') return pause('R17', R17_WHY.lookup)
+  if (paneSession(o.pane) === null) return pause('R17', R17_WHY.lookup)
   if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
   if (!READY_STATUSES.includes(o.pane.status)) {
     return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)

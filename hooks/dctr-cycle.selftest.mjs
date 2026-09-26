@@ -420,6 +420,14 @@ const fapOk = (rs) => rs.every((x) => x.paused && x.standing && x.action && x.be
 clause('clause 2g2 — doctrine-resume\'s ambiguous-first-action template, instantiated: parsed as a paused line, status lists the Open and the Blocked phase as before, and it stands as a pause whose action is an answer in the pane (E8-D16, Q-B)',
   Boolean(fap) && fapOk(fap), JSON.stringify(fap ?? `no template in the resume skill`))
 
+// RT2-B1: an empty session string is no session. herdr answering the Stop with `agent_session.value: ''` takes the
+// failed-lookup path, R17, and never reads as another session (R12).
+const emptySess = fixture('empty-session')
+const emptyRun = run(emptySess, {}, { SHIM_SESSION: '' })
+clause('clause 2c18 — herdr answering the Stop with an empty session string: paused with R17 as a failed lookup, never R12, and no typer launched (RT2-B1)',
+  JSON.stringify(paused(emptySess)) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]' && !launched(emptyRun) &&
+  reads(emptySess) === 1 && !fs.existsSync(emptySess.stubLog), `${JSON.stringify(paused(emptySess))} ${emptyRun.msg} ${emptyRun.err}`)
+
 // E8-D26: three stop reasons alert once each.
 const alertBad = ['Blocked', 'round alarm with no ruling', 'handoff before the warning'].map((n) => negs.find((x) => x.name === n)).filter(({ f, r }) => {
   const m = metas(f), t = toasts(f), p = paused(f)[0].slice('- auto-cycle paused: '.length)
@@ -1106,6 +1114,10 @@ const fapControl = TEMPLATE && firstActionPause(TEMPLATE.replace('auto-cycle pau
 clause('clause 3a18 — the control: the same template written as `State: Paused` is read by none of clause 2g2\'s readers as that pause, and status no longer lists either phase as it did (E8-D16)',
   Boolean(fapControl) && !fapOk(fapControl) && fapControl.every((x) => !x.paused && /^  e8 phase: - State: (Open|Blocked)/.test(x.before) && x.after === '  (none)'),
   JSON.stringify(fapControl))
+
+const emptyReply = JSON.parse(execFileSync(path.join(bin, 'herdr'), ['pane', 'get', 'w9:p1'], { env: { ...baseEnv, SHIM_LOG: path.join(tmp, 'empty-probe.log'), SHIM_SESSION: '' }, encoding: 'utf8' }))
+clause('clause 3a19 — without the hook: the shim, given an empty session, answers a pane whose agent_session.value is the empty string',
+  emptyReply.result.pane.agent_session?.value === '', JSON.stringify(emptyReply))
 
 clause('clause 3a17 — without the hook: the linked hooks directory is a symlink whose real path is this suite\'s own',
   fs.lstatSync(linkHooks).isSymbolicLink() && fs.realpathSync(linkHooks) === fs.realpathSync(import.meta.dirname) && linkHooks !== import.meta.dirname, linkHooks)

@@ -80,7 +80,8 @@ try {
     return { error: true }
   }
   // A restore file that cannot be read or parsed, a half-written one included, is no restore yet: the typer waits for
-  // it and then pauses with R14, and never resumes on it.
+  // it, never resumes on it, and past the wait pauses as typerStep decides from herdr's reading: R18 on the old
+  // session, R14 on another, R17 on no reading.
   const readRestore = () => {
     try {
       const r = JSON.parse(fs.readFileSync(restoreFile(a.pane), 'utf8'))
