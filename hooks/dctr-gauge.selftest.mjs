@@ -144,7 +144,7 @@ const ctx = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, ti
 const ctxLong = gaugeContext({ warn: true, used: 130000, window: W, tier: 120000, tierText: '120000', facts: ['y'.repeat(3000)] })
 clause('clause 1t — gaugeContext: the warning names used tokens, the window, the percent, the tier, doctrine step 5 as the rule\'s source and each action, both ready-line placements included, as facts, under the limit (SC8, SC14)',
   ctx.includes('130000') && ctx.includes('200000') && ctx.includes('65%') && ctx.includes('120000') && ctx.includes('window unknown') &&
-  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && /current step/.test(ctx) &&
+  /state line/.test(ctx) && /doctrine-handoff/.test(ctx) && ctx.includes('auto-cycle: ready') && ctx.includes('The work in hand is finished first, and no new wave, round or repair is started.') && !/current step/.test(ctx) &&
   /step 5/.test(ctx) && /`- auto-cycle: ready` is appended to the record/.test(ctx) && /last line of the assistant message/.test(ctx) &&
   !/\b(you must|must|system:|SYSTEM)\b/.test(ctx) && ctx.length <= GAUGE_MAX && ctxLong.length <= GAUGE_MAX && ctxLong.includes('auto-cycle: ready'),
   ctx)

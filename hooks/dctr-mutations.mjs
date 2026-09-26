@@ -2056,6 +2056,10 @@ const MUTATIONS = [
     clause: "clause 2c18",
     from: "          if (typeof value === 'string' && value !== '') return value\n",
     to: "          if (typeof value === 'string') return value\n" },
+  { name: "the gauge's warning says the current step is finished first, a term nothing defines (DR4-N1)", file: "dctr-lib.mjs",
+    clause: "clause 1t",
+    from: "    'The work in hand is finished first, and no new wave, round or repair is started.',",
+    to: "    'The current step is finished first.'," },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

@@ -828,7 +828,7 @@ export function gaugeContext({ warn = false, used, window, tier, tierText, facts
       ? `doctrine gauge: this session has used ${used} tokens of a ${win ? `${windowText} (${Math.round((used / win) * 100)}%)` : windowText}, reaching the auto-cycle tier ${tierText}${Number.isFinite(tier) && String(tier) !== tierText ? ` (${tier} tokens)` : ''}.`
       : `doctrine gauge: three context readings in a row were unknown, so the used tokens of a ${windowText} are unknown and the auto-cycle warning fires as tier unknown.`,
     'Doctrine step 5 states what follows this warning while auto-cycle is on.',
-    'The current step is finished first.',
+    'The work in hand is finished first, and no new wave, round or repair is started.',
     'The record\'s state line is written next.',
     'doctrine-handoff is run after that.',
     'The ready line `- auto-cycle: ready` is appended to the record.',
