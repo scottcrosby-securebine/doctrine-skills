@@ -2,10 +2,6 @@
 
 The coding wrapper: it takes a feature, a spec or a set of tickets and runs the build through the doctrine's phases, waves and gate, with a code review and an adversary that did not write the code standing between the work and delivery.
 
-![A build split into phases, each phase fanning out into parallel wave seats in their own worktrees, then closing through native checks, a code review pinned to the phase's starting commit, a red team, and a simplification pass before one clean pass certifies it.](doctrine-code.png)
-
-The figure shows the shape of one phase: the requirements file at the top, the wave seats under it, and the gate they all funnel into.
-
 ## When to use it, and when not
 
 Use it when you want general coding work done with the doctrine: backend, frontend or UI, building features, wiring modules, implementing a spec or tickets, with parallel agents, red-teaming and looping. The README's table puts it as "Features, specs and tickets."
@@ -41,7 +37,7 @@ The wrapper maps its flow onto the hub's steps like this.
 
 **Phases and waves** (doctrine step 2): the plan is split into phases, and independent slices run as parallel waves under the hub's isolation rule. Disjoint files are the floor, not the bar. Two agents on separate component files sharing one `.next` directory and one dev port both keep answering 200 while the second build overwrites the first, so each mutating seat gets its own worktree, output directory and port, with dependencies hardlinked rather than symlinked.
 
-**Phase exit** (doctrine steps 3 to 6): native checks, then `matts-code-review`, then the red team, then the simplification review, then the loop to the hub's exit condition. The agent proposes a gate to you rather than taking one, whatever its reach search found; where you choose the hub's smaller gate it is native checks and the red team with any blocking finding repaired and re-reviewed, with the record naming the gate, the reach evidence, the revision that evidence was bound to, and your choice. The next section says what fills each of those slots.
+**Phase exit** (doctrine steps 3 to 6): the simplification review, finished and committed before the pass's native checks start, then native checks, then `matts-code-review`, then the red team, then the loop to the hub's exit condition, with each repair simplified before the pass that re-checks it. The agent proposes a gate to you rather than taking one, whatever its reach search found; where you choose the hub's smaller gate it is native checks and the red team with any blocking finding repaired and re-reviewed, with the record naming the gate, the reach evidence, the revision that evidence was bound to, and your choice. The next section says what fills each of those slots.
 
 **Delivery** (doctrine step 7): commit, then push and open a PR only where your repo's norm says to or you have said to. Where nothing documents a norm, the agent commits locally and asks. The agent reads that norm before wave 1, not after the commits exist, because what a gate pass reads must already be committed on the branch it reviews.
 
@@ -79,7 +75,7 @@ You have a spec for a CSV export: a new endpoint that writes the current filtere
 
 The agent reads the spec and asks two things it leaves open: whether the export should honour the list's active filter, and where the test seams are. You say yes to the filter and agree two seams, the serializer and the HTTP handler. It writes both answers to `.scratch/csv-export-requirements.md`, opens the record beside it, records your request verbatim as the anchor, and reads your CLAUDE.md, which says work lands as a PR. It pins the fixed point: `git rev-parse HEAD` returns `7c1d2e9`.
 
-Wave 1 is two seats, one for the endpoint and one for the button, each in its own worktree on its own port, each prompt carrying its seam and the UI reuse block with your dev server command in place of the `run` skill. Each returns a diff and its test output, and the button seat returns the grep it ran for a sibling export button. The agent applies both diffs to the phase branch, commits, and re-runs the checks itself.
+Wave 1 is two seats, one for the endpoint and one for the button, each in its own worktree on its own port, each prompt carrying its seam and the UI reuse block with your dev server command in place of the `run` skill. Each returns a diff and its test output, and the button seat returns the grep it ran for a sibling export button. The agent applies both diffs to the phase branch and commits. `/ponytail-review` runs on the integrated diff and finds nothing to delete. The agent then re-runs the checks itself.
 
 Round 1 opens on that revision. Native checks: the lint, typecheck and test commands your CLAUDE.md names, all green. The real-environment run: the dev server up, the endpoint hit over the wire, the file opened and read. `matts-code-review`, fixed point `7c1d2e9`, spec path passed, returns two things: a rename suggestion on the serializer, declined with a reason and graded non-blocking, and a Spec finding that the export ignores the active filter, blocking. The red team, `codex:codex-rescue`, returns one blocking finding of its own, that the handler returns 200 with an empty body when the list is empty, verified from source, and lists three attacks that did not land. Round 1 closes with 2 blockers.
 

@@ -34,8 +34,9 @@ point of rule 6.
 6. **Loop** until one full pass comes back clean with no blocking finding left over from an
    earlier pass. Two alarms stop the loop
    and put the decision to you rather than spending your budget without telling you.
-7. **Cut what nobody asked for, then deliver** by whatever route your project normally ships work,
-   and say whether what shipped is what the clean pass certified.
+7. **Cut what nobody asked for** before the pass that certifies the work, so the cut is inside what
+   that pass checked, **then deliver** by whatever route your project normally ships work, and say
+   whether what shipped is what the clean pass certified.
 
 **What it touches.** It edits your working tree, the way Claude Code already does. It commits the way
 your repo does, and where your repo documents no norm the coding workflow commits locally and asks. It

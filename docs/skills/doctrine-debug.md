@@ -2,10 +2,6 @@
 
 Diagnosing and fixing one reported defect under the doctrine: a feedback loop first, parallel hypothesis probes, a red team on the diagnosis before any fix is written, and a gate on the fix.
 
-![Two phases in sequence: a diagnosis phase of hypothesis waves that exits on a red-teamed root-cause claim, then a fix phase that loops through the feedback loop, native checks, review and red team until one pass comes clean.](doctrine-debug.png)
-
-The figure shows the two phases and where the gate sits between them.
-
 ## When to use it, and when not
 
 Use it when you can point at something that is broken, throwing, failing or slow, and you want it diagnosed and fixed rather than only found. The trigger in the skill's description is a report of a defect plus a request to fix it with the doctrine.
@@ -54,7 +50,7 @@ The agent builds the loop. It runs your command, gets the trace, and trims it to
 
 The red team gets the symptom, the loop command, and the claim, and returns two counter-claims. One says the schema also changed; the agent checks the migration history from source and refutes it, with the evidence written in the record. The other is an improvement suggestion, filed non-blocking. The claim survives, and the agent writes the one-paragraph root-cause statement beside the fix: symptom, loop command, cause, the source lines that show it. The diagnosis phase is Exited.
 
-The fix phase opens. The agent records the SHA it started from, writes the regression test (which fails), then the minimal fix (the test passes, the loop is green). Native checks run: the project's lint, typecheck and full test suite, each in the form the repo documents. `matts-code-review` runs from the pinned SHA with the root-cause paragraph as its spec. The red team runs on the diff. Round 1 returns one blocking finding: the fix handles the new date format but a second call site three files over still parses the old way. The class question turns up that site and no others, the repair covers both, and round 2 runs the full gate again on the repaired revision, with the repair diff beside the full one. It comes clean, and the real run, the export command end to end on a copy of the data, is on record for that revision. The simplification review had already run before round 2 and removed a helper the first repair introduced.
+The fix phase opens. The agent records the SHA it started from, writes the regression test (which fails), then the minimal fix (the test passes, the loop is green). The simplification review runs on the fix and finds nothing to delete. Native checks run: the project's lint, typecheck and full test suite, each in the form the repo documents. `matts-code-review` runs from the pinned SHA with the root-cause paragraph as its spec. The red team runs on the diff. Round 1 returns one blocking finding: the fix handles the new date format but a second call site three files over still parses the old way. The class question turns up that site and no others, the repair covers both, and round 2 runs the full gate again on the repaired revision, with the repair diff beside the full one. It comes clean, and the real run, the export command end to end on a copy of the data, is on record for that revision. The simplification review had already run before round 2 and removed a helper the first repair introduced.
 
 The report opens with the gate line, in the form the README shows:
 
