@@ -27,10 +27,10 @@ A long file's middle is cut from a single read on Codex.
 
 The red team here is Claude, run through the Claude Code CLI in headless mode. A Codex subagent cannot change model provider, so a `spawn_agent` seat is never a red team from the other family.
 
-**Run it.** Write the assembled brief to a file, and run the seat from the shell with only read tools allowed:
+**Run it.** Write the assembled brief to a file. Run the seat from the shell with its tool set limited to read-only tools, so it has no tool that writes, runs commands or dispatches:
 
 ```
-claude -p --strict-mcp-config --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" --disallowedTools "Write,Edit,Bash,NotebookEdit,Agent,Task,Workflow,Skill" < <brief-file> > <out-file> 2>&1; echo "exit=$?" > <out-file>.result
+claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file> > <out-file> 2>&1; echo "exit=$?" > <out-file>.result
 ```
 
 - **Paths.** `<out-file>` is a new path for each dispatch, with the dispatch time in its name.
