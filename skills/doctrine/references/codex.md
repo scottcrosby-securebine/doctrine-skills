@@ -41,10 +41,10 @@ Then wait on `<out-file>.result` as the table says, which the launcher writes wi
 
 **Where it survives.** On Linux, Codex's sandbox runs each shell call in its own process namespace, which ends when the call returns, and the detached seat ends with it. No result file appears, and the seat fails at its deadline.
 
-- The seat ran to completion from a Codex session started with `--dangerously-bypass-approvals-and-sandbox` and no managed-network requirement.
+- The seat runs to completion in a Codex session started with `--dangerously-bypass-approvals-and-sandbox` and no managed-network requirement.
 - `--sandbox danger-full-access` avoids the per-call sandbox only in that same unmanaged configuration.
 - With a managed network configured, the sandbox can still apply.
-- On macOS the sandbox works differently, and this seat has not been run there.
+- On macOS the sandbox works differently, and whether the seat survives there is unknown.
 
 Where the seat cannot run, the hub's Fallbacks row gives the same-model substitute, and the phase loses the cross-model red team.
 
