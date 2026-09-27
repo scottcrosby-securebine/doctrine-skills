@@ -508,12 +508,14 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   check("and a record in another workspace's state directory is not chosen, though newer", runs.length === 1 && !runs[0].includes(foreignJob), runs.join(' | '))
 
   // The codex plugin writes under the Claude Code config dir, which is CLAUDE_CONFIG_DIR when set.
-  // A job that exists only there must be the one the watcher follows; HOME holds the older jobs above.
+  // A job that exists only there must be the one the watcher follows, though HOME holds a newer running job for this workspace.
   const cfg = path.join(tmp, 'cfg')
   const cfgJobs = path.join(cfg, 'plugins', 'data', 'codex-openai-codex', 'state', 'doctrine-skills-0123abcd', 'jobs')
   fs.mkdirSync(cfgJobs, { recursive: true })
   const cfgJob = path.join(cfgJobs, 'task-cfg.json')
   fs.writeFileSync(cfgJob, JSON.stringify({ id: 'task-cfg', workspaceRoot: WS, createdAt: new Date(now - 1000).toISOString(), status: 'running', pid: null, logFile: path.join(cfgJobs, 'task-cfg.log') }))
+  check('the config-dir fixture really puts the job only under the config dir, with a newer running job for this workspace under HOME',
+    !fs.readdirSync(jobs).includes('task-cfg.json') && R(runningJob).status === 'running' && R(runningJob).workspaceRoot === WS && Date.parse(R(runningJob).createdAt) > Date.parse(R(cfgJob).createdAt))
   reset(); codexSeat()
   run({ hook_event_name: 'SubagentStop', agent_id: 'cx-1', agent_type: 'codex:codex-rescue', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS }, { HOME: home, CLAUDE_CONFIG_DIR: cfg })
   const cfgRuns = callLines(/^pane run w1:s1 /)
