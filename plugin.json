@@ -1,0 +1,32 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "doctrine",
+  "version": "2.10.1",
+  "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming by a second model family, looping until confident, ruthless simplicity. Fourteen skills: a shared doctrine, wrappers for coding, web design, debugging, auditing, documentation sweeps, deep research, document writing and project tracking, and skills for session continuity and interactive terminal panes.",
+  "author": {
+    "name": "Scott Crosby"
+  },
+  "homepage": "https://github.com/scottcrosby-securebine/doctrine-skills",
+  "repository": "https://github.com/scottcrosby-securebine/doctrine-skills",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "workflow",
+    "red-team",
+    "parallel-agents",
+    "coding",
+    "web-design",
+    "frontend",
+    "accessibility",
+    "debugging",
+    "audit",
+    "documentation",
+    "research",
+    "writing"
+  ],
+  "extensions": {
+    "com.openai": {
+      "hooks": {}
+    }
+  }
+}

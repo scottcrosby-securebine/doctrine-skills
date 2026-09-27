@@ -168,6 +168,8 @@ too: measure it on your own code, because each of those results was specific to 
 
 ## Install
 
+In Claude Code:
+
 ```text
 /plugin marketplace add scottcrosby-securebine/doctrine-skills
 /plugin install doctrine@doctrine-skills
@@ -175,6 +177,13 @@ too: measure it on your own code, because each of those results was specific to 
 
 If the install message says to, run `/reload-plugins` or restart. A freshly installed plugin does not
 always load into the session that installed it.
+
+In Codex CLI:
+
+```text
+codex plugin marketplace add scottcrosby-securebine/doctrine-skills
+codex plugin add doctrine@doctrine-skills
+```
 
 ## Try it on one file
 

@@ -126,6 +126,7 @@ jobs:
         run: |
           python3 -m json.tool .claude-plugin/plugin.json > /dev/null
           python3 -m json.tool .claude-plugin/marketplace.json > /dev/null
+          python3 -m json.tool plugin.json > /dev/null
 
       - name: workflow script syntax gate
         # Not `node --check`: the Workflow tool wraps the body in an async function, so the

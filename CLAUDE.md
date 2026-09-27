@@ -19,6 +19,7 @@ node tools/doc-check.mjs              # prose gate over every .md under skills/;
 node tools/doc-check.mjs --selftest   # its three-clause tamper test, which lives in tools/doc-check.selftest.mjs
 python3 -m json.tool .claude-plugin/plugin.json       # after editing either manifest
 python3 -m json.tool .claude-plugin/marketplace.json
+python3 -m json.tool plugin.json                      # the Codex (Agent Plugins) manifest; its name and version match .claude-plugin/plugin.json
 node tools/herdr-lint.mjs           # the ONE class this repo kept re-finding by review round: a herdr reply whose failure OR emptiness is read as an answer that authorizes destruction; exit 0 clean, 1 on any finding
 node tools/herdr-lint.mjs --selftest  # its three-clause tamper test, which lives in tools/herdr-lint.selftest.mjs; exit 2 if the sidecar is missing
 node hooks/dctr-seat.selftest.mjs   # three-clause tamper test for the seat hook's pure decisions
