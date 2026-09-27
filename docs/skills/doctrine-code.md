@@ -2,10 +2,6 @@
 
 The coding wrapper: it takes a feature, a spec or a set of tickets and runs the build through the doctrine's phases, waves and gate, with a code review and an adversary that did not write the code standing between the work and delivery.
 
-![A build split into phases, each phase fanning out into parallel wave seats in their own worktrees, then closing through native checks, a code review pinned to the phase's starting commit, a red team, and a simplification pass before one clean pass certifies it.](doctrine-code.png)
-
-The figure shows the shape of one phase: the requirements file at the top, the wave seats under it, and the gate they all funnel into.
-
 ## When to use it, and when not
 
 Use it when you want general coding work done with the doctrine: backend, frontend or UI, building features, wiring modules, implementing a spec or tickets, with parallel agents, red-teaming and looping. The README's table puts it as "Features, specs and tickets."

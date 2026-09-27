@@ -2,10 +2,6 @@
 
 Diagnosing and fixing one reported defect under the doctrine: a feedback loop first, parallel hypothesis probes, a red team on the diagnosis before any fix is written, and a gate on the fix.
 
-![Two phases in sequence: a diagnosis phase of hypothesis waves that exits on a red-teamed root-cause claim, then a fix phase that loops through the feedback loop, native checks, review and red team until one pass comes clean.](doctrine-debug.png)
-
-The figure shows the two phases and where the gate sits between them.
-
 ## When to use it, and when not
 
 Use it when you can point at something that is broken, throwing, failing or slow, and you want it diagnosed and fixed rather than only found. The trigger in the skill's description is a report of a defect plus a request to fix it with the doctrine.
