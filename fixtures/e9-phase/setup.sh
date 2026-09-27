@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds one pristine copy of the E9 fixture phase: a git repo holding app/, with the phase
 # record at .doctrine/records/slug.md, excluded from version control. Prints the fixed point.
-# Usage: fixtures/e9-phase/setup.sh <new-empty-directory>
+# Usage: sh fixtures/e9-phase/setup.sh <new-empty-directory>
 set -eu
 dest=${1:?usage: setup.sh <new-empty-directory>}
 here=$(cd "$(dirname "$0")" && pwd)
