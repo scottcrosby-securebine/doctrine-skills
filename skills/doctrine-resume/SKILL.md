@@ -63,8 +63,8 @@ state line at all), invoke neither, whatever the kickoff says.
 
 When no record was read, because the handoff names none or its path resolves
 nowhere (say which in the Handoff line), fall back to the kickoff: if the
-kickoff line's `state:` is `open` (case-insensitive), invoke the `doctrine:doctrine` skill with the Skill
-tool before any other call: the handoff describes the doctrine as it stood when
+kickoff line's `state:` is `open` (case-insensitive), load the `doctrine:doctrine` skill by name
+before any other call: the handoff describes the doctrine as it stood when
 it was written, and a session that only reads about the doctrine never loads it.
 `open` means a doctrine phase is open; any other value means do not. If a skill
 named in this step is not installed, say so in the Handoff line and continue;

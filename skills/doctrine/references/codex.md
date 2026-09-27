@@ -6,7 +6,7 @@ The hub and the wrappers name actions. This file says how each is done on Codex 
 
 A long file's middle is cut from a single read on Codex.
 
-- Read the hub, this file, and any skill or artifact longer than one read's output in chunks of at most 8,000 bytes, for example `tail -c +<offset> <file> | head -c 8000` with the offset stepping by 8,000, until you have read its last byte. Size a chunk by bytes, not lines: one line of the hub runs past 3,000 characters.
+- Read the hub, this file, and any skill or artifact longer than one read's output in chunks of at most 4,000 characters, cut on character boundaries so no character is split: for example `python3 -c 'import sys; t=open(sys.argv[1], encoding="utf-8").read(); o=int(sys.argv[2]); sys.stdout.write(t[o:o+4000])' <file> <offset>`, with the offset stepping by 4,000 until it passes the file's length. Size a chunk by characters, not lines: one line of the hub runs past 3,000 characters.
 - An injected skill body is cut at 8,000 bytes. When a skill is injected, read its SKILL.md in full from the path the skill list gives.
 
 ## Actions
@@ -27,14 +27,16 @@ A long file's middle is cut from a single read on Codex.
 
 The red team here is Claude, run through the Claude Code CLI in headless mode. A Codex subagent cannot change model provider, so a `spawn_agent` seat is never a red team from the other family.
 
-**Run it.** Write the assembled brief to a file. Run the seat from the shell with its tool set limited to read-only tools, so it has no tool that writes, runs commands or dispatches:
+**Run it.** Write the assembled brief to a file. Run the seat in the background from the shell, with its tool set limited to read-only tools and those tools allowed, so it has no tool that writes, runs commands or dispatches:
 
 ```
-claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file> > <out-file> 2>&1; echo "exit=$?" > <out-file>.result
+( claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file> > <out-file> 2>&1; echo "exit=$?" > <out-file>.result ) &
 ```
+
+Then wait on `<out-file>.result` as the table says. The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
 
 - **Paths.** `<out-file>` is a new path for each dispatch, with the dispatch time in its name.
-- **Its record.** The seat's record is that pair of files: `<out-file>` is the return and `<out-file>.result` its status. The wave line names the out-file, the workspace and the dispatch time. That is what the hub's ownership test reads.
+- **Its record.** The seat's record is that pair of files together with its wave line. `<out-file>` is the return, `<out-file>.result` is its status, and the wave line names the out-file, the workspace and the dispatch time. The hub's ownership test reads all three.
 - **The brief.** Its own words say the seat is non-mutating.
 - **The model.** Where the record carries the return, name its model as Claude.
 
@@ -50,7 +52,7 @@ A missing `claude` command, a sign-in failure, a network failure, or a sandbox r
 
 **Engine 1.** Codex has no deep-research workflow. It is a fan-out of blind `spawn_agent` web-search seats with per-claim adversarial verification. Codex's own web search must reach the live web: the top-level `web_search` setting in `$CODEX_HOME/config.toml` set to `"live"`. A `[tools] web_search` line is ignored by current releases.
 
-**Engine 2.** It is `claude -p` as the red team section above gives it. WebSearch and WebFetch are among its allowed tools. A reply whose `[web]` tags carry no fetchable URL is model knowledge.
+**Engine 2.** It is `claude -p` as the red team section above gives it. WebSearch and WebFetch are in its tool set and allowed, so it searches the live web. A reply whose `[web]` tags carry no fetchable URL is model knowledge.
 
 ## Auto-cycle and the hooks
 
