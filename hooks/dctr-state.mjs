@@ -465,7 +465,7 @@ export function withDirLock(dir, fn, waitMs = PLACEMENT_WAIT_MS) {
  *  workspace basename and a hash this reader does not compute, so every directory with the
  *  basename is read. A record another process is mid-write is skipped, not fatal: this is read for
  *  display and the plugin owns the file. Each record carries its own path as `file`. */
-export const codexStateDir = () => path.join(os.homedir(), '.claude', 'plugins', 'data', 'codex-openai-codex', 'state')
+export const codexStateDir = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'plugins', 'data', 'codex-openai-codex', 'state')
 
 export function codexJobRecords(cwd) {
   const prefix = `${path.basename(cwd)}-`

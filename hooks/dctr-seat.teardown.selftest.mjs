@@ -174,7 +174,7 @@ const run = (payload, env = {}) => {
       // A hang is a failure here, not a wait.
       timeout: 30000,
       input: JSON.stringify({ session_id: SESSION, ...payload }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', ...env },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...env },
     }) }
   } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
 }
@@ -506,6 +506,20 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).codexJob === runningJob,
     JSON.stringify(R(path.join(seatsDir, 'dctr-codex-codex-rescue-1.json')).codexJob))
   check("and a record in another workspace's state directory is not chosen, though newer", runs.length === 1 && !runs[0].includes(foreignJob), runs.join(' | '))
+
+  // The codex plugin writes under the Claude Code config dir, which is CLAUDE_CONFIG_DIR when set.
+  // A job that exists only there must be the one the watcher follows; HOME holds the older jobs above.
+  const cfg = path.join(tmp, 'cfg')
+  const cfgJobs = path.join(cfg, 'plugins', 'data', 'codex-openai-codex', 'state', 'doctrine-skills-0123abcd', 'jobs')
+  fs.mkdirSync(cfgJobs, { recursive: true })
+  const cfgJob = path.join(cfgJobs, 'task-cfg.json')
+  fs.writeFileSync(cfgJob, JSON.stringify({ id: 'task-cfg', workspaceRoot: WS, createdAt: new Date(now - 1000).toISOString(), status: 'running', pid: null, logFile: path.join(cfgJobs, 'task-cfg.log') }))
+  reset(); codexSeat()
+  run({ hook_event_name: 'SubagentStop', agent_id: 'cx-1', agent_type: 'codex:codex-rescue', transcript_path: '/home/u/.claude/projects/-p/s.jsonl', cwd: WS }, { HOME: home, CLAUDE_CONFIG_DIR: cfg })
+  const cfgRuns = callLines(/^pane run w1:s1 /)
+  check('and with CLAUDE_CONFIG_DIR set, the watcher follows the job under that dir, not under HOME',
+    cfgRuns.length === 1 && cfgRuns[0].includes(cfgJob), cfgRuns.join(' | '))
+  fs.rmSync(cfg, { recursive: true, force: true })
 
   // B3: between the stop's `pane run` and its marker write, a placement can drop this seat's stale
   // marker and reuse the name for a NEW agent. A write that trusted the name replaced that agent's
