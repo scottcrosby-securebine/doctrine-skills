@@ -4,6 +4,8 @@
 acquires rules that only make sense for that system without anyone noticing. These
 three cases are the standing test that it did not.
 
+`e9-phase/` is not one of them: it is the code phase E9's drives run through doctrine-code on Codex CLI and on Claude Code, and its own README says how to build it.
+
 Run a change against all three. Each proves something the others cannot:
 
 | Case | Proves |

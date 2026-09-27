@@ -10,8 +10,10 @@ mkdir -p "$dest"
 cp -R "$here/app/." "$dest/"
 cd "$dest"
 git init -q -b main
+git config user.name dev
+git config user.email dev@example.invalid
 git add -A
-git -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m "slug: fixture at the fixed point"
+git commit -q -m "slug: initial"
 sha=$(git rev-parse HEAD)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 mkdir -p .doctrine/records

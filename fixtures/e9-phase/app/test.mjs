@@ -7,6 +7,7 @@ const cases = [
   ['Crème Brûlée!', 'creme-brulee'],
   ['a -- b __ c', 'a-b-c'],
   ['', ''],
+  ['Øresund Straße', 'resund-stra-e'],
 ]
 for (const [input, want] of cases) assert.equal(slugify(input), want, `slugify(${JSON.stringify(input)})`)
 console.log(`${cases.length} cases pass`)
