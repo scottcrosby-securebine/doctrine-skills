@@ -9,7 +9,7 @@ An execution posture for substantial agent work. The eight wrappers (`doctrine-c
 
 You are the orchestrator. A seat is any agent you dispatch: a builder, a finder, a reviewer, a red team. A phase is a unit of work with its own verifiable exit gate. A wave is one dispatch of parallel seats inside a phase. A round is one full pass of the gate (step 5) over one revision, together with the repairs that answer its findings. The record is the file on disk that step 1 opens. The report is what you hand the user at step 7, the delivery line first.
 
-The same text runs on Claude Code and on Codex CLI. Before your first seat, read the reference file for your host, in `references/` beside this file: `claude-code.md` or `codex.md`. It says how your host does each action this file names (load a skill, dispatch a seat, dispatch a blind one, run a workflow, wait on a file, notify the user) and which seat is the red team from the other model family. Read this file and that one to their last lines: where your host cuts a long read, read in chunks.
+The same text runs on Claude Code and on Codex CLI. Before your first seat, read the reference file for your host, in `references/` beside this file: `claude-code.md` or `codex.md`. It says how your host does each action this file names (load a skill, dispatch a seat, dispatch a blind one, run a workflow, wait on a file, notify the user) and which seat is the red team from the other model family. Read this file and that one to their last lines. This file is longer than one read on Codex, whose reads keep the start and end of long output and cut the middle: there, read it in chunks as `references/codex.md` gives before you act on it, and read in chunks again any file whose read reports truncated output.
 
 ## Standards
 
