@@ -27,7 +27,7 @@ A long file's middle is cut from a single read on Codex.
 
 The red team here is Claude, run through the Claude Code CLI in headless mode. A Codex subagent cannot change model provider, so a `spawn_agent` seat is never a red team from the other family.
 
-**Run it.** Write the assembled brief to a file. Start the seat through the doctrine's gate launcher. The launcher detaches it, and a plain `&` job dies when Codex's shell call returns. Limit the seat's tool set to read-only tools and allow those tools, so it has no tool that writes, runs commands or dispatches:
+**Run it.** Write the assembled brief to a file. Start the seat through the doctrine's gate launcher, which detaches it: a plain `&` job can die when Codex's shell call returns. Limit the seat's tool set to read-only tools and allow those tools, so it has no tool that writes, runs commands or dispatches:
 
 ```
 env -u HERDR_ENV -u HERDR_PANE_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
@@ -35,11 +35,22 @@ env -u HERDR_ENV -u HERDR_PANE_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/h
 
 Then wait on `<out-file>.result` as the table says, which the launcher writes with `exit=N` when the seat ends.
 
-**Only with Codex's sandbox off.** The seat survives only where your shell runs without Codex's sandbox: `--sandbox danger-full-access`, or `--dangerously-bypass-approvals-and-sandbox`. Inside the sandbox, each shell call's process namespace ends when the call returns, and the detached seat ends with it. No result file appears, and the seat fails at its deadline. The `env -u` prefix keeps the launcher from placing a herdr pane from inside Codex. The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
+**The brief.** The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
+
+**The `env -u` prefix.** It sits on the launcher on purpose, not after `--`: it clears the variables the launcher itself reads, so it runs the seat detached instead of trying to place a herdr pane from inside Codex.
+
+**Where it survives.** On Linux, Codex's sandbox runs each shell call in its own process namespace, which ends when the call returns, and the detached seat ends with it. No result file appears, and the seat fails at its deadline.
+
+- The seat ran to completion from a Codex session started with `--dangerously-bypass-approvals-and-sandbox` and no managed-network requirement.
+- `--sandbox danger-full-access` avoids the per-call sandbox only in that same unmanaged configuration.
+- With a managed network configured, the sandbox can still apply.
+- On macOS the sandbox works differently, and this seat has not been run there.
+
+Where the seat cannot run, the hub's Fallbacks row gives the same-model substitute, and the phase loses the cross-model red team.
 
 - **Paths.** `<out-file>` is a new path for each dispatch, with the dispatch time in its name.
 - **Its record.** The seat's record is that pair of files together with its wave line. `<out-file>` is the return, `<out-file>.result` is its status, and the wave line names the out-file, the workspace and the dispatch time. The hub's ownership test reads all three.
-- **The brief.** Its own words say the seat is non-mutating.
+- **Its wording.** The brief's own words say the seat is non-mutating.
 - **The model.** Where the record carries the return, name its model as Claude.
 
 **Its return.** The return is `<out-file>`. It counts only when all three hold:
