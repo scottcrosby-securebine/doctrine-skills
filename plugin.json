@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "doctrine",
   "version": "2.10.1",
-  "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming by a second model family, looping until confident, ruthless simplicity. Fourteen skills: a shared doctrine, wrappers for coding, web design, debugging, auditing, documentation sweeps, deep research, document writing and project tracking, and skills for session continuity and interactive terminal panes.",
+  "description": "An execution posture for substantial agent work: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Fourteen skills: a shared doctrine, wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, document writing, and project and epic tracking (doctrine-project), plus doctrine-backup, doctrine-handoff, doctrine-resume and doctrine-primer for session continuity across cleared sessions, and doctrine-pane for an interactive terminal session in a pane the user watches and can take over. Composes with (and degrades gracefully without) Matt Pocock's engineering skills, superpowers, codex, ponytail, and Claude Design. Two prerequisites do not degrade, and both refuse rather than falling back to a weaker version of themselves: doctrine-gauntlet needs Playwright, because its critics judge rendered output — without a browser its harness refuses to run rather than report a pass — and doctrine-pane needs herdr, because an interactive session nobody can watch has no purpose. The other twelve skills need nothing installed.",
   "author": {
     "name": "Scott Crosby"
   },
