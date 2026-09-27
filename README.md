@@ -185,8 +185,8 @@ codex plugin marketplace add scottcrosby-securebine/doctrine-skills
 codex plugin add doctrine@doctrine-skills
 ```
 
-On Codex, installation and skill discovery work. The skill text still names Claude Code's tools, and
-adapting it for Codex is work in progress. The hooks run on Claude Code only.
+On Codex the hub reads a Codex reference file for its tools, and runs its red team through Claude.
+The hooks, auto-cycle and `doctrine-pane` run on Claude Code only.
 
 ## Try it on one file
 

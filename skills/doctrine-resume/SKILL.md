@@ -48,8 +48,8 @@ else and the kickoff reads `open`), name the mismatch in the Handoff line. Facts
 a restore hook put in this session's context are a hint and never outrank the
 record.
 
-When the record reads Open or Blocked, your next tool calls are Skill tool
-invocations, in this order: `doctrine:<wrapper>` (for example
+When the record reads Open or Blocked, your next actions load these skills by
+name, in this order: `doctrine:<wrapper>` (for example
 `doctrine:doctrine-code`), then `doctrine:doctrine` unless the wrapper already
 had you invoke it. With `wrapper: none`, or no wrapper line in the record or the handoff header, invoke only
 `doctrine:doctrine`. Nothing comes before them except step 1's `ls` and the

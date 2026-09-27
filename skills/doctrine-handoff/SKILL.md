@@ -17,7 +17,7 @@ already at its standard path.
 
 ## 2. Content rules
 
-Check `~/.claude/skills/handoff/SKILL.md`, then `.claude/skills/handoff/SKILL.md`. Read the first that
+Check your host's user skill directory, then the project's, for `handoff/SKILL.md` (the hub's host reference names both). Read the first that
 exists and apply its **content** rules: reference specs, plans, issues and commits by path or number
 instead of restating them, and name the skills the next session should invoke. Take only its content
 discipline; its storage instruction (a scratch file in the OS temp directory) does not apply, since
@@ -89,7 +89,7 @@ This document is as long as the next session needs; the memory file's word targe
 Rules, each one a failure found in a live repo:
 
 - **Reference, never duplicate** what already lives elsewhere. Cite code by symbol, not line number.
-- **No scratchpad path and no plugin-cache version path** (`~/.claude/plugins/cache/<x>/1.53.0/...`):
+- **No scratchpad path and no plugin-cache version path** (`<plugin-cache>/<x>/1.53.0/...`):
   the first dies on a bounce, the second on the next version bump, and both were found dead in
   committed files.
 

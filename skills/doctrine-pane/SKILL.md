@@ -8,6 +8,8 @@ description: Use when the user asks you to pop a pane, ssh into a box, log into 
 An interactive terminal session in a herdr pane, so the user sees exactly what you see and can take
 the keyboard whenever they want it.
 
+**On Codex CLI this skill does not run.** Its launcher needs a Claude Code session and herdr. Tell the user it does not run on Codex, and do not run the launcher.
+
 This skill does **not** require the `doctrine` hub. You are usually invoked mid-task, and loading
 the whole posture to run two commands would be wrong. A doctrine run may still reach for this skill;
 `doctrine-debug` names it.
