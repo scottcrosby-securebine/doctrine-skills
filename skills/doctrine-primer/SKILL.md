@@ -9,9 +9,9 @@ Restore the session's state, then explain the project to an agent that has never
 
 Need state only, not a codebase tour? `doctrine-resume` is the cheap path: say so and stop.
 
-CLAUDE.md is already in your context; the harness loads it every session, so never spend a read on
-it. **AGENTS.md is not**: it is not auto-loaded unless something `@`-imports it, and it is usually where
-issue-tracking and session-completion norms live. Read it if present.
+Your host loaded one project instruction file for you, which the hub's host reference names. Read the
+other if present, and read the loaded one yourself where your host stops short of its end. AGENTS.md
+is usually where issue-tracking and session-completion norms live.
 
 ## 1. Restore state
 

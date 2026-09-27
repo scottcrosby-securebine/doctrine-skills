@@ -191,7 +191,7 @@ Commit by pathspec, never a bare `git commit`. A bare commit ships the whole ind
 another step left staged, and a docs-flavoured message on a non-docs change misrepresents the commit.
 Leave unrelated staged work for its own commit and say it is still pending.
 
-Follow the repo's own branching norm (AGENTS.md / CLAUDE.md; AGENTS.md is not auto-loaded): some
+Follow the repo's own branching norm (AGENTS.md / CLAUDE.md; read both, since your host may have loaded only one): some
 repos require a branch before committing to the default branch, with a documented exemption for
 docs-only changes. If the norm is unstated, committing the memory update directly is the common case,
 but say what you did.

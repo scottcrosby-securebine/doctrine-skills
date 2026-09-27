@@ -44,6 +44,8 @@ at runtime.
 
 ## Codex — as a visual red team
 
+On Codex CLI the visual red team comes from the other model family, Claude: run `claude -p` read-only as the hub's host reference gives it, with the render paths in the prompt and an instruction to read each image before judging. The two paths below are for Claude Code, where Codex is the other family.
+
 Codex **sees** images, which is what makes it usable as an adversary on rendered work.
 Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
 

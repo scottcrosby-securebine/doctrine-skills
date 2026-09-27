@@ -58,6 +58,10 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 
   Without it, or with the plugin installed and its CLI unreachable: a fresh-context subagent prompted to refute. Research loses cross-model diversity and says so in its report; the gauntlet directs native CSS, SVG and canvas art instead of generated assets.
 
+- On Codex CLI, the Claude Code CLI (`claude`), installed and signed in, and run from a Codex shell outside Codex's per-call sandbox, for example a session started with `--dangerously-bypass-approvals-and-sandbox` and no managed network. On Linux, inside that sandbox, the detached seat ends when its shell call returns. `skills/doctrine/references/codex.md` says what is known on each platform. It supplies the red team from the other model family and `doctrine-research`'s second engine there, run as `skills/doctrine/references/codex.md` gives. That file's chunked reads also use `python3`.
+
+  Without it: the same fresh-context substitute, named in the record as a same-model red team.
+
 - [ponytail](https://github.com/DietrichGebert/ponytail): the simplification review, and the audit lens in `doctrine-audit`.
 
   Without it: the fallback table gives a **different** substitute for each use. `/simplify` for the first. For the audit lens, a manual report-only YAGNI read, never `/simplify`, which is scoped to the diff rather than the target area and mutates the repo.

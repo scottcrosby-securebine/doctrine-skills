@@ -168,6 +168,8 @@ too: measure it on your own code, because each of those results was specific to 
 
 ## Install
 
+In Claude Code:
+
 ```text
 /plugin marketplace add scottcrosby-securebine/doctrine-skills
 /plugin install doctrine@doctrine-skills
@@ -175,6 +177,16 @@ too: measure it on your own code, because each of those results was specific to 
 
 If the install message says to, run `/reload-plugins` or restart. A freshly installed plugin does not
 always load into the session that installed it.
+
+In Codex CLI:
+
+```text
+codex plugin marketplace add scottcrosby-securebine/doctrine-skills
+codex plugin add doctrine@doctrine-skills
+```
+
+On Codex the hub reads a Codex reference file for its tools, and runs its red team through Claude.
+The hooks, auto-cycle and `doctrine-pane` run on Claude Code only.
 
 ## Try it on one file
 
@@ -245,7 +257,7 @@ needs a browser, and without one its harness refuses to run rather than report a
 Neither degrades into a weaker version of itself.
 
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
-plugin, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
+plugin on Claude Code, the Claude Code CLI (`claude`, signed in) on Codex, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
 `doctrine-pane` and auto-cycle, below. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.

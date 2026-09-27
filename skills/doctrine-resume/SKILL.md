@@ -48,8 +48,9 @@ else and the kickoff reads `open`), name the mismatch in the Handoff line. Facts
 a restore hook put in this session's context are a hint and never outrank the
 record.
 
-When the record reads Open or Blocked, your next tool calls are Skill tool
-invocations, in this order: `doctrine:<wrapper>` (for example
+When the record reads Open or Blocked, your next actions load these skills by
+name (on Claude Code through its skill-loading tool; on Codex by reading each
+skill's SKILL.md from your skill list), in this order: `doctrine:<wrapper>` (for example
 `doctrine:doctrine-code`), then `doctrine:doctrine` unless the wrapper already
 had you invoke it. With `wrapper: none`, or no wrapper line in the record or the handoff header, invoke only
 `doctrine:doctrine`. Nothing comes before them except step 1's `ls` and the
@@ -62,8 +63,8 @@ state line at all), invoke neither, whatever the kickoff says.
 
 When no record was read, because the handoff names none or its path resolves
 nowhere (say which in the Handoff line), fall back to the kickoff: if the
-kickoff line's `state:` is `open` (case-insensitive), invoke the `doctrine:doctrine` skill with the Skill
-tool before any other call: the handoff describes the doctrine as it stood when
+kickoff line's `state:` is `open` (case-insensitive), load the `doctrine:doctrine` skill by name
+before any other call: the handoff describes the doctrine as it stood when
 it was written, and a session that only reads about the doctrine never loads it.
 `open` means a doctrine phase is open; any other value means do not. If a skill
 named in this step is not installed, say so in the Handoff line and continue;
