@@ -6,7 +6,7 @@ The hub and the wrappers name actions. This file says how each is done on Codex 
 
 A long file's middle is cut from a single read on Codex.
 
-- Read the hub, this file, and any skill or artifact longer than one read's output in chunks of at most 4,000 characters, cut on character boundaries so no character is split: for example `python3 -c 'import sys; t=open(sys.argv[1], encoding="utf-8").read(); o=int(sys.argv[2]); sys.stdout.write(t[o:o+4000])' <file> <offset>`, with the offset stepping by 4,000 until it passes the file's length. Size a chunk by characters, not lines: one line of the hub runs past 3,000 characters.
+- Read the hub, this file, and any skill or artifact longer than one read's output in chunks of at most 4,000 characters, cut on character boundaries so no character is split: for example `python3 -c 'import sys; t=open(sys.argv[1], encoding="utf-8").read(); o=int(sys.argv[2]); sys.stdout.write(t[o:o+4000])' <file> <offset>`, with the offset stepping by 4,000 until a read prints nothing. This needs `python3`. Where it is absent, use any reader that cuts on character boundaries. Size a chunk by characters, not lines: one line of the hub runs past 3,000 characters.
 - An injected skill body is cut at 8,000 bytes. When a skill is injected, read its SKILL.md in full from the path the skill list gives.
 
 ## Actions
@@ -27,13 +27,13 @@ A long file's middle is cut from a single read on Codex.
 
 The red team here is Claude, run through the Claude Code CLI in headless mode. A Codex subagent cannot change model provider, so a `spawn_agent` seat is never a red team from the other family.
 
-**Run it.** Write the assembled brief to a file. Run the seat in the background from the shell, with its tool set limited to read-only tools and those tools allowed, so it has no tool that writes, runs commands or dispatches:
+**Run it.** Write the assembled brief to a file. Start the seat through the doctrine's gate launcher. The launcher detaches it, and a plain `&` job dies when Codex's shell call returns. Limit the seat's tool set to read-only tools and allow those tools, so it has no tool that writes, runs commands or dispatches:
 
 ```
-( claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file> > <out-file> 2>&1; echo "exit=$?" > <out-file>.result ) &
+node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
 ```
 
-Then wait on `<out-file>.result` as the table says. The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
+Then wait on `<out-file>.result` as the table says, which the launcher writes with `exit=N` when the seat ends. The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
 
 - **Paths.** `<out-file>` is a new path for each dispatch, with the dispatch time in its name.
 - **Its record.** The seat's record is that pair of files together with its wave line. `<out-file>` is the return, `<out-file>.result` is its status, and the wave line names the out-file, the workspace and the dispatch time. The hub's ownership test reads all three.
@@ -46,7 +46,13 @@ Then wait on `<out-file>.result` as the table says. The seat runs no commands, s
 - the output holds findings or an attack list, not an acknowledgement;
 - the brief named the revision under review.
 
-A missing `claude` command, a sign-in failure, a network failure, or a sandbox refusal is a failed seat. The hub's Fallbacks row then applies, and its substitute is a same-model red team, which the record and the exit statement name as such. It never counts as the cross-model red team.
+Each of these is a failed seat:
+
+- a missing `claude` command;
+- a sign-in failure;
+- a network failure;
+- a sandbox refusal;
+- no result file by the seat's deadline. The hub's Fallbacks row then applies, and its substitute is a same-model red team, which the record and the exit statement name as such. It never counts as the cross-model red team.
 
 ## Research engines
 
