@@ -7,7 +7,7 @@ The hub and the wrappers name actions. This file says how each is done on Claude
 | Action | On Claude Code |
 |---|---|
 | Load a skill by name | The Skill tool, with the skill's full name, `doctrine:doctrine-code` for example. |
-| Read a skill that is not model-invocable | `~/.claude/skills/<name>/SKILL.md`, if present. |
+| Read a skill that is not model-invocable | The user's `~/.claude/skills/<name>/SKILL.md`, then the project's `.claude/skills/<name>/SKILL.md`; the first that exists. |
 | Dispatch a seat | The Agent tool. A subagent starts with a fresh context, so every seat is blind by default. |
 | Run a workflow | The Workflow tool, where it is in your tool list. The hub's step 2 is your authorization to use it. |
 | Wait on a file or a job | A background command that exits when the file appears (`until [ -f <file> ]; do sleep 15; done`), or the Monitor tool. Either one re-invokes you. |
@@ -23,10 +23,7 @@ Dispatch it with the Agent tool as `subagent_type: "codex:codex-rescue"`, never 
 
 The seat forwards to the Codex CLI, and returns either a start line or the full result.
 
-**Where its return is.** Its return is in its job record: `~/.claude/plugins/data/codex-openai-codex/state/<workspace-basename>-<hash>/jobs/<task-id>.json`, with the fields status, pid, logFile, result, createdAt, summary and workspaceRoot. The record is yours when both hold:
-
-- its workspaceRoot is your workspace, meaning the session you dispatched from, not the repo under review;
-- its createdAt is at or after the dispatch time you read from the clock.
+**Where its return is.** Its return is in its job record: `~/.claude/plugins/data/codex-openai-codex/state/<workspace-basename>-<hash>/jobs/<task-id>.json`, with the fields status, pid, logFile, result, createdAt, summary and workspaceRoot. For the hub's ownership test, workspaceRoot is the workspace the record names and createdAt is when it was created.
 
 A dead pid, or a terminal status with no result, is a failed seat. A wrapper that dies, from an API error or a kill, is not a dead job, so read the record's status before calling the seat failed.
 
@@ -40,7 +37,7 @@ A dead pid, or a terminal status with no result, is a failed seat. A wrapper tha
 
 **Engine 2.** It is the codex:codex-rescue seat, a thin wrapper whose only tool is Bash. It shells out to the Codex CLI.
 
-- **Search.** Codex's web search is opt-in per user config, and the companion script passes no search flag. So on a default install engine 2 answers from model knowledge. Check the `web_search` setting in `~/.codex/config.toml` before you dispatch.
+- **Search.** The companion script passes no search flag, so engine 2 searches only as the user's Codex config allows. Check the top-level `web_search` setting in `~/.codex/config.toml` before you dispatch: `"live"` reaches the live web, and anything else may answer from a cache or from model knowledge.
 - **Returns.** Say in the dispatch to run in the foreground. The seat prefers background execution for open-ended work and cannot fetch its own results. A job handle that comes back anyway is retrieved with `/codex:status <job-id>`, then the job record's result.
 
 ## Auto-cycle and the hooks

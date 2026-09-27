@@ -9,10 +9,9 @@ Restore the session's state, then explain the project to an agent that has never
 
 Need state only, not a codebase tour? `doctrine-resume` is the cheap path: say so and stop.
 
-Your host loaded one project instruction file for you: Claude Code loads CLAUDE.md, and AGENTS.md
-only through an `@` import or where no CLAUDE.md exists; Codex loads AGENTS.md. Never spend a read on
-the one your host loaded, and read the other if present: AGENTS.md is usually where issue-tracking and
-session-completion norms live.
+Your host loaded one project instruction file for you, which the hub's host reference names. Read the
+other if present, and read the loaded one yourself where your host stops short of its end. AGENTS.md
+is usually where issue-tracking and session-completion norms live.
 
 ## 1. Restore state
 
