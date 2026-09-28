@@ -1940,6 +1940,12 @@ export function codexInstallPlan({ hooksJson, configToml, hookDir, hooksJsonPath
     : `hooks.json: ${trust.length} doctrine entries (${[...new Set(CODEX_HOOKS.map(([ev]) => ev))].join(', ')}) run the hooks in ${hookDir}`)
 
   const lines = configToml ? configToml.replace(/\n$/, '').split('\n') : []
+  // A trust entry is moved or removed with its hook only as a [hooks.state."<key>"] table; one written as a dotted
+  // key or inside an inline table would stay behind at its old index, leaving the hook it names untrusted there
+  // (E10H-R2-B3). So any such entry is refused before either file is written, as a hooks.json layout is (E10H-B5).
+  const HS = ['hooks', 'state']
+  const loose = tomlLines(lines.join('\n')).findIndex((r) => r.kind === 'key' && r.table.length < 3 && (underPath(r.path, HS) || underPath(HS, r.path) || eqPath(r.path, HS)))
+  if (loose >= 0) throw new Error(`config.toml line ${loose + 1} writes a hook trust entry as a dotted key or an inline table, which the install cannot move with the hook it names; write each [hooks.state] entry as its own [hooks.state."<key>"] table and re-run`)
   for (const k of drops) tomlRemove(lines, k)
   for (const [from, to] of moves) tomlRename(lines, from, to)
   const written = trust.filter(([k, hash]) => tomlSet(lines, k, 'trusted_hash', JSON.stringify(hash), ['hooks', 'state'])).length

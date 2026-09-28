@@ -2460,6 +2460,9 @@ const MUTATIONS = [
   { name: "N2: the install registers an Interrupt entry the auto-cycle hook never acts on", file: "dctr-lib.mjs",
     clause: "clause 1j — no Interrupt entry is installed",
     from: "  ['PermissionRequest', 'dctr-cycle.mjs', 30],\n]", to: "  ['PermissionRequest', 'dctr-cycle.mjs', 30],\n  ['Interrupt', 'dctr-cycle.mjs', 3],\n]" },
+  { name: "R2-B3: a dotted-key trust entry under [hooks.state] is accepted and left behind when its hook moves", file: "dctr-lib.mjs",
+    clause: "clause 1k — a trust entry written as a dotted key under [hooks.state] is refused, naming its line",
+    from: "  if (loose >= 0) throw new Error(", to: "  if (false) throw new Error(" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

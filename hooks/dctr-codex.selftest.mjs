@@ -349,6 +349,25 @@ clause('clause 1h — a hooks.json laid out on one line, or with a foreign entry
   layoutRuns.every(({ r, same, copied }) => r.status === 1 && /not laid out as JSON\.stringify/.test(r.stderr) && same && !copied),
   JSON.stringify(layoutRuns.map(({ r, same, copied }) => [r.status, r.stderr.trim(), same, copied])))
 
+// E10H-R2-B3. An earlier install's Interrupt entry (the one N2 dropped) at index 0, a user's Interrupt handler after it
+// at index 1, each trusted, the user's as a dotted key under [hooks.state] (valid TOML Codex reads). Removing the
+// doctrine entry moves the user's handler to index 0, and a dotted trust key would stay behind at index 1, so the
+// install refuses the file before writing either one.
+const oldInterrupt = { hooks: [{ type: 'command', command: `node '${hd}/dctr-cycle.mjs'`, timeout: 3 }] }
+const userInterrupt = { hooks: [{ type: 'command', command: 'echo user-interrupt', timeout: 2 }] }
+const dottedHooks = JSON.stringify({ hooks: { Interrupt: [oldInterrupt, userInterrupt] } }, null, 2) + '\n'
+const dottedConfig = (h) => `[hooks.state."${h}/hooks.json:interrupt:0:0"]\ntrusted_hash = "${trustedHash('Interrupt', oldInterrupt)}"\n\n` +
+  `[hooks.state]\n"${h}/hooks.json:interrupt:1:0".trusted_hash = "${trustedHash('Interrupt', userInterrupt)}"\n`
+const dottedHome = fs.mkdtempSync(path.join(tmp, 'dotted-'))
+put(path.join(dottedHome, 'hooks.json'), dottedHooks)
+put(path.join(dottedHome, 'config.toml'), dottedConfig(dottedHome))
+const dottedRun = run(['install', '--codex-home', dottedHome])
+clause('clause 1k — a trust entry written as a dotted key under [hooks.state] is refused, naming its line, and both files are left byte-identical with no hooks copied (E10H-R2-B3, E10-D2, E10-D3)',
+  dottedRun.status === 1 && /line 5 writes a hook trust entry as a dotted key/.test(dottedRun.stderr) && readOr(path.join(dottedHome, 'hooks.json')) === dottedHooks &&
+    readOr(path.join(dottedHome, 'config.toml')) === dottedConfig(dottedHome) && !fs.existsSync(hookDirFor(dottedHome)) &&
+    /dotted key or an inline table/.test(throws(() => planFor(dottedHome, dottedHooks, `[hooks]\nstate."${dottedHome}/hooks.json:interrupt:1:0".trusted_hash = "sha256:00"\n`)) || ''),
+  `status ${dottedRun.status} ${dottedRun.stderr}`)
+
 // E10H-B6. A 0600 config.toml, installed under umask 0002, and a config.toml that is a symlink into a dotfiles
 // directory: the mode stays 0600, the link stays a link, and the file it names gets the install's lines.
 const oldMask = process.umask(0o002)
@@ -405,6 +424,13 @@ clause("clause 3f — F4 parses, has no sandbox_workspace_write table, and its h
 clause('clause 3g — without the install: the compact and mixed hooks.json hold the same value as herdr\'s own, only laid out otherwise, and neither survives a round trip through JSON.stringify; under umask 0002 a file written with no mode is 0664, and the dotfiles config.toml is 0600 behind a symlink',
   [COMPACT, MIXED].every((t) => JSON.stringify(JSON.parse(t)) === JSON.stringify(JSON.parse(scottHooks(home))) && JSON.stringify(JSON.parse(t), null, 2) + (t.endsWith('\n') ? '\n' : '') !== t) &&
   freshMode === 0o664 && linkWas, `fresh mode ${freshMode.toString(8)}`)
+
+const dottedPath = path.join(dottedHome, 'hooks.json')
+const dottedBefore = trustRows(dottedHooks, dottedConfig(dottedHome), dottedPath)
+const dottedMoved = trustRows(JSON.stringify({ hooks: { Interrupt: [userInterrupt] } }), dottedConfig(dottedHome), dottedPath)
+clause("clause 3h — without the install: the dotted-key fixture parses and trusts both handlers, and dropping the doctrine entry with the trust keys left where they are leaves the user's handler untrusted at its new index 0",
+  tomlOk(dottedConfig(dottedHome)).ok && dottedBefore.length === 2 && allTrusted(dottedBefore) && !allTrusted(dottedMoved),
+  `${JSON.stringify(dottedBefore)} ${JSON.stringify(dottedMoved)}`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
