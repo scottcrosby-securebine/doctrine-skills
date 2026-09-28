@@ -16,6 +16,9 @@ const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision,
 } = await import('./dctr-lib.mjs')
+// Seams the gate round 1 repair added, read off the module so the suite still loads, and reports FAIL, where they are absent.
+const lib = await import('./dctr-lib.mjs')
+const composerEmpty = lib.composerEmpty ?? (() => undefined), codexUnderClaude = lib.codexUnderClaude ?? (() => undefined)
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
 const J = (l) => JSON.parse(l)
@@ -141,9 +144,9 @@ clause('clause 1j2 — Codex typerStep after /clear: the pane not showing the co
   JSON.stringify(ts({ stage: 'resume', took: false, waited: 500 })))
 clause('clause 1j3 — Codex typerStep after /clear: a pane that could not be read pauses with R17; the continue line seen resumes and carries the cycle flag once; focused waits with it (Q6)',
   ts({ stage: 'resume', took: null }).reason === 'could not type into the pane: herdr could not read the pane' &&
-  ts({ stage: 'resume', took: true }).act === 'resume' && ts({ stage: 'resume', took: true }).cycle === true && !ts({ stage: 'resume', took: true, cycled: true }).cycle &&
-  ts({ stage: 'resume', took: true, pane: { ...idle, focused: true } }).act === 'wait' && ts({ stage: 'resume', took: true, pane: { ...idle, focused: true } }).cycle === true,
-  JSON.stringify([ts({ stage: 'resume', took: null }), ts({ stage: 'resume', took: true })]))
+  ts({ stage: 'resume', took: true, composer: true }).act === 'resume' && ts({ stage: 'resume', took: true, composer: true }).cycle === true && !ts({ stage: 'resume', took: true, composer: true, cycled: true }).cycle &&
+  ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, focused: true } }).act === 'wait' && ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, focused: true } }).cycle === true,
+  JSON.stringify([ts({ stage: 'resume', took: null }), ts({ stage: 'resume', took: true, composer: true })]))
 clause('clause 1j4 — Codex typerStep after the resume: no restore file waits, then pauses with R14 (clear 1, resume 1); herdr not yet on the new session waits, then R17; a third session is R16',
   ts({ stage: 'confirm', resumes: 1, cycled: true, waited: 100 }).act === 'wait' && ts({ stage: 'confirm', resumes: 1, cycled: true, waited: 500 }).code === 'R14' &&
   ts({ stage: 'confirm', resumes: 1, restore: NEW, sessionWait: 100 }).act === 'wait' &&
@@ -159,6 +162,77 @@ clause('clause 1j5 — Codex typerStep confirming: typing into the new chat is R
   ts({ stage: 'confirm', resumes: 1, restore: NEW, pane: NP, waited: 400, typedNew: false }).act === 'resume' &&
   ts({ stage: 'confirm', resumes: 2, restore: NEW, pane: NP, waited: 400, typedNew: false }).code === 'R15',
   'wrong')
+
+// ---------------------------------------------------------------- clause 1, gate round 1 repair: real rollouts from ~/.codex/sessions
+
+// E10H-B7: Codex labels each user message's items; the AGENTS.md block and the environment context are injected, typed
+// text is user.text, whatever the text starts with.
+const am = transcriptEntries(text(F.AGENTS_MD_TURN), 'codex').entries.filter((e) => e.type === 'user')
+const tk = transcriptEntries(text(F.TASK_TYPED), 'codex').entries[0]
+clause('clause 1k — the AGENTS.md block Codex injects (no user.text label) is meta and not typing; the prompt after it is typing; a typed prompt opening with a tag (user.text) is typing too (E10H-B7)',
+  am.length === 2 && am[0].isMeta === true && !userTyped(am[0]) && am[1].isMeta === false && userTyped(am[1]) && tk?.isMeta === false && userTyped(tk),
+  JSON.stringify([am.map((e) => [e.isMeta, userTyped(e)]), tk?.isMeta]))
+clause('clause 2i — the AGENTS.md block does not start a turn: the turn it sits in ended, so its rollout reads no running turn (E10H-B7)',
+  obs(F.AGENTS_MD_TURN).backgroundRunning === false && obs(F.AGENTS_MD_TURN, 'done').idle === true, JSON.stringify(obs(F.AGENTS_MD_TURN)))
+
+// E10H-B2: a cell is tracked by its id and ends at its own output. POLLED_CELL: cell 4 polled twice while running, then
+// completed, and the earlier process 84395 completed: nothing runs at the end.
+clause('clause 1l — a code-mode cell polled while running and then completed, in a turn whose earlier process also completed, reads nothing running, and the ended turn reads idle (E10H-B2, P2)',
+  obs(F.POLLED_CELL).backgroundRunning === false && obs(F.POLLED_CELL, 'done').idle === true, JSON.stringify(obs(F.POLLED_CELL)))
+// Derived: POLLED_CELL cut after cell 4's first "running" output (before any poll), with the completion of process
+// 4436 (a node heredoc another cell of the same turn ran) moved there: a command that is not cell 4's completes while
+// cell 4 still runs. Then the rest of the rollout: cell 4's polls, its own "Script completed", and the completion of
+// process 84395, which cell 4's write_stdin waited on and so names.
+const pc = F.POLLED_CELL, c4 = pc.findIndex((l) => l.includes('Script running with cell ID 4')), done84 = pc.findIndex((l) => l.includes('"process_id":"84395"'))
+const other = pc.findIndex((l) => l.includes('"process_id":"4436"'))
+const interleaved = [...pc.slice(0, c4 + 1).filter((l, i) => i !== other), pc[other]]
+const cell4End = pc.findIndex((l, i) => i > c4 && l.includes('Script completed') && pc.slice(c4, i).some((x) => x.includes('\\"cell_id\\":\\"4\\"')))
+clause('clause 1l2 — another command of the turn completing does not end a cell still running; the cell ends at its own output, and the process it waited on at that process\'s completion (E10H-B2, red team B2)',
+  obs(interleaved).backgroundRunning === true && obs([...interleaved, ...pc.slice(c4 + 1, cell4End + 1)]).backgroundRunning === true &&
+  obs([...interleaved, ...pc.slice(c4 + 1)]).backgroundRunning === false,
+  JSON.stringify([obs(interleaved), obs([...interleaved, ...pc.slice(c4 + 1)])]))
+clause('clause 1l3 — the tty cell ends at its own command\'s completion (the call whose input names that command), still (B5 tty path)',
+  obs(F.CELL_RUNNING).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === false,
+  JSON.stringify([obs(F.CELL_RUNNING), obs([F.CELL_RUNNING, F.CELL_DONE])]))
+// Derived (N11): N11_OUTPUT's command output printed raw, as `text(r.output)` prints it, so the "session_id":<digits>
+// text in it is bare rather than inside Codex's JSON part; inserted into TUI_TURN before its task_complete.
+const n11 = J(F.N11_OUTPUT[0]), n11raw = JSON.stringify({ ...n11, payload: { ...n11.payload, output: [n11.payload.output[0], { type: 'input_text', text: JSON.parse(n11.payload.output[1].text).output }] } })
+const withN11 = [...F.TUI_TURN.slice(0, -1), n11raw, F.TUI_TURN.at(-1)]
+clause('clause 1l4 — "session_id":<digits> in what a command printed is not a running terminal; only Codex\'s own exec result shape is (N11)',
+  obs(withN11).backgroundRunning === false && obs([...F.TUI_TURN.slice(0, -1), F.N11_OUTPUT[0], F.TUI_TURN.at(-1)]).backgroundRunning === false && obs(F.BG_RUNNING).backgroundRunning === true,
+  JSON.stringify(obs(withN11)))
+// Derived (N11): BG_RUNNING's turn ended by turn_aborted (the event B6's esc wrote, turn_id rewritten to BG_RUNNING's
+// turn) instead of task_complete: what that turn started is cleared.
+const bgTurn = J(F.BG_RUNNING.at(-1)).payload.turn_id
+const aborted = JSON.stringify({ timestamp: J(F.BG_RUNNING.at(-1)).timestamp, type: 'event_msg', payload: { type: 'turn_aborted', turn_id: bgTurn, reason: 'interrupted' } })
+clause('clause 1l5 — a turn_aborted clears the background terminals its turn started (N11)',
+  obs([...F.BG_RUNNING.slice(0, -1), aborted]).backgroundRunning === false && obs([...F.BG_RUNNING.slice(0, -1), aborted, F.TUI_NEXT]).backgroundRunning === false,
+  JSON.stringify(obs([...F.BG_RUNNING.slice(0, -1), aborted])))
+
+// E10H-B3: the watcher reads the background state as of the turn's end, not as of its first poll after it.
+const bgAll = text(F.BG_RUNNING, F.BG_DONE), wt = watchedTurn(bgAll)
+clause('clause 1g3 — watchedTurn says where the turn ended, so the rollout up to that point shows the terminal running even once its completion follows (E10H-B3)',
+  wt.ended === true && Number.isInteger(wt.endAt) && codexObservations(bgAll.slice(0, wt.endAt), null).backgroundRunning === true &&
+  codexObservations(bgAll, null).backgroundRunning === false && bgAll.slice(0, wt.endAt).endsWith(F.BG_RUNNING.at(-1) + '\n'),
+  JSON.stringify(wt))
+
+// E10H-B1: after the /clear the composer must be empty, and nothing may show the user started the new chat.
+const DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› my own draft')
+const SUBMITTED = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
+clause('clause 1n — composerEmpty: the new chat\'s placeholder after the continue line is empty; a draft, or a prompt submitted after it, is not; no continue line names nothing (E10H-B1)',
+  composerEmpty(F.NARROW_AFTER, OLD_NARROW) === true && composerEmpty(F.CLEAR_SCREEN, OLD_WIDE) === true && composerEmpty(DRAFT, OLD_NARROW) === false &&
+  composerEmpty(SUBMITTED, OLD_NARROW) === false && composerEmpty(F.NARROW_BEFORE, OLD_NARROW) === null,
+  JSON.stringify([composerEmpty(F.NARROW_AFTER, OLD_NARROW), composerEmpty(DRAFT, OLD_NARROW), composerEmpty(SUBMITTED, OLD_NARROW)]))
+clause('clause 1n2 — Codex typerStep after /clear sends no resume line into a draft or after the user started the new chat: a composer that is not empty, a restore file, or herdr naming another session is R16 (E10H-B1)',
+  ts({ stage: 'resume', took: true, composer: false }).code === 'R16' && ts({ stage: 'resume', took: true, composer: true, restore: NEW }).code === 'R16' &&
+  ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, session: 'new' } }).code === 'R16' &&
+  ts({ stage: 'resume', took: false, waited: 100, restore: NEW }).code === 'R16' && ts({ stage: 'resume', took: true, composer: true }).act === 'resume',
+  JSON.stringify([ts({ stage: 'resume', took: true, composer: false }), ts({ stage: 'resume', took: true, composer: true, restore: NEW })]))
+
+// N1: a Codex process under a Claude Code session (codex app-server started by codex:codex-rescue) is the Claude session's.
+clause('clause 1o — codexUnderClaude: a Codex payload with CLAUDE_CODE_SESSION_ID set; not without it, and never a Claude Code payload (N1)',
+  codexUnderClaude({ CLAUDE_CODE_SESSION_ID: 'c' }, 'codex') === true && codexUnderClaude({}, 'codex') === false && codexUnderClaude({ CLAUDE_CODE_SESSION_ID: '' }, 'codex') === false &&
+  codexUnderClaude({ CLAUDE_CODE_SESSION_ID: 'c' }, 'claude') === false, 'wrong')
 
 // ---------------------------------------------------------------- clause 2: known-good captures stay quiet
 
@@ -197,4 +271,21 @@ clause('clause 3e — without the lib: TUI_TURN\'s last token_count reads input 
 clause('clause 3f — without the lib: the seat\'s PostToolUse carries agent_id, the main one does not, and both name rollout- transcripts; the Stop of the background turn says nothing of the running process',
   'agent_id' in F.POST_SEAT && !('agent_id' in F.POST_MAIN) && /\/rollout-[^/]*$/.test(F.POST_MAIN.transcript_path) && /\/rollout-[^/]*$/.test(F.POST_SEAT.transcript_path) &&
   !('background_tasks' in F.STOP_BG) && F.STOP_BG.last_assistant_message === 'started', 'payload fixtures wrong')
+const kinds = (l) => J(l).payload.internal_chat_message_metadata_passthrough?.content_item_kinds
+clause('clause 3g — without the lib: the AGENTS.md message opens "# AGENTS.md instructions for", not a tag, and its labels lack user.text; the typed prompts carry user.text, one of them opening with a tag',
+  J(F.AGENTS_MD_TURN[1]).payload.content[0].text.startsWith('# AGENTS.md instructions for') && !kinds(F.AGENTS_MD_TURN[1]).includes('user.text') &&
+  kinds(F.AGENTS_MD_TURN[1]).includes('agents_md.instructions') && kinds(F.AGENTS_MD_TURN[2]).includes('user.text') &&
+  J(F.TASK_TYPED[0]).payload.content[0].text.startsWith('<task>') && kinds(F.TASK_TYPED[0]).includes('user.text'), 'label fixtures wrong')
+const waitCalls = pc.filter((l) => J(l).payload.name === 'wait').map((l) => J(l).payload)
+clause('clause 3h — without the lib: POLLED_CELL reads "running with cell ID 4" three times (its own output and two polls) and "Script completed" at a third wait on cell 4; process 84395 is started before cell 4, cell 4\'s call writes to it, and it completes after that; process 4436\'s command is in another call\'s input and not in cell 4\'s',
+  pc.filter((l) => l.includes('Script running with cell ID 4')).length === 3 && waitCalls.length === 3 && waitCalls.every((w) => JSON.parse(w.arguments).cell_id === '4') &&
+  J(pc[cell4End]).payload.call_id === waitCalls[2].call_id && pc.some((l, i) => i < c4 && l.includes('\\"session_id\\":84395')) && done84 > cell4End &&
+  J(pc.find((l) => J(l).payload.call_id === J(pc[c4]).payload.call_id)).payload.input.includes('session_id:84395') &&
+  !J(pc.find((l) => J(l).payload.call_id === J(pc[c4]).payload.call_id)).payload.input.includes(J(pc[other]).payload.item.command[2]) &&
+  pc.some((l) => J(l).payload.type === 'custom_tool_call' && J(l).payload.input.includes(J(pc[other]).payload.item.command[2].slice(0, 30))), 'polled cell fixture wrong')
+clause('clause 3i — without the lib: the derived raw output carries bare "session_id":<digits> text, and N11_OUTPUT\'s own exec result is a finished process (exit_code 0, no session_id)',
+  /"session_id"\s*:\s*\d+/.test(J(n11raw).payload.output[1].text) && !/\{"chunk_id"/.test(J(n11raw).payload.output[1].text) && JSON.parse(n11.payload.output[1].text).exit_code === 0 && !('session_id' in JSON.parse(n11.payload.output[1].text)), 'n11 fixture wrong')
+clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
+  [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
+  F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')
 process.exit(bad ? 1 : 0)

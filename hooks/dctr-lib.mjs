@@ -532,7 +532,7 @@ export const GATE_ROLE = 'gate'
  * would kill the check, so its marker MOVES to the unowned gate directory and its pane is left
  * alone. Everything else closes, a finished gate included. The caller reads the file; this decides.
  */
-export const sweepAction = (seat, resultExists) => (seat?.role === GATE_ROLE && !resultExists ? 'move' : 'close')
+export const sweepAction = (seat, resultExists) => (seat?.detached ? 'leave' : seat?.role === GATE_ROLE && !resultExists ? 'move' : 'close')
 
 /** The name a moved gate marker takes in the unowned directory. Gate names are allocated per session,
  *  so two sessions' `dctr-gate-1.json` moved under their bare names would overwrite each other (F4). */
@@ -1423,6 +1423,10 @@ export const clearSweepTargets = (sessions, newSessionId, paneId) => (paneId
  *  run reads what it always read. */
 export const shellSessionId = (env) => env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID || null
 
+/** Whether a launcher runs from a Codex session's own shell: CODEX_SESSION_ID with no Claude Code session id. A Codex
+ *  process under a Claude Code session is that session's, as shellSessionId and codexUnderClaude have it (N3). */
+export const codexShell = (env) => !env.CLAUDE_CODE_SESSION_ID && Boolean(env.CODEX_SESSION_ID)
+
 /** Whether a gate with no pane must run in the foreground rather than detached, from the command line of PID 1 in the
  *  launcher's PID namespace (`/proc/1/cmdline`, NUL-separated): true inside Codex's Linux sandbox, where PID 1 is
  *  `codex-linux-sandbox` (probed 2026-09-28) and every process in the namespace dies when the command returns. A
@@ -1436,19 +1440,31 @@ export const gateWaits = (pid1Cmdline) => path.basename(String(pid1Cmdline ?? ''
 
 const hostName = (host) => (host === 'codex' ? 'Codex' : 'Claude')
 
-/** A Codex user message the harness wrote rather than the user typed: the environment context, an injected skill
- *  body, a Stop hook's prompt, a turn-aborted note, and the like, each a tagged block (probe rollouts). */
+/** A Codex user message the harness wrote rather than the user typed, for a rollout that does not label its items: the
+ *  environment context, an injected skill body, a Stop hook's prompt, a turn-aborted note, and the like, each a tagged
+ *  block (probe rollouts). */
 const CODEX_META = /^<[a-z_]+[\s>]/
+
+/** Whether a Codex user message is one the harness wrote. Codex 0.156.1 labels each message's items in
+ *  internal_chat_message_metadata_passthrough.content_item_kinds: typed text is `user.text`, and the AGENTS.md block
+ *  (`agents_md.instructions`), the environment context, an injected skill and the like are not, so a message whose
+ *  labels lack user.text was injected whatever its text starts with, and one carrying it was typed, a prompt that
+ *  opens with a tag included (real rollouts under ~/.codex/sessions, E10H-B7). A message with no labels falls back to
+ *  the tagged-block test. */
+const codexInjected = (p, text) => {
+  const kinds = p.internal_chat_message_metadata_passthrough?.content_item_kinds
+  return Array.isArray(kinds) ? !kinds.includes('user.text') : CODEX_META.test(text.trimStart())
+}
 
 /** One rollout line as the entries the typer's readers take (seam S1): each user or assistant message item mapped to
  *  `{ type, timestamp, message: { content: [{ type: 'text', text }] }, isMeta }`; every other item maps to nothing.
- *  isMeta marks a user message nobody typed: the harness's tagged blocks, and the typer's own resume line, so
+ *  isMeta marks a user message nobody typed: what the harness injected, and the typer's own resume line, so
  *  userTyped reads a Codex entry as it reads a Claude Code one. */
 function codexEntry(e) {
   const p = e?.payload
   if (e?.type !== 'response_item' || p?.type !== 'message' || (p.role !== 'user' && p.role !== 'assistant')) return []
   const text = (Array.isArray(p.content) ? p.content : []).map((c) => (typeof c?.text === 'string' ? c.text : '')).join('')
-  return [{ type: p.role, timestamp: e.timestamp, message: { content: [{ type: 'text', text }] }, isMeta: p.role === 'user' && (CODEX_META.test(text.trimStart()) || text.trim() === CODEX_RESUME_LINE) }]
+  return [{ type: p.role, timestamp: e.timestamp, message: { content: [{ type: 'text', text }] }, isMeta: p.role === 'user' && (codexInjected(p, text) || text.trim() === CODEX_RESUME_LINE) }]
 }
 
 /**
@@ -1507,16 +1523,57 @@ export function clearTook(before, after, oldId) {
   return count(after) > count(before)
 }
 
+/** What the TUI shows in an empty composer: a new chat's placeholder, and a follow-up's (both in the 0.156.1 binary). */
+const COMPOSER_PLACEHOLDERS = ['Ask Codex to do anything', 'Ask a follow-up question']
+
+/** Whether the composer after the last continue line naming `oldId` is empty, the state the E10 table's typer row
+ *  names ("followed by an empty composer", probe-clear-screen.txt): exactly one composer line (`›`) follows that
+ *  continue line, and it holds nothing or the placeholder. False for a draft, and for a prompt the user already
+ *  submitted in the new chat, which leaves its own `›` line and then a fresh composer. Null when no continue line
+ *  names `oldId`, so it says nothing (E10H-B1). */
+export function composerEmpty(text, oldId) {
+  if (!oldId) return null
+  const ls = String(text ?? '').split('\n')
+  const at = ls.findLastIndex((l, i) => l.includes(CLEAR_TOOK_TEXT) && ls.slice(i, i + 4).join(' ').includes(oldId))
+  if (at < 0) return null
+  const composer = ls.slice(at + 1).map((l) => l.trim()).filter((l) => l.startsWith('›'))
+  return composer.length === 1 && ['', ...COMPOSER_PLACEHOLDERS].includes(composer[0].slice(1).trim())
+}
+
+/** Whether a Codex process belongs to a Claude Code session: a Codex hook payload whose environment carries
+ *  CLAUDE_CODE_SESSION_ID, as `codex app-server` does when codex:codex-rescue starts it from Claude Code's shell. Its
+ *  hooks stand down, since the herdr pane, the project and the record are the Claude session's, and a gate it launches
+ *  joins that session, as shellSessionId has it (N1, N3). */
+export const codexUnderClaude = (env, host) => host === 'codex' && Boolean(env?.CLAUDE_CODE_SESSION_ID)
+export const UNDER_CLAUDE_WHY = 'a Codex process under a Claude Code session (CLAUDE_CODE_SESSION_ID set), whose own hooks own its pane and record'
+
+/** A process Codex's own exec result says is still running: the result object Codex writes for a command that
+ *  outlived its yield (`{"chunk_id":…,"wall_time_seconds":…,"session_id":N,…}`, bare or inside Promise.allSettled's
+ *  `{"status":"fulfilled","value":…}`), at the start of a part or of a line, where a model that prints the result
+ *  whole puts it. A finished command's result carries exit_code in session_id's place. Text a command printed sits
+ *  inside the result's `output` string, escaped, so a `"session_id":N` there is never read as one (N11). */
+const CODEX_RUNNING = /(?:^|\n)(?:\{"status":"fulfilled","value":)?\{"chunk_id":"[^"\\]*","wall_time_seconds":[^,{}"]*,"session_id":(\d+)/g
+/** exec_command's own text result, on the path without code mode: its header, before `Output:`, names the process. */
+const PROCESS_RUNNING = /^Process running with session ID (\d+)$/m
+
 /**
  * The state of a rollout's last turn and its background terminals, read line by line. A turn starts at task_started
  * or at a user message the user typed, and ends at task_complete (its error and last_agent_message kept) or
- * turn_aborted. A background terminal is a command still running when its call returned (probe B5): on the sandboxed
- * path the call's output carries `"session_id":N` and ends when an item_completed CommandExecution names process_id
- * N; on the tty path the output reads `Script running with cell ID N`, and it ends at the next CommandExecution
- * completion of the same turn after that output, the only link the rollout gives.
+ * turn_aborted, which also ends what that turn left running. A background terminal is a command still running when
+ * its call returned (probe B5):
+ * - a process: Codex's own exec result carries its session_id (CODEX_RUNNING, PROCESS_RUNNING) and it ends when an
+ *   item_completed CommandExecution names that process_id;
+ * - a code-mode cell: an output reading `Script running with cell ID N`, whether the cell's own call's or a `wait`
+ *   poll's (a wait call's arguments name its cell_id). It ends at a later output of the same cell that is not
+ *   running (`Script completed`, `Script failed`), or at a CommandExecution completion the cell's call names: its
+ *   command in the call's input, or its process id as a session_id there (a write_stdin cell). A completion no call
+ *   names at all ends the oldest running cell of its turn, the only link the rollout gives (B5's tty path); one
+ *   another call names ends no cell (E10H-B2).
  */
 function codexTurnState(text) {
-  const running = new Set(), cells = []
+  const running = new Map() // process id -> the turn that started it
+  const cells = new Map() // cell id -> { turn, input }, in the order each last reported running
+  const calls = new Map() // call id -> { input, cell }
   let ended = false, error = null, lastMessage = null
   for (const l of String(text ?? '').split('\n')) {
     if (!l.trim()) continue
@@ -1530,19 +1587,47 @@ function codexTurnState(text) {
       ended = true
       lastMessage = typeof p.last_agent_message === 'string' ? p.last_agent_message : null
       error = p.error ? String(p.error.codex_error_info || p.error.message || 'unknown') : null
+      if (p.type === 'turn_aborted') {
+        for (const [id, turn] of running) if (turn === p.turn_id) running.delete(id)
+        for (const [id, c] of cells) if (c.turn === p.turn_id) cells.delete(id)
+      }
+    }
+    if (e.type === 'response_item' && (p.type === 'custom_tool_call' || p.type === 'function_call')) {
+      let cell = null
+      if (p.name === 'wait') { try { cell = String(JSON.parse(p.arguments).cell_id ?? '') || null } catch { /* no cell named */ } }
+      calls.set(p.call_id, { input: String(p.input ?? p.arguments ?? ''), cell })
     }
     if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
-      const out = typeof p.output === 'string' ? p.output : Array.isArray(p.output) ? p.output.map((o) => o?.text || '').join('\n') : JSON.stringify(p.output ?? '')
-      for (const m of out.matchAll(/"session_id"\s*:\s*(\d+)|Process running with session ID (\d+)/g)) running.add(m[1] || m[2])
-      if (/Script running with cell ID \d+/.test(out)) cells.push(p.internal_chat_message_metadata_passthrough?.turn_id ?? null)
+      const turn = p.internal_chat_message_metadata_passthrough?.turn_id ?? null
+      const parts = typeof p.output === 'string' ? [p.output] : Array.isArray(p.output) ? p.output.map((o) => (typeof o?.text === 'string' ? o.text : '')) : []
+      for (const part of parts) for (const m of part.matchAll(CODEX_RUNNING)) running.set(m[1], turn)
+      const head = PROCESS_RUNNING.exec(String(parts[0] ?? '').split('\nOutput:\n')[0])
+      if (head) running.set(head[1], turn)
+      const call = calls.get(p.call_id)
+      const cell = /^Script running with cell ID (\d+)/.exec(parts[0] ?? '')?.[1]
+      if (cell) {
+        // A poll carries the input of the call that started the cell, which is what names its command.
+        const input = cells.get(cell)?.input ?? (call && !call.cell ? call.input : '')
+        cells.delete(cell)
+        cells.set(cell, { turn, input })
+        if (call && !call.cell) call.cell = cell
+      } else if (call?.cell) cells.delete(call.cell)
     }
     if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'CommandExecution') {
-      running.delete(String(p.item.process_id))
-      const at = cells.indexOf(p.turn_id)
-      if (at >= 0) cells.splice(at, 1)
+      const pid = String(p.item.process_id)
+      running.delete(pid)
+      const cmd = Array.isArray(p.item.command) ? String(p.item.command.at(-1) ?? '') : ''
+      const names = (input) => (cmd !== '' && (input.includes(cmd) || input.includes(JSON.stringify(cmd).slice(1, -1)))) ||
+        new RegExp(`session_id\\W{0,3}:\\s*${pid}\\b`).test(input)
+      const own = [...cells].find(([, c]) => names(c.input))
+      if (own) cells.delete(own[0])
+      else if (![...calls.values()].some((c) => names(c.input))) {
+        const oldest = [...cells].find(([, c]) => c.turn === p.turn_id)
+        if (oldest) cells.delete(oldest[0])
+      }
     }
   }
-  return { ended, error, lastMessage, backgroundRunning: running.size > 0 || cells.length > 0 }
+  return { ended, error, lastMessage, backgroundRunning: running.size > 0 || cells.size > 0 }
 }
 
 /**
@@ -1561,17 +1646,20 @@ export function codexObservations(rolloutText, herdrStatus) {
 }
 
 /** The watcher's turn, from the rollout text written since it started (at its UserPromptSubmit): `ended` once a
- *  task_complete or turn_aborted is there, `newTurn` once a task_started follows that end. */
+ *  task_complete or turn_aborted is there, `newTurn` once a task_started follows that end, and `endAt`, the offset in
+ *  `text` just past the line that ended it (null while it runs), so the background state can be read as it stood when
+ *  the turn ended rather than at whichever poll first saw the end (E10H-B3). */
 export function watchedTurn(text) {
-  let ended = false, newTurn = false
+  let ended = false, newTurn = false, endAt = null, at = 0
   for (const l of String(text ?? '').split('\n')) {
+    at += l.length + 1
     let e
     try { e = JSON.parse(l) } catch { continue }
     if (e?.type !== 'event_msg') continue
-    if (e.payload?.type === 'task_complete' || e.payload?.type === 'turn_aborted') ended = true
+    if (!ended && (e.payload?.type === 'task_complete' || e.payload?.type === 'turn_aborted')) { ended = true; endAt = at }
     else if (ended && e.payload?.type === 'task_started') newTurn = true
   }
-  return { ended, newTurn }
+  return { ended, newTurn, endAt }
 }
 
 /** The watcher's timings in ms: poll, how long a turn end stays idle before the idle pause (Claude Code raises
@@ -1617,9 +1705,15 @@ function codexTyperAct(o) {
   const guard = typerGuard(o, t, pause)
   if (guard) return guard
   if (o.stage === 'resume') {
+    // The user started the new chat before the resume line: Codex writes the restore file, and herdr's hook names the
+    // new session, only at a new chat's first prompt, and the typer has sent none (E10H-B1).
+    const s = paneSession(o.pane)
+    if (o.restore || (s !== null && s !== o.oldSession)) return pause('R16')
     if (o.took === null || o.took === undefined) return pause('R17', R17_WHY.lookup)
     if (!o.took) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the /clear to take' } : pause('R18', o.oldSession)
-    return typerReady(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line' }
+    // `o.composer` is composerEmpty's answer: a draft, or a prompt submitted after the continue line, is typing.
+    if (o.composer !== true) return pause('R16')
+    return typerReady(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line and an empty composer' }
   }
   if (!o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
   const s = paneSession(o.pane)
@@ -1645,8 +1739,8 @@ function codexTyperAct(o) {
 // rust-v0.156.1 (hooks/src/engine/discovery.rs hook_hash, hooks/src/events/common.rs matcher_pattern_for_event).
 
 /** What the install registers on Codex: [event, script, timeout in seconds, matcher]. One script serves both
- *  hosts; a matcher only where Codex applies one (SessionStart matches its source). Codex clamps SessionEnd and
- *  Interrupt timeouts to 1..3 seconds, so 3 is the most either can have. */
+ *  hosts; a matcher only where Codex applies one (SessionStart matches its source). Codex clamps a SessionEnd
+ *  timeout to 1..3 seconds, so 3 is the most it can have. No Interrupt entry: dctr-cycle.mjs acts on no Interrupt (N2). */
 export const CODEX_HOOKS = [
   ['SessionStart', 'dctr-restore.mjs', 5, 'clear'],
   ['SessionStart', 'dctr-seat.mjs', 10, 'clear'],
@@ -1657,7 +1751,6 @@ export const CODEX_HOOKS = [
   ['Stop', 'dctr-cycle.mjs', 60],
   ['UserPromptSubmit', 'dctr-cycle.mjs', 5],
   ['PermissionRequest', 'dctr-cycle.mjs', 30],
-  ['Interrupt', 'dctr-cycle.mjs', 3],
 ]
 /** `SessionStart` -> `session_start`, the label Codex keys trust lines and hashes by. */
 export const hookEventLabel = (ev) => String(ev).replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase()
@@ -1847,9 +1940,11 @@ export function codexInstallPlan({ hooksJson, configToml, hookDir, hooksJsonPath
   const indent = /\n([ \t]+)\S/.exec(hooksJson || '')?.[1] ?? 2
   const nl = (text) => (!text || text.endsWith('\n') ? '\n' : '')
   if (hasHooks && JSON.stringify(JSON.parse(hooksJson), null, indent) + nl(hooksJson) !== hooksJson) {
-    // ponytail: re-serialized, not spliced, so a hand-formatted hooks.json has its layout normalized (every entry's
-    // content and index unchanged, so no trust line breaks). Splice the text if a user's layout must survive.
-    messages.push('hooks.json was not laid out as JSON.stringify lays it out, so its layout changed; no entry\'s content or position did')
+    // The file is written back whole. Where it round-trips through JSON.stringify every entry the install did not
+    // write comes back byte for byte; any other layout would come back changed, which E10-D2 forbids, so it is
+    // refused before either file is written (E10H-B5). ponytail: refuse, not splice; splice the text if a
+    // hand-laid-out hooks.json must be accepted as it stands.
+    throw new Error(`hooks.json is not laid out as JSON.stringify(value, null, ${JSON.stringify(indent)}) lays it out, so writing the doctrine entries would change the bytes of entries the install does not own; lay it out that way, or add the entries by hand, and re-run`)
   }
   const hooksOut = JSON.stringify(doc, null, indent) + nl(hooksJson)
   messages.push(hooksOut === hooksJson ? 'hooks.json: no change, the doctrine entries are current'

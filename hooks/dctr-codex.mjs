@@ -35,7 +35,18 @@ const before = { hooks: read(hooksPath), config: read(configPath) }
 let plan
 try { plan = codexInstallPlan({ hooksJson: before.hooks, configToml: before.config, hookDir, hooksJsonPath: hooksPath }) } catch (e) { refuse(e.message) }
 
-const writeAtomic = (file, data) => { const tmp = `${file}.tmp.${process.pid}`; fs.writeFileSync(tmp, data); fs.renameSync(tmp, file) }
+/** Written through a symlink to the file it names, with that file's mode (a new file gets 0600: config.toml can hold
+ *  tokens), so a dotfiles link stays a link and a 0600 config stays 0600 whatever the umask (E10H-B6). */
+const writeAtomic = (file, data) => {
+  let target = file
+  try { target = fs.realpathSync(file) } catch { /* a new file */ }
+  let mode = 0o600
+  try { mode = fs.statSync(target).mode & 0o777 } catch { /* a new file */ }
+  const tmp = `${target}.tmp.${process.pid}`
+  fs.writeFileSync(tmp, data, { mode })
+  fs.chmodSync(tmp, mode)
+  fs.renameSync(tmp, target)
+}
 const src = import.meta.dirname
 const same = (a, b) => { try { return Buffer.compare(fs.readFileSync(a), fs.readFileSync(b)) === 0 } catch { return false } }
 const current = (() => {

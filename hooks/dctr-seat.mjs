@@ -40,7 +40,7 @@ import {
   PREFIX, agentName, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName,
-  hostOf, seatTranscriptPath, clearSweepSkip, clearSweepTargets } from './dctr-lib.mjs'
+  hostOf, seatTranscriptPath, clearSweepSkip, clearSweepTargets, codexUnderClaude, UNDER_CLAUDE_WHY } from './dctr-lib.mjs'
 import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, readCodexSeat, sessionsOfPane, indexPaneSession, sleepMs } from './dctr-state.mjs'
 
 /**
@@ -89,6 +89,8 @@ function sweepSession(sessionId, waitMs, log) {
       // the records that say how to tear it down.
       for (const seat of seats) {
         if (moving.includes(seat)) continue
+        // A detached gate has no pane to close; its record goes with the directory, and its check runs on.
+        if (sweepAction(seat, false) === 'leave') continue
         // A record that NAMES nothing cannot be closed. `reserveMarker` publishes `{}` and it
         // survives whenever a rollback's republish also failed, so this shape reaches disk; asking
         // herdr to close `undefined` turned a useless record into a failed close, which is a
@@ -216,6 +218,7 @@ const event = payload.hook_event_name
 const sessionId = payload.session_id
 if (!sessionId) stand_down('no session_id in the payload')
 logSession = sessionId
+if (codexUnderClaude(process.env, hostOf(payload))) stand_down(UNDER_CLAUDE_WHY)
 
 // Contained posture. DCTR_VIEW_REQUEST_DIR is an allowed mount (sbsforge: /bridge); its
 // presence means this session runs inside a container that must reach nothing on the host.

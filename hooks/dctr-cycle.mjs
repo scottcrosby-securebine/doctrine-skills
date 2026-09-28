@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
-  hostOf, codexObservations,
+  hostOf, codexObservations, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -50,6 +50,7 @@ try {
   try { payload = JSON.parse((typeof input === 'function' ? input() : input) || '{}') } catch { stand_down('hook payload was not readable') }
   event = payload.hook_event_name || 'none'
   const host = hostOf(payload)
+  if (codexUnderClaude(process.env, host)) stand_down(UNDER_CLAUDE_WHY)
   // Codex's events read as the Claude Code events they stand for (E10 table), so every decision below is the one
   // E8 certified: a PermissionRequest is a Notification permission_prompt, and a Stop's background_tasks is the
   // background terminals the rollout shows running (S5; a rollout that cannot be read counts as one running, the

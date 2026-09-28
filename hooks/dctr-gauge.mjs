@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   gaugeSkip, followKickoff, lastOnOffEntry, autoCycleActive, stopFileRepo, repoOf, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
-  hostOf,
+  hostOf, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
 import { hookLog, stateDir, standDown, writeMarker, appendRecordLine } from './dctr-state.mjs'
 import { readBridge } from './dctr-bridge.mjs'
@@ -59,6 +59,7 @@ try {
   if (why) stand_down(why)
   sessionId = payload.session_id
   const host = hostOf(payload)
+  if (codexUnderClaude(process.env, host)) stand_down(UNDER_CLAUDE_WHY)
 
   const projectDir = (host === 'codex' ? null : process.env.CLAUDE_PROJECT_DIR) || payload.cwd
   if (!projectDir) stand_down('no CLAUDE_PROJECT_DIR and no cwd in the payload')

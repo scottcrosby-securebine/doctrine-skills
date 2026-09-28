@@ -24,9 +24,11 @@ import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   hostOf, seatTranscriptPath, codexTaskName, renderRollout, renderRecord, clearSweepSkip, clearSweepTargets, shellSessionId,
-  paneLabel, transcriptPath, restoreSkip, gateWaits,
+  paneLabel, transcriptPath, restoreSkip, gateWaits, sweepAction,
 } from './dctr-lib.mjs'
-import { sleepMs } from './dctr-state.mjs'
+import { sleepMs, liveWork, sideOccupants } from './dctr-state.mjs'
+// Seams the gate round 1 repair added, read off the module so the suite still loads, and reports FAIL, where they are absent.
+const codexShell = (await import('./dctr-lib.mjs')).codexShell ?? (() => undefined)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 let bad = 0
@@ -170,7 +172,7 @@ esac
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 const hook = path.join(HERE, 'dctr-seat.mjs')
-const env = (extra = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...extra })
+const env = (extra = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', CLAUDE_CODE_SESSION_ID: '', ...extra })
 const run = (payload, extra) => {
   try { return { code: 0, out: execFileSync('node', [hook], { timeout: 30000, input: JSON.stringify(payload), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: env(extra) }) } }
   catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
@@ -313,7 +315,9 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   fs.writeFileSync(calls, '')
   const out2 = path.join(tmp, 'g', 'contained.out')
   let so2 = ''
-  try { so2 = execFileSync('node', [gate, 'probe', out2, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: { ...genv, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } }) } catch (e) { so2 = String(e.stdout || '') + String(e.stderr || '') }
+  // PID 1 from a fixture, an init's command line, so the suite gives the same answer inside Codex's sandbox (N9).
+  const init = path.join(tmp, 'pid1-init'); fs.writeFileSync(init, '/sbin/init\0splash\0')
+  try { so2 = execFileSync('node', [gate, 'probe', out2, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: { ...genv, DCTR_PID1_FILE: init, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } }) } catch (e) { so2 = String(e.stdout || '') + String(e.stderr || '') }
   clause('clause 2g — contained outside Codex\'s sandbox it runs detached, as it always has, with exit=0 and zero herdr calls',
     /running detached/.test(so2) && waitFor(() => /^exit=0$/m.test((() => { try { return fs.readFileSync(`${out2}.result`, 'utf8') } catch { return '' } })())) && callText() === '',
     `${so2}\ncalls: ${callText()}`)
@@ -330,11 +334,45 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   clause('clause 1x — inside Codex\'s sandbox it runs the check to completion before returning, with exit=0 in its result file and zero herdr calls',
     /ran in the foreground/.test(so3) && /^exit=0$/m.test(resultAtExit) && callText() === '',
     `${so3}\nresult at exit: ${JSON.stringify(resultAtExit)}\ncalls: ${callText()}`)
-  clause('clause 1y — the sandbox is read from PID 1\'s command line only: this host\'s PID 1, an init, a codex CLI as PID 1, a sandbox named only as an argument and an empty read do not count',
-    gateWaits(fs.readFileSync(pid1, 'utf8')) && !gateWaits((() => { try { return fs.readFileSync('/proc/1/cmdline', 'utf8') } catch { return '' } })()) &&
+  clause('clause 1y — the sandbox is read from PID 1\'s command line only: an init, a codex CLI as PID 1, a sandbox named only as an argument and an empty read do not count',
+    gateWaits(fs.readFileSync(pid1, 'utf8')) && !gateWaits(fs.readFileSync(init, 'utf8')) &&
     !gateWaits('') && !gateWaits(null) && !gateWaits('/sbin/init\0splash\0') &&
     !gateWaits('/usr/bin/codex\0exec\0') && !gateWaits('bash\0-c\0codex-linux-sandbox --x\0'),
     'gateWaits misread a PID 1 command line')
+
+  // E10H-B4. The launch codex.md gives the claude -p red team: `env -u HERDR_ENV -u HERDR_PANE_ID -u
+  // CLAUDE_CODE_SESSION_ID node .../dctr-gate.mjs red-team <out> -- ...`, from a Codex shell (CODEX_SESSION_ID kept),
+  // outside the sandbox (init PID 1), where it detaches. A short sleep stands in for claude -p.
+  fs.rmSync(stateOf(SESSION), { recursive: true, force: true })
+  fs.writeFileSync(calls, '')
+  const out4 = path.join(tmp, 'g', 'red-team.out')
+  const rtEnv = { ...genv, DCTR_PID1_FILE: init }
+  for (const k of ['HERDR_ENV', 'HERDR_PANE_ID', 'CLAUDE_CODE_SESSION_ID']) delete rtEnv[k]
+  let so4 = ''
+  try { so4 = execFileSync('node', [gate, 'red-team', out4, '--', 'sh', '-c', 'sleep 2; echo verdict'], { encoding: 'utf8', timeout: 30000, env: rtEnv }) } catch (e) { so4 = String(e.stdout || '') + String(e.stderr || '') }
+  process.env.TMPDIR = tmp
+  const m4 = readJson(markerOf(SESSION, 'dctr-gate-1'))
+  const live4 = liveWork(SESSION)
+  const cols4 = sideOccupants(m4 ? [m4] : [], [{ pane_id: 'w1:p1' }])
+  clause('clause 1ac — the Codex reference\'s claude -p red-team launch from a Codex shell leaves a gate marker with no pane in that session\'s seats: live while its result is missing, holding no column slot, left alone by a sweep, and no herdr call (E10H-B4)',
+    /running detached/.test(so4) && m4?.role === 'gate' && m4.detached === true && m4.paneId === '' && m4.file === out4 && m4.label === 'red-team' &&
+    live4 === 'gate dctr-gate-1 is live' && Array.isArray(cols4) && cols4.length === 0 && sweepAction(m4, false) === 'leave' && callText() === '',
+    `${so4}\nmarker ${JSON.stringify(m4)} live ${live4} cols ${JSON.stringify(cols4)} calls ${callText()}`)
+  const done4 = waitFor(() => /^exit=0$/m.test((() => { try { return fs.readFileSync(`${out4}.result`, 'utf8') } catch { return '' } })()), 15000)
+  const gone4 = waitFor(() => !fs.existsSync(markerOf(SESSION, 'dctr-gate-1')), 5000)
+  clause('clause 1ad — once its result file is written the marker is gone and the session has no live work (E10H-B4)',
+    done4 && gone4 && liveWork(SESSION) === null, `done ${done4} gone ${gone4} live ${liveWork(SESSION)}`)
+  fs.writeFileSync(calls, '')
+  const out5 = path.join(tmp, 'g', 'claude-detached.out')
+  const clEnv = { ...rtEnv, CLAUDE_CODE_SESSION_ID: 'c1a0de00-0000-4000-8000-00000000000d' }
+  try { execFileSync('node', [gate, 'probe', out5, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: clEnv }) } catch { /* the clause reports it */ }
+  waitFor(() => fs.existsSync(`${out5}.result`))
+  clause('clause 2j — a detached gate from a Claude Code shell writes no marker, as it always has; codexShell reads a Claude id as Claude\'s (N3)',
+    !fs.existsSync(path.join(stateOf('c1a0de00-0000-4000-8000-00000000000d'), 'seats')) &&
+    codexShell({ CODEX_SESSION_ID: 'x' }) && !codexShell({ CODEX_SESSION_ID: 'x', CLAUDE_CODE_SESSION_ID: 'c' }) && !codexShell({}), 'a marker was written')
+  clause('clause 3g — without the launcher: the red-team environment names the Codex session and neither herdr variable nor a Claude id, and the init PID 1 is not the sandbox',
+    rtEnv.CODEX_SESSION_ID === SESSION && !('HERDR_ENV' in rtEnv) && !('HERDR_PANE_ID' in rtEnv) && !('CLAUDE_CODE_SESSION_ID' in rtEnv) &&
+    !fs.readFileSync(init, 'utf8').startsWith('codex-linux-sandbox'), 'red-team env wrong')
 }
 
 // ------------------------------------------------------------------------------------------------ the pane launcher from a Codex shell

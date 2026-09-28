@@ -53,9 +53,12 @@ try {
     const active = !chain.why && autoCycleActive(chain.record.entries, Boolean(stopFileRepo([a.project, repoOf(chain.recordPath, fs.existsSync)], fs.existsSync)))
     let text = null
     try { text = fs.readFileSync(a.transcript, 'utf8') } catch (e) { log(`the rollout could not be read (${e.code || e.message})`) }
-    const turn = text === null ? { ended: false, newTurn: false } : watchedTurn(text.slice(Buffer.from(text).subarray(0, a.from).toString('utf8').length))
+    const start = text === null ? 0 : Buffer.from(text).subarray(0, a.from).toString('utf8').length
+    const turn = text === null ? { ended: false, newTurn: false } : watchedTurn(text.slice(start))
     const obs = text === null ? { backgroundRunning: true, apiError: null, idle: false } : codexObservations(text, turn.ended ? status() : null)
-    if (turn.ended && bgAtEnd === null) bgAtEnd = obs.backgroundRunning
+    // Read as the rollout stood at the line that ended the turn, where the Stop decided, not at this poll: a terminal
+    // that exited between the end and this poll still held that Stop back, and nothing else will run it again (E10H-B3).
+    if (turn.ended && bgAtEnd === null) bgAtEnd = codexObservations(text.slice(0, start + turn.endAt), null).backgroundRunning
     idleSince = obs.idle ? (idleSince ?? now) : null
     const last = turn.ended ? lastMessage(text) : null
     const step = watchStep({ active, turn, obs, bgAtEnd: Boolean(bgAtEnd), ready: endsReady(last), idleFor: idleSince === null ? 0 : now - idleSince, age: now, times })

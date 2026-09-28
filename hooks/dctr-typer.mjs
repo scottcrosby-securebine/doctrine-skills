@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY,
-  CODEX_RESUME_LINE, clearTook,
+  CODEX_RESUME_LINE, clearTook, composerEmpty,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -124,12 +124,16 @@ try {
     const old = stage === 'clear' ? entriesFrom(a.transcript, a.length) : null
     const fresh = stage !== 'clear' && restore ? entriesFrom(restore.transcript) : null
     partialSince = old?.partial || fresh?.partial ? (partialSince ?? now) : null
+    // Codex, after the /clear and before the resume line: one pane read answers both whether the /clear took and
+    // whether the composer below the continue line is still empty (Q6, E10H-B1).
+    const after = codex && stage === 'resume' ? paneText() : undefined
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
       midWrite: partialSince === null ? null : now - partialSince,
       grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
       typedNew: fresh === null ? null : fresh.entries.some(userTyped),
-      host: a.host, took: codex && stage === 'resume' ? (() => { const after = paneText(); return after === null ? null : clearTook(before, after, a.session) })() : undefined,
+      host: a.host, took: after === undefined ? undefined : after === null ? null : clearTook(before, after, a.session),
+      composer: typeof after === 'string' ? composerEmpty(after, a.session) : undefined,
       firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })

@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -173,6 +173,28 @@ export function movedGatePath(marker) {
   return path.join(gatesDir(path.dirname(state)), movedGateName(base.slice(PREFIX.length + 1), path.basename(marker, '.json')))
 }
 
+/**
+ * A detached gate's marker (E10H-B4): the claude -p red team the Codex reference launches runs with no pane, and
+ * nothing else shows the Stop hook it is running (liveWork reads markers). So it gets a gate marker with no pane,
+ * `detached: true`, in the session's seats directory, under the next free gate name; seatLive keeps it live until
+ * `<file>.result` exists, and the launcher's --run drops it when it writes that file. It holds no column slot
+ * (sideOccupants) and is never closed or moved by a sweep (sweepAction). Returns the marker's path, or null when none
+ * could be written, which leaves the gate running as it always has, unseen.
+ */
+export function writeDetachedGate(sessionId, file, label) {
+  try {
+    fs.mkdirSync(seatsDir(sessionId), { recursive: true })
+    const taken = liveSeatsPartial(sessionId).seats.map((s) => s.agent).concat(movedGateNames(sessionId))
+    for (let n = nextIndex(GATE_ROLE, taken); n; n = nextIndex(GATE_ROLE, taken)) {
+      const agent = agentName(GATE_ROLE, n), marker = path.join(seatsDir(sessionId), `${agent}.json`)
+      try { reserveMarker(marker) } catch (e) { if (e.code !== 'EEXIST') throw e; taken.push(agent); continue }
+      writeMarker(marker, { agent, role: GATE_ROLE, n, tabId: '', paneId: '', file, label, detached: true })
+      return marker
+    }
+  } catch { /* no marker: the gate still runs */ }
+  return null
+}
+
 /** The gate names this session id holds in the unowned directory, readable or not: a name is taken
  *  by the file, whatever is in it. A directory not there yet holds none. */
 export function movedGateNames(sessionId) {
@@ -281,7 +303,8 @@ export function sideOccupants(seats, layout) {
   let moved
   try { moved = movedGates() } catch { return null }
   if (moved.unreadable.length) return null
-  const inLayout = (m) => !m.paneId || layout.some((l) => l.pane_id === m.paneId)
+  // A detached gate (writeDetachedGate) has no pane and holds no slot; a marker still being placed has none yet and does.
+  const inLayout = (m) => !m.detached && (!m.paneId || layout.some((l) => l.pane_id === m.paneId))
   return seats.filter(inLayout).concat(panes.filter(inLayout), moved.gates.filter(inLayout))
 }
 

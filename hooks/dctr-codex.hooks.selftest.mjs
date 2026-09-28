@@ -49,19 +49,25 @@ if (args[0] === 'pane' && args[1] === 'get') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
   process.stdout.write(st.clearedAt ? (st.after ?? st.before) : st.before)
 } else if (args[0] === 'pane' && args[1] === 'run') {
-  if (args[3] === '/clear') { st.clearedAt = Date.now(); save() }
+  if (args[3] === '/clear') {
+    st.clearedAt = Date.now()
+    // The user submits a prompt in the new chat before the typer's resume line: Codex fires SessionStart, so the
+    // restore file and herdr's session name the new chat.
+    if (st.userStarts) { st.resumed = true; fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript })) }
+    save()
+  }
   else if (st.onResume === 'write') {
     st.resumed = true; save()
     fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
     const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
-    fs.appendFileSync(st.newTranscript, [msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')].join('\\n') + '\\n')
+    fs.appendFileSync(st.newTranscript, [...(st.firstLines || []), msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')].join('\\n') + '\\n')
   }
 }
 process.exit(0)
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_PANE_ID: 'wX:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'DCTR_TYPER_SCRIPT', 'DCTR_WATCH_SCRIPT', 'DCTR_CYCLE_SCRIPT']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'DCTR_TYPER_SCRIPT', 'DCTR_WATCH_SCRIPT', 'DCTR_CYCLE_SCRIPT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_SESSION_ID']) delete baseEnv[k]
 // A CLAUDE_PROJECT_DIR naming another directory: a Codex session inherits whatever launched it, and must read its own cwd.
 const decoy = path.join(tmp, 'decoy'); fs.mkdirSync(decoy)
 baseEnv.CLAUDE_PROJECT_DIR = decoy
@@ -280,6 +286,13 @@ const wbEvents = fs.readFileSync(wbLog, 'utf8').trim().split('\n').map((l) => JS
 clause('clause 1d3 — the watcher fires nothing while the background terminal runs, then, once its completion lands, hands the hook the Stop again with the turn\'s last message (E8-D7 through the table)',
   wbBefore === '' && wbEvents[0]?.hook_event_name === 'Stop' && wbEvents[0].last_assistant_message === 'started' && wbEvents[0].stop_hook_active === false && wbEvents[0].session_id === 'v1',
   `${wbBefore} || ${JSON.stringify(wbEvents)}`)
+// E10H-B3: the turn's end and the terminal's completion both land before the watcher's first poll after the end.
+const wb2 = project('watch-bg-between')
+const wb2Log = path.join(wb2.dir, 'events.log')
+await watcher(wb2, 'v2', rollout(wb2, 'v2', [F.BG_RUNNING, F.BG_DONE]), Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wb2Log })
+const wb2Events = (() => { try { return fs.readFileSync(wb2Log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } })()
+clause('clause 1d6 — the watcher, when the turn ended with a terminal running and the terminal exited before it looked, still hands the hook the Stop again (E10H-B3)',
+  wb2Events[0]?.hook_event_name === 'Stop' && wb2Events[0].last_assistant_message === 'started', JSON.stringify(wb2Events))
 const wn = project('watch-new')
 const wnLog = path.join(wn.dir, 'events.log')
 await watcher(wn, 'q1', rollout(wn, 'q1', [F.TUI_TURN, F.TUI_COMPACT]), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wnLog })
@@ -337,6 +350,22 @@ clause('clause 1e5 — typer on Codex, the pane focused at first: it waits, then
 const tContained = typerCase('contained', {}, { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') })
 clause('clause 1e6 — typer on Codex in a contained session: no herdr call at all (E8-D15)', tContained.calls.length === 0 && tContained.sends === '0,0', td(tContained))
 
+// Gate round 1 repair. Derived pane texts: NARROW_AFTER with its empty composer replaced by a draft, and with a prompt
+// the user submitted and its answer above a fresh composer.
+const DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› my own draft')
+const SUBMITTED = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
+const tDraft = typerCase('draft', { after: DRAFT })
+clause('clause 1e7 — typer on Codex, a draft typed into the new chat\'s composer after the /clear: the resume line is never sent into it, paused R16 (clear 1, resume 0, E10H-B1)',
+  tDraft.sends === '1,0' && JSON.stringify(tDraft.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]' && tDraft.otherSends.length === 0, td(tDraft))
+const tStarted = typerCase('started', { after: SUBMITTED, userStarts: true })
+clause('clause 1e8 — typer on Codex, the user submitted a prompt in the new chat before the resume line (restore file and herdr on the new session): no resume sent, paused R16 (E10H-B1)',
+  tStarted.sends === '1,0' && JSON.stringify(tStarted.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', td(tStarted))
+// The new chat's rollout opening with the AGENTS.md block Codex injects (AGENTS_MD_TURN's real line, cut from a user's
+// session) before the resume line: that is not the user typing.
+const tAgents = typerCase('agents', { firstLines: [F.AGENTS_MD_TURN[1]] })
+clause('clause 1e9 — typer on Codex, the new chat opens with the injected AGENTS.md block: the cycle confirms with no pause (clear 1, resume 1, E10H-B7)',
+  tAgents.sends === '1,1' && tAgents.paused.length === 0 && tAgents.cycled.length === 1, td(tAgents))
+
 // ---------------------------------------------------------------- clause 2: known-good inputs stay quiet
 
 const q = project('quiet')
@@ -349,6 +378,26 @@ const qg = project('quiet-gauge', { on: '- auto-cycle: on cap 10 tier 100000' })
 const qg1 = hook('dctr-gauge.mjs', qg, as(F.POST_MAIN, qg, 'm2', rollout(qg, 'm2', F.TUI_TURN)))
 clause('clause 2b — gauge on Codex below the tier: silent, a latch recording the first reading, no warned line',
   qg1.out === '' && latch('m2')?.firstUsed === 17503 && recLines(qg, /warned/).length === 0, `${qg1.out} ${JSON.stringify(latch('m2'))}`)
+
+// N1: a Codex process started from a Claude Code shell (codex:codex-rescue's app-server) inherits CLAUDE_CODE_SESSION_ID
+// and the Claude session's pane. Each Codex payload that acts above (a PermissionRequest, a Stop that launches the
+// typer, a gauge crossing, a restore) stands down there, writing nothing and calling no herdr.
+const uc = project('under-claude', { on: '- auto-cycle: on cap 10 tier 90000', lines: ['- auto-cycle: warned u1 10000'] })
+write(path.join(stateDir('u1'), 'gauge.json'), JSON.stringify({ session_id: 'u1', warned: true, warnedAt: Date.now() - 60000 }))
+shim(uc, { session: 'u1' })
+const ucEnv = { CLAUDE_CODE_SESSION_ID: 'c1a0de00-0000-4000-8000-00000000000c', DCTR_TYPER_SCRIPT: stub, STUB_LOG: path.join(uc.dir, 'typer.log') }
+const ucT = rollout(uc, 'u1', [F.TUI_TURN, up99])
+const ucBefore = fs.readFileSync(uc.record, 'utf8')
+const ucRuns = [
+  hook('dctr-cycle.mjs', uc, as(F.PERMISSION, uc, 'u1', ucT), ucEnv),
+  hook('dctr-cycle.mjs', uc, as(F.STOP_MAIN, uc, 'u1', ucT, { last_assistant_message: 'Handoff written.\nauto-cycle: ready' }), ucEnv),
+  hook('dctr-gauge.mjs', uc, as(F.POST_MAIN, uc, 'u2', ucT), ucEnv),
+  hook('dctr-restore.mjs', uc, as(F.SS_CLEAR, uc, 'u3', ucT), ucEnv),
+]
+clause('clause 1f — a Codex process under a Claude Code session: PermissionRequest, Stop, PostToolUse and SessionStart clear stand down, the record unchanged, no typer, no restore file, no herdr call (N1)',
+  ucRuns.every((r) => r.code === 0 && r.out === '') && fs.readFileSync(uc.record, 'utf8') === ucBefore && !fs.existsSync(path.join(uc.dir, 'typer.log')) &&
+  calls(uc).length === 0 && latch('u2') === null,
+  `${JSON.stringify(ucRuns.map((r) => [r.code, r.out, r.err.trim().slice(0, 80)]))} calls ${JSON.stringify(calls(uc))}`)
 
 // ---------------------------------------------------------------- clause 3: the staged inputs carry the defect, no hook run
 

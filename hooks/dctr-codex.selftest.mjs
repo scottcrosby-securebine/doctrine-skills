@@ -323,6 +323,49 @@ clause('clause 1f — a --codex-home that does not exist is refused, as Codex re
 clause('clause 1g — an unknown argument is a usage error',
   run(['instal']).status === 2 && run(['install', '--codex-home']).status === 2, 'accepted')
 
+clause('clause 1j — no Interrupt entry is installed: dctr-cycle.mjs acts on no Interrupt, so each Esc would only start a process that stands down (N2)',
+  !CODEX_HOOKS.some(([ev]) => ev === 'Interrupt') && !('Interrupt' in parsed1.hooks), JSON.stringify(Object.keys(parsed1.hooks)))
+
+// E10H-B5. Derived from herdr's real group (F2, HERDR_GROUP_TEXT): the same hooks.json laid out on one line, and laid
+// out as herdr lays it out but with herdr's group written on one line. Written back whole, either would change that
+// group's bytes, so the install refuses before writing either file.
+const COMPACT = JSON.stringify({ hooks: { SessionStart: [JSON.parse(HERDR_GROUP_TEXT)] } })
+const MIXED = `{\n  "hooks": {\n    "SessionStart": [\n      ${JSON.stringify(JSON.parse(HERDR_GROUP_TEXT))}\n    ]\n  }\n}\n`
+const layoutRuns = [COMPACT, MIXED].map((text) => {
+  const h = fs.mkdtempSync(path.join(tmp, 'layout-'))
+  put(path.join(h, 'hooks.json'), text)
+  put(path.join(h, 'config.toml'), scottConfig(h))
+  const r = run(['install', '--codex-home', h])
+  return { r, same: readOr(path.join(h, 'hooks.json')) === text && readOr(path.join(h, 'config.toml')) === scottConfig(h), copied: fs.existsSync(hookDirFor(h)) }
+})
+clause('clause 1h — a hooks.json laid out on one line, or with a foreign entry on one line, is refused naming its layout, and both files are left byte-identical with no hooks copied (E10H-B5, E10-D2)',
+  layoutRuns.every(({ r, same, copied }) => r.status === 1 && /not laid out as JSON\.stringify/.test(r.stderr) && same && !copied),
+  JSON.stringify(layoutRuns.map(({ r, same, copied }) => [r.status, r.stderr.trim(), same, copied])))
+
+// E10H-B6. A 0600 config.toml, installed under umask 0002, and a config.toml that is a symlink into a dotfiles
+// directory: the mode stays 0600, the link stays a link, and the file it names gets the install's lines.
+const oldMask = process.umask(0o002)
+const modeHome = fs.mkdtempSync(path.join(tmp, 'mode-'))
+put(path.join(modeHome, 'hooks.json'), scottHooks(modeHome))
+put(path.join(modeHome, 'config.toml'), scottConfig(modeHome))
+fs.chmodSync(path.join(modeHome, 'config.toml'), 0o600)
+const modeRun = run(['install', '--codex-home', modeHome])
+const modeAfter = fs.statSync(path.join(modeHome, 'config.toml')).mode & 0o777
+const linkHome = fs.mkdtempSync(path.join(tmp, 'link-')), dots = fs.mkdtempSync(path.join(tmp, 'dotfiles-'))
+put(path.join(linkHome, 'hooks.json'), scottHooks(linkHome))
+put(path.join(dots, 'config.toml'), scottConfig(linkHome))
+fs.chmodSync(path.join(dots, 'config.toml'), 0o600)
+fs.symlinkSync(path.join(dots, 'config.toml'), path.join(linkHome, 'config.toml'))
+const linkWas = fs.lstatSync(path.join(linkHome, 'config.toml')).isSymbolicLink() && (fs.statSync(path.join(dots, 'config.toml')).mode & 0o777) === 0o600
+const linkRun = run(['install', '--codex-home', linkHome])
+const freshMode = (() => { const f = path.join(tmp, 'umask-probe'); fs.writeFileSync(f, ''); return fs.statSync(f).mode & 0o777 })()
+process.umask(oldMask)
+clause('clause 1i — the install keeps a 0600 config.toml at 0600 under umask 0002, and writes through a symlinked config.toml to the file it names, leaving the link (E10H-B6)',
+  modeRun.status === 0 && modeAfter === 0o600 && readOr(path.join(modeHome, 'config.toml')).includes('network_access = true') &&
+  linkRun.status === 0 && fs.lstatSync(path.join(linkHome, 'config.toml')).isSymbolicLink() && readOr(path.join(dots, 'config.toml')).includes('network_access = true') &&
+  (fs.statSync(path.join(dots, 'config.toml')).mode & 0o777) === 0o600,
+  `mode ${modeAfter.toString(8)} ${modeRun.stderr} link ${fs.lstatSync(path.join(linkHome, 'config.toml')).isSymbolicLink()} ${linkRun.stderr}`)
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it, without the install
 
 const probeHooks = JSON.stringify({ hooks: Object.fromEntries(Object.keys(CODEX_WROTE).map((ev) => [ev, [probeGroup(ev)]])) })
@@ -352,6 +395,9 @@ const scottParsed = tomlOk(scottConfig(home))
 const scottRows = trustRows(scottHooks(home), scottConfig(home), path.join(home, 'hooks.json'))
 clause("clause 3f — F4 parses, has no sandbox_workspace_write table, and its herdr trust line is already the one Codex computes",
   scottParsed.ok && scottParsed.doc.sandbox_workspace_write === undefined && allTrusted(scottRows) && scottRows.length === 1, JSON.stringify(scottRows))
+clause('clause 3g — without the install: the compact and mixed hooks.json hold the same value as herdr\'s own, only laid out otherwise, and neither survives a round trip through JSON.stringify; under umask 0002 a file written with no mode is 0664, and the dotfiles config.toml is 0600 behind a symlink',
+  [COMPACT, MIXED].every((t) => JSON.stringify(JSON.parse(t)) === JSON.stringify(JSON.parse(scottHooks(home))) && JSON.stringify(JSON.parse(t), null, 2) + (t.endsWith('\n') ? '\n' : '') !== t) &&
+  freshMode === 0o664 && linkWas, `fresh mode ${freshMode.toString(8)}`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
