@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   gaugeSkip, followKickoff, lastOnOffEntry, autoCycleActive, stopFileRepo, repoOf, readUsage, resolveTier, gaugeStep, gaugeContext, ownLatch, firstUsedOf, HANDOFF_COST_TOKENS,
+  hostOf,
 } from './dctr-lib.mjs'
 import { hookLog, stateDir, standDown, writeMarker, appendRecordLine } from './dctr-state.mjs'
 import { readBridge } from './dctr-bridge.mjs'
@@ -32,7 +33,7 @@ const stand_down = standDown('PostToolBatch', 'gauge', () => sessionId)
 
 /** The transcript's reading (readUsage), from its last TAIL_CHUNKS[i] bytes cut to the first complete line, read
  *  again with the next, larger chunk while no usage entry is found and the file has more. Missing when unreadable. */
-function readTranscript(file, lastUuid) {
+function readTranscript(file, lastUuid, host) {
   let fd
   try {
     fd = fs.openSync(file, 'r')
@@ -43,11 +44,12 @@ function readTranscript(file, lastUuid) {
       const buf = Buffer.alloc(size - start)
       fs.readSync(fd, buf, 0, buf.length, start)
       const text = buf.toString('utf8')
-      reading = readUsage(start > 0 ? text.slice(text.indexOf('\n') + 1) : text, lastUuid)
-      if (reading.unknown !== 'unparseable' || start === 0) break
+      reading = readUsage(start > 0 ? text.slice(text.indexOf('\n') + 1) : text, lastUuid, host)
+      // `none` is a Codex rollout with no token_count in this chunk: one may sit further back.
+      if ((reading.unknown !== 'unparseable' && reading.unknown !== 'none') || start === 0) break
     }
     return reading
-  } catch { return readUsage(null, lastUuid) } finally { if (fd !== undefined) fs.closeSync(fd) }
+  } catch { return readUsage(null, lastUuid, host) } finally { if (fd !== undefined) fs.closeSync(fd) }
 }
 
 try {
@@ -56,8 +58,9 @@ try {
   const why = gaugeSkip(payload)
   if (why) stand_down(why)
   sessionId = payload.session_id
+  const host = hostOf(payload)
 
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || payload.cwd
+  const projectDir = (host === 'codex' ? null : process.env.CLAUDE_PROJECT_DIR) || payload.cwd
   if (!projectDir) stand_down('no CLAUDE_PROJECT_DIR and no cwd in the payload')
   const chain = followKickoff({ projectDir, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
   if (chain.why) stand_down(chain.why)
@@ -70,8 +73,13 @@ try {
   const latchFile = path.join(stateDir(sessionId), 'gauge.json')
   let latch = null
   try { latch = ownLatch(JSON.parse(fs.readFileSync(latchFile, 'utf8')), sessionId) } catch { /* no latch yet: a fresh session */ }
-  const window = readBridge(sessionId)?.window ?? null
-  const reading = readTranscript(payload.transcript_path, latch?.lastUuid ?? null)
+  const reading = readTranscript(payload.transcript_path, latch?.lastUuid ?? null, host)
+  // Codex: the PostToolUse events after one token_count are one batch, read once (E10 table), and before the first
+  // token_count no batch has happened yet (probe A2); the window is the rollout's own model_context_window.
+  if (host === 'codex' && (reading.unknown === 'stale' || reading.unknown === 'none')) {
+    stand_down(reading.unknown === 'stale' ? 'the batch of this token_count was already read' : 'no token_count in the rollout yet, so no batch')
+  }
+  const window = host === 'codex' ? reading.window ?? null : readBridge(sessionId)?.window ?? null
 
   const firstUsed = firstUsedOf(latch, reading)
   const resolved = resolveTier({ tierText: cycle.tier, window, firstUsed, handoffCost: HANDOFF_COST_TOKENS })
@@ -106,7 +114,7 @@ try {
   const systemMessage = stepped.warn
     ? `dctr gauge: auto-cycle warning at ${used ?? 'unknown'} tokens of a ${window ?? 'unknown'}-token window, tier ${stepped.warnedTier}${facts.length ? `; ${facts.join('; ')}` : ''}`
     : `dctr gauge: ${facts.join('; ')}`
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolBatch', additionalContext }, systemMessage }))
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: payload.hook_event_name, additionalContext }, systemMessage }))
   hookLog(sessionId, `PostToolBatch gauge ${stepped.warn ? `warned, tier ${stepped.warnedTier}` : 'reported facts'} — ${facts.join('; ') || 'no facts'}`)
   process.exit(0)
 } catch (e) {

@@ -47,6 +47,8 @@ export const HERDR_TIMEOUT_MS = 30000
 /** How long a placement lock may sit before a provably dead holder loses it. */
 export const PLACEMENT_STALE_MS = 10000
 export const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }))
+/** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
+export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
 
 /** herdr answers a pane that does not exist with **exit 1 and a structured error code**, not with a
  *  null pane, so `execFileSync` throws and every caller that read a throw as "I could not look"
