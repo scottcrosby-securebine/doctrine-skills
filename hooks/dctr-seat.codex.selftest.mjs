@@ -178,6 +178,7 @@ const run = (payload, extra) => {
 const callText = () => { try { return fs.readFileSync(calls, 'utf8') } catch { return '' } }
 const stateOf = (sid) => path.join(tmp, `dctr-${sid}`)
 const markerOf = (sid, name) => path.join(stateOf(sid), 'seats', `${name}.json`)
+const indexOf = (pane, sid) => path.join(tmp, 'dctr-by-pane', `${pane.replace(/[^A-Za-z0-9_-]/g, '_')}.${sid}`)
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
 const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Date.now() < until) { if (pred()) return true; sleepMs(50) } return pred() }
 
@@ -189,8 +190,13 @@ const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Dat
     r.code === 0 && callText().includes(`pane run w1:pS node '${path.join(HERE, 'dctr-render.mjs')}' '${SEAT_ROLLOUT}'`) &&
     callText().includes('pane rename w1:pS default · echo_task') && m?.label === 'default · echo_task' && m?.file === SEAT_ROLLOUT,
     `${r.out}\ncalls:\n${callText()}\nmarker: ${JSON.stringify(m)}`)
-  clause('clause 1m — its marker names the session\'s own pane, which the /clear sweep matches on',
-    m?.sessionPane === 'w1:p1' && m?.agent_id === AGENT, JSON.stringify(m))
+  clause('clause 1m — its marker names the session\'s own pane, and the pane index names the session, which the /clear sweep finds it by',
+    m?.sessionPane === 'w1:p1' && m?.agent_id === AGENT && fs.existsSync(indexOf('w1:p1', SESSION)), `${JSON.stringify(m)} index ${fs.existsSync(indexOf('w1:p1', SESSION))}`)
+  fs.rmSync(path.join(tmp, 'dctr-by-pane'), { recursive: true, force: true })
+  run({ ...CLAUDE_START, session_id: 'claude-s1' })
+  clause('clause 2h — a Claude Code seat writes no pane index entry: Claude Code sweeps on SessionEnd',
+    !fs.existsSync(path.join(tmp, 'dctr-by-pane')), String(fs.existsSync(path.join(tmp, 'dctr-by-pane')) && fs.readdirSync(path.join(tmp, 'dctr-by-pane'))))
+  fs.rmSync(stateOf('claude-s1'), { recursive: true, force: true })
 
   fs.writeFileSync(calls, '')
   const s = run(STOP)
@@ -236,6 +242,9 @@ const stage = () => {
   fs.writeFileSync(markerOf(OLD, 'dctr-gate-1'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', n: 1, tabId: null, paneId: 'w1:g1', file: out, label: 'probe', sessionPane: 'w1:p1' }))
   fs.mkdirSync(path.join(stateOf('other-pane-session'), 'seats'), { recursive: true })
   fs.writeFileSync(markerOf('other-pane-session', 'dctr-default-1'), JSON.stringify({ agent: 'dctr-default-1', agent_id: 'a-other', role: 'default', n: 1, tabId: null, paneId: 'w1:o1', file: '/t/o.jsonl', sessionPane: 'w1:p9' }))
+  // The pane index, as placement writes it, for both sessions.
+  fs.rmSync(path.join(tmp, 'dctr-by-pane'), { recursive: true, force: true }); fs.mkdirSync(path.join(tmp, 'dctr-by-pane'))
+  fs.writeFileSync(indexOf('w1:p1', OLD), ''); fs.writeFileSync(indexOf('w1:p9', 'other-pane-session'), '')
   fs.writeFileSync(calls, '')
 }
 const movedGate = path.join(gatesDir, `${OLD}.dctr-gate-1.json`)
@@ -253,6 +262,11 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
     !fs.existsSync(stateOf(OLD)) && fs.existsSync(markerOf('other-pane-session', 'dctr-default-1')) && !/w1:o1/.test(callText()),
     `old: ${fs.existsSync(stateOf(OLD))}; calls: ${callText()}`)
   clause('clause 1t — inside SessionEnd\'s budget: the hook exits under 1,500 ms', took < 1500, `took ${took}ms`)
+  const hadEntry = fs.existsSync(indexOf('w1:p1', OLD))
+  run(CLEAR)
+  clause('clause 1z — the next /clear drops the index entry of a session whose state directory is gone, and keeps the other pane\'s',
+    hadEntry && !fs.existsSync(indexOf('w1:p1', OLD)) && fs.existsSync(indexOf('w1:p9', 'other-pane-session')),
+    `before ${hadEntry}, after ${fs.existsSync(indexOf('w1:p1', OLD))}`)
 }
 {
   stage()
@@ -285,13 +299,15 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
 {
   const gate = path.join(HERE, 'dctr-gate.mjs')
   const out = path.join(tmp, 'g', 'probe.out')
+  fs.rmSync(path.join(tmp, 'dctr-by-pane'), { recursive: true, force: true })
   fs.writeFileSync(calls, '')
   const genv = env({ CLAUDE_CODE_SESSION_ID: '', CODEX_SESSION_ID: SESSION, CODEX_THREAD_ID: SESSION })
   let so = ''
   try { so = execFileSync('node', [gate, 'probe', out, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: genv }) } catch (e) { so = String(e.stdout || '') + String(e.stderr || '') }
   const m = readJson(markerOf(SESSION, 'dctr-gate-1'))
   clause('clause 1w — a gate launched from a Codex shell (CODEX_SESSION_ID, no Claude id) is placed in a pane named from its label, under that session',
-    /running in pane w1:pS/.test(so) && /^pane rename w1:pS probe$/m.test(callText()) && m?.label === 'probe' && m?.sessionPane === 'w1:p1',
+    /running in pane w1:pS/.test(so) && /^pane rename w1:pS probe$/m.test(callText()) && m?.label === 'probe' && m?.sessionPane === 'w1:p1' &&
+    fs.existsSync(indexOf('w1:p1', SESSION)),
     `${so}\ncalls:\n${callText()}\nmarker ${JSON.stringify(m)}`)
   fs.rmSync(stateOf(SESSION), { recursive: true, force: true })
   fs.writeFileSync(calls, '')

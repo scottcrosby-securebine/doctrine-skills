@@ -41,7 +41,7 @@ import {
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName,
   hostOf, seatTranscriptPath, clearSweepSkip, clearSweepTargets } from './dctr-lib.mjs'
-import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, readCodexSeat, sessionsOnDisk, sleepMs } from './dctr-state.mjs'
+import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, readCodexSeat, sessionsOfPane, indexPaneSession, sleepMs } from './dctr-state.mjs'
 
 /**
  * SessionEnd's sweep, run inline by the hook under SESSION_END_WAIT_MS and by the detached `--sweep`
@@ -507,6 +507,7 @@ try {
       const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label, sessionPane: process.env.HERDR_PANE_ID }
       writeMarker(marker, record)
       reserved = null   // complete: the marker is now a record rather than a reservation
+      if (hostOf(payload) === 'codex') indexPaneSession(process.env.HERDR_PANE_ID, sessionId)   // for the /clear sweep
 
       herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
       // A tab was created under the label; a side pane is named after the fact. Display only.
@@ -729,7 +730,7 @@ try {
     const pane = process.env.HERDR_PANE_ID
     if (!pane) stand_down('no HERDR_PANE_ID, so no pane whose ending chat could be swept')
     const deadline = Date.now() + SESSION_END_WAIT_MS
-    for (const old of clearSweepTargets(sessionsOnDisk(), sessionId, pane)) {
+    for (const old of clearSweepTargets(sessionsOfPane(pane), sessionId, pane)) {
       log(`SessionStart clear: sweeping session ${old}, whose markers name this pane ${pane}`)
       const left = deadline - Date.now()
       if (left > 0 && sweepSession(old, left, log) !== 'busy') continue

@@ -512,17 +512,29 @@ export function readCodexSeat(file, retryMs = 200) {
   return null
 }
 
-/** Every session state directory under the temp root, with its readable seat markers: `[{ id, seats }]`. The Codex
- *  /clear sweep reads these because the new chat's hook is not told the ending chat's id. A directory with no `seats`
- *  is not a session's (dctr-panes, dctr-gates, dctr-autocycle), and one that cannot be read is left out: the sweep
- *  acts only on what it read. */
-export function sessionsOnDisk() {
+/** The index the Codex /clear sweep finds a pane's sessions by: one empty file `<pane token>.<session id>` per Codex
+ *  session that placed a pane from that pane, written at placement. The new chat's hook is not told the ending chat's
+ *  id, and listing the temp root instead cost 330 ms warm on a host whose /tmp held 400,000 entries, which a live
+ *  /clear pushed past the sweep's budget. Claude Code sessions write none: they sweep on SessionEnd. */
+export const paneIndexDir = () => path.join(tmpRoot(), `${PREFIX}-by-pane`)
+const paneIndexFile = (paneId, sessionId) => path.join(paneIndexDir(), `${paneToken(paneId)}.${sessionId}`)
+
+/** Records that `sessionId` placed a pane from `paneId`. Best effort: a missing entry costs that session its /clear
+ *  sweep, and SessionEnd still sweeps it when the process exits. */
+export function indexPaneSession(paneId, sessionId) {
+  if (!paneId || !sessionId) return
+  try { fs.mkdirSync(paneIndexDir(), { recursive: true }); fs.writeFileSync(paneIndexFile(paneId, sessionId), '') } catch { /* see above */ }
+}
+
+/** The sessions the index names for `paneId`, each with its readable seat markers: `[{ id, seats }]`. An entry whose
+ *  state directory is gone (swept by SessionEnd or by a detached sweep) is removed here and not returned. */
+export function sessionsOfPane(paneId) {
   let names
-  try { names = fs.readdirSync(tmpRoot()) } catch { return [] }
+  try { names = fs.readdirSync(paneIndexDir()) } catch { return [] }
+  const prefix = `${paneToken(paneId)}.`
   const out = []
-  for (const n of names.filter((x) => x.startsWith(`${PREFIX}-`))) {
-    const id = n.slice(PREFIX.length + 1)
-    if (!fs.existsSync(seatsDir(id))) continue
+  for (const id of names.filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length))) {
+    if (!fs.existsSync(stateDir(id))) { try { fs.rmSync(paneIndexFile(paneId, id), { force: true }) } catch { /* next time */ } continue }
     try { out.push({ id, seats: liveSeatsPartial(id).seats }) } catch { /* unreadable: not a target */ }
   }
   return out

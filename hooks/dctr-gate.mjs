@@ -57,7 +57,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
   seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS, shellSessionId, gateWaits } from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason } from './dctr-state.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason, indexPaneSession } from './dctr-state.mjs'
 
 
 const self = path.resolve(process.argv[1])
@@ -398,6 +398,8 @@ if (argv[0] === '--run') {
         if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
         writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: process.env.HERDR_PANE_ID })
         herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, tabId, process.env.HERDR_WORKSPACE_ID, label, command)])
+        // A Codex session's gate is indexed for the /clear sweep, which finds a pane's sessions by it (E10-D22).
+        if (!process.env.CLAUDE_CODE_SESSION_ID) indexPaneSession(process.env.HERDR_PANE_ID, sessionId)
       } catch (e) {
         // Close FIRST, then drop the record, and only if the close was answered. This runs in the
         // launcher process rather than inside the pane's own shell, so the ordering the completion
