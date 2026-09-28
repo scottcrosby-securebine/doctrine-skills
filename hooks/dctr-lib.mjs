@@ -1431,13 +1431,8 @@ export const shellSessionId = (env) => env.CLAUDE_CODE_SESSION_ID || env.CODEX_S
  *  Everywhere else, a Codex session run without the sandbox included, the gate detaches as it always has. */
 export const gateWaits = (pid1Cmdline) => path.basename(String(pid1Cmdline ?? '').split('\0')[0]) === 'codex-linux-sandbox'
 
-// ---------------------------------------------------------------- the Codex host (E10, e10-hookport)
-//
-// One script serves both hosts: each hook reads the payload's host and, on Codex, reads a Codex rollout where it read
-// a Claude Code transcript. Every fact about Codex 0.156.1 below comes from the e10-hookport probes (records
-// e10-hookport/probes/A-hook-runtime.md and B-autocycle-surfaces.md); the fixtures in dctr-codex.fixtures.mjs are
-// cut from their rollouts and payloads.
-
+// ---------------------------------------------------------------- Codex host: transcripts, the gauge, auto-cycle and the typer (E10)
+// The fixtures in dctr-codex.fixtures.mjs are cut from the probes' rollouts and payloads.
 
 const hostName = (host) => (host === 'codex' ? 'Codex' : 'Claude')
 
