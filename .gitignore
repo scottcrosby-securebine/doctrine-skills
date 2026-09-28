@@ -4,6 +4,3 @@ package.json
 package-lock.json
 docs/handoffs/
 docs/research/
-
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-/graft/
