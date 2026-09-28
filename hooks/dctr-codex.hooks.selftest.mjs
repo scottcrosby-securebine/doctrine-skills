@@ -336,6 +336,14 @@ await watcher(wg, 'q4', rollout(wg, 'q4', F.TUI_TURN), 0, { DCTR_CYCLE_SCRIPT: s
 const wgLog = (() => { try { return fs.readFileSync(path.join(stateDir('q4'), 'hook.log'), 'utf8') } catch { return '' } })()
 clause('clause 1d5 — the watcher exits when herdr answers that its pane does not exist, long before its watch ends, handing nothing on',
   wgLog.includes('exit: the pane is gone') && Date.now() - wgT0 < 6000 && !fs.existsSync(path.join(wg.dir, 'events.log')), `${wgLog} ${Date.now() - wgT0}ms`)
+// E10H-B9: the TUI closed mid-turn, so the turn never ends; the watcher must still notice its pane is gone.
+const wm = project('watch-gone-midturn')
+shim(wm, { gone: true })
+const wmT0 = Date.now()
+await watcher(wm, 'q5', rollout(wm, 'q5', F.TUI_TURN.filter((l) => !l.includes('"task_complete"'))), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: path.join(wm.dir, 'events.log'), DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 8000 }) })
+const wmLog = (() => { try { return fs.readFileSync(path.join(stateDir('q5'), 'hook.log'), 'utf8') } catch { return '' } })()
+clause('clause 1d7 — the watcher exits when its pane is gone while the turn has not ended (the TUI closed mid-turn), long before its watch ends (E10H-B9)',
+  wmLog.includes('exit: the pane is gone') && Date.now() - wmT0 < 6000 && !fs.existsSync(path.join(wm.dir, 'events.log')), `${wmLog} ${Date.now() - wmT0}ms`)
 clause('clause 1d4 — the watcher exits handing nothing on when a new turn has started, when auto-cycle is off, and when the turn ended on the ready line',
   !fs.existsSync(wnLog) && !fs.existsSync(woLog) && !fs.existsSync(wrLog), [wnLog, woLog, wrLog].filter((p) => fs.existsSync(p)).join(' '))
 
