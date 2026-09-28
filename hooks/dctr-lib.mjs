@@ -1320,3 +1320,87 @@ export function notifyDecision(event, f = {}) {
   if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.cronsEmpty !== true || f.lastStop?.ready !== false) return null
   return pauseReason('R8')
 }
+
+// ---------------------------------------------------------------- Codex host: seats, their panes, the /clear sweep (E10)
+//
+// One set of hook scripts serves both hosts (E10's ruling: never a Codex-only copy of a hook). What differs is read
+// from the payload here. Facts about Codex CLI 0.156.1 below are from the E10 probes (doctrine-skills-project,
+// .doctrine/records/e10-scope and e10-hookport/probes), each as the comment beside it says.
+
+/** Which harness wrote this hook input: 'codex' when its transcript_path is a Codex rollout (`rollout-<ts>-<id>.jsonl`),
+ *  else 'claude'. Codex hands every hook a rollout: SubagentStart the seat's own, SubagentStop the parent's. */
+export const hostOf = (input) => (path.basename(String(input?.transcript_path ?? '')).startsWith('rollout-') ? 'codex' : 'claude')
+
+/** The seat's own transcript. SubagentStop's `agent_transcript_path` on either host; without it, on Codex, SubagentStart's
+ *  `transcript_path`, which IS the seat's rollout there, and on Claude Code the path derived from the parent's. */
+export const seatTranscriptPath = (p) => p?.agent_transcript_path ||
+  (hostOf(p) === 'codex' ? p?.transcript_path || null : transcriptPath(p?.transcript_path, p?.agent_id))
+
+/** A Codex seat's name: the task_name of the spawn_agent call that started it, which the seat rollout's first record,
+ *  its session_meta, carries as `agent_path` (`/root/echo_task`, last segment `echo_task`). Codex writes no meta file
+ *  beside a rollout and encrypts the task message, so this is the one title a seat has. Null for a rollout whose first
+ *  line is not a complete session_meta naming a path: the parent's names none, and one not yet written is empty. */
+export function codexTaskName(rolloutText) {
+  let first
+  try { first = JSON.parse(String(rolloutText ?? '').split('\n', 1)[0]) } catch { return null }
+  if (first?.type !== 'session_meta') return null
+  const p = first.payload?.agent_path ?? first.payload?.source?.subagent?.thread_spawn?.agent_path
+  return (typeof p === 'string' && p.split('/').filter(Boolean).at(-1)) || null
+}
+
+/** A tool result's text. A code-mode exec output is a list of parts, one of them JSON whose `output` is the command's
+ *  own output beside bookkeeping (chunk_id, wall time); that output is shown instead of the JSON around it. */
+const rolloutOutput = (output) => (Array.isArray(output) ? output : [{ text: output }])
+  .map((c) => {
+    const t = typeof c?.text === 'string' ? c.text : typeof c === 'string' ? c : ''
+    try { const j = JSON.parse(t); if (typeof j?.output === 'string') return j.output } catch { /* plain text */ }
+    return t
+  }).join('')
+
+/** One rendered line for a Codex rollout record, or null for one that shows nothing: renderRecord's counterpart. A seat's
+ *  task (agent_message), its assistant and user messages, each tool call and each result are shown; developer messages,
+ *  reasoning, event_msg, token and session records are not, as renderRecord drops thinking and attachments. */
+export function renderRollout(rec, { head = RESULT_HEAD, tail = RESULT_TAIL } = {}) {
+  if (rec?.type !== 'response_item') return null
+  const p = rec.payload || {}
+  const texts = () => (Array.isArray(p.content) ? p.content : []).filter((c) => typeof c?.text === 'string' && c.text.trim()).map((c) => c.text)
+  let out = []
+  if (p.type === 'message' && p.role === 'assistant') out = texts().map((t) => t.trim())
+  else if (p.type === 'message' && p.role === 'user') out = texts().map((t) => `» ${firstLine(t)}`)
+  else if (p.type === 'agent_message') out = texts().map((t) => `» ${t.trim().split('\n').filter(Boolean).join(' · ').slice(0, 160)}`)
+  else if (p.type === 'function_call') out = [`→ ${p.name}  ${firstLine(p.arguments ?? '')}`]
+  else if (p.type === 'custom_tool_call') out = [`→ ${p.name}  ${firstLine(p.input ?? '')}`]
+  else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
+    const raw = rolloutOutput(p.output)
+    if (raw.trim()) out = [indent(truncate(raw, head, tail))]
+  }
+  const text = out.join('\n').trimEnd()
+  return text || null
+}
+
+/** Why the Codex /clear sweep stands down, or null when it runs (E10-D22, E8-D6 through E10's table). On Codex a /clear
+ *  ends no session: SessionEnd fires only when the process exits (probe-clear.txt), so the ending chat's seats and gates
+ *  would hold their panes and column slots through the whole new chat. The new chat's SessionStart with source clear,
+ *  which Codex fires at its first prompt, sweeps them instead. Claude Code sweeps on SessionEnd and stands down here. */
+export const clearSweepSkip = (p) => restoreSkip(p) ?? (hostOf(p) === 'codex' ? null : 'not a Codex session; Claude Code sweeps on SessionEnd')
+
+/** The sessions the /clear sweep takes: every session other than the new one holding a marker whose `sessionPane`, the
+ *  HERDR_PANE_ID of the session that placed it, is this pane. `sessions` is `[{ id, seats }]`. A session's markers all
+ *  carry one pane, since every hook and launcher of a session inherits its process's environment. */
+export const clearSweepTargets = (sessions, newSessionId, paneId) => (paneId
+  ? (sessions || []).filter((s) => s && s.id !== newSessionId && (s.seats || []).some((m) => m?.sessionPane === paneId)).map((s) => s.id)
+  : [])
+
+/** The orchestrator's session id for a launcher run from its shell (dctr-gate.mjs): Claude Code's CLAUDE_CODE_SESSION_ID,
+ *  else CODEX_SESSION_ID, which Codex 0.156.1 sets in every command its model runs (probed 2026-09-28) and which equals the
+ *  session_id its hooks receive, so a gate joins its session's seats under one lock. Claude Code's first: a Claude Code
+ *  run reads what it always read. */
+export const shellSessionId = (env) => env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID || null
+
+/** Whether a gate with no pane must run in the foreground rather than detached, from the command line of PID 1 in the
+ *  launcher's PID namespace (`/proc/1/cmdline`, NUL-separated): true inside Codex's Linux sandbox, where PID 1 is
+ *  `codex-linux-sandbox` (probed 2026-09-28) and every process in the namespace dies when the command returns. A
+ *  detached gate launched there was killed before it opened its transcript (E10-D14, live run 2026-09-28). Waiting costs
+ *  nothing there: Codex keeps a command that outlives its tool call as a background terminal until it exits (probe B5).
+ *  Everywhere else, a Codex session run without the sandbox included, the gate detaches as it always has. */
+export const gateWaits = (pid1Cmdline) => path.basename(String(pid1Cmdline ?? '').split('\0')[0]) === 'codex-linux-sandbox'

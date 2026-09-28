@@ -53,11 +53,11 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
-  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS } from './dctr-lib.mjs'
-import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason } from './dctr-state.mjs'
+  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS, shellSessionId, gateWaits } from './dctr-lib.mjs'
+import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason, indexPaneSession } from './dctr-state.mjs'
 
 
 const self = path.resolve(process.argv[1])
@@ -275,7 +275,9 @@ if (argv[0] === '--run') {
   if (dash !== 2 || !label || !out || argv.length < 4) usage()
   const command = argv.slice(dash + 1)
   const outFile = path.resolve(out)
-  const sessionId = process.env.CLAUDE_CODE_SESSION_ID
+  // Claude Code's session id, else Codex's CODEX_SESSION_ID, which is the session_id the seat hook's payload carries,
+  // so a gate launched from a Codex shell joins its session's seats under one lock and one cap (E10-D11, E10-D12).
+  const sessionId = shellSessionId(process.env)
   // A REUSED PATH carried the previous run's verdict: the transcript was truncated on open but the
   // result file was not touched, so the documented existence wait returned at once with a stale
   // `exit=0` while the new check was still running. Reproduced 2026-09-12. Removed HERE, in the
@@ -291,6 +293,16 @@ if (argv[0] === '--run') {
     // `--run` reads by position — with two of them missing the label landed in the tabId slot and the
     // completion path called `tab list` on a path whose whole contract is that it touches herdr zero
     // times. The tripwire clause caught it; the placeholders are what keep it caught.
+    // Inside Codex's sandbox the check runs to completion first: a detached child dies with the command (gateWaits).
+    // DCTR_PID1_FILE stands in for /proc/1/cmdline so a selftest can place the launcher "inside" the sandbox.
+    let pid1 = ''
+    try { pid1 = fs.readFileSync(process.env.DCTR_PID1_FILE || '/proc/1/cmdline', 'utf8') } catch { /* not Linux: detach */ }
+    if (gateWaits(pid1)) {
+      const r = spawnSync('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { stdio: 'ignore' })
+      hookLog(sessionId, `gate "${label}" no pane — ${reason}; ran in the foreground (Codex), status ${r.status}, output ${outFile}`)
+      console.log(`${PREFIX}-gate: no pane (${reason}) — ran in the foreground, since Codex ends a detached process with its command; transcript ${outFile}, verdict in ${outFile}.result`)
+      process.exit(0)
+    }
     const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
@@ -303,7 +315,7 @@ if (argv[0] === '--run') {
   const reason = (process.env.DCTR_VIEW_REQUEST_DIR ? 'contained session (DCTR_VIEW_REQUEST_DIR set), no host pane' : null) ??
     skipReason(process.env) ??
     (process.env.HERDR_PANE_ID ? null : 'no HERDR_PANE_ID in the environment') ??
-    (sessionId ? null : 'no CLAUDE_CODE_SESSION_ID in the environment')
+    (sessionId ? null : 'no CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment')
   if (reason) detached(reason)
 
   let placed
@@ -384,8 +396,10 @@ if (argv[0] === '--run') {
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
         // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.
         if (!tabId) try { herdr(['pane', 'rename', paneId, label]) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
-        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
+        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: process.env.HERDR_PANE_ID })
         herdr(['pane', 'run', paneId, gateRunCommand(self, outFile, marker, paneId, tabId, process.env.HERDR_WORKSPACE_ID, label, command)])
+        // A Codex session's gate is indexed for the /clear sweep, which finds a pane's sessions by it (E10-D22).
+        if (!process.env.CLAUDE_CODE_SESSION_ID) indexPaneSession(process.env.HERDR_PANE_ID, sessionId)
       } catch (e) {
         // Close FIRST, then drop the record, and only if the close was answered. This runs in the
         // launcher process rather than inside the pane's own shell, so the ordering the completion
@@ -411,7 +425,7 @@ if (argv[0] === '--run') {
           // SessionEnd could reach a pane whose record was still reserveMarker's `{}`.
           let published = false
           try {
-            writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })
+            writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: process.env.HERDR_PANE_ID })
             published = true
           } catch (we) { hookLog(sessionId, `gate "${label}": could not publish a record for the pane it could not close (${String(we.message).split('\n')[0]})`) }
           hookLog(sessionId, published

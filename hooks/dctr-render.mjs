@@ -13,10 +13,12 @@
 // first record yet.
 
 import fs from 'node:fs'
-import { renderRecord } from './dctr-lib.mjs'
+import { renderRecord, renderRollout, hostOf } from './dctr-lib.mjs'
 
 const file = process.argv[2]
 if (!file) { console.error('usage: dctr-render.mjs <transcript.jsonl>'); process.exit(2) }
+// A Codex seat's transcript is its rollout, whose records have another shape (E10-D7). The file name says which.
+const render = hostOf({ transcript_path: file }) === 'codex' ? renderRollout : renderRecord
 
 const POLL_MS = 250
 let offset = 0
@@ -52,7 +54,7 @@ function pump() {
       if (!line.trim()) continue
       let rec
       try { rec = JSON.parse(line) } catch { continue }  // a partial or malformed record is skipped, never fatal
-      const text = renderRecord(rec)
+      const text = render(rec)
       if (text) console.log(text)
     }
   } finally {

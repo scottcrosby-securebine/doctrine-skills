@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -496,6 +496,48 @@ export function readMeta(file, retryMs = 200) {
     sleepMs(retryMs)
   }
   return null
+}
+
+/** A Codex seat's spawn metadata in readMeta's shape, `{ description: <task_name> }`, from its rollout's session_meta
+ *  (codexTaskName, E10-D8), or null. The same one retry as readMeta, for a first record not flushed yet. */
+export function readCodexSeat(file, retryMs = 200) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let text = null
+    try { text = fs.readFileSync(file, 'utf8') } catch { /* not written yet */ }
+    const name = codexTaskName(text)
+    if (name) return { description: name }
+    if (attempt) return null
+    sleepMs(retryMs)
+  }
+  return null
+}
+
+/** The index the Codex /clear sweep finds a pane's sessions by: one empty file `<pane token>.<session id>` per Codex
+ *  session that placed a pane from that pane, written at placement. The new chat's hook is not told the ending chat's
+ *  id, and listing the temp root instead cost 330 ms warm on a host whose /tmp held 400,000 entries, which a live
+ *  /clear pushed past the sweep's budget. Claude Code sessions write none: they sweep on SessionEnd. */
+export const paneIndexDir = () => path.join(tmpRoot(), `${PREFIX}-by-pane`)
+const paneIndexFile = (paneId, sessionId) => path.join(paneIndexDir(), `${paneToken(paneId)}.${sessionId}`)
+
+/** Records that `sessionId` placed a pane from `paneId`. Best effort: a missing entry costs that session its /clear
+ *  sweep, and SessionEnd still sweeps it when the process exits. */
+export function indexPaneSession(paneId, sessionId) {
+  if (!paneId || !sessionId) return
+  try { fs.mkdirSync(paneIndexDir(), { recursive: true }); fs.writeFileSync(paneIndexFile(paneId, sessionId), '') } catch { /* see above */ }
+}
+
+/** The sessions the index names for `paneId`, each with its readable seat markers: `[{ id, seats }]`. An entry whose
+ *  state directory is gone (swept by SessionEnd or by a detached sweep) is removed here and not returned. */
+export function sessionsOfPane(paneId) {
+  let names
+  try { names = fs.readdirSync(paneIndexDir()) } catch { return [] }
+  const prefix = `${paneToken(paneId)}.`
+  const out = []
+  for (const id of names.filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length))) {
+    if (!fs.existsSync(stateDir(id))) { try { fs.rmSync(paneIndexFile(paneId, id), { force: true }) } catch { /* next time */ } continue }
+    try { out.push({ id, seats: liveSeatsPartial(id).seats }) } catch { /* unreadable: not a target */ }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- auto-cycle (E8-D15, E8-D16, E8-D17, E8-D26)

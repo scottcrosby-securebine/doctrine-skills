@@ -15,6 +15,12 @@
 //   SessionEnd     sweep any pane or tab whose seat never stopped, except a gate still running,
 //                  whose marker moves to the unowned gate directory (E8-R13). A lock it cannot take
 //                  inside the 1.5s budget hands the sweep to a detached `--sweep` child
+//   SessionStart   Codex only, source clear: the same sweep, over the sessions whose markers name this
+//                  pane, since Codex ends no session on /clear (E10-D22). The Claude Code hooks.json does
+//                  not subscribe it; the Codex install does
+//
+// The same file serves Codex CLI: hostOf() in dctr-lib.mjs reads which harness sent the payload, and a
+// Codex seat renders its rollout and is named from its spawn task_name (E10-D7, E10-D8).
 //
 // It always exits 0. A hook that fails must never fail the run it is watching: this is not a gate,
 // it cannot block a phase, it cannot reset a counter and it cannot produce a finding. Every reason
@@ -31,10 +37,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
-  PREFIX, agentName, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
+  PREFIX, agentName, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, shq, tabCreateArgs,
   seatPlacement, splitArgs, reportsSidebarRow, staleSideSeats, viewRequestPath, viewRequest, containerIdFromMountinfo,
-  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName } from './dctr-lib.mjs'
-import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, sleepMs } from './dctr-state.mjs'
+  errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName,
+  hostOf, seatTranscriptPath, clearSweepSkip, clearSweepTargets } from './dctr-lib.mjs'
+import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, herdr, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, isPaneNotFound, isTabNotFound, codexJobRecords, readMeta, readCodexSeat, sessionsOfPane, indexPaneSession, sleepMs } from './dctr-state.mjs'
 
 /**
  * SessionEnd's sweep, run inline by the hook under SESSION_END_WAIT_MS and by the detached `--sweep`
@@ -225,7 +232,7 @@ if (requestDir) {
       log(`contained stop ${payload.agent_id}: request removed`)
       process.exit(0)
     }
-    const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
+    const file = seatTranscriptPath(payload)
     if (!file) stand_down('could not resolve the seat transcript path')
     let cid = null
     try { cid = containerIdFromMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')) } catch { /* not linux, or no /proc */ }
@@ -258,12 +265,13 @@ try {
     if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
     fs.mkdirSync(seatsDir(sessionId), { recursive: true })
 
-    const file = payload.agent_transcript_path || transcriptPath(payload.transcript_path, payload.agent_id)
+    const file = seatTranscriptPath(payload)
     if (!file) stand_down('could not resolve the seat transcript path')
     // The harness writes the seat's spawn metadata beside its transcript in the same second this
     // hook fires; its `description` is the Agent tool's description, the title the status line
     // shows. Read outside the lock, since the retry inside it would hold every seat behind this one.
-    const meta = readMeta(metaPath(file))
+    // Codex writes no meta file: a Codex seat's title is its spawn task_name, read from its rollout (E10-D8).
+    const meta = hostOf(payload) === 'codex' ? readCodexSeat(file) : readMeta(metaPath(file))
     const description = meta && typeof meta.description === 'string' ? meta.description : ''
 
     const why = withPlacementLock(() => {
@@ -494,9 +502,12 @@ try {
       // filesystem, node is present, so the renderer runs directly in the pane. A CONTAINED agent
       // never reaches here — DCTR_VIEW_REQUEST_DIR routes it to the bridge-write path above, which
       // makes no herdr call at all.
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label }
+      // `sessionPane` is the pane this session runs in: the Codex /clear sweep finds the ending chat's markers by it,
+      // since the new chat's hook is not told the ending chat's session id (E10-D22).
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label, sessionPane: process.env.HERDR_PANE_ID }
       writeMarker(marker, record)
       reserved = null   // complete: the marker is now a record rather than a reservation
+      if (hostOf(payload) === 'codex') indexPaneSession(process.env.HERDR_PANE_ID, sessionId)   // for the /clear sweep
 
       herdr(['pane', 'run', paneId, `node ${shq(renderer)} ${shq(file)}`])
       // A tab was created under the label; a side pane is named after the fact. Display only.
@@ -709,6 +720,28 @@ try {
     }
   }
 
+  if (event === 'SessionStart') {
+    // Codex's /clear (E10-D22, E8-D6 through E10's table). Codex ends no session on /clear, so SessionEnd never
+    // sweeps the ending chat until the process exits; the new chat's SessionStart with source clear sweeps every other
+    // session whose markers name this pane, by the same sweepSession SessionEnd runs, under the same 1.5 s budget and
+    // the same hand-off to a detached `--sweep` child for a lock that stays busy. Claude Code keeps its SessionEnd sweep.
+    const why = clearSweepSkip(payload)
+    if (why) stand_down(why)
+    const pane = process.env.HERDR_PANE_ID
+    if (!pane) stand_down('no HERDR_PANE_ID, so no pane whose ending chat could be swept')
+    const deadline = Date.now() + SESSION_END_WAIT_MS
+    for (const old of clearSweepTargets(sessionsOfPane(pane), sessionId, pane)) {
+      log(`SessionStart clear: sweeping session ${old}, whose markers name this pane ${pane}`)
+      const left = deadline - Date.now()
+      if (left > 0 && sweepSession(old, left, log) !== 'busy') continue
+      try {
+        const child = spawn(process.execPath, [import.meta.filename, '--sweep', old], { detached: true, stdio: 'ignore' })
+        child.unref()
+        log(`SessionStart clear: a lock was busy past the budget; handed the sweep of ${old} to detached pid ${child.pid}`)
+      } catch (e) { log(`SessionStart clear: the detached sweep of ${old} could not start (${e.message}); its state directory is left in place`) }
+    }
+  }
+
   if (event === 'SessionEnd') {
     // Inline under the 1.5s budget. A lock that is busy past SESSION_END_WAIT_MS is not a sweep that
     // failed, it is one that has not happened yet, so it goes to a detached child with its own longer
@@ -721,8 +754,8 @@ try {
       } catch (e) { log(`SessionEnd: a lock was busy and the detached sweep could not start (${e.message}); state directory left in place`) }
     }
   }
-  if (!['SubagentStart', 'SubagentStop', 'SessionEnd'].includes(event)) {
-    stand_down(`no handler for ${event || 'an unnamed event'}; hooks.json subscribes to three`)
+  if (!['SubagentStart', 'SubagentStop', 'SessionEnd', 'SessionStart'].includes(event)) {
+    stand_down(`no handler for ${event || 'an unnamed event'}; hooks.json subscribes to three, and a Codex install adds SessionStart`)
   }
 } catch (e) {
   // herdr is pre-1.0 and its own notes say upgrades can require restarting the server. Every

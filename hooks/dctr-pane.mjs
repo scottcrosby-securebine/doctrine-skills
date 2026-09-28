@@ -73,7 +73,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SIDE_CAP, isSideSeat, seatPlacement, shq, skipReason, splitArgs, staleSideSeats, tabCreateArgs } from './dctr-lib.mjs'
+import { SIDE_CAP, isSideSeat, seatPlacement, shq, skipReason, splitArgs, staleSideSeats, tabCreateArgs, shellSessionId } from './dctr-lib.mjs'
 import { acquireLock, breakIfOrphaned, dropGoneGates, herdr, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
 
 const SETTLE_MS = 400          // one beat after a write, so the echo has somewhere to land
@@ -302,8 +302,9 @@ async function open(label, tee, connect) {
   // read from the environment rather than passed, and its absence refuses rather than defaulting,
   // because placing blind is the thing the cap exists to stop. Panes still survive SessionEnd:
   // that comes from where their markers live, not from this launcher being ignorant of the session.
-  const sessionId = process.env.CLAUDE_CODE_SESSION_ID
-  if (!sessionId) die('no CLAUDE_CODE_SESSION_ID; without it this pane cannot be counted against the seat and gate cap, and splitting blind is what that cap prevents')
+  // The one resolver the gate launcher reads, shellSessionId: Claude Code's id, else Codex's CODEX_SESSION_ID (E10-D12).
+  const sessionId = shellSessionId(process.env)
+  if (!sessionId) die('no CLAUDE_CODE_SESSION_ID (nor a Codex CODEX_SESSION_ID); without it this pane cannot be counted against the seat and gate cap, and splitting blind is what that cap prevents')
 
   // Refuse to touch a transcript whose pane may still be alive — ONE decision over the whole table,
   // and it writes nothing. Whatever it finds stale is handed to the sweep that runs under the
