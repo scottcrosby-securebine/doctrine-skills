@@ -1396,3 +1396,11 @@ export const clearSweepTargets = (sessions, newSessionId, paneId) => (paneId
  *  session_id its hooks receive, so a gate joins its session's seats under one lock. Claude Code's first: a Claude Code
  *  run reads what it always read. */
 export const shellSessionId = (env) => env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID || null
+
+/** Whether a gate with no pane must run in the foreground rather than detached, from the command line of PID 1 in the
+ *  launcher's PID namespace (`/proc/1/cmdline`, NUL-separated): true inside Codex's Linux sandbox, where PID 1 is
+ *  `codex-linux-sandbox` (probed 2026-09-28) and every process in the namespace dies when the command returns. A
+ *  detached gate launched there was killed before it opened its transcript (E10-D14, live run 2026-09-28). Waiting costs
+ *  nothing there: Codex keeps a command that outlives its tool call as a background terminal until it exits (probe B5).
+ *  Everywhere else, a Codex session run without the sandbox included, the gate detaches as it always has. */
+export const gateWaits = (pid1Cmdline) => path.basename(String(pid1Cmdline ?? '').split('\0')[0]) === 'codex-linux-sandbox'

@@ -24,7 +24,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   hostOf, seatTranscriptPath, codexTaskName, renderRollout, renderRecord, clearSweepSkip, clearSweepTargets, shellSessionId,
-  paneLabel, transcriptPath, restoreSkip,
+  paneLabel, transcriptPath, restoreSkip, gateWaits,
 } from './dctr-lib.mjs'
 import { sleepMs } from './dctr-state.mjs'
 
@@ -298,9 +298,27 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   const out2 = path.join(tmp, 'g', 'contained.out')
   let so2 = ''
   try { so2 = execFileSync('node', [gate, 'probe', out2, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: { ...genv, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } }) } catch (e) { so2 = String(e.stdout || '') + String(e.stderr || '') }
-  clause('clause 1x — contained, it runs detached, writes exit=0 to its result file and calls herdr zero times',
+  clause('clause 2g — contained outside Codex\'s sandbox it runs detached, as it always has, with exit=0 and zero herdr calls',
     /running detached/.test(so2) && waitFor(() => /^exit=0$/m.test((() => { try { return fs.readFileSync(`${out2}.result`, 'utf8') } catch { return '' } })())) && callText() === '',
     `${so2}\ncalls: ${callText()}`)
+  // Inside Codex's Linux sandbox, PID 1 of the command's namespace is codex-linux-sandbox and every process in it dies
+  // when the command returns: a live contained run lost its detached gate before it opened its transcript (seat II's
+  // L3, E10-D14). There the result must already be on disk when the launcher returns. The PID 1 command line below is
+  // the one a Codex 0.156.1 sandboxed command read from /proc/1/cmdline (seat II's pid1-probe.txt), cut after the cwd.
+  const pid1 = path.join(tmp, 'pid1'); fs.writeFileSync(pid1, `codex-linux-sandbox\0--sandbox-policy-cwd\0${tmp}\0`)
+  fs.writeFileSync(calls, '')
+  const out3 = path.join(tmp, 'g', 'sandboxed.out')
+  let so3 = ''
+  try { so3 = execFileSync('node', [gate, 'probe', out3, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: { ...genv, DCTR_PID1_FILE: pid1, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } }) } catch (e) { so3 = String(e.stdout || '') + String(e.stderr || '') }
+  const resultAtExit = (() => { try { return fs.readFileSync(`${out3}.result`, 'utf8') } catch { return '' } })()
+  clause('clause 1x — inside Codex\'s sandbox it runs the check to completion before returning, with exit=0 in its result file and zero herdr calls',
+    /ran in the foreground/.test(so3) && /^exit=0$/m.test(resultAtExit) && callText() === '',
+    `${so3}\nresult at exit: ${JSON.stringify(resultAtExit)}\ncalls: ${callText()}`)
+  clause('clause 1y — the sandbox is read from PID 1\'s command line only: this host\'s PID 1, an init, a codex CLI as PID 1, a sandbox named only as an argument and an empty read do not count',
+    gateWaits(fs.readFileSync(pid1, 'utf8')) && !gateWaits((() => { try { return fs.readFileSync('/proc/1/cmdline', 'utf8') } catch { return '' } })()) &&
+    !gateWaits('') && !gateWaits(null) && !gateWaits('/sbin/init\0splash\0') &&
+    !gateWaits('/usr/bin/codex\0exec\0') && !gateWaits('bash\0-c\0codex-linux-sandbox --x\0'),
+    'gateWaits misread a PID 1 command line')
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

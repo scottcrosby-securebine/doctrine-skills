@@ -2127,6 +2127,14 @@ const MUTATIONS = [
     clause: 'clause 1v — once the lock is free, the detached sweep closes the seat and moves the gate',
     from: "      if (left > 0 && sweepSession(old, left, log) !== 'busy') continue",
     to: '      if (left > 0) sweepSession(old, left, log)\n      continue' },
+  { name: "(Codex) a gate inside Codex's sandbox detaches, and dies with the command", file: 'dctr-gate.mjs',
+    clause: "clause 1x — inside Codex's sandbox it runs the check to completion before returning",
+    from: '    if (gateWaits(pid1)) {',
+    to: '    if (false) {' },
+  { name: "(Codex) the sandbox test reads anything but PID 1's program name", file: 'dctr-lib.mjs',
+    clause: "clause 1y — the sandbox is read from PID 1's command line only",
+    from: "export const gateWaits = (pid1Cmdline) => path.basename(String(pid1Cmdline ?? '').split('\\0')[0]) === 'codex-linux-sandbox'",
+    to: "export const gateWaits = (pid1Cmdline) => /codex/.test(String(pid1Cmdline ?? ''))" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

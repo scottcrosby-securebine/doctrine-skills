@@ -53,10 +53,10 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   PREFIX, GATE_ROLE, agentName, tabLabel, skipReason, nextIndex, stopAction, tabCreateArgs, shq,
-  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS, shellSessionId } from './dctr-lib.mjs'
+  seatPlacement, splitArgs, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS, shellSessionId, gateWaits } from './dctr-lib.mjs'
 import { seatsDir, herdr, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, isPaneNotFound, isTabNotFound, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason } from './dctr-state.mjs'
 
 
@@ -293,6 +293,16 @@ if (argv[0] === '--run') {
     // `--run` reads by position — with two of them missing the label landed in the tabId slot and the
     // completion path called `tab list` on a path whose whole contract is that it touches herdr zero
     // times. The tripwire clause caught it; the placeholders are what keep it caught.
+    // Inside Codex's sandbox the check runs to completion first: a detached child dies with the command (gateWaits).
+    // DCTR_PID1_FILE stands in for /proc/1/cmdline so a selftest can place the launcher "inside" the sandbox.
+    let pid1 = ''
+    try { pid1 = fs.readFileSync(process.env.DCTR_PID1_FILE || '/proc/1/cmdline', 'utf8') } catch { /* not Linux: detach */ }
+    if (gateWaits(pid1)) {
+      const r = spawnSync('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { stdio: 'ignore' })
+      hookLog(sessionId, `gate "${label}" no pane — ${reason}; ran in the foreground (Codex), status ${r.status}, output ${outFile}`)
+      console.log(`${PREFIX}-gate: no pane (${reason}) — ran in the foreground, since Codex ends a detached process with its command; transcript ${outFile}, verdict in ${outFile}.result`)
+      process.exit(0)
+    }
     const child = spawn('node', [self, '--run', outFile, '', '', '', '', label, '--', ...command], { detached: true, stdio: 'ignore' })
     child.unref()
     hookLog(sessionId, `gate "${label}" no pane — ${reason}; detached pid ${child.pid}, output ${outFile}`)
