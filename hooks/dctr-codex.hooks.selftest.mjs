@@ -336,7 +336,7 @@ const events = (file) => { try { return fs.readFileSync(file, 'utf8').trim().spl
 const wb2 = heldProject('watch-bg-between', 'v2')
 const wb2T = rollout(wb2, 'v2', F.BG_RUNNING.slice(0, -1))
 stopNow(wb2, 'v2', wb2T)
-const wb2Held = (() => { try { return JSON.parse(fs.readFileSync(stopHeldFile('v2'), 'utf8')) } catch { return null } })()
+const wb2Held = readJson(() => stopHeldFile('v2'))
 fs.appendFileSync(wb2T, jl(F.BG_DONE, F.BG_RUNNING.at(-1)))
 const wb2Log = path.join(wb2.dir, 'events.log')
 await watcher(wb2, 'v2', wb2T, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wb2Log }, F.STOP_BG.turn_id)
