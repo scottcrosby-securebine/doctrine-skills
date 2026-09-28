@@ -209,6 +209,10 @@ clause('clause 1l5 — a turn_aborted clears the background terminals its turn s
   obs([...F.BG_RUNNING.slice(0, -1), aborted]).backgroundRunning === false && obs([...F.BG_RUNNING.slice(0, -1), aborted, F.TUI_NEXT]).backgroundRunning === false,
   JSON.stringify(obs([...F.BG_RUNNING.slice(0, -1), aborted])))
 
+clause('clause 1l6 — a process whose completion is written before the output that still reads it running is not running; the same output with no completion is (corpus check, real rollout)',
+  obs(F.RACE_EXITED).backgroundRunning === false && obs([F.RACE_EXITED[0], F.RACE_EXITED[2]]).backgroundRunning === true,
+  JSON.stringify([obs(F.RACE_EXITED), obs([F.RACE_EXITED[0], F.RACE_EXITED[2]])]))
+
 // E10H-B3: the watcher reads the background state as of the turn's end, not as of its first poll after it.
 const bgAll = text(F.BG_RUNNING, F.BG_DONE), wt = watchedTurn(bgAll)
 clause('clause 1g3 — watchedTurn says where the turn ended, so the rollout up to that point shows the terminal running even once its completion follows (E10H-B3)',
@@ -285,6 +289,10 @@ clause('clause 3h — without the lib: POLLED_CELL reads "running with cell ID 4
   pc.some((l) => J(l).payload.type === 'custom_tool_call' && J(l).payload.input.includes(J(pc[other]).payload.item.command[2].slice(0, 30))), 'polled cell fixture wrong')
 clause('clause 3i — without the lib: the derived raw output carries bare "session_id":<digits> text, and N11_OUTPUT\'s own exec result is a finished process (exit_code 0, no session_id)',
   /"session_id"\s*:\s*\d+/.test(J(n11raw).payload.output[1].text) && !/\{"chunk_id"/.test(J(n11raw).payload.output[1].text) && JSON.parse(n11.payload.output[1].text).exit_code === 0 && !('session_id' in JSON.parse(n11.payload.output[1].text)), 'n11 fixture wrong')
+clause('clause 3k — without the lib: RACE_EXITED\'s completion of process 3581 comes before, and in the same turn as, the output whose exec result carries session_id 3581 and no exit_code',
+  J(F.RACE_EXITED[1]).payload.item.process_id === '3581' && JSON.parse(J(F.RACE_EXITED[2]).payload.output[1].text).session_id === 3581 &&
+  !('exit_code' in JSON.parse(J(F.RACE_EXITED[2]).payload.output[1].text)) && J(F.RACE_EXITED[1]).timestamp < J(F.RACE_EXITED[2]).timestamp &&
+  J(F.RACE_EXITED[1]).payload.turn_id === J(F.RACE_EXITED[2]).payload.internal_chat_message_metadata_passthrough.turn_id, 'race fixture wrong')
 clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
   [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
   F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')

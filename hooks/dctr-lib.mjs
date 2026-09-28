@@ -1572,6 +1572,8 @@ const PROCESS_RUNNING = /^Process running with session ID (\d+)$/m
  */
 function codexTurnState(text) {
   const running = new Map() // process id -> the turn that started it
+  const exited = new Map() // process id -> the turn its completion came in
+  const start = (id, turn) => { if (exited.get(id) !== turn) running.set(id, turn) }
   const cells = new Map() // cell id -> { turn, input }, in the order each last reported running
   const calls = new Map() // call id -> { input, cell }
   let ended = false, error = null, lastMessage = null
@@ -1600,9 +1602,11 @@ function codexTurnState(text) {
     if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
       const turn = p.internal_chat_message_metadata_passthrough?.turn_id ?? null
       const parts = typeof p.output === 'string' ? [p.output] : Array.isArray(p.output) ? p.output.map((o) => (typeof o?.text === 'string' ? o.text : '')) : []
-      for (const part of parts) for (const m of part.matchAll(CODEX_RUNNING)) running.set(m[1], turn)
+      // A process that exited between its yield and its output being written has its completion first (real rollout
+      // 2026-09-27T22-34-11 lines 179 and 181): that output's "running" is already answered.
+      for (const part of parts) for (const m of part.matchAll(CODEX_RUNNING)) start(m[1], turn)
       const head = PROCESS_RUNNING.exec(String(parts[0] ?? '').split('\nOutput:\n')[0])
-      if (head) running.set(head[1], turn)
+      if (head) start(head[1], turn)
       const call = calls.get(p.call_id)
       const cell = /^Script running with cell ID (\d+)/.exec(parts[0] ?? '')?.[1]
       if (cell) {
@@ -1616,6 +1620,7 @@ function codexTurnState(text) {
     if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'CommandExecution') {
       const pid = String(p.item.process_id)
       running.delete(pid)
+      exited.set(pid, p.turn_id ?? null)
       const cmd = Array.isArray(p.item.command) ? String(p.item.command.at(-1) ?? '') : ''
       const names = (input) => (cmd !== '' && (input.includes(cmd) || input.includes(JSON.stringify(cmd).slice(1, -1)))) ||
         new RegExp(`session_id\\W{0,3}:\\s*${pid}\\b`).test(input)
