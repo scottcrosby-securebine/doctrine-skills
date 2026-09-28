@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { wrapperValue, parseRecord, unwrapLine } from './dctr-record.mjs'
@@ -1637,4 +1638,236 @@ function codexTyperAct(o) {
   if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
   if (o.resumes >= 2) return pause('R15')
   return typerReady(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
+}
+
+// ---------------------------------------------------------------- the Codex install (E10-D1 to E10-D6)
+//
+// Codex 0.156.1 loads no plugin hooks under the root manifest, so the doctrine's hooks reach Codex through the
+// user's CODEX_HOME/hooks.json, which `dctr-codex.mjs install` writes from codexInstallPlan below. Codex runs a
+// user hook only when config.toml carries `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]
+// trusted_hash = "<trustedHash>"`; without it `codex exec` skips the hook silently. Source of every fact here:
+// doctrine-skills-project .doctrine/records/e10-hookport/probes/A-hook-runtime.md (A5), and codex-rs at
+// rust-v0.156.1 (hooks/src/engine/discovery.rs hook_hash, hooks/src/events/common.rs matcher_pattern_for_event).
+
+/** What the install registers on Codex: [event, script, timeout in seconds, matcher]. One script serves both
+ *  hosts; a matcher only where Codex applies one (SessionStart matches its source). Codex clamps SessionEnd and
+ *  Interrupt timeouts to 1..3 seconds, so 3 is the most either can have. */
+export const CODEX_HOOKS = [
+  ['SessionStart', 'dctr-restore.mjs', 5, 'clear'],
+  ['SessionStart', 'dctr-seat.mjs', 10, 'clear'],
+  ['SubagentStart', 'dctr-seat.mjs', 10],
+  ['SubagentStop', 'dctr-seat.mjs', 10],
+  ['SessionEnd', 'dctr-seat.mjs', 3],
+  ['PostToolUse', 'dctr-gauge.mjs', 5],
+  ['Stop', 'dctr-cycle.mjs', 60],
+  ['UserPromptSubmit', 'dctr-cycle.mjs', 5],
+  ['PermissionRequest', 'dctr-cycle.mjs', 30],
+  ['Interrupt', 'dctr-cycle.mjs', 3],
+]
+/** `SessionStart` -> `session_start`, the label Codex keys trust lines and hashes by. */
+export const hookEventLabel = (ev) => String(ev).replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase()
+const CONTEXT_LIMIT_EVENTS = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'SubagentStart']
+/** JSON with keys sorted at every level and no spaces, as serde_json writes Codex's TOML identity value. */
+const sortedJson = (v) => (Array.isArray(v) ? `[${v.map(sortedJson).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${sortedJson(v[k])}`).join(',')}}`
+  : JSON.stringify(v))
+
+/** The trusted_hash Codex 0.156.1 computes for handler `hi` of `group` under `eventName`. */
+export function trustedHash(eventName, group, hi = 0) {
+  const h = group.hooks[hi]
+  const t = typeof h.timeout === 'number' ? h.timeout : null
+  const handler = { type: 'command', command: h.command, async: Boolean(h.async),
+    timeout: ['SessionEnd', 'Interrupt'].includes(eventName) ? Math.min(Math.max(t ?? 1, 1), 3) : Math.max(t ?? 600, 1) }
+  if (h.statusMessage != null) handler.statusMessage = h.statusMessage
+  if (h.additionalContextLimit != null && h.additionalContextLimit !== 2500 && CONTEXT_LIMIT_EVENTS.includes(eventName)) handler.additionalContextLimit = h.additionalContextLimit
+  const identity = { event_name: hookEventLabel(eventName), hooks: [handler] }
+  if (group.matcher != null) identity.matcher = group.matcher
+  return 'sha256:' + crypto.createHash('sha256').update(sortedJson(identity)).digest('hex')
+}
+
+// A line editor for config.toml, enough for the two keys the install writes and correct on everything around them:
+// it never rewrites a line it does not own, and it tracks strings and brackets so a line inside a multi-line string
+// or a nested array that opens with "[" is never read as a table. A shape it cannot edit in place, it refuses.
+const TOML_ESC = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', e: '\x1b', '"': '"', '\\': '\\' }
+function parseTomlKey(s, i) {
+  const segs = []
+  for (;;) {
+    while (s[i] === ' ' || s[i] === '\t') i++
+    let seg = ''
+    if (s[i] === '"') {
+      for (i++; i < s.length && s[i] !== '"'; i++) {
+        if (s[i] !== '\\') { seg += s[i]; continue }
+        const e = s[++i], n = { u: 4, U: 8, x: 2 }[e]
+        if (n) { seg += String.fromCodePoint(parseInt(s.slice(i + 1, i + 1 + n), 16)); i += n } else if (e in TOML_ESC) seg += TOML_ESC[e]; else return null
+      }
+      if (s[i++] !== '"') return null
+    } else if (s[i] === "'") {
+      const j = s.indexOf("'", i + 1)
+      if (j < 0) return null
+      seg = s.slice(i + 1, j); i = j + 1
+    } else {
+      seg = /^[A-Za-z0-9_-]*/.exec(s.slice(i))[0]
+      if (!seg) return null
+      i += seg.length
+    }
+    segs.push(seg)
+    while (s[i] === ' ' || s[i] === '\t') i++
+    if (s[i] !== '.') return { segs, end: i }
+    i++
+  }
+}
+/** Each line tagged header, array-header, key, cont (inside a value begun on an earlier line) or other (blank or
+ *  comment). A header carries its table path; a key line its table, its full path, where its `=` is and where
+ *  its comment starts. */
+export function tomlLines(text) {
+  let state = null, depth = 0, table = []
+  return text.split('\n').map((line) => {
+    const row = { text: line, kind: 'cont' }
+    if (state === null && depth === 0) {
+      const t = line.trimStart(), off = line.length - t.length
+      if (t === '' || t.startsWith('#')) row.kind = 'other'
+      else if (t.startsWith('[')) {
+        const arr = t.startsWith('[[')
+        const k = parseTomlKey(t, arr ? 2 : 1)
+        if (!k || !t.startsWith(arr ? ']]' : ']', k.end)) throw new Error(`config.toml: unreadable table header ${JSON.stringify(line)}`)
+        Object.assign(row, { kind: arr ? 'array-header' : 'header', path: k.segs })
+        table = arr ? ['\0array', ...k.segs] : k.segs
+      } else {
+        const k = parseTomlKey(t, 0)
+        if (!k || t[k.end] !== '=') throw new Error(`config.toml: unreadable line ${JSON.stringify(line)}`)
+        Object.assign(row, { kind: 'key', table, path: [...table, ...k.segs], eq: off + k.end })
+      }
+    }
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (state === null) {
+        if (c === '#') { row.commentAt = i; break }
+        if (c === '"' || c === "'") { if (line.startsWith(c.repeat(3), i)) { state = c.repeat(3); i += 2 } else state = c }
+        else if (c === '[' || c === '{') depth++
+        else if (c === ']' || c === '}') depth--
+      } else if (c === '\\' && state[0] === '"') i++
+      else if (state.length === 1 ? c === state : line.startsWith(state, i)) {
+        // A multi-line string may end in up to two more quotes of its own content: `""""` is `"` then the close.
+        if (state.length === 3) { i += 2; for (let n = 0; n < 2 && line[i + 1] === state[0]; n++) i++ }
+        state = null
+      }
+    }
+    if (state === '"' || state === "'") state = null
+    return row
+  })
+}
+const eqPath = (a, b) => a.length === b.length && a.every((s, i) => s === b[i])
+const underPath = (a, pre) => a.length > pre.length && pre.every((s, i) => s === a[i])
+const tomlKey = (seg) => (/^[A-Za-z0-9_-]+$/.test(seg) ? seg : JSON.stringify(seg))
+const tomlPath = (p) => p.map(tomlKey).join('.')
+/** The index after the last line a table's block holds (its header, keys and their continuations). */
+function tomlBlockEnd(rows, h) {
+  let last = h
+  for (let i = h + 1; i < rows.length && !rows[i].kind.endsWith('header'); i++) if (rows[i].kind !== 'other') last = i
+  return last + 1
+}
+/** `tablePath.key = value`, written in place where the key exists, under the table's header where only the table
+ *  does, and otherwise as a new table after the last table under `anchor`, else at the end. Returns whether the
+ *  lines changed. */
+function tomlSet(lines, tablePath, key, value, anchor = null) {
+  const rows = tomlLines(lines.join('\n'))
+  const full = [...tablePath, key]
+  for (const [i, r] of rows.entries()) {
+    if (r.kind !== 'key') continue
+    if (eqPath(r.path, full)) {
+      if (rows[i + 1]?.kind === 'cont') throw new Error(`config.toml: ${tomlPath(full)} spans several lines; set it to ${value} by hand and re-run`)
+      if (r.text.slice(r.eq + 1, r.commentAt ?? r.text.length).trim() === value) return false
+      lines[i] = `${r.text.slice(0, r.eq + 1)} ${value}`
+      return true
+    }
+    if (underPath(full, r.path)) throw new Error(`config.toml sets ${tomlPath(r.path)} inline, so the install cannot add ${tomlPath(full)} without rewriting it; write ${tomlPath(r.path)} as a [${tomlPath(r.path)}] table and re-run`)
+    if (r.table.length < tablePath.length && underPath(r.path, tablePath)) throw new Error(`config.toml defines ${tomlPath(tablePath)} with dotted keys; write it as a [${tomlPath(tablePath)}] table and re-run`)
+  }
+  const h = rows.findIndex((r) => r.kind === 'header' && eqPath(r.path, tablePath))
+  if (h >= 0) { lines.splice(h + 1, 0, `${tomlKey(key)} = ${value}`); return true }
+  const last = anchor ? rows.findLastIndex((r) => r.kind === 'header' && (eqPath(r.path, anchor) || underPath(r.path, anchor))) : -1
+  const at = last >= 0 ? tomlBlockEnd(rows, last) : lines.length
+  lines.splice(at, 0, ...(at > 0 && lines[at - 1].trim() !== '' ? [''] : []), `[${tomlPath(tablePath)}]`, `${tomlKey(key)} = ${value}`)
+  return true
+}
+/** Remove a table's block and the blank line before it. */
+function tomlRemove(lines, tablePath) {
+  const rows = tomlLines(lines.join('\n'))
+  const h = rows.findIndex((r) => r.kind === 'header' && eqPath(r.path, tablePath))
+  if (h < 0) return
+  const from = h > 0 && lines[h - 1].trim() === '' ? h - 1 : h
+  lines.splice(from, tomlBlockEnd(rows, h) - from)
+}
+function tomlRename(lines, from, to) {
+  const h = tomlLines(lines.join('\n')).findIndex((r) => r.kind === 'header' && eqPath(r.path, from))
+  if (h >= 0) lines[h] = `[${tomlPath(to)}]`
+}
+
+/**
+ * The install as text in, text out: hooks.json with the CODEX_HOOKS entries running the scripts in `hookDir`, and
+ * config.toml with a trust line for each and sandbox_workspace_write.network_access = true (Q3). An entry is the
+ * install's own when its group is one handler running `node '<hookDir>/dctr-*.mjs'`; every other entry and trust
+ * line is left byte-identical (E10-D2). Own entries are rewritten in place, so no foreign group changes index and
+ * its trust key still names it; a foreign group that does move, because a surplus own entry before it went, has
+ * its trust table renamed to its new key. Run on its own output it changes nothing (E10-D4). Throws on a shape it
+ * cannot edit without rewriting something it does not own. `hooksJson` and `configToml` are the files' text, or
+ * null where the file is absent.
+ */
+export function codexInstallPlan({ hooksJson, configToml, hookDir, hooksJsonPath }) {
+  let doc = { hooks: {} }
+  const hasHooks = hooksJson != null && hooksJson.trim() !== ''
+  if (hasHooks) {
+    try { doc = JSON.parse(hooksJson) } catch (e) { throw new Error(`hooks.json is not JSON: ${e.message}`) }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('hooks.json is not a JSON object')
+    doc.hooks ??= {}
+    if (!doc.hooks || typeof doc.hooks !== 'object' || Array.isArray(doc.hooks)) throw new Error('hooks.json: "hooks" is not an object')
+  }
+  const ownPrefix = `node ${shq(hookDir + '/')}`.slice(0, -1)
+  const isOwn = (g) => Array.isArray(g?.hooks) && g.hooks.length === 1 && typeof g.hooks[0]?.command === 'string' &&
+    g.hooks[0].command.startsWith(ownPrefix) && /^dctr-[a-z]+\.mjs'$/.test(g.hooks[0].command.slice(ownPrefix.length))
+  const want = {}
+  for (const [ev, script, timeout, matcher] of CODEX_HOOKS) {
+    (want[ev] ||= []).push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command: `node ${shq(path.join(hookDir, script))}`, timeout }] })
+  }
+  const keyOf = (ev, gi, hi = 0) => ['hooks', 'state', `${hooksJsonPath}:${hookEventLabel(ev)}:${gi}:${hi}`]
+  const drops = [], moves = [], trust = []
+  for (const ev of new Set([...Object.keys(doc.hooks), ...Object.keys(want)])) {
+    const old = doc.hooks[ev] ?? []
+    if (!Array.isArray(old)) throw new Error(`hooks.json: hooks.${ev} is not an array`)
+    const desired = want[ev] || [], next = []
+    let di = 0
+    const place = () => { trust.push([keyOf(ev, next.length), trustedHash(ev, desired[di])]); next.push(desired[di++]) }
+    old.forEach((g, gi) => {
+      if (!isOwn(g)) {
+        if (next.length !== gi) for (let hi = 0; hi < (g?.hooks?.length || 0); hi++) moves.push([keyOf(ev, gi, hi), keyOf(ev, next.length, hi)])
+        next.push(g)
+      } else if (di < desired.length) place()
+      else drops.push(keyOf(ev, gi))
+    })
+    while (di < desired.length) place()
+    if (doc.hooks[ev] !== undefined || next.length) doc.hooks[ev] = next
+  }
+
+  const messages = []
+  const indent = /\n([ \t]+)\S/.exec(hooksJson || '')?.[1] ?? 2
+  const nl = (text) => (!text || text.endsWith('\n') ? '\n' : '')
+  if (hasHooks && JSON.stringify(JSON.parse(hooksJson), null, indent) + nl(hooksJson) !== hooksJson) {
+    // ponytail: re-serialized, not spliced, so a hand-formatted hooks.json has its layout normalized (every entry's
+    // content and index unchanged, so no trust line breaks). Splice the text if a user's layout must survive.
+    messages.push('hooks.json was not laid out as JSON.stringify lays it out, so its layout changed; no entry\'s content or position did')
+  }
+  const hooksOut = JSON.stringify(doc, null, indent) + nl(hooksJson)
+  messages.push(hooksOut === hooksJson ? 'hooks.json: no change, the doctrine entries are current'
+    : `hooks.json: ${trust.length} doctrine entries (${[...new Set(CODEX_HOOKS.map(([ev]) => ev))].join(', ')}) run the hooks in ${hookDir}`)
+
+  const lines = configToml ? configToml.replace(/\n$/, '').split('\n') : []
+  for (const k of drops) tomlRemove(lines, k)
+  for (const [from, to] of moves) tomlRename(lines, from, to)
+  const written = trust.filter(([k, hash]) => tomlSet(lines, k, 'trusted_hash', JSON.stringify(hash), ['hooks', 'state'])).length
+  const net = tomlSet(lines, ['sandbox_workspace_write'], 'network_access', 'true')
+  messages.push(written || drops.length || moves.length ? `config.toml: ${written} doctrine hook trust lines written` : 'config.toml: the doctrine trust lines are current')
+  messages.push(net
+    ? 'config.toml: set sandbox_workspace_write.network_access = true, so a command Codex runs in its workspace-write sandbox can reach herdr (and the network)'
+    : 'config.toml: sandbox_workspace_write.network_access = true was already set')
+  return { hooksJson: hooksOut, configToml: lines.join('\n') + (lines.length ? nl(configToml) : ''), messages }
 }

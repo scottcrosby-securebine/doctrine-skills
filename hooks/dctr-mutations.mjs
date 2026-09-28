@@ -42,10 +42,13 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs',
   'dctr-gauge.mjs', 'dctr-gauge.selftest.mjs', 'dctr-bridge.mjs', 'dctr-bridge.selftest.mjs',
   'dctr-cycle.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.mjs', 'dctr-typer.selftest.mjs',
-  // The renderer is read by the Codex suite, which runs it on a rollout.
+  // The renderer is read by the Codex suite, which runs it on a rollout, and the codex (install) suite checks the
+  // install copies it: without it both suites are red in every copy.
   'dctr-render.mjs', 'dctr-seat.codex.selftest.mjs',
   // The Codex host (E10): the watcher the cycle hook spawns, the real-capture fixtures and the two Codex suites.
-  'dctr-watch.mjs', 'dctr-codex.fixtures.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-codex.hooks.selftest.mjs']
+  'dctr-watch.mjs', 'dctr-codex.fixtures.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-codex.hooks.selftest.mjs',
+  // The Codex install command and the orchestrator's pause notification, each with its suite.
+  'dctr-codex.mjs', 'dctr-codex.selftest.mjs', 'dctr-notify.mjs', 'dctr-notify.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -66,8 +69,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle.
  *  The Codex suite placed 2026-09-28, measured on one host: seat 1.36s, seat.codex 2.29s, gauge 2.65s, gate 7.25s.
  *  The two Codex host suites placed 2026-09-28, measured standalone on one host: codex seams 0.05s (first), codex.hooks
- *  9.3s (after gate, before pane). Merged by those two measurements, not re-measured together. */
-const SUITES = ['dctr-codex.seams.selftest.mjs', 'dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
+ *  9.3s (after gate, before pane). Notify and codex (install) placed 2026-09-28, measured on one host: record 0.03s,
+ *  notify 0.56s, project 0.69s, restore 0.84s, codex 0.96s, bridge 1.00s. Merged from three seats' separate
+ *  measurements, not re-measured together. */
+const SUITES = ['dctr-codex.seams.selftest.mjs', 'dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -2310,6 +2315,72 @@ const MUTATIONS = [
   { name: 'the watcher hands the hook a StopFailure without the error', file: 'dctr-watch.mjs',
     clause: 'clause 1d — the paused line names the Codex API error',
     from: "fire('StopFailure', { error: obs.apiError, dctr_watch: true })", to: "fire('StopFailure', { dctr_watch: true })" },
+  // The Codex install (E10-D1 to E10-D6), pinned by dctr-codex.selftest.mjs.
+  { name: "Codex's trust hash is taken over unsorted keys", file: 'dctr-lib.mjs',
+    clause: 'clause 2a — trustedHash reproduces all 12 hashes Codex 0.156.1 wrote',
+    from: 'Object.keys(v).sort().map((k)', to: 'Object.keys(v).map((k)' },
+  { name: "the trust hash drops Codex's 1..3 second clamp on SessionEnd and Interrupt", file: 'dctr-lib.mjs',
+    clause: 'clause 2a — trustedHash reproduces all 12 hashes Codex 0.156.1 wrote, SessionEnd and Interrupt clamped to 3',
+    from: "['SessionEnd', 'Interrupt'].includes(eventName) ? Math.min(Math.max(t ?? 1, 1), 3) : Math.max(t ?? 600, 1)", to: 'Math.max(t ?? 600, 1)' },
+  { name: 'the trust hash leaves the matcher out of the identity', file: 'dctr-lib.mjs',
+    clause: 'clause 2c — trustedHash of a matcher-bearing entry is the hash Codex accepted in a live run',
+    from: '  if (group.matcher != null) identity.matcher = group.matcher\n', to: '' },
+  { name: 'an earlier install entry is dropped and re-appended instead of rewritten in place', file: 'dctr-lib.mjs',
+    clause: "clause 2n — an earlier install's stale Stop entry is rewritten in place at index 0",
+    from: '      } else if (di < desired.length) place()\n      else drops.push(keyOf(ev, gi))', to: '      } else drops.push(keyOf(ev, gi))' },
+  { name: 'a foreign group that moves keeps its old trust key', file: 'dctr-lib.mjs',
+    clause: "clause 2o — the user's Stop group that moved from index 2 to 1 keeps a trust line under its new key",
+    from: '        if (next.length !== gi) for (let hi', to: '        if (false) for (let hi' },
+  { name: "a surplus earlier install's trust table is left behind", file: 'dctr-lib.mjs',
+    clause: 'clause 2o — no trust line is left for index 2',
+    from: '  for (const k of drops) tomlRemove(lines, k)\n', to: '' },
+  { name: 'a key the install sets is never rewritten in place', file: 'dctr-lib.mjs',
+    clause: 'clause 2m — network_access = false in an existing [sandbox_workspace_write] becomes true in place',
+    from: '      lines[i] = `${r.text.slice(0, r.eq + 1)} ${value}`', to: '      lines[i] = r.text' },
+  { name: 'the TOML scanner does not know multi-line strings', file: 'dctr-lib.mjs',
+    clause: 'clause 2l — a multi-line string opening lines with "[" is not read as a table',
+    from: 'if (line.startsWith(c.repeat(3), i)) { state = c.repeat(3); i += 2 } else state = c', to: 'state = c' },
+  { name: 'the TOML scanner does not track brackets across lines', file: 'dctr-lib.mjs',
+    clause: 'clause 2l — a nested array opening lines with "[" is not read as a table',
+    from: "        else if (c === '[' || c === '{') depth++", to: '        else if (false) depth++' },
+  { name: 'an inline hooks.state or sandbox_workspace_write is rewritten instead of refused', file: 'dctr-lib.mjs',
+    clause: 'clause 1c — hooks.state or sandbox_workspace_write set as an inline table is refused',
+    from: '    if (underPath(full, r.path)) throw', to: '    if (false) throw' },
+  { name: 'the install no longer names the network setting it turned on', file: 'dctr-lib.mjs',
+    clause: 'clause 2j — the command names sandbox_workspace_write.network_access = true in its output (E10-D6)',
+    from: "    ? 'config.toml: set sandbox_workspace_write.network_access = true, so", to: "    ? 'config.toml: set network access on, so" },
+  { name: "any entry running a dctr script is taken for the install's own", file: 'dctr-lib.mjs',
+    clause: 'clause 2p — a dctr script registered from another directory is left in place',
+    from: "g.hooks[0].command.startsWith(ownPrefix) && /^dctr-[a-z]+\\.mjs'$/.test(g.hooks[0].command.slice(ownPrefix.length))",
+    to: "/\\/dctr-[a-z]+\\.mjs'$/.test(g.hooks[0].command)" },
+  { name: 'the install copies no hooks under CODEX_HOME', file: 'dctr-codex.mjs',
+    clause: 'clause 2d — the command copies the hooks directory under CODEX_HOME',
+    from: '    fs.cpSync(src, tmp, { recursive: true })', to: '    fs.mkdirSync(tmp)' },
+  { name: 'a given CODEX_HOME is not canonicalized as Codex canonicalizes it', file: 'dctr-codex.mjs',
+    clause: 'clause 2q — a symlinked CODEX_HOME is canonicalized: every trust key names the real hooks.json path',
+    from: '  try { home = fs.realpathSync(given) }', to: '  try { home = path.resolve(given); fs.statSync(home) }' },
+  { name: 'the install ignores $CODEX_HOME', file: 'dctr-codex.mjs',
+    clause: 'clause 2q — with no flag, $CODEX_HOME is the home',
+    from: 'const given = rest[1] ?? (process.env.CODEX_HOME || null)', to: 'const given = rest[1] ?? null' },
+  // The orchestrator's pause notification on Codex, pinned by dctr-notify.selftest.mjs.
+  { name: 'the pause notification calls herdr in a contained session', file: 'dctr-notify.mjs',
+    clause: 'clause 1 — contained: stands down and calls herdr ZERO times',
+    from: "const why = (process.env.DCTR_VIEW_REQUEST_DIR ? 'contained session", to: "const why = (false ? 'contained session" },
+  { name: 'the pause notification calls herdr outside a herdr session', file: 'dctr-notify.mjs',
+    clause: 'clause 1 — outside herdr (HERDR_ENV unset): calls herdr ZERO times',
+    from: '  skipReason(process.env) ??\n', to: '' },
+  { name: 'the pause notification calls herdr with no pane', file: 'dctr-notify.mjs',
+    clause: 'clause 1 — no HERDR_PANE_ID: calls herdr ZERO times',
+    from: "(process.env.HERDR_PANE_ID ? null : 'no HERDR_PANE_ID in the environment')", to: 'null' },
+  { name: 'the pause notification splits its text into a title and a --body', file: 'dctr-notify.mjs',
+    clause: 'clause 2b — the call carries no --body',
+    from: "['notification', 'show', title, '--sound', 'request']", to: "['notification', 'show', `${phase}: doctrine auto-cycle paused`, '--body', reason, '--sound', 'request']" },
+  { name: 'the pause notification keeps only the first word of a reason', file: 'dctr-notify.mjs',
+    clause: 'clause 2c — a reason given as several words reaches the title',
+    from: "const reason = words.join(' ')", to: 'const reason = words[0]' },
+  { name: 'a refused pause notification exits 0', file: 'dctr-notify.mjs',
+    clause: 'clause 2d — herdr refusing is reported and exits 1',
+    from: '  process.exit(1)\n}\nconsole.log(`dctr-notify: shown', to: '  process.exit(0)\n}\nconsole.log(`dctr-notify: shown' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
