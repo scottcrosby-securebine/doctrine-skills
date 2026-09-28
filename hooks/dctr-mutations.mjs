@@ -43,7 +43,7 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   'dctr-gauge.mjs', 'dctr-gauge.selftest.mjs', 'dctr-bridge.mjs', 'dctr-bridge.selftest.mjs',
   'dctr-cycle.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.mjs', 'dctr-typer.selftest.mjs',
   // The Codex host (E10): the watcher the cycle hook spawns, the real-capture fixtures and the two Codex suites.
-  'dctr-watch.mjs', 'dctr-codex.fixtures.mjs', 'dctr-codex.selftest.mjs', 'dctr-codex.hooks.selftest.mjs']
+  'dctr-watch.mjs', 'dctr-codex.fixtures.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-codex.hooks.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -64,7 +64,7 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle.
  *  The two Codex suites placed 2026-09-28, measured standalone on one host: codex 0.05s (first), codex.hooks 9.3s
  *  (after gate, before pane). */
-const SUITES = ['dctr-codex.selftest.mjs', 'dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
+const SUITES = ['dctr-codex.seams.selftest.mjs', 'dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -2073,7 +2073,7 @@ const MUTATIONS = [
     to: "" },
   // ---------------------------------------------------------------- the Codex host (E10 e10-hookport, seat III)
   // Each reverts one behaviour the Codex port added, in dctr-lib.mjs's Codex section or in a hook's Codex branch; the
-  // suites that pin them are dctr-codex.selftest.mjs (pure, on real captures) and dctr-codex.hooks.selftest.mjs (end to end).
+  // suites that pin them are dctr-codex.seams.selftest.mjs (pure, on real captures) and dctr-codex.hooks.selftest.mjs (end to end).
   { name: 'every payload reads as Claude Code, so no Codex branch is ever taken (S3)', file: 'dctr-lib.mjs',
     clause: 'clause 1a — hostOf: a payload whose transcript_path is a rollout- file is codex',
     from: ".startsWith('rollout-') ? 'codex' : 'claude')", to: ".startsWith('rollout-') ? 'claude' : 'claude')" },

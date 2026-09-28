@@ -1,7 +1,7 @@
 // Behavioral tamper test for the Codex host's pure seams in dctr-lib.mjs (E10 e10-hookport, seams S1, S4, S5 and
 // the watcher and typer decisions built on them), per CLAUDE.md's three clauses.
 //
-//   node hooks/dctr-codex.selftest.mjs      exit 0 all clauses passed, 1 otherwise
+//   node hooks/dctr-codex.seams.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
 // Every rollout, payload and pane text is a real Codex 0.156.1 capture, cut verbatim into dctr-codex.fixtures.mjs
 // (each constant names its probe file). A fixture a clause needs in another shape is derived here, and says so.
