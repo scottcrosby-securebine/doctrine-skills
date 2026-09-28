@@ -700,7 +700,10 @@ export function restoreContext({ phase, state, stateLine, recordPath, wrapper, h
 /** Why the gauge stands down, or null when it acts: only on PostToolBatch in the main session. A seat's batch
  *  carries `agent_id` and the parent's session id, so it is filtered before anything is read or written (E8-D21). */
 export function gaugeSkip(p) {
-  if (!p || p.hook_event_name !== 'PostToolBatch') return `not a PostToolBatch event (${p?.hook_event_name || 'none'})`
+  // Codex has no PostToolBatch: its main-session PostToolUse events stand in for it (E10 adaptation table), and the
+  // gauge reads each token_count once (readUsage's stale reading), so the PostToolUse events after one are one batch.
+  const batch = p?.hook_event_name === 'PostToolBatch' || (p?.hook_event_name === 'PostToolUse' && hostOf(p) === 'codex')
+  if (!p || !batch) return `not a PostToolBatch event (${p?.hook_event_name || 'none'})`
   if ('agent_id' in p) return 'a seat batch (agent_id present)'
   if (!p.session_id) return 'no session_id in the payload'
   if (!p.transcript_path) return 'no transcript_path in the payload'
@@ -718,8 +721,9 @@ export const lastOnOffEntry = (entries) =>
  * truncated tail). `{ used, uuid, at }`, or `{ unknown }`: `missing` for no text, `unparseable` for no such entry,
  * `stale` when that entry is the one the latch saw at the previous batch (SC2).
  */
-export function readUsage(transcriptText, lastUuid) {
+export function readUsage(transcriptText, lastUuid, host = 'claude') {
   if (transcriptText === null || transcriptText === undefined) return { unknown: 'missing' }
+  if (host === 'codex') return readCodexUsage(transcriptText, lastUuid)
   const ls = String(transcriptText).split('\n')
   for (let i = ls.length - 1; i >= 0; i--) {
     let e
@@ -878,10 +882,10 @@ export const PAUSES = {
   R6: { reason: () => 'no progress in 2 cycles', action: "read the record's last work, then /clear and type resume" },
   R7: { reason: () => 'waiting for your permission approval', action: 'approve or deny in the pane' },
   R8: { reason: () => 'session idle, waiting for you', action: 'reply in the pane' },
-  R9: { reason: (error) => `Claude API error: ${error}`, action: 'retry in the pane', match: /^Claude API error: / },
+  R9: { reason: (error, host) => `${hostName(host)} API error: ${error}`, action: 'retry in the pane', match: /^(Claude|Codex) API error: / },
   R10: { reason: () => 'could not cycle: handoff not written', action: 'run doctrine-handoff, then /clear and type resume' },
   R11: { reason: () => 'could not cycle: another Stop hook kept the session running', action: '/clear and type resume by hand' },
-  R12: { reason: () => 'could not cycle: this pane now runs a different Claude session', action: 'check the pane' },
+  R12: { reason: (_, host) => `could not cycle: this pane now runs a different ${hostName(host)} session`, action: 'check the pane', match: /^could not cycle: this pane now runs a different (Claude|Codex) session$/ },
   R13: { reason: () => 'could not cycle: contained session', action: '/clear and type resume by hand' },
   R14: { reason: () => 'cleared, but the new session did not start doctrine', action: 'type resume' },
   R15: { reason: () => 'resume typed twice, no reply from the new session', action: 'check the pane' },
@@ -889,7 +893,7 @@ export const PAUSES = {
   R17: { reason: (why) => `could not type into the pane: ${why}`, action: '/clear and type resume by hand', match: /^could not type into the pane: / },
   R18: { reason: (id) => `/clear did not take: session ${id} still running`, action: 'clear your draft, then /clear and type resume', match: /^\/clear did not take: session \S+ still running$/ },
 }
-export const pauseReason = (code, arg) => PAUSES[code].reason(arg)
+export const pauseReason = (code, arg, host) => PAUSES[code].reason(arg, host)
 /** R17's `<reason>`, one fixed phrase per failure (SP7): never a raw herdr status or error message, which go to
  *  hook.log. No phrase says stall, typer, claim or blocked (D2). */
 export const R17_WHY = {
@@ -1139,7 +1143,7 @@ export function cycleProgress(entries, hashNow) {
  */
 export function cycleDecision(f) {
   const v = (x) => (typeof x === 'function' ? x() : x)
-  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg, f.host) })
   // 1. Pausing states.
   if (f.stopRepo) return pause('R1', f.stopRepo)
   if (f.blocked) return pause('R2', f.blocked)
@@ -1208,14 +1212,15 @@ const ownResume = (text) => {
  * the last line makes the read unreadable (null), which never authorizes a send (RB2); a last line with no newline
  * that does not parse yet is a write in progress, `partial`, neither typing nor nothing. Blank lines are skipped.
  */
-export function transcriptEntries(text) {
+export function transcriptEntries(text, host = 'claude') {
   const lines = String(text).split('\n'), last = lines.pop(), entries = []
+  const done = (partial) => ({ entries: host === 'codex' ? entries.flatMap(codexEntry) : entries, partial })
   for (const l of lines) {
     if (!l.trim()) continue
     try { entries.push(JSON.parse(l)) } catch { return null }
   }
-  if (!last.trim()) return { entries, partial: false }
-  try { entries.push(JSON.parse(last)); return { entries, partial: false } } catch { return { entries, partial: true } }
+  if (!last.trim()) return done(false)
+  try { entries.push(JSON.parse(last)); return done(false) } catch { return done(true) }
 }
 
 /** The typer's timings in ms (E8-D15): poll, how long a pane may read not idle once unfocused, how long to wait
@@ -1248,9 +1253,10 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * otherwise, so a /clear nobody saw take counts no cycle (E8-D17, E8-D28).
  */
 export function typerStep(o) {
-  const step = typerAct(o)
+  const step = o.host === 'codex' ? codexTyperAct(o) : typerAct(o)
   const s = paneSession(o.pane)
-  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession)
+  // On Codex the pane's continue line naming the old session (clearTook) is the first sight of the /clear taking (Q6).
+  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession) || (o.host === 'codex' && o.took === true)
   return o.stage !== 'clear' && !o.cycled && step.act !== 'abort' && took ? { ...step, cycle: true } : step
 }
 
@@ -1314,9 +1320,232 @@ function typerAct(o) {
  * decides (pauseStands, E8-R28, E8-R30).
  */
 export function notifyDecision(event, f = {}) {
-  if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown')
+  if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown', f.host)
   if (event === 'permission_prompt') return pauseReason('R7')
   if (event !== 'idle_prompt') return null
   if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.cronsEmpty !== true || f.lastStop?.ready !== false) return null
   return pauseReason('R8')
+}
+
+// ---------------------------------------------------------------- the Codex host (E10, e10-hookport)
+//
+// One script serves both hosts: each hook reads the payload's host and, on Codex, reads a Codex rollout where it read
+// a Claude Code transcript. Every fact about Codex 0.156.1 below comes from the e10-hookport probes (records
+// e10-hookport/probes/A-hook-runtime.md and B-autocycle-surfaces.md); the fixtures in dctr-codex.fixtures.mjs are
+// cut from their rollouts and payloads.
+
+/** The host a hook payload came from (seam S3): Codex names its session file `rollout-<time>-<id>.jsonl`. */
+export const hostOf = (input) => (path.basename(String(input?.transcript_path ?? '')).startsWith('rollout-') ? 'codex' : 'claude')
+
+const hostName = (host) => (host === 'codex' ? 'Codex' : 'Claude')
+
+/** A Codex user message the harness wrote rather than the user typed: the environment context, an injected skill
+ *  body, a Stop hook's prompt, a turn-aborted note, and the like, each a tagged block (probe rollouts). */
+const CODEX_META = /^<[a-z_]+[\s>]/
+
+/** One rollout line as the entries the typer's readers take (seam S1): each user or assistant message item mapped to
+ *  `{ type, timestamp, message: { content: [{ type: 'text', text }] }, isMeta }`; every other item maps to nothing. */
+function codexEntry(e) {
+  const p = e?.payload
+  if (e?.type !== 'response_item' || p?.type !== 'message' || (p.role !== 'user' && p.role !== 'assistant')) return []
+  const text = (Array.isArray(p.content) ? p.content : []).map((c) => (typeof c?.text === 'string' ? c.text : '')).join('')
+  return [{ type: p.role, timestamp: e.timestamp, message: { content: [{ type: 'text', text }] }, isMeta: p.role === 'user' && CODEX_META.test(text.trimStart()) }]
+}
+
+/**
+ * readUsage for a Codex rollout (seam S1): the latest token_count event carrying info, read as used =
+ * info.last_token_usage.input_tokens and window = info.model_context_window, its timestamp standing in for the entry
+ * id. A token_count whose input is zero (the one a compaction writes) is skipped, as E8-D10 skips zero totals, and so
+ * is a line that does not parse. `stale` when that token_count is the one the latch read at the previous batch: the
+ * PostToolUse events after one token_count are one batch (E10 table), so the gauge reads it once. With no such event,
+ * `unparseable` when a line did not parse, else `none`: no token_count yet, the first tool call of a session (probe A2).
+ */
+function readCodexUsage(text, lastUuid) {
+  const ls = String(text).split('\n')
+  let bad = false
+  for (let i = ls.length - 1; i >= 0; i--) {
+    if (!ls[i].trim()) continue
+    let e
+    try { e = JSON.parse(ls[i]) } catch { bad = true; continue }
+    const info = e?.type === 'event_msg' && e.payload?.type === 'token_count' ? e.payload.info : null
+    const used = info?.last_token_usage?.input_tokens
+    if (!Number.isFinite(used) || used <= 0) continue
+    if (lastUuid && e.timestamp === lastUuid) return { unknown: 'stale' }
+    const window = info.model_context_window
+    return { used, uuid: e.timestamp, at: e.timestamp || null, window: Number.isFinite(window) && window > 0 ? window : null }
+  }
+  return { unknown: bad ? 'unparseable' : 'none' }
+}
+
+/** What the typer types on Codex after the /clear takes: the skill's exact registered name after `$`, the one form
+ *  Codex itself injects as a skill (probe B1), with the not-a-ruling argument. Sent as one line, the TUI's skill popup
+ *  never opens and one Enter submits it (seat III live run, III-evidence/popup-resume-line-rollout.jsonl). */
+export const CODEX_RESUME_LINE = `$doctrine:doctrine-resume ${RESUME_ARGS}`
+
+/** userTyped for a Codex entry (codexEntry's shape): a user message the harness did not write, other than the
+ *  typer's own resume line. */
+export const codexUserTyped = (e) => e?.type === 'user' && !e.isMeta && e.message?.content?.[0]?.text?.trim() !== CODEX_RESUME_LINE
+
+/** The line Codex prints when /clear ends a session: `To continue this session, run codex resume, then select <title>
+ *  (<session id>)` (probe-clear-screen.txt). */
+export const CLEAR_TOOK_TEXT = 'To continue this session, run codex resume'
+
+/** Each continue line in a pane's text, joined with the lines Codex wrapped it onto: it breaks the line itself at the
+ *  pane's width, which puts the session id on the next line in a narrow pane (III-evidence/popup-after-clear.txt). The
+ *  wrap ends at a blank line or the composer's `›`. */
+function continueLines(text) {
+  const ls = String(text ?? '').split('\n'), out = []
+  ls.forEach((l, i) => {
+    if (!l.includes(CLEAR_TOOK_TEXT)) return
+    let s = l.trim()
+    for (let j = i + 1; j < ls.length && j <= i + 3 && ls[j].trim() && !ls[j].trim().startsWith('›'); j++) s += ` ${ls[j].trim()}`
+    out.push(s)
+  })
+  return out
+}
+
+/** Whether the typer's /clear took (seam S4, Q6): the pane text read after the send holds more continue lines naming
+ *  the old session than the text read before it, so one appeared that was not there. */
+export function clearTook(before, after, oldId) {
+  if (!oldId) return false
+  const count = (t) => continueLines(t).filter((l) => l.includes(oldId)).length
+  return count(after) > count(before)
+}
+
+/**
+ * The state of a rollout's last turn and its background terminals, read line by line. A turn starts at task_started
+ * or at a user message the user typed, and ends at task_complete (its error and last_agent_message kept) or
+ * turn_aborted. A background terminal is a command still running when its call returned (probe B5): on the sandboxed
+ * path the call's output carries `"session_id":N` and ends when an item_completed CommandExecution names process_id
+ * N; on the tty path the output reads `Script running with cell ID N`, and it ends at the next CommandExecution
+ * completion of the same turn after that output, the only link the rollout gives.
+ */
+function codexTurnState(text) {
+  const running = new Set(), cells = []
+  let ended = false, error = null, lastMessage = null
+  for (const l of String(text ?? '').split('\n')) {
+    if (!l.trim()) continue
+    let e
+    try { e = JSON.parse(l) } catch { continue }
+    const p = e?.payload
+    if (!p || typeof p !== 'object') continue
+    const started = (e.type === 'event_msg' && p.type === 'task_started') || codexEntry(e).some((x) => x.type === 'user' && !x.isMeta)
+    if (started) { ended = false; error = null; lastMessage = null }
+    if (e.type === 'event_msg' && (p.type === 'task_complete' || p.type === 'turn_aborted')) {
+      ended = true
+      lastMessage = typeof p.last_agent_message === 'string' ? p.last_agent_message : null
+      error = p.error ? String(p.error.codex_error_info || p.error.message || 'unknown') : null
+    }
+    if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
+      const out = typeof p.output === 'string' ? p.output : Array.isArray(p.output) ? p.output.map((o) => o?.text || '').join('\n') : JSON.stringify(p.output ?? '')
+      for (const m of out.matchAll(/"session_id"\s*:\s*(\d+)|Process running with session ID (\d+)/g)) running.add(m[1] || m[2])
+      if (/Script running with cell ID \d+/.test(out)) cells.push(p.internal_chat_message_metadata_passthrough?.turn_id ?? null)
+    }
+    if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'CommandExecution') {
+      running.delete(String(p.item.process_id))
+      const at = cells.indexOf(p.turn_id)
+      if (at >= 0) cells.splice(at, 1)
+    }
+  }
+  return { ended, error, lastMessage, backgroundRunning: running.size > 0 || cells.length > 0 }
+}
+
+/**
+ * The observations Codex's hooks do not carry (seam S5), from the session's rollout and herdr's agent_status for its
+ * pane (null when there is no pane, or none may be read): `backgroundRunning`, a background terminal the session
+ * started with no completion item yet (E8-D7's background_tasks); `apiError`, the error a task_complete carries after
+ * the last user turn, as a 5xx ends a turn with no Stop (probe B6, E8-D18's StopFailure), else null; `idle`, the turn
+ * ended with no error and no background terminal, its last assistant message not the ready line, and herdr reporting
+ * the pane ready for input where it was read (E8-D18's idle_prompt).
+ */
+export function codexObservations(rolloutText, herdrStatus) {
+  const t = codexTurnState(rolloutText)
+  const apiError = t.ended && t.error ? t.error : null
+  const ready = herdrStatus === null || herdrStatus === undefined || READY_STATUSES.includes(herdrStatus)
+  return { backgroundRunning: t.backgroundRunning, apiError, idle: t.ended && !apiError && !t.backgroundRunning && !endsReady(t.lastMessage) && ready }
+}
+
+/** The watcher's turn, from the rollout text written since it started (at its UserPromptSubmit): `ended` once a
+ *  task_complete or turn_aborted is there, `newTurn` once a task_started follows that end. */
+export function watchedTurn(text) {
+  let ended = false, newTurn = false
+  for (const l of String(text ?? '').split('\n')) {
+    let e
+    try { e = JSON.parse(l) } catch { continue }
+    if (e?.type !== 'event_msg') continue
+    if (e.payload?.type === 'task_complete' || e.payload?.type === 'turn_aborted') ended = true
+    else if (ended && e.payload?.type === 'task_started') newTurn = true
+  }
+  return { ended, newTurn }
+}
+
+/** The watcher's timings in ms: poll, how long a turn end stays idle before the idle pause (Claude Code raises
+ *  idle_prompt after about 60 s), and the longest it watches one turn. */
+export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
+
+/**
+ * The Codex watcher's next action (E10 table rows for idle_prompt, StopFailure and background_tasks): Codex fires no
+ * hook for a turn ended by an API error, for a session left idle, or for a background terminal's exit (probes B5, B6),
+ * so a detached watcher started at each UserPromptSubmit reads the rollout and herdr and hands the auto-cycle hook the
+ * event Claude Code would have fired. `o.turn` is watchedTurn's, `o.obs` codexObservations', `o.bgAtEnd` whether a
+ * background terminal ran when the turn ended, `o.idleFor` ms the observation has read idle, `o.age` ms watched.
+ * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the terminal that held back the Stop has
+ * exited, so the Stop is decided again) and `idle` (an idle_prompt).
+ */
+export function watchStep(o) {
+  const t = o.times || WATCH_TIMES
+  if (!o.active) return { act: 'exit', reason: 'auto-cycle is not active' }
+  if (o.turn.newTurn) return { act: 'exit', reason: 'a new turn started, and its own watcher follows it' }
+  if (o.age >= t.max) return { act: 'exit', reason: 'the turn was watched for the longest time allowed' }
+  if (!o.turn.ended) return { act: 'wait', reason: 'the turn is running' }
+  if (o.obs.apiError) return { act: 'stopFailure', reason: `the turn ended with an API error (${o.obs.apiError})` }
+  if (o.bgAtEnd && !o.obs.backgroundRunning) return { act: 'stop', reason: 'the background terminal the turn left running has exited' }
+  if (o.obs.idle && o.idleFor >= t.idle) return { act: 'idle', reason: 'the session has been idle, waiting for the user' }
+  return { act: 'wait', reason: o.obs.idle ? 'idle, inside the grace' : 'nothing to report' }
+}
+
+/** Waits for herdr to report the pane ready to type into, as typerAct does before a send: a failed lookup is R17, a
+ *  focused pane waits, a busy one waits inside the grace, then R17. Null when it may type. */
+function readyToType(o, t, pause) {
+  if (!o.pane || o.pane.error) return pause('R17', R17_WHY.lookup)
+  if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
+  if (!READY_STATUSES.includes(o.pane.status)) return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
+  return null
+}
+
+/**
+ * typerAct on Codex (E10 table rows for the typer). Before the /clear it is typerAct itself. Then Codex writes nothing
+ * on disk until the next prompt, so the typer reads the pane (Q6): `o.took` is clearTook's answer, null when the pane
+ * could not be read. Once it took, the resume line is sent as the new chat's first prompt; a /clear that did not take
+ * within the restore wait pauses with R18 naming the old session, and nothing is sent (clear 1, resume 0). After the
+ * resume the typer waits for the restore file carrying the new session id (R14 past the wait: clear 1, resume 1) and
+ * for herdr to report that session, then for the first turn, as on Claude Code.
+ */
+function codexTyperAct(o) {
+  if (o.stage === 'clear') return typerAct(o)
+  const t = o.times || TYPER_TIMES
+  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg, 'codex') })
+  if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
+  if (o.stopRepo) return pause('R1', o.stopRepo)
+  if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
+  if (o.midWrite !== null && o.midWrite !== undefined) {
+    return o.midWrite < t.idle ? { act: 'wait', reason: 'the transcript ends in a line still being written' } : pause('R17', R17_WHY.transcript)
+  }
+  if (o.stage === 'resume') {
+    if (o.took === null || o.took === undefined) return pause('R17', R17_WHY.lookup)
+    if (!o.took) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the /clear to take' } : pause('R18', o.oldSession)
+    return readyToType(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line' }
+  }
+  if (!o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
+  const s = paneSession(o.pane)
+  if (s !== o.restore.session) {
+    if (s !== null && s !== o.oldSession) return pause('R16')
+    return o.sessionWait < t.session ? { act: 'wait', reason: 'herdr does not report the new session yet' } : pause('R17', s === null ? R17_WHY.lookup : R17_WHY.session)
+  }
+  if (o.typedNew) return pause('R16')
+  if (o.firstTurn) return { act: 'confirm', reason: 'the new session took its first turn' }
+  if (o.waited < t.firstTurn) return { act: 'wait', reason: 'waiting for the first turn' }
+  if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
+  if (o.resumes >= 2) return pause('R15')
+  return readyToType(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
 }
