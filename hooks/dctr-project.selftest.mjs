@@ -808,7 +808,7 @@ for (const name of ['herdr', 'gh', 'curl']) {
   fs.chmodSync(path.join(bin, name), 0o755)
 }
 const home = path.join(tmp, 'home'); fs.mkdirSync(home)
-const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CODE_SESSION_ID: '' }
+const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: '' }
 const cli = (...args) => spawnSync('node', [script, ...args], { env, encoding: 'utf8' })
 const writeTree = (root, files) => { for (const [rel, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), body) } }
 

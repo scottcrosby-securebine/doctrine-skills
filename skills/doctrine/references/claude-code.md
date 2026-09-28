@@ -23,7 +23,7 @@ Dispatch it with the Agent tool as `subagent_type: "codex:codex-rescue"`, never 
 
 The seat forwards to the Codex CLI, and returns either a start line or the full result.
 
-**Where its return is.** Its return is in its job record: `~/.claude/plugins/data/codex-openai-codex/state/<workspace-basename>-<hash>/jobs/<task-id>.json`, with the fields status, pid, logFile, result, createdAt, summary and workspaceRoot. For the hub's ownership test, workspaceRoot is the workspace the record names and createdAt is when it was created.
+**Where its return is.** Its return is in its job record: `<config dir>/plugins/data/codex-openai-codex/state/<workspace-basename>-<hash>/jobs/<task-id>.json`, where `<config dir>` is `$CLAUDE_CONFIG_DIR` when that variable is set and `~/.claude` otherwise, with the fields status, pid, logFile, result, createdAt, summary and workspaceRoot. For the hub's ownership test, workspaceRoot is the workspace the record names and createdAt is when it was created.
 
 A dead pid, or a terminal status with no result, is a failed seat. A wrapper that dies, from an API error or a kill, is not a dead job, so read the record's status before calling the seat failed.
 
