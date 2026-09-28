@@ -236,6 +236,26 @@ clause('clause 1c4 — a Codex Stop with a background terminal the rollout shows
   b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
   (b2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && launch?.host === 'codex' && launch?.session === 'b1' && recLines(bg, /paused/).length === 0 && !/"decision"/.test(b1.out + b2.out),
   `b1 ${b1.out} ${b1.err} b2 ${b2.out} ${b2.err} launch ${JSON.stringify(launch)} paused ${JSON.stringify(recLines(bg, /paused/))}`)
+// E10H-B4: the claude -p red team's marker, captured from a real dispatch (REDTEAM_MARKER), in the session's seats with
+// its result file not yet written: every other precondition true, the Stop waits; once the result is written, the
+// same Stop launches the typer.
+const rt = project('redteam', { lines: ['- auto-cycle: warned t1 10000'] })
+write(path.join(stateDir('t1'), 'gauge.json'), JSON.stringify({ session_id: 't1', warned: true, warnedAt: Date.now() - 60000 }))
+const rtOut = path.join(rt.dir, 'red-team.out')
+write(path.join(stateDir('t1'), 'seats', 'dctr-gate-1.json'), JSON.stringify({ ...F.REDTEAM_MARKER, file: rtOut }))
+shim(rt, { session: 't1' })
+const rtLog = path.join(rt.dir, 'typer.log')
+const rtT = rollout(rt, 't1', F.TUI_TURN)
+const stopRt = () => hook('dctr-cycle.mjs', rt, as(F.STOP_MAIN, rt, 't1', rtT, { last_assistant_message: 'Handoff written.\nauto-cycle: ready' }), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: rtLog })
+const rt1 = stopRt()
+const rtHook1 = (() => { try { return fs.readFileSync(path.join(stateDir('t1'), 'hook.log'), 'utf8') } catch { return '' } })()
+write(`${rtOut}.result`, 'exit=0\n')
+const rt2 = stopRt()
+await sleep(500)
+clause('clause 1c7 — a Codex Stop with the claude -p red team\'s marker (captured from a real dispatch) and no result file waits on it and launches no typer; once the result file exists the same Stop launches the typer (E10H-B4, E8-D7 through the table)',
+  rt1.code === 0 && /Stop decided wait: gate dctr-gate-1 is live/.test(rtHook1) && !(rt1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) &&
+  (rt2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && fs.existsSync(rtLog) && recLines(rt, /paused/).length === 0,
+  `rt1 ${rt1.out} ${rt1.err} log ${rtHook1.split('\n').filter((l) => /Stop decided/.test(l)).join(' | ')} rt2 ${rt2.out} ${rt2.err} paused ${JSON.stringify(recLines(rt, /paused/))}`)
 const r12 = project('r12', { lines: ['- auto-cycle: warned z1 10000'] })
 write(path.join(stateDir('z1'), 'gauge.json'), JSON.stringify({ session_id: 'z1', warned: true, warnedAt: Date.now() - 60000 }))
 shim(r12, { session: 'someone-else' })
@@ -417,6 +437,9 @@ clause('clause 3b — without the hooks: the background rollout\'s turn ended wh
   F.BG_RUNNING.map(J).at(-1).payload.type === 'task_complete' && J(F.BG_DONE[0]).timestamp > F.BG_RUNNING.map(J).at(-1).timestamp && !('background_tasks' in F.STOP_BG), 'bg fixture wrong')
 clause('clause 3c — without the hooks: the typer\'s narrow pane text holds the old session id only after the /clear, and the gauge tier 10000 is below the rollout\'s 17503 while 100000 is above it',
   !F.NARROW_BEFORE.includes(OLD) && F.NARROW_AFTER.includes(OLD) && F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+clause('clause 3e — without the hooks: the captured red-team marker is a gate with no pane, marked detached, naming a red-team transcript and the red-team label',
+  F.REDTEAM_MARKER.role === 'gate' && F.REDTEAM_MARKER.paneId === '' && F.REDTEAM_MARKER.detached === true && F.REDTEAM_MARKER.label === 'red-team' &&
+  /red-team\.out$/.test(F.REDTEAM_MARKER.file), 'marker fixture wrong')
 clause('clause 3d — without the hooks: the other session\'s rollout in the isolation case reads 230000, past its tier, so a gauge reading it would have warned',
   fs.readFileSync(path.join(isoG.dir, 'sessions', 'rollout-2026-09-28T19-00-00-other.jsonl'), 'utf8').includes('"input_tokens":230000'), 'isolation fixture wrong')
 

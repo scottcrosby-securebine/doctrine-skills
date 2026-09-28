@@ -248,3 +248,10 @@ export const N11_OUTPUT = [
 "{\"timestamp\":\"2026-09-28T20:32:00.563Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call_rLmg9omhu8dvwuBRDnXUCR6y\",\"output\":[{\"type\":\"input_text\",\"text\":\"Script completed\\nWall time 0.4 seconds\\nOutput:\\n\"},{\"type\":\"input_text\",\"text\":\"{\\\"chunk_id\\\":\\\"ef7a5d\\\",\\\"wall_time_seconds\\\":0.000037905,\\\"exit_code\\\":0,\\\"original_token_count\\\":12055,\\\"output\\\":\\\"id\\\\\\\":\\\\\\\"9abe57\\\\\\\",\\\\\\\"wall_time_seconds\\\\\\\":1.0008,\\\\\\\"session_id\\\\\\\":40576,\\\\\\\"original_token_count\\\\\\\":0,\\\\\\\"output\\\\\\\":\\\\\\\"\\\\\\\"}`. H\\\"}\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"01a0e9b7-38d1-7a90-bae3-9366ae254359\"}}}",
 ]
 
+
+/** the gate marker the Codex reference's claude -p red-team launch left, captured from a real dispatch: a Codex 0.156.1 session
+ *  (codex exec, bypass flags) ran `env -u HERDR_ENV -u HERDR_PANE_ID -u CLAUDE_CODE_SESSION_ID node .../dctr-gate.mjs red-team
+ *  <out> -- sh -c 'sleep 40; echo verdict'` (a sleep standing in for claude -p) and its Stop decided "wait: gate dctr-gate-1
+ *  is live". Source: doctrine-skills-project/.doctrine/records/e10-hookport/build/R1-evidence/live-b4/marker-01a0ea04-e308-7043-ac6a-c4929f2ebc3c.json,
+ *  verbatim (its `file` is that run's scratch path; a clause points it at its own). */
+export const REDTEAM_MARKER = {"agent":"dctr-gate-1","role":"gate","n":1,"tabId":"","paneId":"","file":"/tmp/claude-1000/-home-radadmin-claude-projects-doctrine-skills/63c58dae-27b1-41c6-8951-11e87f30cc74/scratchpad/r1live/b4/rt/red-team.out","label":"red-team","detached":true}
