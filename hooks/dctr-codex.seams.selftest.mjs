@@ -11,7 +11,14 @@
 import * as F from './dctr-codex.fixtures.mjs'
 
 let bad = 0
-const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
+// A throw outside a clause (a mutated function called while deriving a clause's input) is a FAIL line naming the
+// last clause that ran, never an exit with no verdict, which the mutation gate cannot judge (E10H-B8).
+let lastClause = null
+process.on('uncaughtException', (e) => {
+  console.log(`FAIL  the suite threw after ${lastClause ?? 'its first line'}: ${String(e?.message || e).split('\n')[0]}`)
+  process.exit(1)
+})
+const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision,
@@ -117,7 +124,7 @@ clause('clause 1h — the API-error and different-session pauses name Codex on C
   notifyDecision('StopFailure', { error: 'internal_server_error', host: 'codex' }) === 'Codex API error: internal_server_error' &&
   notifyDecision('StopFailure', { error: 'rate_limit' }) === 'Claude API error: rate_limit',
   JSON.stringify([pauseReason('R9', 'x', 'codex'), pauseReason('R12', undefined, 'codex')]))
-const cd = (host) => cycleDecision({ sessionId: 's', warned: true, ready: true, handoffLanded: true, paneSession: 'other', host })
+const cd = (host) => { try { return cycleDecision({ sessionId: 's', warned: true, ready: true, handoffLanded: true, paneSession: 'other', host }) } catch (e) { return { reason: `cycleDecision threw: ${e.message}` } } }
 clause('clause 1h2 — cycleDecision on Codex names Codex in the different-session pause, and as today names Claude',
   cd('codex').reason === 'could not cycle: this pane now runs a different Codex session' && cd(undefined).reason === 'could not cycle: this pane now runs a different Claude session',
   JSON.stringify([cd('codex'), cd(undefined)]))
@@ -194,6 +201,21 @@ clause('clause 1l2 — another command of the turn completing does not end a cel
 clause('clause 1l3 — the tty cell ends at its own command\'s completion (the call whose input names that command), still (B5 tty path)',
   obs(F.CELL_RUNNING).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === false,
   JSON.stringify([obs(F.CELL_RUNNING), obs([F.CELL_RUNNING, F.CELL_DONE])]))
+// Derived: the tty cell 6 (CELL_RUNNING, its own command still running) with no completion yet, then (a) the wait
+// call and "Script completed" output POLLED_CELL has for cell 4, cell id and turn rewritten to cell 6's: the cell's own
+// output is the only thing that ends it; and (b) RACE_EXITED's call and completion, turn rewritten to cell 6's: a
+// command another call names completing in the same turn, which must not end cell 6.
+const c6turn = J(F.CELL_RUNNING.find((l) => /cell ID 6/.test(l))).payload.internal_chat_message_metadata_passthrough.turn_id
+const c4turn = J(pc[c4]).payload.internal_chat_message_metadata_passthrough.turn_id
+const asCell6 = (l) => l.replaceAll('\\"cell_id\\":\\"4\\"', '\\"cell_id\\":\\"6\\"').replaceAll(c4turn, c6turn)
+const ownEnd = [asCell6(pc[cell4End - 1]), asCell6(pc[cell4End]).replace(/\{\\"chunk_id\\"[^}]*\}/, '{}')]
+const raceTurn = J(F.RACE_EXITED[1]).payload.turn_id
+const otherDone = [F.RACE_EXITED[0], F.RACE_EXITED[1]].map((l) => l.replaceAll(raceTurn, c6turn))
+clause('clause 1l7 — a cell ends at its own "Script completed", with no completion of its command (E10H-B2)',
+  obs([F.CELL_RUNNING, ownEnd]).backgroundRunning === false, JSON.stringify(obs([F.CELL_RUNNING, ownEnd])))
+clause('clause 1l8 — a completion of a command another call names, in the cell\'s own turn, does not end the cell (E10H-B2, red team B2)',
+  obs([F.CELL_RUNNING, otherDone]).backgroundRunning === true && obs([F.CELL_RUNNING, otherDone, F.CELL_DONE]).backgroundRunning === false,
+  JSON.stringify([obs([F.CELL_RUNNING, otherDone]), obs([F.CELL_RUNNING, otherDone, F.CELL_DONE])]))
 // Derived (N11): N11_OUTPUT's command output printed raw, as `text(r.output)` prints it, so the "session_id":<digits>
 // text in it is bare rather than inside Codex's JSON part; inserted into TUI_TURN before its task_complete.
 const n11 = J(F.N11_OUTPUT[0]), n11raw = JSON.stringify({ ...n11, payload: { ...n11.payload, output: [n11.payload.output[0], { type: 'input_text', text: JSON.parse(n11.payload.output[1].text).output }] } })
@@ -293,6 +315,12 @@ clause('clause 3k — without the lib: RACE_EXITED\'s completion of process 3581
   J(F.RACE_EXITED[1]).payload.item.process_id === '3581' && JSON.parse(J(F.RACE_EXITED[2]).payload.output[1].text).session_id === 3581 &&
   !('exit_code' in JSON.parse(J(F.RACE_EXITED[2]).payload.output[1].text)) && J(F.RACE_EXITED[1]).timestamp < J(F.RACE_EXITED[2]).timestamp &&
   J(F.RACE_EXITED[1]).payload.turn_id === J(F.RACE_EXITED[2]).payload.internal_chat_message_metadata_passthrough.turn_id, 'race fixture wrong')
+const c6call = J(F.CELL_RUNNING.find((l) => J(l).payload.call_id === J(F.CELL_RUNNING.find((x) => /cell ID 6/.test(x))).payload.call_id && J(l).payload.type === 'custom_tool_call')).payload
+clause('clause 3l — without the lib: the derived own end is a wait on cell 6 answered "Script completed" with no session_id, and the derived other completion names a command that is in its own call\'s input and not in cell 6\'s, in cell 6\'s turn',
+  JSON.parse(J(ownEnd[0]).payload.arguments).cell_id === '6' && J(ownEnd[1]).payload.call_id === J(ownEnd[0]).payload.call_id &&
+  J(ownEnd[1]).payload.output[0].text.startsWith('Script completed') && !ownEnd[1].includes('session_id') &&
+  J(otherDone[0]).payload.input.includes(J(otherDone[1]).payload.item.command[2]) && !c6call.input.includes(J(otherDone[1]).payload.item.command[2]) &&
+  J(otherDone[1]).payload.turn_id === c6turn, 'derived cell fixtures wrong')
 clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
   [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
   F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')

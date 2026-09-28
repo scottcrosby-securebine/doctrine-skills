@@ -1527,17 +1527,17 @@ export function clearTook(before, after, oldId) {
 const COMPOSER_PLACEHOLDERS = ['Ask Codex to do anything', 'Ask a follow-up question']
 
 /** Whether the composer after the last continue line naming `oldId` is empty, the state the E10 table's typer row
- *  names ("followed by an empty composer", probe-clear-screen.txt): exactly one composer line (`›`) follows that
- *  continue line, and it holds nothing or the placeholder. False for a draft, and for a prompt the user already
- *  submitted in the new chat, which leaves its own `›` line and then a fresh composer. Null when no continue line
- *  names `oldId`, so it says nothing (E10H-B1). */
+ *  names ("followed by an empty composer", probe-clear-screen.txt): the first composer line (`›`) after that
+ *  continue line holds nothing or the placeholder. False for a draft, for a prompt the user already submitted in the
+ *  new chat (its own `›` line comes first, the fresh composer after its answer), and when no composer line shows.
+ *  Null when no continue line names `oldId`, so it says nothing (E10H-B1). */
 export function composerEmpty(text, oldId) {
   if (!oldId) return null
   const ls = String(text ?? '').split('\n')
   const at = ls.findLastIndex((l, i) => l.includes(CLEAR_TOOK_TEXT) && ls.slice(i, i + 4).join(' ').includes(oldId))
   if (at < 0) return null
-  const composer = ls.slice(at + 1).map((l) => l.trim()).filter((l) => l.startsWith('›'))
-  return composer.length === 1 && ['', ...COMPOSER_PLACEHOLDERS].includes(composer[0].slice(1).trim())
+  const composer = ls.slice(at + 1).map((l) => l.trim()).find((l) => l.startsWith('›'))
+  return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
 }
 
 /** Whether a Codex process belongs to a Claude Code session: a Codex hook payload whose environment carries

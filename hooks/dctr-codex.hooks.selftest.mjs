@@ -17,7 +17,14 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import * as F from './dctr-codex.fixtures.mjs'
 
 let bad = 0
-const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
+// A throw outside a clause (a mutated function called while deriving a clause's input) is a FAIL line naming the
+// last clause that ran, never an exit with no verdict, which the mutation gate cannot judge (E10H-B8).
+let lastClause = null
+process.on('uncaughtException', (e) => {
+  console.log(`FAIL  the suite threw after ${lastClause ?? 'its first line'}: ${String(e?.message || e).split('\n')[0]}`)
+  process.exit(1)
+})
+const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-hooks-'))
 process.env.TMPDIR = tmp
@@ -219,14 +226,14 @@ const bgLog = path.join(bg.dir, 'typer.log')
 const stopBg = (more = {}) => hook('dctr-cycle.mjs', bg, as(F.STOP_BG, bg, 'b1', bgT, { last_assistant_message: 'Handoff written.\nauto-cycle: ready', ...more }), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: bgLog })
 shim(bg, { session: 'b1' })
 const b1 = stopBg()
-const facts1 = JSON.parse(fs.readFileSync(stopFactsFile('b1'), 'utf8'))
+const facts1 = (() => { try { return JSON.parse(fs.readFileSync(stopFactsFile('b1'), 'utf8')) } catch { return null } })()
 const launches1 = fs.existsSync(bgLog) ? fs.readFileSync(bgLog, 'utf8').trim().split('\n').length : 0
 fs.appendFileSync(bgT, jl(F.BG_DONE))
 const b2 = stopBg()
 await sleep(500)
 const launch = (() => { try { return JSON.parse(fs.readFileSync(bgLog, 'utf8').trim().split('\n').at(-1)) } catch { return null } })()
 clause('clause 1c4 — a Codex Stop with a background terminal the rollout shows running launches no typer and records it live; once its completion is in the rollout the same Stop launches the typer, told the host (E8-D7 through the table)',
-  b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1.backgroundEmpty === false &&
+  b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
   (b2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && launch?.host === 'codex' && launch?.session === 'b1' && recLines(bg, /paused/).length === 0 && !/"decision"/.test(b1.out + b2.out),
   `b1 ${b1.out} ${b1.err} b2 ${b2.out} ${b2.err} launch ${JSON.stringify(launch)} paused ${JSON.stringify(recLines(bg, /paused/))}`)
 const r12 = project('r12', { lines: ['- auto-cycle: warned z1 10000'] })

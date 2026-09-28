@@ -32,7 +32,14 @@ const codexShell = (await import('./dctr-lib.mjs')).codexShell ?? (() => undefin
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 let bad = 0
-const clause = (n, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
+// A throw outside a clause (a mutated function called while deriving a clause's input) is a FAIL line naming the
+// last clause that ran, never an exit with no verdict, which the mutation gate cannot judge (E10H-B8).
+let lastClause = null
+process.on('uncaughtException', (e) => {
+  console.log(`FAIL  the suite threw after ${lastClause ?? 'its first line'}: ${String(e?.message || e).split('\n')[0]}`)
+  process.exit(1)
+})
+const clause = (n, ok, detail = '') => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 // ------------------------------------------------------------------------------------------------ fixtures
 // probe-rollouts/.../rollout-2026-09-28T13-01-37-01a0e81b-4af7-7330-a113-bad47ba77c3e.jsonl, line 1, cut as the header says.
@@ -195,6 +202,12 @@ const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Dat
   clause('clause 1m — its marker names the session\'s own pane, and the pane index names the session, which the /clear sweep finds it by',
     m?.sessionPane === 'w1:p1' && m?.agent_id === AGENT && fs.existsSync(indexOf('w1:p1', SESSION)), `${JSON.stringify(m)} index ${fs.existsSync(indexOf('w1:p1', SESSION))}`)
   fs.rmSync(path.join(tmp, 'dctr-by-pane'), { recursive: true, force: true })
+  // N1: the same SubagentStart from a Codex process under a Claude Code session (codex:codex-rescue's app-server).
+  fs.writeFileSync(calls, '')
+  const under = run({ ...START, session_id: 'u1a0de00-0000-4000-8000-00000000000f' }, { CLAUDE_CODE_SESSION_ID: 'c1a0de00-0000-4000-8000-00000000000f' })
+  clause('clause 1af — a Codex SubagentStart from a process under a Claude Code session places nothing: no herdr call, no marker, no index entry (N1)',
+    under.code === 0 && callText() === '' && !fs.existsSync(path.join(stateOf('u1a0de00-0000-4000-8000-00000000000f'), 'seats')) && !fs.existsSync(path.join(tmp, 'dctr-by-pane')),
+    `${under.out}\ncalls:\n${callText()}`)
   run({ ...CLAUDE_START, session_id: 'claude-s1' })
   clause('clause 2h — a Claude Code seat writes no pane index entry: Claude Code sweeps on SessionEnd',
     !fs.existsSync(path.join(tmp, 'dctr-by-pane')), String(fs.existsSync(path.join(tmp, 'dctr-by-pane')) && fs.readdirSync(path.join(tmp, 'dctr-by-pane'))))
@@ -367,6 +380,16 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   const clEnv = { ...rtEnv, CLAUDE_CODE_SESSION_ID: 'c1a0de00-0000-4000-8000-00000000000d' }
   try { execFileSync('node', [gate, 'probe', out5, '--', 'true'], { encoding: 'utf8', timeout: 30000, env: clEnv }) } catch { /* the clause reports it */ }
   waitFor(() => fs.existsSync(`${out5}.result`))
+  // A SessionEnd over a session whose only marker is a detached gate still running: nothing to close or move, and the
+  // state directory goes with no herdr call (E10H-B4).
+  const DS = 'd5e5510a-0000-4000-8000-00000000000e'
+  fs.mkdirSync(path.join(stateOf(DS), 'seats'), { recursive: true })
+  fs.writeFileSync(markerOf(DS, 'dctr-gate-1'), JSON.stringify({ agent: 'dctr-gate-1', role: 'gate', n: 1, tabId: '', paneId: '', file: path.join(tmp, 'g', 'never.out'), label: 'red-team', detached: true }))
+  fs.writeFileSync(calls, '')
+  const endRun = run({ session_id: DS, transcript_path: path.join(ROLLOUTS, `rollout-2026-09-28T13-05-48-${DS}.jsonl`), cwd: tmp, hook_event_name: 'SessionEnd', reason: 'other' })
+  clause('clause 1ae — SessionEnd over a session holding only a running detached gate removes its state directory, moves nothing and calls herdr zero times (E10H-B4)',
+    endRun.code === 0 && !fs.existsSync(path.join(stateOf(DS), 'seats', 'dctr-gate-1.json')) && !fs.existsSync(path.join(tmp, 'dctr-gates', `${DS}.dctr-gate-1.json`)) && callText() === '',
+    `${endRun.out} seats ${fs.existsSync(path.join(stateOf(DS), 'seats')) && fs.readdirSync(path.join(stateOf(DS), 'seats'))} calls ${callText()}`)
   clause('clause 2j — a detached gate from a Claude Code shell writes no marker, as it always has; codexShell reads a Claude id as Claude\'s (N3)',
     !fs.existsSync(path.join(stateOf('c1a0de00-0000-4000-8000-00000000000d'), 'seats')) &&
     codexShell({ CODEX_SESSION_ID: 'x' }) && !codexShell({ CODEX_SESSION_ID: 'x', CLAUDE_CODE_SESSION_ID: 'c' }) && !codexShell({}), 'a marker was written')

@@ -16,7 +16,14 @@ import { spawnSync } from 'node:child_process'
 import { trustedHash, codexInstallPlan, CODEX_HOOKS } from './dctr-lib.mjs'
 
 let bad = 0
-const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
+// A throw outside a clause (a mutated function called while deriving a clause's input) is a FAIL line naming the
+// last clause that ran, never an exit with no verdict, which the mutation gate cannot judge (E10H-B8).
+let lastClause = null
+process.on('uncaughtException', (e) => {
+  console.log(`FAIL  the suite threw after ${lastClause ?? 'its first line'}: ${String(e?.message || e).split('\n')[0]}`)
+  process.exit(1)
+})
+const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 const cli = path.join(import.meta.dirname, 'dctr-codex.mjs')
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-')))
