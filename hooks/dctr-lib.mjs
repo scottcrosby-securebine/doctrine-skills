@@ -1213,14 +1213,17 @@ const ownResume = (text) => {
  * that does not parse yet is a write in progress, `partial`, neither typing nor nothing. Blank lines are skipped.
  */
 export function transcriptEntries(text, host = 'claude') {
+  const read = readEntries(text)
+  return host === 'codex' && read ? { entries: read.entries.flatMap(codexEntry), partial: read.partial } : read
+}
+function readEntries(text) {
   const lines = String(text).split('\n'), last = lines.pop(), entries = []
-  const done = (partial) => ({ entries: host === 'codex' ? entries.flatMap(codexEntry) : entries, partial })
   for (const l of lines) {
     if (!l.trim()) continue
     try { entries.push(JSON.parse(l)) } catch { return null }
   }
-  if (!last.trim()) return done(false)
-  try { entries.push(JSON.parse(last)); return done(false) } catch { return done(true) }
+  if (!last.trim()) return { entries, partial: false }
+  try { entries.push(JSON.parse(last)); return { entries, partial: false } } catch { return { entries, partial: true } }
 }
 
 /** The typer's timings in ms (E8-D15): poll, how long a pane may read not idle once unfocused, how long to wait
@@ -1264,15 +1267,35 @@ export function typerStep(o) {
  *  string, and an empty one is no answer (RT2-B1). */
 const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' && pane.session !== '' ? pane.session : null)
 
-function typerAct(o) {
-  const t = o.times || TYPER_TIMES
-  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+/** The checks every typer observation passes first, on both hosts: auto-cycle still active, no stop file, no pause
+ *  since the claim, no transcript line mid-write. A step, or null to go on. */
+function typerGuard(o, t, pause) {
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
   if (o.stopRepo) return pause('R1', o.stopRepo)
   if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
   if (o.midWrite !== null && o.midWrite !== undefined) {
     return o.midWrite < t.idle ? { act: 'wait', reason: 'the transcript ends in a line still being written' } : pause('R17', R17_WHY.transcript)
   }
+  return null
+}
+
+/** The pane checks before any send, on both hosts: herdr names a session, the pane is unfocused and ready for input.
+ *  A step, or null when the typer may type. */
+function typerReady(o, t, pause) {
+  // A reply with no Claude session is a failed lookup, never a changed session (ST2).
+  if (paneSession(o.pane) === null) return pause('R17', R17_WHY.lookup)
+  if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
+  if (!READY_STATUSES.includes(o.pane.status)) {
+    return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
+  }
+  return null
+}
+
+function typerAct(o) {
+  const t = o.times || TYPER_TIMES
+  const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg) })
+  const guard = typerGuard(o, t, pause)
+  if (guard) return guard
   if (o.stage === 'confirm') {
     if (o.typedNew) return pause('R16')
     if (o.firstTurn) return { act: 'confirm', reason: 'the new session took its first turn' }
@@ -1288,12 +1311,8 @@ function typerAct(o) {
     // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
     return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   }
-  // A reply with no Claude session is a failed lookup, never a changed session (ST2).
-  if (paneSession(o.pane) === null) return pause('R17', R17_WHY.lookup)
-  if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
-  if (!READY_STATUSES.includes(o.pane.status)) {
-    return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
-  }
+  const ready = typerReady(o, t, pause)
+  if (ready) return ready
   if (o.stage === 'clear') {
     // A transcript that could not be read, or is now shorter than at the Stop, says nothing about new entries (RB2).
     if (o.grew === null) return pause('R17', R17_WHY.transcript)
@@ -1344,12 +1363,14 @@ const hostName = (host) => (host === 'codex' ? 'Codex' : 'Claude')
 const CODEX_META = /^<[a-z_]+[\s>]/
 
 /** One rollout line as the entries the typer's readers take (seam S1): each user or assistant message item mapped to
- *  `{ type, timestamp, message: { content: [{ type: 'text', text }] }, isMeta }`; every other item maps to nothing. */
+ *  `{ type, timestamp, message: { content: [{ type: 'text', text }] }, isMeta }`; every other item maps to nothing.
+ *  isMeta marks a user message nobody typed: the harness's tagged blocks, and the typer's own resume line, so
+ *  userTyped reads a Codex entry as it reads a Claude Code one. */
 function codexEntry(e) {
   const p = e?.payload
   if (e?.type !== 'response_item' || p?.type !== 'message' || (p.role !== 'user' && p.role !== 'assistant')) return []
   const text = (Array.isArray(p.content) ? p.content : []).map((c) => (typeof c?.text === 'string' ? c.text : '')).join('')
-  return [{ type: p.role, timestamp: e.timestamp, message: { content: [{ type: 'text', text }] }, isMeta: p.role === 'user' && CODEX_META.test(text.trimStart()) }]
+  return [{ type: p.role, timestamp: e.timestamp, message: { content: [{ type: 'text', text }] }, isMeta: p.role === 'user' && (CODEX_META.test(text.trimStart()) || text.trim() === CODEX_RESUME_LINE) }]
 }
 
 /**
@@ -1381,10 +1402,6 @@ function readCodexUsage(text, lastUuid) {
  *  Codex itself injects as a skill (probe B1), with the not-a-ruling argument. Sent as one line, the TUI's skill popup
  *  never opens and one Enter submits it (seat III live run, III-evidence/popup-resume-line-rollout.jsonl). */
 export const CODEX_RESUME_LINE = `$doctrine:doctrine-resume ${RESUME_ARGS}`
-
-/** userTyped for a Codex entry (codexEntry's shape): a user message the harness did not write, other than the
- *  typer's own resume line. */
-export const codexUserTyped = (e) => e?.type === 'user' && !e.isMeta && e.message?.content?.[0]?.text?.trim() !== CODEX_RESUME_LINE
 
 /** The line Codex prints when /clear ends a session: `To continue this session, run codex resume, then select <title>
  *  (<session id>)` (probe-clear-screen.txt). */
@@ -1507,15 +1524,6 @@ export function watchStep(o) {
   return { act: 'wait', reason: o.obs.idle ? 'idle, inside the grace' : 'nothing to report' }
 }
 
-/** Waits for herdr to report the pane ready to type into, as typerAct does before a send: a failed lookup is R17, a
- *  focused pane waits, a busy one waits inside the grace, then R17. Null when it may type. */
-function readyToType(o, t, pause) {
-  if (!o.pane || o.pane.error) return pause('R17', R17_WHY.lookup)
-  if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
-  if (!READY_STATUSES.includes(o.pane.status)) return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
-  return null
-}
-
 /**
  * typerAct on Codex (E10 table rows for the typer). Before the /clear it is typerAct itself. Then Codex writes nothing
  * on disk until the next prompt, so the typer reads the pane (Q6): `o.took` is clearTook's answer, null when the pane
@@ -1528,16 +1536,12 @@ function codexTyperAct(o) {
   if (o.stage === 'clear') return typerAct(o)
   const t = o.times || TYPER_TIMES
   const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg, 'codex') })
-  if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
-  if (o.stopRepo) return pause('R1', o.stopRepo)
-  if (o.pausedSinceClaim) return { act: 'abort', reason: 'a paused line was written since the claim' }
-  if (o.midWrite !== null && o.midWrite !== undefined) {
-    return o.midWrite < t.idle ? { act: 'wait', reason: 'the transcript ends in a line still being written' } : pause('R17', R17_WHY.transcript)
-  }
+  const guard = typerGuard(o, t, pause)
+  if (guard) return guard
   if (o.stage === 'resume') {
     if (o.took === null || o.took === undefined) return pause('R17', R17_WHY.lookup)
     if (!o.took) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the /clear to take' } : pause('R18', o.oldSession)
-    return readyToType(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line' }
+    return typerReady(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line' }
   }
   if (!o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
   const s = paneSession(o.pane)
@@ -1550,5 +1554,5 @@ function codexTyperAct(o) {
   if (o.waited < t.firstTurn) return { act: 'wait', reason: 'waiting for the first turn' }
   if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
   if (o.resumes >= 2) return pause('R15')
-  return readyToType(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
+  return typerReady(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
 }

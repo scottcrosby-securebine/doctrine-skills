@@ -14,7 +14,7 @@ let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
-  pauseReason, pauseCode, samePause, codexUserTyped, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision,
+  pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision,
 } = await import('./dctr-lib.mjs')
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
@@ -118,11 +118,13 @@ clause('clause 1h2 — cycleDecision on Codex names Codex in the different-sessi
   cd('codex').reason === 'could not cycle: this pane now runs a different Codex session' && cd(undefined).reason === 'could not cycle: this pane now runs a different Claude session',
   JSON.stringify([cd('codex'), cd(undefined)]))
 
-const resumeUser = { type: 'user', isMeta: false, message: { content: [{ type: 'text', text: CODEX_RESUME_LINE }] } }
-clause('clause 1i — the Codex resume line is the skill\'s $-mention with the not-a-ruling argument, and codexUserTyped does not count it, the harness\'s meta messages, or an assistant message; a typed prompt counts',
-  CODEX_RESUME_LINE === '$doctrine:doctrine-resume (typed by doctrine auto-cycle, not a ruling)' && !codexUserTyped(resumeUser) &&
-  !codexUserTyped(users[0]) && codexUserTyped(users[1]) && !codexUserTyped(assts[0]) && RESUME_LINE.startsWith('/doctrine:'),
-  JSON.stringify([codexUserTyped(resumeUser), codexUserTyped(users[0]), codexUserTyped(users[1])]))
+// Derived: TUI_TURN's prompt line with its text replaced by the resume line, as the typer's send records it.
+const resumeLine = F.TUI_TURN[2].replace("Run the shell command 'echo tui-one', then reply with the word alpha.", CODEX_RESUME_LINE)
+const resumeUser = transcriptEntries(text(resumeLine), 'codex').entries[0]
+clause('clause 1i — the Codex resume line is the skill\'s $-mention with the not-a-ruling argument; read off a rollout it is meta, so userTyped does not count it, nor the harness\'s meta messages or an assistant message, while a typed prompt counts',
+  CODEX_RESUME_LINE === '$doctrine:doctrine-resume (typed by doctrine auto-cycle, not a ruling)' && resumeUser?.isMeta === true && !userTyped(resumeUser) &&
+  !userTyped(users[0]) && userTyped(users[1]) && !userTyped(assts[0]) && RESUME_LINE.startsWith('/doctrine:'),
+  JSON.stringify([resumeUser, userTyped(users[0]), userTyped(users[1])]))
 
 const T = { poll: 20, idle: 150, restore: 400, session: 400, firstTurn: 300 }
 const idle = { status: 'done', focused: false, session: 'old' }

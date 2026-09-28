@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY,
-  CODEX_RESUME_LINE, codexUserTyped, clearTook,
+  CODEX_RESUME_LINE, clearTook,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -128,7 +128,7 @@ try {
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
       midWrite: partialSince === null ? null : now - partialSince,
       grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
-      typedNew: fresh === null ? null : fresh.entries.some(codex ? codexUserTyped : userTyped),
+      typedNew: fresh === null ? null : fresh.entries.some(userTyped),
       host: a.host, took: codex && stage === 'resume' ? (() => { const after = paneText(); return after === null ? null : clearTook(before, after, a.session) })() : undefined,
       firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
@@ -145,11 +145,11 @@ try {
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
-      fs.rmSync(restoreFile(a.pane), { force: true })
       if (codex) {
         before = paneText()
         if (before === null) pausing(pauseReason('R17', R17_WHY.lookup, 'codex'))
       }
+      fs.rmSync(restoreFile(a.pane), { force: true })
       send('/clear')
       log(`sent /clear, cycle ${a.n}`)
       stage = 'resume'; stageStart = now

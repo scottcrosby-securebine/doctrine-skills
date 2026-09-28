@@ -32,11 +32,7 @@ import {
   appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
-// PermissionRequest is Codex's: it stands for Claude Code's Notification permission_prompt (E10 table). Codex fires no
-// Notification or StopFailure; the watcher (dctr-watch.mjs) hands this hook those events, read off the rollout.
-const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit', 'PermissionRequest']
-/** A notice-only event: it ends no turn. */
-const NOTICES = ['Notification', 'PermissionRequest']
+const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
 
 /** The hook, over one event's payload: `input` is its text or a function that reads it, called inside the guarded
  *  path so a read that fails stands down with exit 0 (RB8-2). Every path ends in process.exit. Run as a script it
@@ -53,13 +49,26 @@ try {
   let payload
   try { payload = JSON.parse((typeof input === 'function' ? input() : input) || '{}') } catch { stand_down('hook payload was not readable') }
   event = payload.hook_event_name || 'none'
-  // The reason's words are the Claude Code events', unchanged since E8 (the cycle suite's clause 2s reads them).
+  const host = hostOf(payload)
+  // Codex's events read as the Claude Code events they stand for (E10 table), so every decision below is the one
+  // E8 certified: a PermissionRequest is a Notification permission_prompt, and a Stop's background_tasks is the
+  // background terminals the rollout shows running (S5; a rollout that cannot be read counts as one running, the
+  // direction that waits). Codex fires no Notification idle_prompt or StopFailure; the watcher (dctr-watch.mjs) reads
+  // them off the rollout and hands this hook the event.
+  if (host === 'codex' && event === 'PermissionRequest') {
+    event = 'Notification'
+    payload = { ...payload, hook_event_name: event, notification_type: 'permission_prompt' }
+  }
+  if (host === 'codex' && event === 'Stop') {
+    let running = true
+    try { running = codexObservations(fs.readFileSync(payload.transcript_path, 'utf8'), null).backgroundRunning } catch { /* unreadable: running */ }
+    payload = { ...payload, background_tasks: running ? [{ status: 'running', source: 'codex rollout' }] : [] }
+  }
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
   sessionId = payload.session_id || null
   if (!sessionId) stand_down('no session_id in the payload')
 
-  const host = hostOf(payload)
   // Codex sets no project variable: one in its environment was inherited from whatever launched it (E10).
   const projectDir = (host === 'codex' ? null : process.env.CLAUDE_PROJECT_DIR) || payload.cwd
   if (!projectDir) stand_down('no CLAUDE_PROJECT_DIR and no cwd in the payload')
@@ -85,32 +94,24 @@ try {
   // E8-R31: a Stop, a StopFailure and a submitted prompt each end a turn; record where, before this event writes any
   // line, so an R7, R8 or R9 the ended turn answered no longer holds back the dedup. A submitted prompt does nothing
   // else: it writes no paused line, raises no alert and prints nothing, since its output would reach the model.
-  if (!NOTICES.includes(event)) writeTurnEnd(sessionId, recordPath)
-  if (event === 'UserPromptSubmit') {
-    // Codex: the watcher follows this turn for the events Codex never fires (an API error, idle, a background
-    // terminal's exit). Spawned detached; it reads herdr only when a pane may be reached.
-    if (host === 'codex' && active) {
-      let from = 0
-      try { from = fs.statSync(payload.transcript_path).size } catch { /* not written yet: the watcher reads from the start */ }
-      const args = { session: sessionId, transcript: payload.transcript_path, cwd: payload.cwd, project: projectDir, pane: paneId, from }
-      const script = process.env.DCTR_WATCH_SCRIPT || path.join(import.meta.dirname, 'dctr-watch.mjs')
-      spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
-      log('turn end recorded; the Codex watcher follows the turn')
-    } else log('turn end recorded')
-    process.exit(0)
+  if (event !== 'Notification') writeTurnEnd(sessionId, recordPath)
+  // Codex: the watcher follows this turn for the events Codex never fires (an API error, idle, a background terminal's
+  // exit). Spawned detached; it reads herdr only when a pane may be reached.
+  if (event === 'UserPromptSubmit' && host === 'codex' && active) {
+    let from = 0
+    try { from = fs.statSync(payload.transcript_path).size } catch { /* not written yet: the watcher reads from the start */ }
+    const args = { session: sessionId, transcript: payload.transcript_path, cwd: payload.cwd, project: projectDir, pane: paneId, from }
+    const script = process.env.DCTR_WATCH_SCRIPT || path.join(import.meta.dirname, 'dctr-watch.mjs')
+    spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
+    log('the Codex watcher follows the turn')
   }
+  if (event === 'UserPromptSubmit') { log('turn end recorded'); process.exit(0) }
 
   if (event === 'Stop') {
-    // Codex's Stop carries no background_tasks: a background terminal is read off the rollout (S5); one that cannot be
-    // read counts as live, the direction that waits rather than clears (E8-D7: an unknown status is unfinished).
-    let background = backgroundLive(payload.background_tasks)
-    if (host === 'codex') {
-      try { background = codexObservations(fs.readFileSync(payload.transcript_path, 'utf8'), null).backgroundRunning } catch { background = true }
-    }
     // S4: what an idle_prompt later needs to know about this Stop, persisted by Stop alone, so a StopFailure or a
     // submitted prompt never replaces them with unknowns: the payload's two live-work lists (RB6-3) and its ready line.
     writeMarker(stopFactsFile(sessionId), {
-      backgroundEmpty: !background, cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
+      backgroundEmpty: !backgroundLive(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
     })
 
     const keyLine = claimKey(record.entries)
@@ -123,7 +124,7 @@ try {
       ...pausingStates(record.entries),
       warned,
       pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
-      backgroundTasks: background,
+      backgroundTasks: backgroundLive(payload.background_tasks),
       liveWork: liveWork(sessionId),
       sessionCrons: nonEmpty(payload.session_crons),
       ready: endsReady(payload.last_assistant_message),
@@ -158,14 +159,15 @@ try {
       try { length = fs.statSync(payload.transcript_path).size } catch { /* unreadable: the typer could not tell new entries */ }
       if (length === null) pause(pauseReason('R17', R17_WHY.transcript))
       else {
-        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt, keyLine, host }
+        const args = { pane: paneId, session: sessionId, transcript: payload.transcript_path, length, record: recordPath, hash, project: projectDir, n: decision.n, phase: header.phase, stopAt, keyLine }
+        if (host === 'codex') args.host = host
         const script = process.env.DCTR_TYPER_SCRIPT || path.join(import.meta.dirname, 'dctr-typer.mjs')
         spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
         messages.push(LAUNCH_MESSAGE)
       }
     }
   } else if (active) {
-    const kind = event === 'StopFailure' ? 'StopFailure' : event === 'PermissionRequest' ? 'permission_prompt' : payload.notification_type
+    const kind = event === 'StopFailure' ? 'StopFailure' : payload.notification_type
     let lastStop = null
     try { lastStop = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')) } catch { /* no Stop yet in this session */ }
     const reason = notifyDecision(kind, {
