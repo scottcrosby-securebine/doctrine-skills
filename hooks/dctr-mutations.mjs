@@ -41,7 +41,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // dctr-record.mjs is read by dctr-project.mjs too (STATE_LINE), so without it every project suite dies on load.
   'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs',
   'dctr-gauge.mjs', 'dctr-gauge.selftest.mjs', 'dctr-bridge.mjs', 'dctr-bridge.selftest.mjs',
-  'dctr-cycle.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.mjs', 'dctr-typer.selftest.mjs']
+  'dctr-cycle.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.mjs', 'dctr-typer.selftest.mjs',
+  // The renderer is read by the Codex suite, which runs it on a rollout.
+  'dctr-render.mjs', 'dctr-seat.codex.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -59,8 +61,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  Re-measured after the cycle suite gained its pause-model enumeration, one host: gate 7.1s, typer 10.3s, pane 12.3s,
  *  cycle 13.0s, teardown 21.0s; gate moved ahead of typer, and pane ahead of cycle.
  *  Re-measured after the cycle suite gained its hook-event enumeration, one host: gate 7.0s, pane 12.4s, typer 13.5s,
- *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
+ *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle.
+ *  The Codex suite placed 2026-09-28, measured on one host: seat 1.36s, seat.codex 2.29s, gauge 2.65s, gate 7.25s. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -2067,6 +2070,63 @@ const MUTATIONS = [
     clause: "clause 1t2",
     from: "    'The seats already out are waited for.',\n",
     to: "" },
+  // Codex host (E10, seat II): each reverts one Codex behaviour, and dctr-seat.codex.selftest.mjs must notice.
+  { name: '(Codex) every payload reads as Claude Code', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — a Codex SubagentStart reads as Codex',
+    from: "export const hostOf = (input) => (path.basename(String(input?.transcript_path ?? '')).startsWith('rollout-') ? 'codex' : 'claude')",
+    to: "export const hostOf = () => 'claude'" },
+  { name: '(Codex) the seat transcript is derived as Claude Code derives it', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — the seat transcript is the rollout it names',
+    from: "(hostOf(p) === 'codex' ? p?.transcript_path || null : transcriptPath(p?.transcript_path, p?.agent_id))",
+    to: 'transcriptPath(p?.transcript_path, p?.agent_id)' },
+  { name: '(Codex) the seat name keeps the whole agent_path', file: 'dctr-lib.mjs',
+    clause: "clause 1c — the seat's name is the spawn task_name",
+    from: "return (typeof p === 'string' && p.split('/').filter(Boolean).at(-1)) || null",
+    to: "return (typeof p === 'string' && p) || null" },
+  { name: '(Codex) a Codex seat is not named from its rollout', file: 'dctr-seat.mjs',
+    clause: 'clause 1l — the pane is named paneLabel(agent_type, task_name)',
+    from: "hostOf(payload) === 'codex' ? readCodexSeat(file)",
+    to: "hostOf(payload) === 'codex' ? null" },
+  { name: '(Codex) the renderer reads a rollout as a Claude Code transcript', file: 'dctr-render.mjs',
+    clause: 'clause 1o — the renderer, pointed at a Codex rollout, prints the tool call',
+    from: "const render = hostOf({ transcript_path: file }) === 'codex' ? renderRollout : renderRecord",
+    to: 'const render = renderRecord' },
+  { name: "(Codex) a tool result shows the exec JSON instead of the command's output", file: 'dctr-lib.mjs',
+    clause: "clause 1e — the renderer shows the command's own output",
+    from: "    try { const j = JSON.parse(t); if (typeof j?.output === 'string') return j.output } catch { /* plain text */ }\n",
+    to: '' },
+  { name: '(Codex) a seat marker does not record its session pane', file: 'dctr-seat.mjs',
+    clause: "clause 1m — its marker names the session's own pane",
+    from: 'file, label, sessionPane: process.env.HERDR_PANE_ID }',
+    to: 'file, label }' },
+  { name: '(Codex) a gate marker does not record its session pane', file: 'dctr-gate.mjs',
+    clause: 'clause 1w — a gate launched from a Codex shell is placed under that session',
+    from: "        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: process.env.HERDR_PANE_ID })\n        herdr(['pane', 'run'",
+    to: "        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label })\n        herdr(['pane', 'run'" },
+  { name: '(Codex) the gate reads only Claude Code\'s session id', file: 'dctr-gate.mjs',
+    clause: 'clause 1w — a gate launched from a Codex shell is placed in a pane',
+    from: '  const sessionId = shellSessionId(process.env)',
+    to: '  const sessionId = process.env.CLAUDE_CODE_SESSION_ID' },
+  { name: '(Codex) shellSessionId ignores CODEX_SESSION_ID', file: 'dctr-lib.mjs',
+    clause: "clause 1k — Codex's CODEX_SESSION_ID without Claude Code's",
+    from: 'env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID || null',
+    to: 'env.CLAUDE_CODE_SESSION_ID || null' },
+  { name: '(Codex) the /clear sweep runs on Claude Code too', file: 'dctr-lib.mjs',
+    clause: 'clause 2e — a Claude Code SessionStart after /clear sweeps nothing',
+    from: "restoreSkip(p) ?? (hostOf(p) === 'codex' ? null : 'not a Codex session; Claude Code sweeps on SessionEnd')",
+    to: 'restoreSkip(p)' },
+  { name: "(Codex) the /clear sweep takes sessions of any pane", file: 'dctr-lib.mjs',
+    clause: "clause 2f — a /clear in another pane sweeps nothing of this pane's sessions",
+    from: '(s.seats || []).some((m) => m?.sessionPane === paneId)',
+    to: '(s.seats || []).length' },
+  { name: '(Codex) the /clear sweep takes the new session too', file: 'dctr-lib.mjs',
+    clause: 'clause 1i — no session of another pane or the new one',
+    from: 's && s.id !== newSessionId && ',
+    to: 's && ' },
+  { name: '(Codex) a busy /clear sweep is dropped instead of handed to a detached child', file: 'dctr-seat.mjs',
+    clause: 'clause 1v — once the lock is free, the detached sweep closes the seat and moves the gate',
+    from: "      if (left > 0 && sweepSession(old, left, log) !== 'busy') continue",
+    to: '      if (left > 0) sweepSession(old, left, log)\n      continue' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
