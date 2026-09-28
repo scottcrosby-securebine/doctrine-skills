@@ -24,11 +24,9 @@ import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   hostOf, seatTranscriptPath, codexTaskName, renderRollout, renderRecord, clearSweepSkip, clearSweepTargets, shellSessionId,
-  paneLabel, transcriptPath, restoreSkip, gateWaits, sweepAction,
+  paneLabel, transcriptPath, restoreSkip, gateWaits, sweepAction, codexShell,
 } from './dctr-lib.mjs'
 import { sleepMs, liveWork, sideOccupants } from './dctr-state.mjs'
-// Seams the gate round 1 repair added, read off the module so the suite still loads, and reports FAIL, where they are absent.
-const codexShell = (await import('./dctr-lib.mjs')).codexShell ?? (() => undefined)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 let bad = 0

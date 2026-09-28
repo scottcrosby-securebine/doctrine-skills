@@ -22,10 +22,8 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision,
+  composerEmpty, codexUnderClaude,
 } = await import('./dctr-lib.mjs')
-// Seams the gate round 1 repair added, read off the module so the suite still loads, and reports FAIL, where they are absent.
-const lib = await import('./dctr-lib.mjs')
-const composerEmpty = lib.composerEmpty ?? (() => undefined), codexUnderClaude = lib.codexUnderClaude ?? (() => undefined)
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
 const J = (l) => JSON.parse(l)
