@@ -1635,20 +1635,17 @@ export function codexObservations(rolloutText, herdrStatus) {
 }
 
 /** The watcher's turn, from the rollout text written since it started (at its UserPromptSubmit): `ended` once a
- *  task_complete or turn_aborted is there, `newTurn` once a task_started follows that end, and `endAt`, the offset in
- *  `text` just past the line that ended it (null while it runs), so the background state can be read as it stood when
- *  the turn ended rather than at whichever poll first saw the end (E10H-B3). */
+ *  task_complete or turn_aborted is there, and `newTurn` once a task_started follows that end. */
 export function watchedTurn(text) {
-  let ended = false, newTurn = false, endAt = null, at = 0
+  let ended = false, newTurn = false
   for (const l of String(text ?? '').split('\n')) {
-    at += l.length + 1
     let e
     try { e = JSON.parse(l) } catch { continue }
     if (e?.type !== 'event_msg') continue
-    if (!ended && (e.payload?.type === 'task_complete' || e.payload?.type === 'turn_aborted')) { ended = true; endAt = at }
+    if (!ended && (e.payload?.type === 'task_complete' || e.payload?.type === 'turn_aborted')) ended = true
     else if (ended && e.payload?.type === 'task_started') newTurn = true
   }
-  return { ended, newTurn, endAt }
+  return { ended, newTurn }
 }
 
 /** The watcher's timings in ms: poll, how long a turn end stays idle before the idle pause (Claude Code raises
@@ -1659,21 +1656,25 @@ export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
  * The Codex watcher's next action (E10 table rows for idle_prompt, StopFailure and background_tasks): Codex fires no
  * hook for a turn ended by an API error, for a session left idle, or for a background terminal's exit (probes B5, B6),
  * so a detached watcher started at each UserPromptSubmit reads the rollout and herdr and hands the auto-cycle hook the
- * event Claude Code would have fired. `o.turn` is watchedTurn's, `o.obs` codexObservations', `o.bgAtEnd` whether a
- * background terminal ran when the turn ended, `o.ready` whether the turn's last message ends with the ready line,
- * `o.idleFor` ms the observation has read idle, `o.age` ms watched. A turn ended on the ready line with no terminal
- * running leaves nothing to watch: its Stop decided, and an idle pause never follows the ready line (E8-D18).
- * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the terminal that held back the Stop has
- * exited, so the Stop is decided again) and `idle` (an idle_prompt).
+ * event Claude Code would have fired. `o.turn` is watchedTurn's, `o.obs` codexObservations', `o.held` whether this
+ * turn's Stop decided to wait for live work, as that Stop itself persisted it (the Stop runs before Codex writes the
+ * task_complete, so what the rollout shows at the turn's end is not what the Stop read: E10H-R2-B2), `o.liveWork`
+ * liveWork's reason or null, `o.session` the watched session and `o.paneSession` the session herdr names in the pane
+ * (null when unread), `o.ready` whether the turn's last message ends with the ready line, `o.idleFor` ms the
+ * observation has read idle, `o.age` ms watched. A turn ended on the ready line with no terminal running and no Stop
+ * held leaves nothing to watch: its Stop decided, and an idle pause never follows the ready line (E8-D18).
+ * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the work that held the Stop back is gone:
+ * the background terminals finished and no seat or gate is live, so the Stop is decided again) and `idle`.
  */
 export function watchStep(o) {
   const t = o.times || WATCH_TIMES
   if (!o.active) return { act: 'exit', reason: 'auto-cycle is not active' }
   if (o.turn.newTurn) return { act: 'exit', reason: 'a new turn started, and its own watcher follows it' }
+  if (o.paneSession && o.paneSession !== o.session) return { act: 'exit', reason: 'herdr names another session in the pane' }
   if (o.age >= t.max) return { act: 'exit', reason: 'the turn was watched for the longest time allowed' }
   if (!o.turn.ended) return { act: 'wait', reason: 'the turn is running' }
   if (o.obs.apiError) return { act: 'stopFailure', reason: `the turn ended with an API error (${o.obs.apiError})` }
-  if (o.bgAtEnd && !o.obs.backgroundRunning) return { act: 'stop', reason: 'the background terminal the turn left running has exited' }
+  if (o.held) return o.obs.backgroundRunning || o.liveWork ? { act: 'wait', reason: 'the Stop is held for live work' } : { act: 'stop', reason: 'the work that held the Stop back is gone' }
   if (o.ready && !o.obs.backgroundRunning) return { act: 'exit', reason: 'the turn ended on the ready line, so the Stop hook and the typer take it from here' }
   if (o.obs.idle && o.idleFor >= t.idle) return { act: 'idle', reason: 'the session has been idle, waiting for the user' }
   return { act: 'wait', reason: o.obs.idle ? 'idle, inside the grace' : 'nothing to report' }

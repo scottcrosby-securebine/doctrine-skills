@@ -29,7 +29,7 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-hooks-'))
 process.env.TMPDIR = tmp
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE } = await import('./dctr-lib.mjs')
-const { stateDir, restoreFile, stopFactsFile } = await import('./dctr-state.mjs')
+const { stateDir, restoreFile, stopFactsFile, stopHeldFile } = await import('./dctr-state.mjs')
 
 const here = import.meta.dirname
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text) }
@@ -225,17 +225,23 @@ const bgT = rollout(bg, 'b1', F.BG_RUNNING)
 const bgLog = path.join(bg.dir, 'typer.log')
 const stopBg = (more = {}) => hook('dctr-cycle.mjs', bg, as(F.STOP_BG, bg, 'b1', bgT, { last_assistant_message: 'Handoff written.\nauto-cycle: ready', ...more }), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: bgLog })
 shim(bg, { session: 'b1' })
+// Read inside the try, file name and all: under a mutation the name itself may throw, and a clause must still judge.
+const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file(), 'utf8')) } catch { return null } }
 const b1 = stopBg()
-const facts1 = (() => { try { return JSON.parse(fs.readFileSync(stopFactsFile('b1'), 'utf8')) } catch { return null } })()
+const facts1 = readJson(() => stopFactsFile('b1')), held1 = readJson(() => stopHeldFile('b1'))
 const launches1 = fs.existsSync(bgLog) ? fs.readFileSync(bgLog, 'utf8').trim().split('\n').length : 0
 fs.appendFileSync(bgT, jl(F.BG_DONE))
 const b2 = stopBg()
+const held2 = readJson(() => stopHeldFile('b1'))
 await sleep(500)
 const launch = (() => { try { return JSON.parse(fs.readFileSync(bgLog, 'utf8').trim().split('\n').at(-1)) } catch { return null } })()
 clause('clause 1c4 — a Codex Stop with a background terminal the rollout shows running launches no typer and records it live; once its completion is in the rollout the same Stop launches the typer, told the host (E8-D7 through the table)',
   b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
   (b2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && launch?.host === 'codex' && launch?.session === 'b1' && recLines(bg, /paused/).length === 0 && !/"decision"/.test(b1.out + b2.out),
   `b1 ${b1.out} ${b1.err} b2 ${b2.out} ${b2.err} launch ${JSON.stringify(launch)} paused ${JSON.stringify(recLines(bg, /paused/))}`)
+clause('clause 1c8 — a Codex Stop persists its own decision for its turn: held for the running terminal, then not held once the Stop launched (E10H-R2-B2)',
+  held1?.turn === F.STOP_BG.turn_id && held1.held === true && Number.isFinite(held1.at) && held2?.turn === F.STOP_BG.turn_id && held2.held === false,
+  `${JSON.stringify(held1)} ${JSON.stringify(held2)}`)
 // E10H-B4: the claude -p red team's marker, captured from a real dispatch (REDTEAM_MARKER), in the session's seats with
 // its result file not yet written: every other precondition true, the Stop waits; once the result is written, the
 // same Stop launches the typer.
@@ -280,9 +286,9 @@ clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active start
 // ---------------------------------------------------------------- clause 1d: the watcher end to end
 
 const WT = JSON.stringify({ poll: 20, idle: 150, max: 5000 })
-function watcher(f, id, transcript, from, env = {}) {
+function watcher(f, id, transcript, from, env = {}, turn = null) {
   return new Promise((resolve) => {
-    const c = spawn('node', [path.join(here, 'dctr-watch.mjs'), JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from })],
+    const c = spawn('node', [path.join(here, 'dctr-watch.mjs'), JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn })],
       { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: 'ignore' })
     c.on('exit', (code) => resolve(code))
   })
@@ -301,10 +307,20 @@ hook('dctr-cycle.mjs', wi, as(F.STOP_MAIN, wi, 'y1', wiT, { last_assistant_messa
 await watcher(wi, 'y1', wiT, Buffer.byteLength(jl(F.TUI_TURN.slice(0, 2))))
 clause('clause 1d2 — the watcher, on a turn ended with a prose answer and no ready line while herdr reads done, hands the hook an idle_prompt past the grace: the idle paused line (E8-D18 through the table)',
   JSON.stringify(recLines(wi, /^- auto-cycle paused: /)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify(recLines(wi, /paused/)))
-const wb = project('watch-bg')
+// A session whose Stop reaches the live-work step (warned, its latch, herdr naming it): the real Stop runs first, as
+// Codex runs it before writing the turn's task_complete, and persists that it held.
+function heldProject(name, id) {
+  const f = project(name, { lines: [`- auto-cycle: warned ${id} 10000`] })
+  write(path.join(stateDir(id), 'gauge.json'), JSON.stringify({ session_id: id, warned: true, warnedAt: Date.now() - 60000 }))
+  shim(f, { session: id })
+  return f
+}
+const stopNow = (f, id, t, more = {}) => hook('dctr-cycle.mjs', f, as(F.STOP_BG, f, id, t, more), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: path.join(f.dir, 'typer.log') })
+const wb = heldProject('watch-bg', 'v1')
 const wbT = rollout(wb, 'v1', F.BG_RUNNING)
+stopNow(wb, 'v1', wbT)
 const wbLog = path.join(wb.dir, 'events.log')
-const wbRun = watcher(wb, 'v1', wbT, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wbLog })
+const wbRun = watcher(wb, 'v1', wbT, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wbLog }, F.STOP_BG.turn_id)
 await sleep(400)
 const wbBefore = fs.existsSync(wbLog) ? fs.readFileSync(wbLog, 'utf8') : ''
 fs.appendFileSync(wbT, jl(F.BG_DONE))
@@ -313,13 +329,57 @@ const wbEvents = fs.readFileSync(wbLog, 'utf8').trim().split('\n').map((l) => JS
 clause('clause 1d3 — the watcher fires nothing while the background terminal runs, then, once its completion lands, hands the hook the Stop again with the turn\'s last message (E8-D7 through the table)',
   wbBefore === '' && wbEvents[0]?.hook_event_name === 'Stop' && wbEvents[0].last_assistant_message === 'started' && wbEvents[0].stop_hook_active === false && wbEvents[0].session_id === 'v1',
   `${wbBefore} || ${JSON.stringify(wbEvents)}`)
-// E10H-B3: the turn's end and the terminal's completion both land before the watcher's first poll after the end.
-const wb2 = project('watch-bg-between')
+// E10H-R2-B2, the order Codex writes (probe B5b: Stop at 54.324, task_complete at 54.334): the Stop reads the rollout
+// before its task_complete, sees the terminal running and holds; the terminal's completion lands next, and the
+// task_complete after it. Read at the task_complete, nothing was running; the Stop still held and must be re-run.
+const events = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } }
+const wb2 = heldProject('watch-bg-between', 'v2')
+const wb2T = rollout(wb2, 'v2', F.BG_RUNNING.slice(0, -1))
+stopNow(wb2, 'v2', wb2T)
+const wb2Held = (() => { try { return JSON.parse(fs.readFileSync(stopHeldFile('v2'), 'utf8')) } catch { return null } })()
+fs.appendFileSync(wb2T, jl(F.BG_DONE, F.BG_RUNNING.at(-1)))
 const wb2Log = path.join(wb2.dir, 'events.log')
-await watcher(wb2, 'v2', rollout(wb2, 'v2', [F.BG_RUNNING, F.BG_DONE]), Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wb2Log })
-const wb2Events = (() => { try { return fs.readFileSync(wb2Log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } })()
-clause('clause 1d6 — the watcher, when the turn ended with a terminal running and the terminal exited before it looked, still hands the hook the Stop again (E10H-B3)',
-  wb2Events[0]?.hook_event_name === 'Stop' && wb2Events[0].last_assistant_message === 'started', JSON.stringify(wb2Events))
+await watcher(wb2, 'v2', wb2T, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wb2Log }, F.STOP_BG.turn_id)
+const wb2Events = events(wb2Log)
+clause('clause 1d6 — the terminal finishing between the Stop\'s read and the task_complete: the Stop held, and the watcher hands the hook the Stop again, though the rollout at the task_complete shows nothing running (E10H-R2-B2, red team R2-B2, Spec N1)',
+  wb2Held?.held === true && wb2Events[0]?.hook_event_name === 'Stop' && wb2Events[0].last_assistant_message === 'started' && wb2Events[0].turn_id === F.STOP_BG.turn_id,
+  `${JSON.stringify(wb2Held)} ${JSON.stringify(wb2Events)}`)
+// E10H-R2-B2 for a live gate (red team R2-N2): the claude -p red team's marker with no result file, a turn ended on the
+// ready line with no terminal running; the Stop holds on the gate, and its result file is what re-runs it.
+const wgt = heldProject('watch-gate', 'v3')
+const wgtOut = path.join(wgt.dir, 'red-team.out')
+write(path.join(stateDir('v3'), 'seats', 'dctr-gate-1.json'), JSON.stringify({ ...F.REDTEAM_MARKER, file: wgtOut }))
+const readyTurn = F.TUI_TURN.map((l) => l.replace('"last_agent_message":"alpha"', '"last_agent_message":"Handoff written.\\nauto-cycle: ready"'))
+const wgtT = rollout(wgt, 'v3', readyTurn)
+stopNow(wgt, 'v3', wgtT, { turn_id: 'turn-v3', last_assistant_message: 'Handoff written.\nauto-cycle: ready' })
+const wgtLog = path.join(wgt.dir, 'events.log')
+const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3')
+await sleep(400)
+const wgtBefore = events(wgtLog)
+write(`${wgtOut}.result`, 'exit=0\n')
+await wgtRun
+const wgtEvents = events(wgtLog)
+clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
+  wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
+  `${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
+// Spec N2: the user quit Codex and a later session runs in the pane; herdr names that session, so the old watcher ends.
+const wos = project('watch-other-session')
+shim(wos, { session: 'someone-else', status: 'done' })
+const wosLog = path.join(wos.dir, 'events.log')
+await watcher(wos, 'v4', rollout(wos, 'v4', F.TUI_TURN), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wosLog })
+const wosHook = (() => { try { return fs.readFileSync(path.join(stateDir('v4'), 'hook.log'), 'utf8') } catch { return '' } })()
+clause('clause 1d9 — the watcher exits handing nothing on when herdr names another session in its pane (Spec N2)',
+  !fs.existsSync(wosLog) && wosHook.includes('exit: herdr names another session in the pane'), `${wosHook} ${events(wosLog).length}`)
+// A held fact an earlier turn's Stop left (its turn is not this watcher's) says nothing about this turn: the turn ended
+// idle with nothing running, so the watcher raises the idle pause and never re-runs a Stop.
+const wst = project('watch-stale-held')
+shim(wst, { session: 'v5', status: 'done' })
+write(stopHeldFile('v5'), JSON.stringify({ turn: 'an-earlier-turn', held: true, at: 1 }))
+const wstLog = path.join(wst.dir, 'events.log')
+await watcher(wst, 'v5', rollout(wst, 'v5', F.TUI_TURN), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wstLog }, 'this-turn')
+const wstEvents = events(wstLog)
+clause('clause 1d10 — a held fact written for another turn is not this turn\'s: the watcher hands on the idle_prompt, never a Stop (E10H-R2-B2)',
+  wstEvents.length === 1 && wstEvents[0].hook_event_name === 'Notification' && wstEvents[0].notification_type === 'idle_prompt', JSON.stringify(wstEvents))
 const wn = project('watch-new')
 const wnLog = path.join(wn.dir, 'events.log')
 await watcher(wn, 'q1', rollout(wn, 'q1', [F.TUI_TURN, F.TUI_COMPACT]), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wnLog })

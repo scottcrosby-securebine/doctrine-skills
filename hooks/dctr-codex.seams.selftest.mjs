@@ -101,18 +101,25 @@ clause('clause 1f6 — codexObservations: a new prompt after an API-error turn c
   obs([F.API_ERROR, F.TUI_NEXT]).apiError === null, JSON.stringify(obs([F.API_ERROR, F.TUI_NEXT])))
 
 const W = { poll: 10, idle: 100, max: 10000 }
-const ws = (o) => watchStep({ active: true, turn: { ended: true, newTurn: false }, obs: { backgroundRunning: false, apiError: null, idle: false }, bgAtEnd: false, idleFor: 0, age: 0, times: W, ...o })
+const ws = (o) => watchStep({ active: true, turn: { ended: true, newTurn: false }, obs: { backgroundRunning: false, apiError: null, idle: false }, held: false, liveWork: null, session: 's1', paneSession: null, idleFor: 0, age: 0, times: W, ...o })
 clause('clause 1g — watchedTurn: a turn is ended at its task_complete, and a task_started after that end is a new turn',
   watchedTurn(text(F.TUI_TURN.slice(3))).ended === true && watchedTurn(text(F.TUI_TURN.slice(3))).newTurn === false &&
   watchedTurn(text(F.TUI_TURN.slice(3, 10))).ended === false && watchedTurn(text(F.TUI_TURN.slice(3), F.TUI_COMPACT)).newTurn === true,
   JSON.stringify([watchedTurn(text(F.TUI_TURN.slice(3))), watchedTurn(text(F.TUI_TURN.slice(3), F.TUI_COMPACT))]))
-clause('clause 1g2 — watchStep: an inactive record or a new turn exits; a running turn waits; an API error is a StopFailure; the terminal that held the Stop exiting re-runs the Stop; idle past the grace is an idle_prompt, inside it waits',
+clause('clause 1g2 — watchStep: an inactive record or a new turn exits; a running turn waits; an API error is a StopFailure; a Stop held for live work is re-run once that work is gone and waits while it is not; idle past the grace is an idle_prompt, inside it waits',
   ws({ active: false }).act === 'exit' && ws({ turn: { ended: true, newTurn: true } }).act === 'exit' && ws({ turn: { ended: false, newTurn: false } }).act === 'wait' &&
-  ws({ obs: { apiError: 'internal_server_error' } }).act === 'stopFailure' && ws({ bgAtEnd: true }).act === 'stop' &&
-  ws({ bgAtEnd: true, obs: { backgroundRunning: true } }).act === 'wait' && ws({ obs: { idle: true }, idleFor: 150 }).act === 'idle' &&
+  ws({ obs: { apiError: 'internal_server_error' } }).act === 'stopFailure' && ws({ held: true }).act === 'stop' &&
+  ws({ held: true, obs: { backgroundRunning: true } }).act === 'wait' && ws({ obs: { idle: true }, idleFor: 150 }).act === 'idle' &&
   ws({ obs: { idle: true }, idleFor: 50 }).act === 'wait' && ws({ age: 20000, turn: { ended: false } }).act === 'exit' && WATCH_TIMES.idle === 60000 &&
-  ws({ ready: true }).act === 'exit' && ws({ ready: true, bgAtEnd: true }).act === 'stop' && ws({ ready: true, obs: { backgroundRunning: true } }).act === 'wait',
-  JSON.stringify([ws({ bgAtEnd: true }), ws({ obs: { idle: true }, idleFor: 150 })]))
+  ws({ ready: true }).act === 'exit' && ws({ ready: true, held: true }).act === 'stop' && ws({ ready: true, obs: { backgroundRunning: true } }).act === 'wait',
+  JSON.stringify([ws({ held: true }), ws({ obs: { idle: true }, idleFor: 150 })]))
+clause('clause 1g4 — watchStep: a Stop held for a live gate waits while the gate is live, even on the ready line with no terminal running, and is re-run once it is not (E10H-R2-B2, red team R2-N2)',
+  ws({ ready: true, held: true, liveWork: 'gate dctr-gate-1 is live' }).act === 'wait' && ws({ held: true, liveWork: 'gate dctr-gate-1 is live' }).act === 'wait' &&
+  ws({ ready: true, held: true, liveWork: null }).act === 'stop', JSON.stringify(ws({ ready: true, held: true, liveWork: 'gate dctr-gate-1 is live' })))
+clause('clause 1g5 — watchStep: herdr naming another session in the pane ends the watch, before any event is handed on; its own session, or none read, does not (Spec N2)',
+  ws({ paneSession: 's2', obs: { idle: true }, idleFor: 150 }).act === 'exit' && ws({ paneSession: 's2', held: true }).act === 'exit' &&
+  ws({ paneSession: 's1', obs: { idle: true }, idleFor: 150 }).act === 'idle' && ws({ paneSession: null, held: true }).act === 'stop',
+  JSON.stringify(ws({ paneSession: 's2', obs: { idle: true }, idleFor: 150 })))
 
 clause('clause 1h — the API-error and different-session pauses name Codex on Codex and Claude as today, and each host\'s text is the same pause (E10 table)',
   pauseReason('R9', 'internal_server_error', 'codex') === 'Codex API error: internal_server_error' && pauseReason('R9', 'x') === 'Claude API error: x' &&
@@ -247,13 +254,6 @@ clause('clause 1l5 — a turn_aborted clears nothing: the terminals Esc left run
 clause('clause 1l6 — a process whose completion is written before the output that still reads it running is not running; the same output with no completion is (corpus check, real rollout)',
   obs(F.RACE_EXITED).backgroundRunning === false && obs([F.RACE_EXITED[0], F.RACE_EXITED[2]]).backgroundRunning === true,
   JSON.stringify([obs(F.RACE_EXITED), obs([F.RACE_EXITED[0], F.RACE_EXITED[2]])]))
-
-// E10H-B3: the watcher reads the background state as of the turn's end, not as of its first poll after it.
-const bgAll = text(F.BG_RUNNING, F.BG_DONE), wt = watchedTurn(bgAll)
-clause('clause 1g3 — watchedTurn says where the turn ended, so the rollout up to that point shows the terminal running even once its completion follows (E10H-B3)',
-  wt.ended === true && Number.isInteger(wt.endAt) && codexObservations(bgAll.slice(0, wt.endAt), null).backgroundRunning === true &&
-  codexObservations(bgAll, null).backgroundRunning === false && bgAll.slice(0, wt.endAt).endsWith(F.BG_RUNNING.at(-1) + '\n'),
-  JSON.stringify(wt))
 
 // E10H-B1: after the /clear the composer must be empty, and nothing may show the user started the new chat.
 const DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› my own draft')

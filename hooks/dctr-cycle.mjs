@@ -28,7 +28,7 @@ import {
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
-  hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, paneClaimHeld,
+  hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, stopHeldFile, paneClaimHeld,
   appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded,
 } from './dctr-state.mjs'
 
@@ -101,7 +101,7 @@ try {
   if (event === 'UserPromptSubmit' && host === 'codex' && active) {
     let from = 0
     try { from = fs.statSync(payload.transcript_path).size } catch { /* not written yet: the watcher reads from the start */ }
-    const args = { session: sessionId, transcript: payload.transcript_path, cwd: payload.cwd, project: projectDir, pane: paneId, from }
+    const args = { session: sessionId, transcript: payload.transcript_path, cwd: payload.cwd, project: projectDir, pane: paneId, from, turn: payload.turn_id ?? null }
     const script = process.env.DCTR_WATCH_SCRIPT || path.join(import.meta.dirname, 'dctr-watch.mjs')
     spawn(process.execPath, [script, JSON.stringify(args)], { detached: true, stdio: 'ignore', env: process.env }).unref()
     log('the Codex watcher follows the turn')
@@ -117,6 +117,7 @@ try {
 
     const keyLine = claimKey(record.entries)
     const warned = Boolean(sessionWarned(record.entries, sessionId))
+    const live = liveWork(sessionId)
     let hash = null
     const decision = cycleDecision({
       sessionId,
@@ -126,7 +127,7 @@ try {
       warned,
       pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
       backgroundTasks: backgroundLive(payload.background_tasks),
-      liveWork: liveWork(sessionId),
+      liveWork: live,
       sessionCrons: nonEmpty(payload.session_crons),
       ready: endsReady(payload.last_assistant_message),
       handoffLanded: () => {
@@ -154,6 +155,9 @@ try {
       claimTaken: fs.existsSync(claimFile(sessionId, keyLine)),
     })
     log(`Stop decided ${decision.act}${decision.code ? ` ${decision.code}` : ''}: ${decision.reason}`)
+    // Codex fires no Stop when the work a Stop waited on ends, so the watcher retries this one; it reads that the Stop
+    // held from here, for this turn, never from the rollout, whose turn end Codex writes after this hook (E10H-R2-B2).
+    if (host === 'codex') writeMarker(stopHeldFile(sessionId), { turn: payload.turn_id ?? null, held: decision.act === 'wait' && (backgroundLive(payload.background_tasks) || Boolean(live)), at: stopAt })
     if (decision.act === 'pause') pause(decision.reason)
     if (decision.act === 'launch') {
       let length = null
