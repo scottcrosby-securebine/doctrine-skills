@@ -47,8 +47,11 @@ if mode == "toml":
     except Exception as e: print(json.dumps({"ok": False, "error": str(e)}))
 elif mode == "trust":
     hooks_path, config_path, key_path = sys.argv[2], sys.argv[3], sys.argv[4]
-    cfg = tomllib.load(open(config_path, "rb")).get("hooks", {}).get("state", {})
-    hj = json.load(open(hooks_path))["hooks"]
+    try:
+        cfg = tomllib.load(open(config_path, "rb")).get("hooks", {}).get("state", {})
+        hj = json.load(open(hooks_path))["hooks"]
+    except Exception as e:
+        print(json.dumps([{"key": "unreadable", "stored": None, "computed": str(e), "command": ""}])); sys.exit(0)
     rows = []
     for ev, groups in hj.items():
         for gi, g in enumerate(groups):
@@ -171,6 +174,9 @@ const INLINE_SANDBOX = `sandbox_workspace_write = { writable_roots = ["/tmp"] }\
 
 const hookDirFor = (home) => path.join(home, 'doctrine', 'hooks')
 const planFor = (home, hooksJson, configToml) => codexInstallPlan({ hooksJson, configToml, hookDir: hookDirFor(home), hooksJsonPath: path.join(home, 'hooks.json') })
+// A plan that throws on a known-good fixture must fail its clauses, never crash the suite: a crash renders no verdict.
+const goodPlan = (...a) => { try { return planFor(...a) } catch (e) { return { hooksJson: '{"hooks":{}}', configToml: '', messages: [`threw: ${e.message}`] } } }
+const readOr = (file) => { try { return fs.readFileSync(file, 'utf8') } catch { return '' } }
 const throws = (f) => { try { f(); return null } catch (e) { return e.message || String(e) } }
 const allTrusted = (rows) => rows.length > 0 && rows.every((r) => r.stored === r.computed)
 /** Removing every line the install added leaves the original text exactly: the original lines are a subsequence
@@ -200,7 +206,14 @@ const home = fs.mkdtempSync(path.join(tmp, 'home-'))
 put(path.join(home, 'hooks.json'), scottHooks(home))
 put(path.join(home, 'config.toml'), scottConfig(home))
 const before = { hooks: scottHooks(home), config: scottConfig(home) }
-const run = (args, env = {}) => spawnSync('node', [cli, ...args], { encoding: 'utf8', env: { ...process.env, ...env } })
+// HOME is a scratch directory on every run, so a CODEX_HOME resolved to the default can never be the real ~/.codex,
+// whatever a mutation does to the resolution.
+const fakeHome = fs.mkdtempSync(path.join(tmp, 'user-'))
+const run = (args, env = {}) => {
+  const e = { ...process.env, HOME: fakeHome, ...env }
+  if (!('CODEX_HOME' in env)) delete e.CODEX_HOME
+  return spawnSync('node', [cli, ...args], { encoding: 'utf8', env: e })
+}
 const first = run(['install', '--codex-home', home])
 const after1 = { hooks: fs.readFileSync(path.join(home, 'hooks.json'), 'utf8'), config: fs.readFileSync(path.join(home, 'config.toml'), 'utf8') }
 const second = run(['install', '--codex-home', home])
@@ -233,16 +246,30 @@ clause('clause 2j — the command names sandbox_workspace_write.network_access =
 clause('clause 2k — a second run exits 0 and leaves hooks.json and config.toml byte-identical (E10-D4)',
   second.status === 0 && after2.hooks === after1.hooks && after2.config === after1.config, `status ${second.status} ${second.stderr}`)
 
+// CODEX_HOME resolved as Codex resolves it: $CODEX_HOME when no flag, canonicalized, and ~/.codex otherwise.
+const realHome = fs.mkdtempSync(path.join(tmp, 'real-')), link = path.join(tmp, 'link-home')
+fs.symlinkSync(realHome, link)
+const viaEnv = run(['install'], { CODEX_HOME: link })
+const envKeys = Object.keys(tomlOk(readOr(path.join(realHome, 'config.toml'))).doc?.hooks?.state || {})
+clause('clause 2q — with no flag, $CODEX_HOME is the home, and a symlinked one is canonicalized as Codex canonicalizes it: every trust key names the real hooks.json path',
+  viaEnv.status === 0 && envKeys.length === CODEX_HOOKS.length && envKeys.every((k) => k.startsWith(`${realHome}/hooks.json:`)) &&
+    JSON.parse(readOr(path.join(realHome, 'hooks.json')) || '{}').hooks?.Stop?.[0]?.hooks[0].command === `node '${realHome}/doctrine/hooks/dctr-cycle.mjs'`,
+  `status ${viaEnv.status} ${viaEnv.stderr} keys ${JSON.stringify(envKeys)}`)
+const viaDefault = run(['install'])
+clause('clause 2r — with neither, the home is ~/.codex, created when absent',
+  viaDefault.status === 0 && fs.existsSync(path.join(fakeHome, '.codex', 'hooks.json')) && fs.existsSync(path.join(fakeHome, '.codex', 'doctrine', 'hooks', 'dctr-seat.mjs')),
+  `status ${viaDefault.status} ${viaDefault.stderr}`)
+
 // The tricky TOML, with no hooks.json at all.
-const trickyPlan = planFor(home, null, TRICKY)
+const trickyPlan = goodPlan(home, null, TRICKY)
 const trickyToml = tomlOk(trickyPlan.configToml)
 const trickyRows = trustRows(trickyPlan.hooksJson, trickyPlan.configToml, path.join(home, 'hooks.json'))
 clause('clause 2l — a multi-line string and a nested array opening lines with "[" are not read as tables: the output parses, the string is unchanged, and every doctrine entry is trusted',
   trickyToml.ok && trickyToml.doc.developer_instructions === '[hooks.state."fake"]\ntrusted_hash = "not a table"\n' && allTrusted(trickyRows),
   `${JSON.stringify(trickyToml).slice(0, 300)} ${JSON.stringify(trickyRows.filter((r) => r.stored !== r.computed))}`)
 clause('clause 2m — network_access = false in an existing [sandbox_workspace_write] becomes true in place, and its other keys stay',
-  trickyToml.ok && trickyToml.doc.sandbox_workspace_write.network_access === true && JSON.stringify(trickyToml.doc.sandbox_workspace_write.writable_roots) === '["/tmp/x"]' &&
-    trickyPlan.configToml.split('\n').filter((l) => l.startsWith('[sandbox_workspace_write]')).length === 1 && trickyToml.doc.profiles.x.model === 'o',
+  trickyToml.ok && trickyToml.doc.sandbox_workspace_write?.network_access === true && JSON.stringify(trickyToml.doc.sandbox_workspace_write?.writable_roots) === '["/tmp/x"]' &&
+    trickyPlan.configToml.split('\n').filter((l) => l.startsWith('[sandbox_workspace_write]')).length === 1 && trickyToml.doc.profiles?.x?.model === 'o',
   trickyPlan.configToml)
 
 // An earlier install whose Stop entry had another timeout, a second (duplicate) doctrine Stop group, and a user's
@@ -254,8 +281,8 @@ const staleHooks = JSON.stringify({ hooks: { Stop: [staleStop, staleStop, userSt
 const key = (ev, gi) => `${home}/hooks.json:${ev}:${gi}:0`
 const staleConfig = `[hooks.state."${key('stop', 0)}"]\ntrusted_hash = "${trustedHash('Stop', staleStop)}"\n\n[hooks.state."${key('stop', 1)}"]\ntrusted_hash = "${trustedHash('Stop', staleStop)}"\n\n` +
   `[hooks.state."${key('stop', 2)}"]\ntrusted_hash = "${trustedHash('Stop', userStop)}"\n`
-const stalePlan = planFor(home, staleHooks, staleConfig)
-const staleOut = JSON.parse(stalePlan.hooksJson).hooks.Stop
+const stalePlan = goodPlan(home, staleHooks, staleConfig)
+const staleOut = JSON.parse(stalePlan.hooksJson).hooks.Stop || []
 const staleRows = trustRows(stalePlan.hooksJson, stalePlan.configToml, path.join(home, 'hooks.json'))
 clause('clause 2n — an earlier install\'s stale Stop entry is rewritten in place at index 0 and its duplicate removed',
   staleOut.length === 2 && staleOut[0].hooks[0].timeout === 60 && staleOut[0].hooks[0].command === `node '${hd}/dctr-cycle.mjs'`, JSON.stringify(staleOut))
@@ -263,9 +290,9 @@ clause("clause 2o — the user's Stop group that moved from index 2 to 1 keeps a
   JSON.stringify(staleOut[1]) === JSON.stringify(userStop) && allTrusted(staleRows) && !stalePlan.configToml.includes(key('stop', 2)), stalePlan.configToml)
 // A user's own entry running a dctr script from somewhere else is not the install's to rewrite.
 const foreign = { hooks: [{ type: 'command', command: "node '/opt/elsewhere/dctr-cycle.mjs'", timeout: 60 }] }
-const foreignPlan = planFor(home, JSON.stringify({ hooks: { Stop: [foreign] } }, null, 2), '')
+const foreignPlan = goodPlan(home, JSON.stringify({ hooks: { Stop: [foreign] } }, null, 2), '')
 clause('clause 2p — a dctr script registered from another directory is left in place, and the doctrine entry is added after it',
-  JSON.stringify(JSON.parse(foreignPlan.hooksJson).hooks.Stop[0]) === JSON.stringify(foreign) && JSON.parse(foreignPlan.hooksJson).hooks.Stop.length === 2, foreignPlan.hooksJson)
+  JSON.stringify(JSON.parse(foreignPlan.hooksJson).hooks.Stop?.[0]) === JSON.stringify(foreign) && JSON.parse(foreignPlan.hooksJson).hooks.Stop?.length === 2, foreignPlan.hooksJson)
 
 // ---------------------------------------------------------------- clause 1: what must trip
 
