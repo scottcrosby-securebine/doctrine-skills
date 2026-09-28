@@ -102,7 +102,8 @@ clause('clause 1g2 — watchStep: an inactive record or a new turn exits; a runn
   ws({ active: false }).act === 'exit' && ws({ turn: { ended: true, newTurn: true } }).act === 'exit' && ws({ turn: { ended: false, newTurn: false } }).act === 'wait' &&
   ws({ obs: { apiError: 'internal_server_error' } }).act === 'stopFailure' && ws({ bgAtEnd: true }).act === 'stop' &&
   ws({ bgAtEnd: true, obs: { backgroundRunning: true } }).act === 'wait' && ws({ obs: { idle: true }, idleFor: 150 }).act === 'idle' &&
-  ws({ obs: { idle: true }, idleFor: 50 }).act === 'wait' && ws({ age: 20000, turn: { ended: false } }).act === 'exit' && WATCH_TIMES.idle === 60000,
+  ws({ obs: { idle: true }, idleFor: 50 }).act === 'wait' && ws({ age: 20000, turn: { ended: false } }).act === 'exit' && WATCH_TIMES.idle === 60000 &&
+  ws({ ready: true }).act === 'exit' && ws({ ready: true, bgAtEnd: true }).act === 'stop' && ws({ ready: true, obs: { backgroundRunning: true } }).act === 'wait',
   JSON.stringify([ws({ bgAtEnd: true }), ws({ obs: { idle: true }, idleFor: 150 })]))
 
 clause('clause 1h — the API-error and different-session pauses name Codex on Codex and Claude as today, and each host\'s text is the same pause (E10 table)',

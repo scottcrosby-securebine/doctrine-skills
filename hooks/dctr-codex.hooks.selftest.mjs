@@ -169,6 +169,13 @@ write(path.join(isoG.dir, 'sessions', 'rollout-2026-09-28T19-00-00-other.jsonl')
 const iso = hook('dctr-gauge.mjs', isoG, as(F.POST_MAIN, isoG, 'i1', isoT))
 clause('clause 1b8 — gauge on Codex reads only the rollout at its own transcript_path: another session\'s newer rollout past the tier leaves it unwarned (E8-D23 through the table)',
   iso.code === 0 && iso.out === '' && latch('i1')?.firstUsed === 17503 && recLines(isoG, /warned/).length === 0, `${iso.out} ${JSON.stringify(latch('i1'))}`)
+// Derived: past the last token_count, one tool output line of 700 KB, longer than the gauge's first tail read.
+const bigG = project('gauge-big', { on: '- auto-cycle: on cap 10 tier 100000' })
+const bigLine = F.TUI_TURN[9].replace(/"output":\[.*\],"internal_chat/, `"output":${JSON.stringify('x'.repeat(700 * 1024))},"internal_chat`)
+const bigT = rollout(bigG, 'big1', [F.TUI_TURN, bigLine])
+const big = hook('dctr-gauge.mjs', bigG, as(F.POST_MAIN, bigG, 'big1', bigT))
+clause('clause 1b10 — gauge on Codex: a token_count further back than the first tail read (a 700 KB tool output after it) is still found: the reading is 17503, not "no token_count yet"',
+  big.code === 0 && big.out === '' && latch('big1')?.firstUsed === 17503 && fs.statSync(bigT).size > 700 * 1024 && bigLine.length > 700 * 1024, `${big.out} ${big.err} ${JSON.stringify(latch('big1'))} ${bigLine.length}`)
 const offG = project('gauge-off', { on: '- auto-cycle: off' })
 const off = hook('dctr-gauge.mjs', offG, as(F.POST_MAIN, offG, 'o1', rollout(offG, 'o1', F.TUI_TURN)))
 clause('clause 1b9 — gauge on Codex with auto-cycle off: nothing, and no latch (E8-D4)', off.out === '' && latch('o1') === null, off.out)
@@ -183,6 +190,9 @@ clause('clause 1c — a Codex PermissionRequest stands for Notification permissi
   calls(pr).some((c) => c[0] === 'notification' && c.includes('--body') && String(c[c.indexOf('--body') + 1]).startsWith('waiting for your permission approval')) &&
   calls(pr).some((c) => c[1] === 'report-metadata' && c.includes('autocycle=auto-cycle paused·waiting for your permission approval')) && !/"decision"|permissionDecision/.test(pr1.out),
   `${pr1.out} ${pr1.err} ${JSON.stringify(recLines(pr, /paused/))} ${JSON.stringify(calls(pr))}`)
+const pr3 = hook('dctr-cycle.mjs', pr, as(F.PERMISSION, pr, 'k1', prT))
+clause('clause 1c1 — a second Codex PermissionRequest while the first\'s paused line stands writes no second line: a permission prompt ends no turn (E8-D18, E8-R31)',
+  pr3.code === 0 && recLines(pr, /^- auto-cycle paused: /).length === 1, JSON.stringify(recLines(pr, /paused/)))
 const prOff = project('perm-off', { on: '- auto-cycle: off' })
 const pr2 = hook('dctr-cycle.mjs', prOff, as(F.PERMISSION, prOff, 'k2', rollout(prOff, 'k2', F.TUI_TURN)))
 clause('clause 1c2 — a Codex PermissionRequest with auto-cycle off does nothing (E8-D18)', pr2.out === '' && recLines(prOff, /paused/).length === 0 && calls(prOff).length === 0, pr2.out)
