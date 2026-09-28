@@ -87,8 +87,8 @@ clause('clause 1f — codexObservations: a background terminal whose output carr
   obs(F.BG_RUNNING).backgroundRunning === true && obs(F.BG_RUNNING).idle === false && obs(F.BG_RUNNING).apiError === null, JSON.stringify(obs(F.BG_RUNNING)))
 clause('clause 1f2 — codexObservations: once its item_completed names that process_id it is not running, and the ended turn reads idle (S5)',
   obs([F.BG_RUNNING, F.BG_DONE]).backgroundRunning === false && obs([F.BG_RUNNING, F.BG_DONE]).idle === true, JSON.stringify(obs([F.BG_RUNNING, F.BG_DONE])))
-clause('clause 1f3 — codexObservations: the tty path\'s running cell is a background terminal until a completion of its turn follows (S5, B5 tty path)',
-  obs(F.CELL_RUNNING).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === false, JSON.stringify([obs(F.CELL_RUNNING), obs([F.CELL_RUNNING, F.CELL_DONE])]))
+clause('clause 1f3 — codexObservations: the tty path\'s running cell is a background terminal, and the completion of its command does not end it: only the cell\'s own output does (S5, B5 tty path, E10H-R2-B1; clause 1l3)',
+  obs(F.CELL_RUNNING).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === true, JSON.stringify([obs(F.CELL_RUNNING), obs([F.CELL_RUNNING, F.CELL_DONE])]))
 clause('clause 1f4 — codexObservations: a task_complete carrying an error after the last user turn is the API error, and that turn is not idle (S5, B6)',
   obs(F.API_ERROR, 'idle').apiError === 'internal_server_error' && obs(F.API_ERROR, 'idle').idle === false, JSON.stringify(obs(F.API_ERROR, 'idle')))
 // Derived: TUI_TURN with its final answer and task_complete ending in the ready line, and TUI_TURN cut before its end.
@@ -196,9 +196,6 @@ clause('clause 1l2 — another command of the turn completing does not end a cel
   obs(interleaved).backgroundRunning === true && obs([...interleaved, ...pc.slice(c4 + 1, cell4End + 1)]).backgroundRunning === true &&
   obs([...interleaved, ...pc.slice(c4 + 1)]).backgroundRunning === false,
   JSON.stringify([obs(interleaved), obs([...interleaved, ...pc.slice(c4 + 1)])]))
-clause('clause 1l3 — the tty cell ends at its own command\'s completion (the call whose input names that command), still (B5 tty path)',
-  obs(F.CELL_RUNNING).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === false,
-  JSON.stringify([obs(F.CELL_RUNNING), obs([F.CELL_RUNNING, F.CELL_DONE])]))
 // Derived: the tty cell 6 (CELL_RUNNING, its own command still running) with no completion yet, then (a) the wait
 // call and "Script completed" output POLLED_CELL has for cell 4, cell id and turn rewritten to cell 6's: the cell's own
 // output is the only thing that ends it; and (b) RACE_EXITED's call and completion, turn rewritten to cell 6's: a
@@ -211,9 +208,26 @@ const raceTurn = J(F.RACE_EXITED[1]).payload.turn_id
 const otherDone = [F.RACE_EXITED[0], F.RACE_EXITED[1]].map((l) => l.replaceAll(raceTurn, c6turn))
 clause('clause 1l7 — a cell ends at its own "Script completed", with no completion of its command (E10H-B2)',
   obs([F.CELL_RUNNING, ownEnd]).backgroundRunning === false, JSON.stringify(obs([F.CELL_RUNNING, ownEnd])))
-clause('clause 1l8 — a completion of a command another call names, in the cell\'s own turn, does not end the cell (E10H-B2, red team B2)',
-  obs([F.CELL_RUNNING, otherDone]).backgroundRunning === true && obs([F.CELL_RUNNING, otherDone, F.CELL_DONE]).backgroundRunning === false,
+clause('clause 1l8 — a completion of a command another call names, in the cell\'s own turn, does not end the cell, nor does its own command\'s; its own output does (E10H-B2, red team B2, E10H-R2-B1)',
+  obs([F.CELL_RUNNING, otherDone]).backgroundRunning === true && obs([F.CELL_RUNNING, otherDone, F.CELL_DONE]).backgroundRunning === true &&
+  obs([F.CELL_RUNNING, otherDone, F.CELL_DONE, ownEnd]).backgroundRunning === false,
   JSON.stringify([obs([F.CELL_RUNNING, otherDone]), obs([F.CELL_RUNNING, otherDone, F.CELL_DONE])]))
+clause('clause 1l3 — the completion of the command a cell\'s own call names does not end the cell: the cell may run more (E10H-R2-B1)',
+  obs([F.CELL_RUNNING, F.CELL_DONE]).backgroundRunning === true && obs([F.CELL_RUNNING, F.CELL_DONE, ownEnd]).backgroundRunning === false,
+  JSON.stringify([obs([F.CELL_RUNNING, F.CELL_DONE]), obs([F.CELL_RUNNING, F.CELL_DONE, ownEnd])]))
+// E10H-R2-B1, the red team's shape: derived, CELL_RUNNING with cell 6's call awaiting two commands at once (its own loop
+// and a `sleep 120`), then CELL_DONE, the loop's completion, which that call names: one of the two finished, the cell
+// still runs. MULTI_CELL is the real shape with no call naming anything: cell 137 builds each command as it goes.
+const c6callLine = F.CELL_RUNNING.findIndex((l) => J(l).payload.type === 'custom_tool_call' && J(l).payload.call_id === J(F.CELL_RUNNING.find((x) => /cell ID 6/.test(x))).payload.call_id)
+const loopCmd = J(F.CELL_DONE[0]).payload.item.command[2]
+const twoCmds = F.CELL_RUNNING.map((l, i) => (i !== c6callLine ? l : JSON.stringify({ ...J(l), payload: { ...J(l).payload,
+  input: `const [a, b] = await Promise.all([tools.exec_command({cmd:${JSON.stringify(loopCmd)},yield_time_ms:1000}), tools.exec_command({cmd:"sleep 120",yield_time_ms:1000})]); text(a); text(b);\n` } })))
+clause('clause 1l9 — a cell awaiting two commands still runs when the first completes, though its call names that command; it ends at its own output (E10H-R2-B1, red team R2-B1)',
+  obs(twoCmds).backgroundRunning === true && obs([twoCmds, F.CELL_DONE]).backgroundRunning === true && obs([twoCmds, F.CELL_DONE, ownEnd]).backgroundRunning === false,
+  JSON.stringify([obs([twoCmds, F.CELL_DONE]), obs([twoCmds, F.CELL_DONE, ownEnd])]))
+clause('clause 1l10 — the real multi-command cell: each command it built completing, no call naming any, leaves it running until its own "Script completed" (E10H-R2-B1, Spec S1, rollout 01a02d17 lines 2947-2955)',
+  obs(F.MULTI_CELL.slice(0, 2)).backgroundRunning === true && obs(F.MULTI_CELL.slice(0, 5)).backgroundRunning === true && obs(F.MULTI_CELL).backgroundRunning === false,
+  JSON.stringify([obs(F.MULTI_CELL.slice(0, 2)), obs(F.MULTI_CELL.slice(0, 5)), obs(F.MULTI_CELL)]))
 // Derived (N11): N11_OUTPUT's command output printed raw, as `text(r.output)` prints it, so the "session_id":<digits>
 // text in it is bare rather than inside Codex's JSON part; inserted into TUI_TURN before its task_complete.
 const n11 = J(F.N11_OUTPUT[0]), n11raw = JSON.stringify({ ...n11, payload: { ...n11.payload, output: [n11.payload.output[0], { type: 'input_text', text: JSON.parse(n11.payload.output[1].text).output }] } })
@@ -221,13 +235,14 @@ const withN11 = [...F.TUI_TURN.slice(0, -1), n11raw, F.TUI_TURN.at(-1)]
 clause('clause 1l4 — "session_id":<digits> in what a command printed is not a running terminal; only Codex\'s own exec result shape is (N11)',
   obs(withN11).backgroundRunning === false && obs([...F.TUI_TURN.slice(0, -1), F.N11_OUTPUT[0], F.TUI_TURN.at(-1)]).backgroundRunning === false && obs(F.BG_RUNNING).backgroundRunning === true,
   JSON.stringify(obs(withN11)))
-// Derived (N11): BG_RUNNING's turn ended by turn_aborted (the event B6's esc wrote, turn_id rewritten to BG_RUNNING's
-// turn) instead of task_complete: what that turn started is cleared.
+// Probe P-ESC: Esc ends the turn and not the terminals it started, which ps showed running 30 s on. Derived: BG_RUNNING's
+// turn ended by turn_aborted (turn_id rewritten to BG_RUNNING's) instead of task_complete, then BG_DONE.
 const bgTurn = J(F.BG_RUNNING.at(-1)).payload.turn_id
 const aborted = JSON.stringify({ timestamp: J(F.BG_RUNNING.at(-1)).timestamp, type: 'event_msg', payload: { type: 'turn_aborted', turn_id: bgTurn, reason: 'interrupted' } })
-clause('clause 1l5 — a turn_aborted clears the background terminals its turn started (N11)',
-  obs([...F.BG_RUNNING.slice(0, -1), aborted]).backgroundRunning === false && obs([...F.BG_RUNNING.slice(0, -1), aborted, F.TUI_NEXT]).backgroundRunning === false,
-  JSON.stringify(obs([...F.BG_RUNNING.slice(0, -1), aborted])))
+clause('clause 1l5 — a turn_aborted clears nothing: the terminals Esc left running stay running until their own completion (probe P-ESC, Standards NB5)',
+  obs(F.ESC_ABORTED).backgroundRunning === true && obs([F.ESC_ABORTED, F.TUI_NEXT]).backgroundRunning === true &&
+  obs([...F.BG_RUNNING.slice(0, -1), aborted]).backgroundRunning === true && obs([...F.BG_RUNNING.slice(0, -1), aborted, F.BG_DONE]).backgroundRunning === false,
+  JSON.stringify([obs(F.ESC_ABORTED), obs([...F.BG_RUNNING.slice(0, -1), aborted])]))
 
 clause('clause 1l6 — a process whose completion is written before the output that still reads it running is not running; the same output with no completion is (corpus check, real rollout)',
   obs(F.RACE_EXITED).backgroundRunning === false && obs([F.RACE_EXITED[0], F.RACE_EXITED[2]]).backgroundRunning === true,
@@ -319,6 +334,17 @@ clause('clause 3l — without the lib: the derived own end is a wait on cell 6 a
   J(ownEnd[1]).payload.output[0].text.startsWith('Script completed') && !ownEnd[1].includes('session_id') &&
   J(otherDone[0]).payload.input.includes(J(otherDone[1]).payload.item.command[2]) && !c6call.input.includes(J(otherDone[1]).payload.item.command[2]) &&
   J(otherDone[1]).payload.turn_id === c6turn, 'derived cell fixtures wrong')
+const mc = F.MULTI_CELL.map(J), mcDone = mc.filter((e) => e.payload.item?.type === 'CommandExecution')
+clause('clause 3m — without the lib: MULTI_CELL reports cell 137 running, then three CommandExecution completions of its turn before the only other output, a "Script completed" answering a wait on cell 137; no call in it names any of those processes',
+  mc[0].payload.output[0].text.startsWith('Script running with cell ID 137') && mcDone.length === 3 && mcDone.every((e) => e.payload.turn_id === mc[0].payload.internal_chat_message_metadata_passthrough.turn_id) &&
+  mc[1].payload.item?.type === 'CommandExecution' && JSON.parse(mc[2].payload.arguments).cell_id === '137' && mc[5].payload.call_id === mc[2].payload.call_id &&
+  mc[5].payload.output[0].text.startsWith('Script completed') && mcDone.every((d) => !F.MULTI_CELL.some((l, i) => i !== mc.indexOf(d) && l.includes(d.payload.item.process_id))),
+  'multi-command cell fixture wrong')
+const esc = F.ESC_ABORTED.map(J), escIds = esc.flatMap((e) => (e.payload.output || []).map((o) => /"session_id":(\d+)/.exec(o.text)?.[1]).filter(Boolean))
+clause('clause 3n — without the lib: ESC_ABORTED leaves two processes running by their exec results (session_ids, no exit_code), then a turn_aborted of that turn, and no CommandExecution; the twoCmds call awaits both the loop CELL_DONE completes and another command',
+  escIds.length === 2 && !F.ESC_ABORTED.some((l) => l.includes('exit_code') || l.includes('CommandExecution')) && esc.at(-1).payload.type === 'turn_aborted' && esc.at(-1).payload.turn_id === esc[0].payload.turn_id &&
+  J(twoCmds[c6callLine]).payload.input.includes(JSON.stringify(loopCmd)) && J(twoCmds[c6callLine]).payload.input.includes('sleep 120'),
+  'esc or two-command fixture wrong')
 clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
   [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
   F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')

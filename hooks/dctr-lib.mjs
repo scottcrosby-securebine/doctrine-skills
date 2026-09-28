@@ -1559,23 +1559,23 @@ const PROCESS_RUNNING = /^Process running with session ID (\d+)$/m
 /**
  * The state of a rollout's last turn and its background terminals, read line by line. A turn starts at task_started
  * or at a user message the user typed, and ends at task_complete (its error and last_agent_message kept) or
- * turn_aborted, which also ends what that turn left running. A background terminal is a command still running when
- * its call returned (probe B5):
+ * turn_aborted. Esc ends the turn and not what it started: the terminals run on, and nothing but their own
+ * completion ends them (probe P-ESC, r2 repair notes). A background terminal is a command still running when its call
+ * returned (probe B5):
  * - a process: Codex's own exec result carries its session_id (CODEX_RUNNING, PROCESS_RUNNING) and it ends when an
  *   item_completed CommandExecution names that process_id;
  * - a code-mode cell: an output reading `Script running with cell ID N`, whether the cell's own call's or a `wait`
- *   poll's (a wait call's arguments name its cell_id). It ends at a later output of the same cell that is not
- *   running (`Script completed`, `Script failed`), or at a CommandExecution completion the cell's call names: its
- *   command in the call's input, or its process id as a session_id there (a write_stdin cell). A completion no call
- *   names at all ends the oldest running cell of its turn, the only link the rollout gives (B5's tty path); one
- *   another call names ends no cell (E10H-B2).
+ *   poll's (a wait call's arguments name its cell_id). It ends only at a later output of the same cell that is not
+ *   running (`Script completed`, `Script failed`). No command's completion ends a cell, named or not: one cell can run
+ *   several commands, built as it goes, and a completion proves only that one of them finished (E10H-R2-B1, red team
+ *   R2-B1). A cell the rollout never shows ending stays running, the direction that waits (E8-D7).
  */
 function codexTurnState(text) {
   const running = new Map() // process id -> the turn that started it
   const exited = new Map() // process id -> the turn its completion came in
   const start = (id, turn) => { if (exited.get(id) !== turn) running.set(id, turn) }
-  const cells = new Map() // cell id -> { turn, input }, in the order each last reported running
-  const calls = new Map() // call id -> { input, cell }
+  const cells = new Map() // cell id -> the turn it last reported running in
+  const calls = new Map() // call id -> the cell it answers for (a wait's cell_id, or the cell its own call started)
   let ended = false, error = null, lastMessage = null
   for (const l of String(text ?? '').split('\n')) {
     if (!l.trim()) continue
@@ -1589,15 +1589,11 @@ function codexTurnState(text) {
       ended = true
       lastMessage = typeof p.last_agent_message === 'string' ? p.last_agent_message : null
       error = p.error ? String(p.error.codex_error_info || p.error.message || 'unknown') : null
-      if (p.type === 'turn_aborted') {
-        for (const [id, turn] of running) if (turn === p.turn_id) running.delete(id)
-        for (const [id, c] of cells) if (c.turn === p.turn_id) cells.delete(id)
-      }
     }
     if (e.type === 'response_item' && (p.type === 'custom_tool_call' || p.type === 'function_call')) {
       let cell = null
       if (p.name === 'wait') { try { cell = String(JSON.parse(p.arguments).cell_id ?? '') || null } catch { /* no cell named */ } }
-      calls.set(p.call_id, { input: String(p.input ?? p.arguments ?? ''), cell })
+      calls.set(p.call_id, cell)
     }
     if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
       const turn = p.internal_chat_message_metadata_passthrough?.turn_id ?? null
@@ -1607,29 +1603,17 @@ function codexTurnState(text) {
       for (const part of parts) for (const m of part.matchAll(CODEX_RUNNING)) start(m[1], turn)
       const head = PROCESS_RUNNING.exec(String(parts[0] ?? '').split('\nOutput:\n')[0])
       if (head) start(head[1], turn)
-      const call = calls.get(p.call_id)
+      const owner = calls.get(p.call_id)
       const cell = /^Script running with cell ID (\d+)/.exec(parts[0] ?? '')?.[1]
       if (cell) {
-        // A poll carries the input of the call that started the cell, which is what names its command.
-        const input = cells.get(cell)?.input ?? (call && !call.cell ? call.input : '')
-        cells.delete(cell)
-        cells.set(cell, { turn, input })
-        if (call && !call.cell) call.cell = cell
-      } else if (call?.cell) cells.delete(call.cell)
+        cells.set(cell, turn)
+        if (owner === null) calls.set(p.call_id, cell)
+      } else if (owner) cells.delete(owner)
     }
     if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'CommandExecution') {
       const pid = String(p.item.process_id)
       running.delete(pid)
       exited.set(pid, p.turn_id ?? null)
-      const cmd = Array.isArray(p.item.command) ? String(p.item.command.at(-1) ?? '') : ''
-      const names = (input) => (cmd !== '' && (input.includes(cmd) || input.includes(JSON.stringify(cmd).slice(1, -1)))) ||
-        new RegExp(`session_id\\W{0,3}:\\s*${pid}\\b`).test(input)
-      const own = [...cells].find(([, c]) => names(c.input))
-      if (own) cells.delete(own[0])
-      else if (![...calls.values()].some((c) => names(c.input))) {
-        const oldest = [...cells].find(([, c]) => c.turn === p.turn_id)
-        if (oldest) cells.delete(oldest[0])
-      }
     }
   }
   return { ended, error, lastMessage, backgroundRunning: running.size > 0 || cells.size > 0 }
