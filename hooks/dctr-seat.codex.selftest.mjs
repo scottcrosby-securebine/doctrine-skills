@@ -337,6 +337,19 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
     'gateWaits misread a PID 1 command line')
 }
 
+// ------------------------------------------------------------------------------------------------ the pane launcher from a Codex shell
+{
+  // doctrine-pane places under the same session lock and column as seats and gates, so it reads the same resolver.
+  fs.rmSync(stateOf(SESSION), { recursive: true, force: true })
+  fs.writeFileSync(calls, '')
+  let r = { code: 0, out: '' }
+  try { r.out = execFileSync('node', [path.join(HERE, 'dctr-pane.mjs'), 'open', 'box', path.join(tmp, 'pane', 'box.log'), 'true'], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'], env: env({ CLAUDE_CODE_SESSION_ID: '', CODEX_SESSION_ID: SESSION }) }) }
+  catch (e) { r = { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+  clause('clause 1ab — doctrine-pane opened from a Codex shell is placed under that Codex session\'s lock, not refused for want of a Claude id',
+    r.code === 0 && !/no CLAUDE_CODE_SESSION_ID/.test(r.out) && /^pane split w1:p1 /m.test(callText()) && fs.existsSync(stateOf(SESSION)),
+    `${r.code} ${r.out}\ncalls:\n${callText()}`)
+}
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
