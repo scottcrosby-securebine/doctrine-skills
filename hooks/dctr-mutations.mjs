@@ -2428,7 +2428,7 @@ const MUTATIONS = [
     clause: "clause 1d6 — the terminal finishing between the Stop's read and the task_complete: the Stop held",
     from: "held: decision.act === 'wait' && (backgroundLive(payload.background_tasks) || Boolean(live))", to: "held: decision.act === 'wait' && Boolean(live)" },
   { name: "R2-B2: the watcher is not told its turn, so it reads no held fact", file: "dctr-cycle.mjs",
-    clause: "clause 1d3 — the watcher hands the hook the Stop again once the completion lands",
+    clause: "clause 1c6 — a Codex UserPromptSubmit starts the watcher told its turn",
     from: ", from, turn: payload.turn_id ?? null }", to: ", from }" },
   { name: "B1: the Codex resume stage sends into a composer that is not empty", file: "dctr-lib.mjs",
     clause: "clause 1n2 — a composer that is not empty is R16",

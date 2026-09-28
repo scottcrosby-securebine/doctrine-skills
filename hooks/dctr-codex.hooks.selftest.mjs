@@ -279,8 +279,8 @@ const upOff = project('ups-off', { on: '- auto-cycle: off' })
 hook('dctr-cycle.mjs', upOff, as(F.UPS_MAIN, upOff, 'w3', rollout(upOff, 'w3', [])), { DCTR_WATCH_SCRIPT: stub, STUB_LOG: path.join(upOff.dir, 'w.log') })
 await sleep(300)
 const watchArgs = (() => { try { return JSON.parse(fs.readFileSync(upLog, 'utf8').trim()) } catch { return null } })()
-clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active starts the watcher on its rollout from the rollout\'s length; a Claude Code one and an inactive record start none',
-  watchArgs?.session === 'w1' && watchArgs.transcript === upT && watchArgs.from === fs.statSync(upT).size && watchArgs.pane === 'wX:p1' &&
+clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active starts the watcher on its rollout from the rollout\'s length, told its turn (whose Stop decision it reads, E10H-R2-B2); a Claude Code one and an inactive record start none',
+  watchArgs?.session === 'w1' && watchArgs.transcript === upT && watchArgs.from === fs.statSync(upT).size && watchArgs.pane === 'wX:p1' && watchArgs.turn === F.UPS_MAIN.turn_id &&
   !fs.existsSync(upOffLog) && !fs.existsSync(path.join(upOff.dir, 'w.log')), JSON.stringify(watchArgs))
 
 // ---------------------------------------------------------------- clause 1d: the watcher end to end
