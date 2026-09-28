@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { watchStep, watchedTurn, codexObservations, followKickoff, autoCycleActive, stopFileRepo, repoOf, endsReady, WATCH_TIMES } from './dctr-lib.mjs'
-import { herdr, hookLog, sleepMs } from './dctr-state.mjs'
+import { herdr, hookLog, sleepMs, isPaneNotFound } from './dctr-state.mjs'
 
 let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
@@ -38,7 +38,12 @@ const lastMessage = (text) => { try { return JSON.parse(text.trimEnd().split('\n
 const status = () => {
   if (!a.pane) return null
   try { return herdr(['pane', 'get', a.pane])?.result?.pane?.agent_status ?? 'unknown' } // herdr-lint: a failed read is not ready, so nothing is fired on it
-  catch { return 'unknown' }
+  catch (e) {
+    // herdr answering that the pane does not exist is an answer: the session's pane is gone, and nothing is left to
+    // watch for. Any other failure is not ready, so nothing is fired on it.
+    if (isPaneNotFound(e)) { log('exit: the pane is gone'); process.exit(0) }
+    return 'unknown'
+  }
 }
 
 try {

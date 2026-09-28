@@ -41,6 +41,7 @@ let st = {}; try { st = JSON.parse(fs.readFileSync(process.env.SHIM_STATE, 'utf8
 const save = () => fs.writeFileSync(process.env.SHIM_STATE, JSON.stringify(st))
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(args) + '\\n')
 if (args[0] === 'pane' && args[1] === 'get') {
+  if (st.gone) { process.stderr.write('{"error":{"code":"pane_not_found","message":"no such pane"}}\\n'); process.exit(1) }
   st.gets = (st.gets || 0) + 1; save()
   const session = st.resumed ? st.newSession : st.session
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
@@ -288,6 +289,13 @@ await watcher(wo, 'q2', rollout(wo, 'q2', F.API_ERROR), 0, { DCTR_CYCLE_SCRIPT: 
 const wr = project('watch-ready')
 const wrLog = path.join(wr.dir, 'events.log')
 await watcher(wr, 'q3', rollout(wr, 'q3', F.TUI_TURN.map((l) => l.replace('"last_agent_message":"alpha"', '"last_agent_message":"auto-cycle: ready"'))), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wrLog })
+const wg = project('watch-gone')
+shim(wg, { gone: true })
+const wgT0 = Date.now()
+await watcher(wg, 'q4', rollout(wg, 'q4', F.TUI_TURN), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: path.join(wg.dir, 'events.log'), DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 8000 }) })
+const wgLog = (() => { try { return fs.readFileSync(path.join(stateDir('q4'), 'hook.log'), 'utf8') } catch { return '' } })()
+clause('clause 1d5 — the watcher exits when herdr answers that its pane does not exist, long before its watch ends, handing nothing on',
+  wgLog.includes('exit: the pane is gone') && Date.now() - wgT0 < 6000 && !fs.existsSync(path.join(wg.dir, 'events.log')), `${wgLog} ${Date.now() - wgT0}ms`)
 clause('clause 1d4 — the watcher exits handing nothing on when a new turn has started, when auto-cycle is off, and when the turn ended on the ready line',
   !fs.existsSync(wnLog) && !fs.existsSync(woLog) && !fs.existsSync(wrLog), [wnLog, woLog, wrLog].filter((p) => fs.existsSync(p)).join(' '))
 

@@ -34,7 +34,7 @@ clause('clause 1b — transcriptEntries on a rollout: each user and assistant me
   te.partial === false && users.length === 2 && users[0].isMeta === true && users[1].isMeta === false &&
   users[1].message.content[0].text === "Run the shell command 'echo tui-one', then reply with the word alpha." && users[1].timestamp === '2026-09-28T18:52:47.184Z' &&
   assts.length === 2 && assts[1].message.content[0].type === 'text' && assts[1].message.content[0].text === 'alpha' && te.entries.length === 4,
-  JSON.stringify(te.entries.map((e) => [e.type, e.isMeta, e.message.content[0].text.slice(0, 30)])))
+  JSON.stringify(te.entries.map((e) => [e.type, e.isMeta, e.message?.content?.[0]?.text?.slice(0, 30)])))
 const cut = text(F.TUI_TURN).slice(0, -40)
 clause('clause 1b2 — transcriptEntries on a rollout keeps the read rules: a last line still being written is partial, a damaged line before the last makes the read unreadable (S1, RB6-1)',
   transcriptEntries(cut, 'codex')?.partial === true && transcriptEntries(cut, 'codex').entries.length === 4 &&
