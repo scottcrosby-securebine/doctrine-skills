@@ -1488,7 +1488,9 @@ export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
  * hook for a turn ended by an API error, for a session left idle, or for a background terminal's exit (probes B5, B6),
  * so a detached watcher started at each UserPromptSubmit reads the rollout and herdr and hands the auto-cycle hook the
  * event Claude Code would have fired. `o.turn` is watchedTurn's, `o.obs` codexObservations', `o.bgAtEnd` whether a
- * background terminal ran when the turn ended, `o.idleFor` ms the observation has read idle, `o.age` ms watched.
+ * background terminal ran when the turn ended, `o.ready` whether the turn's last message ends with the ready line,
+ * `o.idleFor` ms the observation has read idle, `o.age` ms watched. A turn ended on the ready line with no terminal
+ * running leaves nothing to watch: its Stop decided, and an idle pause never follows the ready line (E8-D18).
  * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the terminal that held back the Stop has
  * exited, so the Stop is decided again) and `idle` (an idle_prompt).
  */
@@ -1500,6 +1502,7 @@ export function watchStep(o) {
   if (!o.turn.ended) return { act: 'wait', reason: 'the turn is running' }
   if (o.obs.apiError) return { act: 'stopFailure', reason: `the turn ended with an API error (${o.obs.apiError})` }
   if (o.bgAtEnd && !o.obs.backgroundRunning) return { act: 'stop', reason: 'the background terminal the turn left running has exited' }
+  if (o.ready && !o.obs.backgroundRunning) return { act: 'exit', reason: 'the turn ended on the ready line, so the Stop hook and the typer take it from here' }
   if (o.obs.idle && o.idleFor >= t.idle) return { act: 'idle', reason: 'the session has been idle, waiting for the user' }
   return { act: 'wait', reason: o.obs.idle ? 'idle, inside the grace' : 'nothing to report' }
 }
