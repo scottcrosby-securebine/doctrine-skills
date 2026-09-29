@@ -1554,8 +1554,9 @@ export const UNDER_CLAUDE_WHY = 'a Codex process under a Claude Code session (CL
 /**
  * The state of a rollout's last turn: a turn starts at task_started or at a user message the user typed, and ends at
  * task_complete (its error and last_agent_message kept) or turn_aborted. Background work is not read from here: a
- * rollout shows a background terminal only in text the model chose to print, which three gate rounds found could say
- * "running" forever or "finished" while it ran (E10H-R3-B4); codexBackground reads the process tree instead.
+ * rollout shows a background terminal only in text the model chose to print, which can read "running" forever (probe
+ * B5 run 1) or show nothing of a loop that runs on (probe P-PROC's tty turn) (E10H-R3-B4); codexBackground reads the
+ * process tree instead.
  */
 function codexTurnState(text) {
   let ended = false, error = null, lastMessage = null

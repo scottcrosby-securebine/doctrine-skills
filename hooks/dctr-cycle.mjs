@@ -77,7 +77,7 @@ try {
   // UserPromptSubmit starts: read past the stand-downs, so a session with auto-cycle off pays nothing for it.
   const listing = host === 'codex' && (event === 'Stop' || event === 'UserPromptSubmit') ? processListing() : null
   // A Stop the watcher re-runs has no Codex above it (the watcher runs detached, under pid 1): it names the one its
-  // UserPromptSubmit found (the live tty run, R3 repair notes). Codex's own payloads never carry dctr_watch.
+  // UserPromptSubmit found (E10H-R3-B4). Codex's own payloads never carry dctr_watch.
   const codex = !listing ? null : payload.dctr_watch === true ? payload.dctr_codex ?? null : codexAncestor(listing, process.pid)
   if (host === 'codex' && event === 'Stop') {
     const bg = codexBackground(listing, codex)

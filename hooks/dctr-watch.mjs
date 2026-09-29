@@ -2,8 +2,8 @@
 //
 // Codex fires no hook for three things the auto-cycle hook acts on under Claude Code: a turn ended by an API error
 // (Claude Code's StopFailure), a session left idle waiting for the user (Notification idle_prompt), and the exit of a
-// background terminal that held a Stop back (Claude Code fires a Stop again). Probes B5 and B6 found that only the
-// session's rollout shows the first two, and only the process tree the third (probe P-PROC, E10H-R3-B4). So
+// background terminal that held a Stop back (Claude Code fires a Stop again). Probe B6 found that only the session's
+// rollout shows the first two, and probe P-PROC that the process tree shows the third (E10H-R3-B4). So
 // dctr-cycle.mjs, on each Codex UserPromptSubmit while auto-cycle is active, spawns this detached with one JSON
 // argument: the session, its rollout, its cwd and project, its herdr pane (null when contained or outside herdr), the
 // rollout's byte length at the prompt, the turn's id and the Codex process above that hook (codexAncestor's, null when
