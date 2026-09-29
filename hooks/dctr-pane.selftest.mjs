@@ -14,7 +14,7 @@ import path from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { seatPlacement, SIDE_CAP, isSideSeat } from './dctr-lib.mjs'
-import { acquireLock, breakIfOrphaned, breakStaleLock, interactivePanes, isPaneNotFound, liveSeatsPartial, panesDir, publishPid, releaseLock, reserveMarker, seatsDir, sideOccupants, writeMarker } from './dctr-state.mjs'
+import { acquireLock, breakIfOrphaned, breakStaleLock, holderAlive, interactivePanes, isPaneNotFound, liveSeatsPartial, lockHolder, ownPidNs, panesDir, PIDLESS_STALE_FACTOR, publishNs, publishPid, releaseLock, reserveMarker, seatsDir, sideOccupants, writeMarker } from './dctr-state.mjs'
 import { recorderLine, defaultTeeDir, markerDir, openDecision } from './dctr-pane.mjs'
 
 // fileURLToPath, not `.pathname`, which percent-encodes: under a path containing a space the
@@ -312,7 +312,7 @@ console.log('round-5 repairs — each was a live defect, so each gets a clause')
   check('a tab session does not occupy a column slot', !isSideSeat({ paneId: 'w9:root', tabId: 'tab1', tee: '/t/x.log' }))
 
   // The steal decision itself, exercised through the function production actually calls. These used
-  // to run against holderAlive, which by then had no production caller at all: the clauses passed
+  // to run against an earlier holderAlive, which by then had no production caller at all: the clauses passed
   // while the real guard in breakIfOrphaned had none. Each case below goes red if its repair is
   // reverted, which is the property the previous version of this block did not have.
   const STALE = 1000
@@ -349,7 +349,7 @@ console.log('round-5 repairs — each was a live defect, so each gets a clause')
   fresh('2147483646'); fs.utimesSync(lk, mid, mid)
   check('while a dead pid at the same age is still broken', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
 
-  // The distinction the whole three-valued lockPid exists for. Revert it — make an unreadable pid
+  // The distinction the whole three-valued lock-file read exists for. Revert it — make an unreadable pid
   // read as dead — and this clause goes red while every other one stays green.
   if (typeof process.getuid === 'function' && process.getuid() === 0) {
     console.log('  skip unreadable-pid clause: running as root, which ignores file modes')
@@ -420,6 +420,147 @@ console.log('round-7 repairs — the previous round\'s fixes each carried a defe
   if (oldTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = oldTmp
 }
 
+console.log('pid namespaces — a holder is judged only from the namespace that issued its pid')
+{
+  // Codex runs a model's commands in a sandbox with its own pid namespace, where the launcher's pid
+  // is 2. Seen from the host, pid 2 is kthreadd and always alive, so a lock a killed sandboxed
+  // launcher left behind was never broken; and two sandboxes can each hand out pid 2, so a pid alone
+  // cannot say whose lock it is. The foreign namespace here is WRITTEN, not entered: this host
+  // refuses an unprivileged `unshare --pid`, so a second namespace can be named but not joined.
+  const STALE = 1000
+  const PIDLESS = STALE * PIDLESS_STALE_FACTOR
+  const MID = STALE * 3        // past the ordinary window, inside the pid-less one
+  const OLD = PIDLESS * 2      // past both
+  const OWN = ownPidNs()
+  const FOREIGN = 'pid:[1]'
+  const LIVE = String(process.pid)
+  const DEAD = '2147483646'
+  const lk = path.join(tmp, 'ns-probe.lock')
+  const make = (pid, ns, ageMs) => {
+    fs.rmSync(lk, { recursive: true, force: true }); fs.mkdirSync(lk)
+    if (ns !== null) fs.writeFileSync(path.join(lk, 'ns'), ns)
+    if (pid !== null) fs.writeFileSync(path.join(lk, 'pid'), pid)
+    const t = new Date(Date.now() - ageMs); fs.utimesSync(lk, t, t)
+  }
+
+  // Clause 3 first, without calling any lock code: the pid the foreign fixture writes answers a
+  // signal on this host, the namespace it names is not this process's own, and this process's own
+  // is what the kernel reports (or absent where there is no /proc to report it).
+  let liveHere = false; try { process.kill(Number(LIVE), 0); liveHere = true } catch { /* not running */ }
+  check('the foreign-namespace fixture writes a pid that is alive on this host', liveHere)
+  let procNs = null; try { procNs = fs.readlinkSync('/proc/self/ns/pid') } catch { /* no /proc */ }
+  check('this process\'s namespace is the one the kernel reports', OWN === procNs && (OWN === null || /^pid:\[\d+\]$/.test(OWN)), String(OWN))
+  check('and the foreign fixture names a namespace this process is not in', FOREIGN !== OWN, `${FOREIGN} vs ${OWN}`)
+  let deadHere = false; try { process.kill(Number(DEAD), 0) } catch (e) { deadHere = e.code === 'ESRCH' }
+  check('the dead-holder fixture writes a pid that is not running', deadHere)
+
+  // T1: the holder is the pid and the namespace together, keeping the three answers the pid read gave.
+  make(LIVE, FOREIGN, 0)
+  const h = lockHolder(lk)
+  check('lockHolder reads the pid and the namespace', h?.pid === LIVE && h?.ns === FOREIGN, JSON.stringify(h))
+  make(LIVE, null, 0)
+  const legacy = lockHolder(lk)
+  check('a lock with no ns file (the previous revision) reads its pid and a null namespace', legacy?.pid === LIVE && legacy?.ns === null, JSON.stringify(legacy))
+  make(null, FOREIGN, 0)
+  check('a lock with no pid file is null, whatever else it carries', lockHolder(lk) === null)
+  // An ns file that is there and cannot be read is "I could not look", exactly as an unreadable pid
+  // is. Reading it as absent would judge a sandboxed holder by its pid, which is the defect.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    console.log('  skip unreadable-ns clause: running as root, which ignores file modes')
+  } else {
+    make(DEAD, FOREIGN, OLD); fs.chmodSync(path.join(lk, 'ns'), 0o000)
+    check('a lock whose ns file cannot be READ is unknown, and survives past both windows',
+      lockHolder(lk) === undefined && breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+    let nsUnreadable = false
+    try { fs.readFileSync(path.join(lk, 'ns'), 'utf8') } catch (e) { nsUnreadable = e.code === 'EACCES' }
+    check('the unreadable-ns fixture really cannot be read', nsUnreadable)
+    fs.chmodSync(path.join(lk, 'ns'), 0o600)
+  }
+
+  // T2: a pid is judged alive or dead only in the namespace that issued it.
+  check('a live holder in this namespace is alive', holderAlive({ pid: LIVE, ns: OWN }, OWN) === true)
+  check('a dead holder in this namespace is dead', holderAlive({ pid: DEAD, ns: OWN }, OWN) === false)
+  check('a holder in another namespace cannot be judged, however alive its pid looks here', holderAlive({ pid: LIVE, ns: FOREIGN }, OWN) === null)
+  check('a holder naming a namespace cannot be judged by a judge that has none', holderAlive({ pid: LIVE, ns: FOREIGN }, null) === null)
+  check('with no namespace on either side (no /proc) the pid is judged as before',
+    holderAlive({ pid: LIVE, ns: null }, null) === true && holderAlive({ pid: DEAD, ns: null }, null) === false)
+  check('a holder that published no namespace (the previous revision) is judged by its pid, as before',
+    holderAlive({ pid: LIVE, ns: null }, OWN) === true && holderAlive({ pid: DEAD, ns: null }, OWN) === false)
+
+  // The steal decision, through breakIfOrphaned, on each kind of holder.
+  make(LIVE, FOREIGN, MID)
+  check('a foreign-namespace lock with a live-looking pid is NOT broken inside the pid-less window',
+    breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+  make(LIVE, FOREIGN, OLD)
+  check('a foreign-namespace lock with a live-looking pid IS broken past the pid-less window',
+    breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
+  make(LIVE, OWN, OLD)
+  check('a live holder in this namespace survives past both windows', breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+  make(DEAD, OWN, MID)
+  check('a dead holder in this namespace is broken after the ordinary window', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
+  make(LIVE, null, OLD)
+  check('a live holder with no ns file survives past both windows, as before', breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+  make(DEAD, null, MID)
+  check('a dead holder with no ns file is broken after the ordinary window, as before', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
+
+  // T3: identity is the pid and the namespace together, at release and at the break.
+  make(LIVE, FOREIGN, 0)
+  check('releaseLock does not remove a lock held by this pid in another namespace', releaseLock(lk) === false && fs.existsSync(lk))
+  make(LIVE, OWN, 0)
+  check('releaseLock removes one held by this pid in this namespace', releaseLock(lk) === true && !fs.existsSync(lk))
+  make(LIVE, FOREIGN, 0)
+  check('breakStaleLock puts back a lock whose namespace differs from the condemned one',
+    breakStaleLock(lk, { pid: LIVE, ns: OWN }) === false && fs.existsSync(lk))
+  check('and breaks it when the namespace matches as well', breakStaleLock(lk, { pid: LIVE, ns: FOREIGN }) === true && !fs.existsSync(lk))
+
+  // acquireLock publishes the namespace beside the pid, and a waiter reads back this process.
+  fs.rmSync(lk, { recursive: true, force: true })
+  // Guarded: a revision whose readback rejects its own publication throws here, and this clause must
+  // still print its verdict rather than end the suite before it.
+  let took; try { took = acquireLock(lk) } catch (e) { took = e.message }
+  let nsFile = null; try { nsFile = fs.readFileSync(path.join(lk, 'ns'), 'utf8') } catch { /* checked below */ }
+  check('acquireLock publishes this process\'s namespace beside its pid', took === true && nsFile === OWN, `${nsFile} vs ${OWN}`)
+  check('and a waiter reads this process back as the holder', lockHolder(lk)?.pid === LIVE && lockHolder(lk)?.ns === OWN)
+  check('and releases what it took', releaseLock(lk) === true && !fs.existsSync(lk))
+
+  // Publication of the namespace is exclusive, for the reason publishPid's is.
+  fs.rmSync(lk, { recursive: true, force: true }); fs.mkdirSync(lk)
+  publishNs(lk, FOREIGN)
+  let second = false
+  try { publishNs(lk, 'pid:[2]') } catch { second = true }
+  check('publishing a namespace into a lock that already carries one fails, and the first is untouched',
+    second && fs.readFileSync(path.join(lk, 'ns'), 'utf8') === FOREIGN)
+  fs.rmSync(lk, { recursive: true, force: true })
+
+  // A lock whose files were published unreadable must be left judgeable, the namespace file included:
+  // an ns nobody can read makes lockHolder answer "could not look", which nothing ever breaks.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    console.log('  skip unreadable-publication clause: running as root, which ignores file modes')
+  } else if (OWN === null) {
+    console.log('  skip unreadable-publication clause: no /proc, so no namespace file is published')
+  } else {
+    const um = path.join(tmp, 'unreadable-ns.lock')
+    fs.rmSync(um, { recursive: true, force: true })
+    const oldUmask = process.umask(0o477)
+    let refused = false
+    try { acquireLock(um) } catch { refused = true }
+    process.umask(oldUmask)
+    const left = lockHolder(um)
+    check('a lock published unreadable refuses to enter and is left judgeable, its namespace included',
+      refused && left !== undefined && left?.ns === OWN, JSON.stringify(left))
+    // Clause 3: the fixture really makes a published file unreadable, without calling acquireLock.
+    const probe = path.join(tmp, 'unreadable-probe')
+    process.umask(0o477)
+    fs.mkdirSync(probe); fs.writeFileSync(path.join(probe, 'ns'), 'x')
+    process.umask(oldUmask)
+    let unreadable = false
+    try { fs.readFileSync(path.join(probe, 'ns')) } catch (e) { unreadable = e.code === 'EACCES' }
+    check('the unreadable-publication fixture really leaves a file nobody can read', unreadable)
+    for (const d of [um, probe]) { try { fs.chmodSync(d, 0o700) } catch { /* already gone */ } ; fs.rmSync(d, { recursive: true, force: true }) }
+  }
+  check('no .dead leftovers remain from the namespace clauses', !fs.readdirSync(tmp).some((f) => f.includes('.dead.')))
+}
+
 console.log('the lock protocol — acquire, release, and break only what is provably orphaned')
 {
   // A holder that cannot publish its pid must NOT enter: to every waiter it is indistinguishable
@@ -463,17 +604,17 @@ console.log('the lock protocol — acquire, release, and break only what is prov
   check('releaseLock will not remove another holder\'s lock', releaseLock(own) === false && fs.existsSync(own))
   fs.rmSync(own, { recursive: true, force: true })
 
-  // The break is verified against the pid it condemned, so a replacement holder is not carried off.
+  // The break is verified against the holder it condemned, so a replacement holder is not carried off.
   const rep = path.join(tmp, 'replacement.lock')
   fs.mkdirSync(rep, { recursive: true })
   fs.writeFileSync(path.join(rep, 'pid'), '999999')
-  check('a lock whose pid is not the condemned one is put back', breakStaleLock(rep, '111111') === false)
+  check('a lock whose pid is not the condemned one is put back', breakStaleLock(rep, { pid: '111111', ns: null }) === false)
   // Condemning a pid-less orphan must still verify. The bypass this replaces skipped the comparison
-  // whenever the condemned pid was null, so breaking an orphan carried off whatever had replaced it.
+  // whenever the condemned holder was null, so breaking an orphan carried off whatever had replaced it.
   check('a lock that acquired a pid since being condemned as pid-less is put back',
     breakStaleLock(rep, null) === false && fs.existsSync(rep))
   check('and it is still there afterwards', fs.existsSync(rep))
-  check('the same lock IS broken when the pid matches', breakStaleLock(rep, '999999') === true)
+  check('the same lock IS broken when the pid matches', breakStaleLock(rep, { pid: '999999', ns: null }) === true)
   check('and it is really gone', !fs.existsSync(rep))
   check('no .dead leftovers remain from the protocol clauses', !fs.readdirSync(tmp).some((f) => f.includes('.dead.')))
 }

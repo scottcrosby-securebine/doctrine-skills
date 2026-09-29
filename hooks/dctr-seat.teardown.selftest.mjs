@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { readMeta, sleepMs, sideOccupants } from './dctr-state.mjs'
+import { PIDLESS_STALE_FACTOR, PLACEMENT_STALE_MS, readMeta, sleepMs, sideOccupants } from './dctr-state.mjs'
 import { seatPlacement } from './dctr-lib.mjs'
 
 const hook = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dctr-seat.mjs')
@@ -1041,6 +1041,36 @@ console.log('clause 1 — a placement drops a moved gate ONLY on a server-wide n
   check('a moved marker replaced during its lookup is left alone: the drop removes only the record it judged',
     after?.paneId === 'w9:gNEW', JSON.stringify(after))
   fs.rmSync(gatesDir, { recursive: true, force: true })
+}
+
+console.log('clause 1 — a placement lock left by a holder in another pid namespace is broken by the seat hook past the pid-less window')
+{
+  // A Codex-sandboxed launcher publishes a pid from its own namespace (2, observed), which the host
+  // sees as a process that is always alive. Killed while holding the placement lock, it used to
+  // block every seat of the session for good. The namespace is WRITTEN, not entered: this host
+  // refuses an unprivileged `unshare --pid`.
+  const lockDir = path.join(stateDir, 'placement.lock')
+  const FOREIGN = 'pid:[1]'
+  let own = null; try { own = fs.readlinkSync('/proc/self/ns/pid') } catch { /* no /proc */ }
+  const plant = (ns) => {
+    reset(); fs.mkdirSync(lockDir)
+    if (ns !== null) fs.writeFileSync(path.join(lockDir, 'ns'), ns)
+    fs.writeFileSync(path.join(lockDir, 'pid'), String(process.pid))
+    const t = new Date(Date.now() - (PLACEMENT_STALE_MS * PIDLESS_STALE_FACTOR + 10000)); fs.utimesSync(lockDir, t, t)
+  }
+  const placed = () => fs.readdirSync(seatsDir).some((f) => f.endsWith('.json'))
+  const start = () => run({ hook_event_name: 'SubagentStart', agent_id: 'ns1', agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/s.jsonl' })
+  plant(FOREIGN); start()
+  check('a lock from another namespace, aged past the pid-less window, is broken and the seat is placed',
+    placed() && called(/^pane split /m), callLines(/split|tab create/).join(' | ') || '(no placement call)')
+  // Known-good: the same live pid in THIS namespace is a live holder and is never stolen from, at any age.
+  plant(own); start()
+  check('the same live pid in this namespace keeps the lock, and no seat is placed past it',
+    !placed() && fs.existsSync(path.join(lockDir, 'pid')) && !called(/^pane split /m))
+  // Clause 3: the fixture's pid is alive on this host and its namespace is not this one.
+  let live = false; try { process.kill(process.pid, 0); live = true } catch { /* not running */ }
+  check('the foreign-lock fixture writes a pid alive on this host under a namespace that is not this one', live && FOREIGN !== own, `${FOREIGN} vs ${own}`)
+  fs.rmSync(lockDir, { recursive: true, force: true })
 }
 
 console.log('clause 1 — a moved gate in this session\'s layout counts against the cap; one elsewhere does not (B2)')
