@@ -316,7 +316,8 @@ export function sideOccupants(seats, layout) {
 // Placement is a read-decide-split sequence, and doctrine dispatches waves: six SubagentStarts in
 // one millisecond is the proven load. Unserialized, every one of them sees zero side seats and
 // founds its own right-hand column. The lock makes marker state and pane geometry move together;
-// a holder that died is stolen after 10s so one crashed hook cannot blind every later seat.
+// a holder that died is stolen after 10s (60s when its pid cannot be judged: none published, or one
+// from another pid namespace) so one crashed hook cannot blind every later seat.
 // ONE LOCK PROTOCOL, used by both loops below and by dctr-pane.mjs. It was written twice, and the
 // copies drifted until each carried defects the other did not, so the protocol lives here and the
 // loops differ only in how they wait. A holder is identified by the pid it publishes AND the pid
@@ -512,8 +513,9 @@ export function holderAlive(holder, ownNs) {
 export const PIDLESS_STALE_FACTOR = 6
 
 export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STALE_FACTOR) {
+  const observedAt = Date.now()
   let age = null
-  try { age = Date.now() - fs.statSync(lock).mtimeMs } catch { return false }   // vanished: nothing to break
+  try { age = observedAt - fs.statSync(lock).mtimeMs } catch { return false }   // vanished: nothing to break
   const condemned = lockHolder(lock)
   if (condemned === undefined) return false          // could not look; never break on that
   // The window depends on what the lock told us about itself. Read the holder FIRST so the choice of
@@ -522,7 +524,10 @@ export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STA
   const alive = condemned === null ? null : holderAlive(condemned, ownPidNs())
   if (age <= (alive === null ? pidlessMs : staleMs)) return false
   if (alive) return false
-  return breakStaleLock(lock, condemned)
+  // The age and the holder are two reads, and the lock can be broken and re-taken between them: the
+  // orphan's age then sits beside a fresh holder, and for one that cannot be judged by its pid the age
+  // is the whole verdict. So the break re-checks the age on the directory it actually moved.
+  return breakStaleLock(lock, condemned, observedAt - (alive === null ? pidlessMs : staleMs))
 }
 
 /** Break a lock we have judged orphaned. The rename is atomic, but the judgement is not tied to it:
@@ -532,7 +537,7 @@ export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STA
  *  passed in and verified against whatever actually moved, pid and namespace both, and a mismatch is
  *  put straight back. Residual, stated rather than papered over: if the put-back loses a race for
  *  the name, the moved lock is dropped and its holder finds out at releaseLock. */
-export function breakStaleLock(lock, condemned = null) {
+export function breakStaleLock(lock, condemned = null, staleBefore = null) {
   const aside = `${lock}.dead.${process.pid}.${Date.now()}`
   try { fs.renameSync(lock, aside) } catch { return false }
   // Compared in EVERY case, null included. Skipping the check when the condemned holder was null meant
@@ -540,7 +545,12 @@ export function breakStaleLock(lock, condemned = null) {
   // which is a live holder's lock, taken by the one branch that did no verification at all.
   {
     const moved = lockHolder(aside)
-    if (!sameHolder(moved, condemned)) {
+    // `staleBefore`, where the caller judged on age: the moved lock must still be that old. A fresh
+    // lock with the condemned identity is a replacement that renewed, or took the name, since the
+    // judgement. An age it cannot read is put back, never destroyed.
+    let stale = staleBefore === null
+    if (!stale) { try { stale = fs.statSync(aside).mtimeMs <= staleBefore } catch { /* could not look */ } }
+    if (!sameHolder(moved, condemned) || !stale) {
       try { fs.renameSync(aside, lock); return false } catch { /* the name was retaken; drop what we hold */ }
     }
   }

@@ -523,6 +523,33 @@ console.log('pid namespaces — a holder is judged only from the namespace that 
     breakStaleLock(lk, { pid: LIVE, ns: OWN }) === false && fs.existsSync(lk))
   check('and breaks it when the namespace matches as well', breakStaleLock(lk, { pid: LIVE, ns: FOREIGN }) === true && !fs.existsSync(lk))
 
+  // The age is re-checked on the directory the break moved (E10P-R2-B1). A replacement taken between
+  // breakIfOrphaned's age read and its holder read carries the condemned identity's shape but a fresh
+  // mtime, and must be put back.
+  make(LIVE, FOREIGN, 0)
+  const cutoff = Date.now() - STALE * PIDLESS_STALE_FACTOR
+  check('the fresh fixture really is newer than the cutoff', fs.statSync(lk).mtimeMs > cutoff)
+  check('breakStaleLock puts back a lock with the condemned identity that is no longer stale',
+    breakStaleLock(lk, { pid: LIVE, ns: FOREIGN }, cutoff) === false && fs.existsSync(lk))
+  make(LIVE, FOREIGN, OLD)
+  check('and still breaks one that is', breakStaleLock(lk, { pid: LIVE, ns: FOREIGN }, cutoff) === true && !fs.existsSync(lk))
+  // The race itself, forced: the orphan's stat is answered, then the orphan is broken and re-taken by a
+  // fresh foreign holder before breakIfOrphaned reads the holder. fs is the one module object both
+  // this suite and dctr-state import, so wrapping its statSync reaches the call under test.
+  make(DEAD, FOREIGN, OLD)
+  const realStat = fs.statSync
+  let swapped = false
+  fs.statSync = (p, ...rest) => {
+    const st = realStat(p, ...rest)
+    if (!swapped && p === lk) { swapped = true; make(LIVE, FOREIGN, 0) }
+    return st
+  }
+  let raced
+  try { raced = breakIfOrphaned(lk, STALE) } finally { fs.statSync = realStat }
+  let retakenAge = null; try { retakenAge = Date.now() - realStat(lk).mtimeMs } catch { /* broken: the clause above says so */ }
+  check('a lock re-taken between the age read and the holder read is not broken', swapped && raced === false && fs.existsSync(lk))
+  check('the re-taken fixture really is fresh', swapped && retakenAge !== null ? retakenAge < STALE : swapped)
+
   // acquireLock publishes the namespace beside the pid, and a waiter reads back this process.
   fs.rmSync(lk, { recursive: true, force: true })
   // Guarded: a revision whose readback rejects its own publication throws here, and this clause must
