@@ -45,7 +45,7 @@ process.on('exit', () => {
 })
 process.env.TMPDIR = tmp
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE } = await import('./dctr-lib.mjs')
-const { stateDir, restoreFile, stopFactsFile, stopHeldFile } = await import('./dctr-state.mjs')
+const { stateDir, restoreFile, stopFactsFile, stopHeldFile, processListing } = await import('./dctr-state.mjs')
 
 const here = import.meta.dirname
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text) }
@@ -597,6 +597,25 @@ clause('clause 1e13 — typer on Codex, the resume turn interrupted before its f
 const tClearDraft = typerCase('clear-draft', { before: DRAFT_BEFORE, after: DRAFT_BEFORE })
 clause('clause 1e12 — typer on Codex, a draft in the composer before the /clear: the /clear is not sent into it, paused R16 (clear 0, resume 0, E10H-R4-B1)',
   tClearDraft.sends === '0,0' && JSON.stringify(tClearDraft.paused) === R16_LINE && tClearDraft.otherSends.length === 0, td(tClearDraft))
+
+// Standards R4-N1: processListing's reads of /proc/<pid>/stat, against this process's own stat and a real zombie: sh
+// execs into sleep and never reaps the `true` it started. proc(5): after "(comm) " come field 3, the state, and field
+// 22, the start time in clock ticks. The zombie and its state are found with ps(1), not the listing.
+const zParent = spawn('sh', ['-c', 'true & exec sleep 5'], { stdio: 'ignore' })
+orphans.push(zParent.pid)
+await sleep(300)
+const psZ = (() => { try { return execFileSync('ps', ['-o', 'pid=,stat=', '--ppid', String(zParent.pid)], { encoding: 'utf8' }).trim().split(/\s+/) } catch { return [] } })()
+const zPid = Number(psZ[0])
+const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfFields = selfStat.slice(selfStat.lastIndexOf(') ') + 2).split(' ')
+const nowList = processListing()
+zParent.kill()
+const me = nowList.procs?.find((p) => p.pid === process.pid), zom = nowList.procs?.find((p) => p.pid === zPid)
+clause('clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out: this process is running (R) with the start time field 22 holds, its parent the suite\'s own; a zombie ps names reads Z, started no earlier than this process (Standards R4-N1)',
+  me?.state === 'R' && me.start === Number(selfFields[19]) && me.ppid === process.ppid && Number.isInteger(me.start) && me.start > 0 &&
+  zom?.state === 'Z' && zom.ppid === zParent.pid && zom.start >= me.start,
+  `${JSON.stringify(me)} ${JSON.stringify(zom)} ps ${JSON.stringify(psZ)}`)
+clause('clause 3g — without the listing: ps names one child of the zombie\'s parent and its state is Z; this process\'s stat field 22 is a positive tick count',
+  psZ.length === 2 && /^Z/.test(psZ[1]) && Number(selfFields[19]) > 0 && selfFields[0] === 'R', JSON.stringify([psZ, selfFields.slice(0, 1), selfFields[19]]))
 
 // ---------------------------------------------------------------- clause 2: known-good inputs stay quiet
 

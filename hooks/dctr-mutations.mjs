@@ -2558,6 +2558,13 @@ const MUTATIONS = [
   { name: "R4-N2: the watcher does not tell codexBackground what it inherited, so a helper carrying it holds the Stop", file: "dctr-watch.mjs",
     clause: "clause 1d13 — once that exits the watcher hands the hook the Stop again",
     from: ", inherited: process.env.CODEX_SESSION_ID, session: a.session } : undefined)", to: " } : undefined)" },
+  // Standards R4-N1: processListing's /proc/<pid>/stat field reads.
+  { name: "R4-N1: processListing reads the state from the ppid field", file: "dctr-state.mjs",
+    clause: "clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out",
+    from: "state: f[0],", to: "state: f[1]," },
+  { name: "R4-N1: processListing reads the start time from the field after it", file: "dctr-state.mjs",
+    clause: "clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out",
+    from: "start: Number(f[19]),", to: "start: Number(f[20])," },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
