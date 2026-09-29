@@ -163,6 +163,17 @@ clause('clause 1f7 — codexBackground unknown, counted running: no listing, a l
   codexBackground(halfBlind, C).unknown === null && codexBackground(halfBlind, C).running === true && codexBackground(detached, C).running === false &&
   codexObservations(text(F.TUI_TURN), 'done').backgroundUnknown === 'no process listing' && codexObservations(text(F.TUI_TURN), 'done').idle === false && obs(F.TUI_TURN).backgroundUnknown === null,
   JSON.stringify([codexBackground(blind, C), codexBackground(halfBlind, C), codexBackground(zombie, C)]))
+// Standards R4-N2. Derived: P-PROC's bypass listings with an inherited CODEX_SESSION_ID ('outer') on everything Codex
+// did not start a command in: the hook, codex-code-mode-host and Codex itself, as a Codex launched with the variable
+// set passes it on. The commands keep the session's own id.
+const ISID = '01a0ea6f-1c15-7372-a6fa-ded272b978f2'
+const inherit = (c) => ({ procs: c.listing.procs.map((p) => (p.session === ISID ? p : p.pid === c.self || /codex(-code-mode-host)?$/.test(p.argv0) ? { ...p, session: 'outer' } : p)) })
+const inhBg = (c, own) => codexBackground(inherit(c), codexAncestor(inherit(c), c.self), own)
+clause('clause 1f8 — codexBackground with an inherited CODEX_SESSION_ID: the hook and codex-code-mode-host carrying it are not work, so an idle turn reads none and the tty loop reads only its own processes; an inherited value equal to the session\'s own excludes nothing (Standards R4-N2)',
+  inhBg(F.PROC_BYPASS.IDLE, { inherited: 'outer', session: ISID }).running === false && inhBg(F.PROC_BYPASS.TTY_GONE, { inherited: 'outer', session: ISID }).running === false &&
+  JSON.stringify(inhBg(F.PROC_BYPASS.TTY, { inherited: 'outer', session: ISID }).pids) === JSON.stringify(F.PROC_BYPASS.TTY.listing.procs.filter((p) => p.session === ISID).map((p) => p.pid)) &&
+  codexBackground(F.PROC_BYPASS.TTY.listing, codexAncestor(F.PROC_BYPASS.TTY.listing, F.PROC_BYPASS.TTY.self), { inherited: ISID, session: ISID }).pids.length === 2 && inherit(F.PROC_BYPASS.TTY).procs.filter((p) => p.session === 'outer').length === 3,
+  JSON.stringify([inhBg(F.PROC_BYPASS.IDLE, { inherited: 'outer', session: ISID }), inhBg(F.PROC_BYPASS.TTY, { inherited: 'outer', session: ISID })]))
 clause('clause 1f4 — codexObservations: a task_complete carrying an error after the last user turn is the API error, and that turn is not idle (S5, B6)',
   obs(F.API_ERROR, 'idle').apiError === 'internal_server_error' && obs(F.API_ERROR, 'idle').idle === false, JSON.stringify(obs(F.API_ERROR, 'idle')))
 // Derived: TUI_TURN with its final answer and task_complete ending in the ready line, and TUI_TURN cut before its end.

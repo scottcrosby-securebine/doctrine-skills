@@ -80,7 +80,7 @@ try {
   // UserPromptSubmit found (E10H-R3-B4). Codex's own payloads never carry dctr_watch.
   const codex = !listing ? null : payload.dctr_watch === true ? payload.dctr_codex ?? null : codexAncestor(listing, process.pid)
   if (host === 'codex' && event === 'Stop') {
-    const bg = codexBackground(listing, codex)
+    const bg = codexBackground(listing, codex, { inherited: process.env.CODEX_SESSION_ID, session: sessionId })
     payload = { ...payload, background_tasks: bg.running ? [{ status: 'running', source: bg.unknown ? `unknown: ${bg.unknown}` : `codex processes ${bg.pids.join(' ')}` }] : [] }
   }
 

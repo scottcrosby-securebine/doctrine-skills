@@ -1627,9 +1627,12 @@ export function codexAncestor(listing, pid) {
  * whole session (probe P-PROC, both postures). A process that left the tree (a detached daemon) is no background
  * terminal of Codex's, and is not counted. `{ running, unknown, pids }`: `unknown` names why it cannot tell (no
  * listing, no Codex process, that process gone or its pid reused, a descendant whose environment cannot be read), and
- * then `running` is true, the direction E8-D7 takes.
+ * then `running` is true, the direction E8-D7 takes. `own` is `{ inherited, session }`: the CODEX_SESSION_ID the
+ * calling hook inherited, and the session's id. A Codex started with the variable already set passes it to its hooks
+ * and helpers unchanged, and only the commands it runs get the session's own, so a value that differs from the
+ * session's is no command's and counts as none (Standards R4-N2).
  */
-export function codexBackground(listing, codex) {
+export function codexBackground(listing, codex, own = {}) {
   const unknown = (why) => ({ running: true, unknown: why, pids: [] })
   if (!listing?.procs) return unknown(listing?.error || 'no process listing')
   if (!codex) return unknown('no Codex process above the hook')
@@ -1649,7 +1652,8 @@ export function codexBackground(listing, codex) {
     if (p.state !== 'Z') live.push(p)
     queue.push(...(kids.get(p.pid) || []))
   }
-  const work = live.filter((p) => p.session)
+  const foreign = own.inherited && own.inherited !== own.session ? own.inherited : null
+  const work = live.filter((p) => p.session && p.session !== foreign)
   if (work.length) return { running: true, unknown: null, pids: work.map((p) => p.pid) }
   const blind = live.find((p) => p.session === null || p.session === undefined)
   return blind ? unknown(`the environment of process ${blind.pid} could not be read`) : { running: false, unknown: null, pids: [] }
@@ -1657,8 +1661,8 @@ export function codexBackground(listing, codex) {
 
 /**
  * The observations Codex's hooks do not carry (seam S5), from the session's rollout, herdr's agent_status for its pane
- * (null when there is no pane, or none may be read) and `procs`, `{ listing, codex }` for codexBackground (absent, it
- * is unknown): `backgroundRunning`, the session's background work live or unknown (E8-D7's background_tasks), with
+ * (null when there is no pane, or none may be read) and `procs`, `{ listing, codex, inherited, session }` for
+ * codexBackground (absent, it is unknown): `backgroundRunning`, the session's background work live or unknown (E8-D7's background_tasks), with
  * `backgroundUnknown` naming why it is unknown, else null; `apiError`, the error a task_complete carries after the
  * last user turn, as a 5xx ends a turn with no Stop (probe B6, E8-D18's StopFailure), else null; `idle`, the turn
  * ended with no error and no background work, its last assistant message not the ready line, and herdr reporting the
@@ -1666,7 +1670,7 @@ export function codexBackground(listing, codex) {
  */
 export function codexObservations(rolloutText, herdrStatus, procs) {
   const t = codexTurnState(rolloutText)
-  const bg = codexBackground(procs?.listing, procs?.codex)
+  const bg = codexBackground(procs?.listing, procs?.codex, procs)
   const apiError = t.ended && t.error ? t.error : null
   const ready = herdrStatus === null || herdrStatus === undefined || READY_STATUSES.includes(herdrStatus)
   return { backgroundRunning: bg.running, backgroundUnknown: bg.unknown, apiError, idle: t.ended && !apiError && !bg.running && !endsReady(t.lastMessage) && ready }

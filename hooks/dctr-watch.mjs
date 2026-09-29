@@ -74,7 +74,7 @@ try {
     // The session's background work from the process tree under the Codex process its UserPromptSubmit named
     // (codexBackground), read only once the turn has ended; an unreadable rollout is a turn not yet ended.
     const obs = text === null ? { backgroundRunning: true, backgroundUnknown: null, apiError: null, idle: false }
-      : codexObservations(text, turn.ended ? pane.status : null, turn.ended ? { listing: processListing(), codex: a.codex ?? null } : undefined)
+      : codexObservations(text, turn.ended ? pane.status : null, turn.ended ? { listing: processListing(), codex: a.codex ?? null, inherited: process.env.CODEX_SESSION_ID, session: a.session } : undefined)
     idleSince = obs.idle ? (idleSince ?? now) : null
     unknownSince = turn.ended && obs.backgroundUnknown ? (unknownSince ?? now) : null
     const last = turn.ended ? lastMessage(text) : null

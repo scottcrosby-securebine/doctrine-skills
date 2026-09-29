@@ -266,6 +266,17 @@ clause('clause 1c4 — a Codex Stop with background work running under its Codex
   b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
   (b2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && launch?.host === 'codex' && launch?.session === 'b1' && recLines(bg, /paused/).length === 0 && !/"decision"/.test(b1.out + b2.out),
   `b1 ${b1.out} ${b1.err} b2 ${b2.out} ${b2.err} launch ${JSON.stringify(launch)} paused ${JSON.stringify(recLines(bg, /paused/))}`)
+// Standards R4-N2: a Codex started with CODEX_SESSION_ID already in its environment hands that value to its hooks, which
+// Codex does not overwrite (only the commands it runs get this session's id). With no work running, the Stop hook,
+// itself a descendant of Codex carrying the inherited id, must not count as work.
+const ih = project('inherited', { lines: ['- auto-cycle: warned i1 10000'] })
+write(path.join(stateDir('i1'), 'gauge.json'), JSON.stringify({ session_id: 'i1', warned: true, warnedAt: Date.now() - 60000 }))
+shim(ih, { session: 'i1' })
+const ihLog = path.join(ih.dir, 'typer.log')
+const ih1 = hook('dctr-cycle.mjs', ih, as(F.STOP_BG, ih, 'i1', rollout(ih, 'i1', [F.BG_RUNNING, F.BG_DONE]), { last_assistant_message: 'Handoff written.\nauto-cycle: ready' }),
+  { DCTR_TYPER_SCRIPT: stub, STUB_LOG: ihLog, CODEX_SESSION_ID: '01a0eb00-0000-7000-8000-0000000000aa' })
+clause('clause 1c9 — a Codex Stop whose hook inherited another CODEX_SESSION_ID from the environment Codex started in, with no work running, is not held by itself: it launches the typer (Standards R4-N2)',
+  ih1.code === 0 && (ih1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && readJson(() => stopHeldFile('i1'))?.held === false, `${ih1.out} ${ih1.err} ${JSON.stringify(readJson(() => stopHeldFile('i1')))}`)
 clause('clause 1c8 — a Codex Stop persists its own decision for its turn: held for the running work, then not held once the Stop launched (E10H-R2-B2)',
   held1?.turn === F.STOP_BG.turn_id && held1.held === true && Number.isFinite(held1.at) && held2?.turn === F.STOP_BG.turn_id && held2.held === false,
   `${JSON.stringify(held1)} ${JSON.stringify(held2)}`)
@@ -377,6 +388,26 @@ clause('clause 1d3 — the watcher fires nothing while the background work runs,
 // before its task_complete, sees the terminal running and holds; the terminal's completion lands next, and the
 // task_complete after it. Read at the task_complete, nothing was running; the Stop still held and must be re-run.
 const events = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } }
+// Standards R4-N2, the watcher's half: Codex started with CODEX_SESSION_ID set, so its helpers (a sleep standing in for
+// codex-code-mode-host) and the hook and watcher carry that inherited value. The Stop holds for the real work; once
+// that exits, the helper carrying the inherited value must not hold the watcher.
+const wih = heldProject('watch-inherited', 'v9')
+const wihT = rollout(wih, 'v9', F.BG_RUNNING)
+const OUTER = { CODEX_SESSION_ID: '01a0eb00-0000-7000-8000-0000000000aa' }
+const helper = spawn('sleep', ['120'], { env: { ...baseEnv, ...OUTER }, stdio: 'ignore' })
+orphans.push(helper.pid)
+const wihWork = work()
+hook('dctr-cycle.mjs', wih, as(F.STOP_BG, wih, 'v9', wihT), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: path.join(wih.dir, 'typer.log'), ...OUTER })
+const wihHeld = readJson(() => stopHeldFile('v9'))
+const wihLog = path.join(wih.dir, 'events.log')
+const wihRun = watcher(wih, 'v9', wihT, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wihLog, ...OUTER }, F.STOP_BG.turn_id)
+await sleep(300)
+fs.appendFileSync(wihT, jl(F.BG_DONE))
+await wihWork.end()
+await wihRun
+helper.kill()
+clause('clause 1d13 — with an inherited CODEX_SESSION_ID on Codex\'s helpers, the hook and the watcher, the Stop holds for the real work only, and once that exits the watcher hands the hook the Stop again (Standards R4-N2)',
+  wihHeld?.held === true && events(wihLog)[0]?.hook_event_name === 'Stop', `${JSON.stringify(wihHeld)} ${JSON.stringify(events(wihLog))}`)
 const wb2 = heldProject('watch-bg-between', 'v2')
 const wb2T = rollout(wb2, 'v2', F.BG_RUNNING.slice(0, -1))
 const wb2Work = work()
