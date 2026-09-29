@@ -444,9 +444,9 @@ const b6Paused = recLines(b6, /paused/)
 stopNow(b6, 'v7', b6T, { turn_id: 'a-later-turn', last_assistant_message: READY })
 const b6Later = readJson(() => stopHeldFile('v7'))
 const UNKNOWN_LINE = '- auto-cycle paused: could not tell whether background work is still running: the Codex process is gone'
-clause('clause 1d12 — a held Stop whose background work the watcher cannot read (its Codex process gone): past the idle grace the hook writes the paused line naming it and herdr raises the notification; a later turn\'s Stop holds nothing (E10H-R3-B4, E8-D16, E8-D26)',
+clause('clause 1d12 — a held Stop whose background work the watcher cannot read (its Codex process gone): past the idle grace the hook writes the paused line naming it and herdr raises the notification, whose action names the /clear and the typed resume that clear it; a later turn\'s Stop holds nothing (E10H-R3-B4, E8-D16, E8-D26, E10H-R4-B2)',
   b6Held?.held === true && JSON.stringify(b6Paused) === JSON.stringify([UNKNOWN_LINE]) &&
-  calls(b6).some((c) => c[0] === 'notification' && String(c[c.indexOf('--body') + 1]).startsWith(UNKNOWN_LINE.slice('- auto-cycle paused: '.length))) &&
+  calls(b6).some((c) => c[0] === 'notification' && c[c.indexOf('--body') + 1] === `${UNKNOWN_LINE.slice('- auto-cycle paused: '.length)}. check the pane for work still running, then /clear and type resume by hand`) &&
   b6Later?.turn === 'a-later-turn' && b6Later.held === false,
   `${JSON.stringify(b6Held)} ${JSON.stringify(b6Paused)} ${JSON.stringify(b6Later)} ${JSON.stringify(calls(b6).filter((c) => c[0] === 'notification'))}`)
 // Spec N2: the user quit Codex and a later session runs in the pane; herdr names that session, so the old watcher ends.

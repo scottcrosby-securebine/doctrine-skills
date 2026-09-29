@@ -222,6 +222,26 @@ clause('clause 1h2 — cycleDecision on Codex names Codex in the different-sessi
   cd('codex').reason === 'could not cycle: this pane now runs a different Codex session' && cd(undefined).reason === 'could not cycle: this pane now runs a different Claude session',
   JSON.stringify([cd('codex'), cd(undefined)]))
 
+// E10H-R4-B2: every pause the Codex paths write names, in its action, the remedy that clears it. A paused line after
+// the session's warned line refuses every later Stop of that session (pausedAfterWarned) until a /clear and a typed
+// resume start a new one, so there its action must name those; before the warned line the session's next turn goes
+// on. The Codex kinds: the unknown background work, and every D2 reason Codex words differently (R9 and R12 today).
+const { parseRecord } = await import('./dctr-record.mjs')
+const { PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason } = lib
+const codexWorded = Object.keys(PAUSES).filter((c) => PAUSES[c].reason('x', 'codex') !== PAUSES[c].reason('x'))
+const codexKinds = [unknownBackgroundReason('the Codex process is gone'), unknownBackgroundReason('the environment of process 4242 could not be read'),
+  ...codexWorded.map((c) => pauseReason(c, 'internal_server_error', 'codex'))]
+const recOf = (...ls) => parseRecord(['# r', '- State: Open', '- auto-cycle: on cap 10 tier 10000', ...ls, ''].join('\n')).entries
+const actionAfter = (r) => { const es = recOf('- auto-cycle: warned s1 10000', `- auto-cycle paused: ${r}`); return { held: pausedAfterWarned(es, 's1'), action: pauseActionAt(es.at(-1), es) } }
+const actionBefore = (r) => { const es = recOf(`- auto-cycle paused: ${r}`); return { held: pausedAfterWarned(es, 's1'), action: pauseActionAt(es.at(-1), es) } }
+const unclear = codexKinds.filter((r) => { const a = actionAfter(r); return !a.held || !a.action.includes('/clear and type resume') })
+clause('clause 1h3 — every pause the Codex paths write names what clears it: after the warned line, where it holds every later Stop of the session, the unknown background work, R9 and R12 in Codex\'s words each name the /clear and the typed resume; the unknown background work names the pane first; R9 before any warned line asks only for the retry; the Claude Code actions are unchanged (E10H-R4-B2)',
+  codexWorded.join() === 'R9,R12' && unclear.length === 0 &&
+  actionAfter(codexKinds[0]).action === 'check the pane for work still running, then /clear and type resume by hand' &&
+  actionBefore(pauseReason('R9', 'internal_server_error', 'codex')).action === 'retry in the pane' &&
+  actionAfter(pauseReason('R9', 'x')).action === 'retry in the pane' && actionAfter(pauseReason('R12')).action === 'check the pane',
+  JSON.stringify(codexKinds.map((r) => [r, actionAfter(r)])))
+
 // Derived: TUI_TURN's prompt line with its text replaced by the resume line, as the typer's send records it.
 const resumeLine = F.TUI_TURN[2].replace("Run the shell command 'echo tui-one', then reply with the word alpha.", CODEX_RESUME_LINE)
 const resumeUser = transcriptEntries(text(resumeLine), 'codex').entries[0]

@@ -920,7 +920,16 @@ export const samePause = (a, b) => (pauseCode(a) ?? `text:${a}`) === (pauseCode(
 const SKILL_QUESTION = /^question: /
 /** The action for a reason as written: the D2 table's for a reason it knows, else an answer in the pane. The skills'
  *  question can need more, which only its place in the record decides (pauseActionAt). */
-export const pauseAction = (reason) => PAUSES[pauseCode(reason)]?.action || 'answer in the pane'
+export const pauseAction = (reason) => CODEX_ACTIONS.find((c) => c.match.test(reason))?.action || PAUSES[pauseCode(reason)]?.action || 'answer in the pane'
+/** The actions for the pauses only Codex writes, or writes in its own words, where the D2 table's would not clear
+ *  them (E10H-R4-B2). Each is written only after the session's warned line, where it holds every later Stop of that
+ *  session (pausedAfterWarned) until a /clear and a typed resume start a new one, so its action names those. R9 in
+ *  Codex's words can come before the warned line too, and pauseActionAt decides it by where it sits. */
+const CODEX_ACTIONS = [
+  { match: /^could not tell whether background work is still running: /, action: 'check the pane for work still running, then /clear and type resume by hand' },
+  { match: /^could not cycle: this pane now runs a different Codex session$/, action: 'check the pane, then /clear and type resume by hand' },
+]
+const CODEX_R9 = /^Codex API error: /
 export const pausedLine = (reason) => `- auto-cycle paused: ${reason}`
 /** The pane message and the toast body for a paused line (E8-R23): the reason, then what to do. */
 export const pauseMessage = (reason, action = pauseAction(reason)) => `doctrine auto-cycle paused: ${reason}. ${action}`
@@ -1014,9 +1023,12 @@ export function pausedAfterWarned(entries, sessionId) {
  *  start after that line), step 3 holds that session and the question asks, once answered, for a /clear and a typed
  *  resume; before the warning the next warned line moves the anchor past it, so it asks only for an answer. */
 export function pauseActionAt(p, entries, startLine = 0) {
-  if (!SKILL_QUESTION.test(p.reason)) return pauseAction(p.reason)
+  const question = SKILL_QUESTION.test(p.reason)
+  // Codex's API error likewise: after the warned line the retry alone leaves step 3 holding the session (E10H-R4-B2).
+  if (!question && !CODEX_R9.test(p.reason)) return pauseAction(p.reason)
   const mark = latestMark(entries, p.line)
-  return mark?.sub === 'warned' && mark.line > startLine ? 'answer in the pane, then /clear and type resume' : 'answer in the pane'
+  const first = question ? 'answer in the pane' : PAUSES.R9.action
+  return mark?.sub === 'warned' && mark.line > startLine ? `${first}, then /clear and type resume` : first
 }
 
 /** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, else the latest cycle line's
@@ -1662,7 +1674,7 @@ export function codexObservations(rolloutText, herdrStatus, procs) {
 
 /** The paused line for background work the watcher could not read past its idle grace (E10H-R3-B4, E8-D16): E8-D7's
  *  direction holds the Stop, and this makes the hold visible, so E8-D26 alerts. Not a D2 table code: its reason is its
- *  text, and its action the default. */
+ *  text, and its action CODEX_ACTIONS' (E10H-R4-B2). */
 export const unknownBackgroundReason = (why) => `could not tell whether background work is still running: ${why}`
 
 /** The watcher's turn, from the rollout text written since it started (at its UserPromptSubmit): `ended` once a

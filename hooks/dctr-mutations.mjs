@@ -1972,12 +1972,12 @@ const MUTATIONS = [
     to: "a === b" },
   { name: "the skills' question pause asks only for an answer in the pane, even after the warning (S4-1)", file: "dctr-lib.mjs",
     clause: "clause 2j",
-    from: "  return mark?.sub === 'warned' && mark.line > startLine ? 'answer in the pane, then /clear and type resume' : 'answer in the pane'\n",
-    to: "  return 'answer in the pane'\n" },
+    from: "  return mark?.sub === 'warned' && mark.line > startLine ? `${first}, then /clear and type resume` : first\n",
+    to: "  return first\n" },
   { name: "the skills' question pause asks for the /clear before the warning too (RB5-1)", file: "dctr-lib.mjs",
     clause: "clause 2c13",
-    from: "  return mark?.sub === 'warned' && mark.line > startLine ? 'answer in the pane, then /clear and type resume' : 'answer in the pane'\n",
-    to: "  return 'answer in the pane, then /clear and type resume'\n" },
+    from: "  return mark?.sub === 'warned' && mark.line > startLine ? `${first}, then /clear and type resume` : first\n",
+    to: "  return `${first}, then /clear and type resume`\n" },
   { name: "a question after a warned line of an earlier session asks for the /clear (RB5-1)", file: "dctr-lib.mjs",
     clause: "clause 1t",
     from: "mark?.sub === 'warned' && mark.line > startLine ?",
@@ -2535,6 +2535,16 @@ const MUTATIONS = [
   { name: "R4-B1: the typer reads the composer below the continue line before the /clear and the retry too", file: "dctr-typer.mjs",
     clause: "clause 1e — typer on Codex, normal",
     from: "stage === 'resume' ? composerEmpty(text, a.session) : composerIdle(text),", to: "composerEmpty(text, a.session)," },
+  // E10H-R4-B2: every pause the Codex paths write names the remedy that clears it.
+  { name: "R4-B2: the unknown background pause asks for an answer in the pane, which cannot clear it", file: "dctr-lib.mjs",
+    clause: "clause 1h3 — every pause the Codex paths write names what clears it; clause 1d12",
+    from: "  { match: /^could not tell whether background work is still running: /, action: 'check the pane for work still running, then /clear and type resume by hand' },\n", to: "" },
+  { name: "R4-B2: R12 in Codex's words asks only to check the pane", file: "dctr-lib.mjs",
+    clause: "clause 1h3 — every pause the Codex paths write names what clears it",
+    from: "  { match: /^could not cycle: this pane now runs a different Codex session$/, action: 'check the pane, then /clear and type resume by hand' },\n", to: "" },
+  { name: "R4-B2: R9 in Codex's words after the warned line asks only for the retry", file: "dctr-lib.mjs",
+    clause: "clause 1h3 — every pause the Codex paths write names what clears it",
+    from: "  if (!question && !CODEX_R9.test(p.reason)) return pauseAction(p.reason)\n", to: "  if (!question) return pauseAction(p.reason)\n" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
