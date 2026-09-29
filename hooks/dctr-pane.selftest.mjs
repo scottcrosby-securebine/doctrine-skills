@@ -605,11 +605,11 @@ console.log('lock liveness across time — a live holder renews its lock, and a 
   }
 
   // One process in a sandbox (or on this host), running `body` with dctr-state's exports in scope.
-  const run = (body, args, { proc = true, env = {}, async = false } = {}) => {
+  const run = (body, args, { proc = true, async = false } = {}) => {
     const script = `import fs from 'node:fs'; import path from 'node:path'; const S = await import(${JSON.stringify(STATE)}); const argv = process.argv.slice(1); ${body}`
     const cmd = sandboxed ? 'bwrap' : 'node'
     const argvFull = sandboxed ? [...BW, ...(proc ? ['--proc', '/proc'] : []), 'node', '--input-type=module', '-e', script, ...args] : ['--input-type=module', '-e', script, ...args]
-    const opts = { encoding: 'utf8', env: { ...process.env, PATH: `${slowbin}:${process.env.PATH}`, ...env } }
+    const opts = { encoding: 'utf8', env: { ...process.env, PATH: `${slowbin}:${process.env.PATH}` } }
     return async ? spawn(cmd, argvFull, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] }) : spawnSync(cmd, argvFull, { ...opts, timeout: 60000 })
   }
   const exited = (child) => new Promise((resolve) => child.on('exit', (code) => resolve(code)))
