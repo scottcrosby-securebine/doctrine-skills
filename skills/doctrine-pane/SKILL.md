@@ -8,8 +8,8 @@ description: Use when the user asks you to pop a pane, ssh into a box, log into 
 An interactive terminal session in a herdr pane, so the user sees exactly what you see and can take
 the keyboard whenever they want it.
 
-**On Codex CLI it needs the doctrine hooks installed** (`node <plugin-root>/hooks/dctr-codex.mjs install`,
-`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
+**On Codex CLI it needs the doctrine hooks installed**, which the user does, not you: ask them to run
+`node <plugin-root>/hooks/dctr-codex.mjs install` (`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
 workspace-write sandbox reach herdr. Without it the launcher's herdr calls fail and it refuses. The pane
 itself runs on the host, outside Codex's sandbox, so whatever you type into it runs unsandboxed.
 
