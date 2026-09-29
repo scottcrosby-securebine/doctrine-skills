@@ -187,7 +187,16 @@ codex plugin add doctrine@doctrine-skills
 ```
 
 On Codex the hub reads a Codex reference file for its tools, and runs its red team through Claude.
-The hooks, auto-cycle and `doctrine-pane` run on Claude Code only.
+Codex loads no plugin hooks, so the seat panes, the restore after `/clear`, the context gauge and
+auto-cycle need one install command, run again after each plugin update:
+
+```text
+node ~/.codex/plugins/cache/doctrine-skills/doctrine/<version>/hooks/dctr-codex.mjs install
+```
+
+It writes the hook entries into `~/.codex/hooks.json` (or `$CODEX_HOME`'s), trusts them in
+`config.toml`, and sets `sandbox_workspace_write.network_access = true` so commands in the
+workspace-write sandbox can reach herdr. `doctrine-pane` runs on Claude Code only.
 
 ## Try it on one file
 
