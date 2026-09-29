@@ -19,12 +19,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { watchStep, watchedTurn, codexObservations, followKickoff, autoCycleActive, stopFileRepo, repoOf, endsReady, WATCH_TIMES } from './dctr-lib.mjs'
-import { herdr, hookLog, sleepMs, isPaneNotFound, stopHeldFile, liveWork, processListing } from './dctr-state.mjs'
+import { herdr, hookLog, sleepMs, isPaneNotFound, stopHeldFile, liveWork, processListing, stateDir } from './dctr-state.mjs'
 
 let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
 if (!a?.session || !a.transcript || !a.project || !Number.isFinite(a.from)) process.exit(0)
-const log = (m) => hookLog(a.session, `auto-cycle watcher: ${m}`)
+// The session's state dir is made once, here, while the session that started the watcher runs; each log line after
+// only appends, so a watcher that outlives its session never re-creates the dir its end removed (R4-N2).
+try { fs.mkdirSync(stateDir(a.session), { recursive: true }) } catch { /* its log lines are then dropped */ }
+const log = (m) => hookLog(a.session, `auto-cycle watcher: ${m}`, false)
 let times = WATCH_TIMES
 try { times = { ...WATCH_TIMES, ...JSON.parse(process.env.DCTR_WATCH_TIMES || '{}') } } catch { /* the defaults */ }
 

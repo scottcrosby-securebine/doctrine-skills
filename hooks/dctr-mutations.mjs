@@ -2565,6 +2565,16 @@ const MUTATIONS = [
   { name: "R4-N1: processListing reads the start time from the field after it", file: "dctr-state.mjs",
     clause: "clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out",
     from: "start: Number(f[19]),", to: "start: Number(f[20])," },
+  // R4-N2 (round 4 real-environment run): a watcher outliving its session re-created the state dir its end removed.
+  { name: "R4-N2 realenv: the watcher's exit log re-creates the state dir the session's end removed", file: "dctr-watch.mjs",
+    clause: "clause 1d14 — exits without re-creating the session's state dir",
+    from: "hookLog(a.session, `auto-cycle watcher: ${m}`, false)", to: "hookLog(a.session, `auto-cycle watcher: ${m}`)" },
+  { name: "R4-N2 realenv: hookLog without create still makes the dir", file: "dctr-state.mjs",
+    clause: "clause 1d14 — exits without re-creating the session's state dir",
+    from: "    else if (!fs.existsSync(stateDir(sessionId))) return\n", to: "    else fs.mkdirSync(stateDir(sessionId), { recursive: true })\n" },
+  { name: "R4-N2 realenv: the watcher never makes its session's state dir, so a watcher started before any hook wrote there logs nothing", file: "dctr-watch.mjs",
+    clause: "clause 1d5 — the watcher exits when herdr answers that its pane does not exist (its log line)",
+    from: "try { fs.mkdirSync(stateDir(a.session), { recursive: true }) } catch { /* its log lines are then dropped */ }\n", to: "" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

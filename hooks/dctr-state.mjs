@@ -23,10 +23,13 @@ export const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
 /** Best-effort append to the session's hook.log; never throws. Hook output goes to a stream nobody
  *  reads, so a stand-down or a fallback that fired left no trace the first time it mattered (F14,
  *  2026-08-31). The launcher writes here too, so a gate that stood down is found where a seat is. */
-export function hookLog(sessionId, msg) {
+export function hookLog(sessionId, msg, create = true) {
   if (!sessionId) return
   try {
-    fs.mkdirSync(stateDir(sessionId), { recursive: true })
+    // `create` false: a process that may outlive its session (the Codex watcher) never re-creates the state dir the
+    // session's end removed (R4-N2); it appends only while the dir is there.
+    if (create) fs.mkdirSync(stateDir(sessionId), { recursive: true })
+    else if (!fs.existsSync(stateDir(sessionId))) return
     fs.appendFileSync(path.join(stateDir(sessionId), 'hook.log'), `${new Date().toISOString()} ${msg}\n`)
   } catch { /* logging must never be the failure */ }
 }

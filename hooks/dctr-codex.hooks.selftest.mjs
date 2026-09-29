@@ -522,6 +522,18 @@ await watcher(wm, 'q5', rollout(wm, 'q5', F.TUI_TURN.filter((l) => !l.includes('
 const wmLog = (() => { try { return fs.readFileSync(path.join(stateDir('q5'), 'hook.log'), 'utf8') } catch { return '' } })()
 clause('clause 1d7 — the watcher exits when its pane is gone while the turn has not ended (the TUI closed mid-turn), long before its watch ends (E10H-B9)',
   wmLog.includes('exit: the pane is gone') && Date.now() - wmT0 < 6000 && !fs.existsSync(path.join(wm.dir, 'events.log')), `${wmLog} ${Date.now() - wmT0}ms`)
+// R4-N2 (round 4 real-environment run): the session ended (SessionEnd removed its state dir) while its watcher still
+// ran; the watcher then found its pane gone and logged its exit, which must not re-create the dir.
+const wend = project('watch-after-end')
+shim(wend, { session: 'q6', status: 'working' })
+const wendRun = watcher(wend, 'q6', rollout(wend, 'q6', F.TUI_TURN.filter((l) => !l.includes('"task_complete"'))), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: path.join(wend.dir, 'events.log'), DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 8000 }) })
+await sleep(400)
+const wendStarted = fs.existsSync(stateDir('q6'))
+fs.rmSync(stateDir('q6'), { recursive: true, force: true })
+shim(wend, { gone: true })
+await wendRun
+clause('clause 1d14 — a watcher whose session ended (its state dir removed) and whose pane is then gone exits without re-creating the session\'s state dir (R4-N2)',
+  wendStarted && !fs.existsSync(stateDir('q6')), `started ${wendStarted} dir after ${fs.existsSync(stateDir('q6'))}`)
 clause('clause 1d4 — the watcher exits handing nothing on when a new turn has started, when auto-cycle is off, and when the turn ended on the ready line',
   !fs.existsSync(wnLog) && !fs.existsSync(woLog) && !fs.existsSync(wrLog), [wnLog, woLog, wrLog].filter((p) => fs.existsSync(p)).join(' '))
 
