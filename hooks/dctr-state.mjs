@@ -49,7 +49,9 @@ export const standDown = (event, name, sessionId) => (why) => {
 export const HERDR_TIMEOUT_MS = 30000
 /** How long a placement lock may sit before a provably dead holder loses it. */
 export const PLACEMENT_STALE_MS = 10000
-export const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }))
+// Every herdr call renews the locks this process holds first (renewHeldLocks), because a herdr call
+// is the one wait inside a lock section that can run to HERDR_TIMEOUT_MS.
+export const herdr = (args) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })) }
 /** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
 export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
 
@@ -324,9 +326,33 @@ export function sideOccupants(seats, layout) {
 // where the launcher is pid 2, and on the host pid 2 is kthreadd and always alive. Two sandboxes can
 // each hand out the same pid, so a pid alone cannot say whose lock it is either.
 
-/** This process's pid namespace as the kernel names it (`pid:[4026531836]`), or null where there is
- *  no /proc to ask, as on macOS, where every holder and judge then agree on null and nothing changes. */
-export const ownPidNs = () => { try { return fs.readlinkSync('/proc/self/ns/pid') } catch { return null } }
+/** The fields of a `/proc/<pid>/stat` line from the state on (`[0]` is field 3, so field n is
+ *  `[n - 3]`), split after the LAST `)`, because the command name before it may hold spaces and
+ *  parentheses of its own. */
+export const statFields = (text) => text.slice(text.lastIndexOf(')') + 2).split(' ')
+
+/** This process's pid namespace, unique over time: the kernel's name for it (`pid:[4026531836]`) and
+ *  the start time of the namespace's own pid 1 (field 22 of /proc/1/stat, clock ticks since boot),
+ *  as `pid:[4026531836]@21`. The link alone is not unique: the kernel reuses a freed namespace's
+ *  inode number, and every Codex sandbox runs its command as pid 2, so a later sandbox landing in a
+ *  reused `pid:[N]` read a dead sandbox's lock as its own pid 2, alive forever.
+ *  Where that start time cannot be read as this namespace's own (a /proc mounted for another
+ *  namespace, whose `self` is not this pid, or a pid 1 it hides), the identity is the link and a
+ *  random token, which no other process can match: every judge then takes the pid-less window, which
+ *  renewal (renewHeldLocks) makes safe for a live holder. Never the link alone, which is the reuse
+ *  defect. Null where there is no /proc at all, as on macOS, where every holder and judge agree on
+ *  null and nothing changes. Read once: a process never leaves its pid namespace. */
+let pidNs
+export const ownPidNs = () => (pidNs === undefined ? (pidNs = readPidNs()) : pidNs)
+function readPidNs() {
+  let link
+  try { link = fs.readlinkSync('/proc/self/ns/pid') } catch { return null }
+  try {
+    const start = fs.readlinkSync('/proc/self') === String(process.pid) ? statFields(fs.readFileSync('/proc/1/stat', 'utf8'))[19] : ''
+    if (/^\d+$/.test(start)) return `${link}@${start}`
+  } catch { /* not readable as this namespace's own */ }
+  return `${link}@unknown:${crypto.randomUUID()}`
+}
 
 /** One published file of a lock: a string, `null` when there is provably no such file, and
  *  `undefined` when it is there and could not be read. Collapsing those two into one answer is what
@@ -354,6 +380,21 @@ const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid 
 
 /** This process as a holder, in the shape lockHolder reads back. */
 const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
+
+/** The locks this process holds, which renewHeldLocks keeps fresh. acquireLock adds, releaseLock removes. */
+const heldLocks = new Set()
+
+/** Renew every lock this process holds: set its mtime to now. A holder that cannot be judged by its
+ *  pid (another namespace, or none published) is broken on AGE, past the pid-less window, so a live
+ *  one must never age that far. herdr() calls this before every call, and a herdr call is the only
+ *  wait in any lock section that can approach the window. A holder that dies stops renewing, and its
+ *  lock ages out as before. The renewal does not re-check that the lock is still ours: one stolen from
+ *  us is renewed at most until our own section ends, which is already the stolen-lock residual
+ *  breakStaleLock states. */
+function renewHeldLocks() {
+  const now = new Date()
+  for (const lock of heldLocks) { try { fs.utimesSync(lock, now, now) } catch { /* gone: releaseLock finds out */ } }
+}
 
 /** Take `lock` if it is free. Returns false if someone else holds it. **Throws** if the directory
  *  was taken but the pid could not be published: a holder no waiter can identify is indistinguish-
@@ -388,6 +429,7 @@ export function acquireLock(lock) {
     if (me.ns !== null) publishNs(lock, me.ns)
     publishPid(lock, me.pid)
     if (!sameHolder(lockHolder(lock), me)) throw new Error('pid readback did not match')
+    heldLocks.add(lock)
   } catch (e) {
     // Hand it back safely. Simply deleting by pathname is the race a previous repair removed: the
     // empty directory can be reaped and re-acquired between the check and the delete, and a live
@@ -413,6 +455,7 @@ export function acquireLock(lock) {
  *  removing it by pathname would take their critical section with it. Returns whether we still
  *  held it, so a caller that cares can tell it was stolen mid-section. */
 export function releaseLock(lock) {
+  heldLocks.delete(lock)
   if (!sameHolder(lockHolder(lock), selfHolder())) return false
   try { fs.rmSync(lock, { recursive: true, force: true }) } catch { /* already released */ }
   return true
@@ -455,10 +498,17 @@ export function holderAlive(holder, ownNs) {
  *  outlive any age the loop could pick. PLACEMENT_STALE_MS is 10s against a 30s herdr timeout, so
  *  the pid-less branch was condemning live holders at a third of the time one can honestly take.
  *
- *  Six times the ordinary window clears the longest legitimate section — a 30s herdr call inside a
- *  5s acquire — with room to spare. The migration is what makes this reachable rather than
- *  theoretical: these files ship to three consuming repos, and a session that has not restarted is
- *  still running the old protocol. */
+ *  What bounds a section against this window is RENEWAL, not the section's length: a holder
+ *  refreshes its lock's mtime before every herdr call (renewHeldLocks), so the age a live holder can
+ *  reach is the longest gap between two renewals, one herdr call of at most HERDR_TIMEOUT_MS plus the
+ *  file work and sub-second settles around it. A section of many calls (a placement reads the layout
+ *  and then one pane per marker) is unbounded in total and never ages. Six times the ordinary window
+ *  (60s for placement, 180s for the tee lock) clears that 30s gap with room to spare;
+ *  dctr-pane.selftest.mjs pins the placement case. The one holder that does not renew is one running
+ *  a revision older than renewal, pid-less or foreign, and for it this window is the only bound: a
+ *  section of several slow herdr calls can outlast it. The migration is what makes that reachable:
+ *  these files ship to three consuming repos, and a session that has not restarted is still running
+ *  the old protocol. */
 export const PIDLESS_STALE_FACTOR = 6
 
 export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STALE_FACTOR) {
@@ -799,7 +849,7 @@ export function processListing() {
   for (const id of pids) {
     let stat, cmd
     try { stat = fs.readFileSync(`/proc/${id}/stat`, 'utf8'); cmd = fs.readFileSync(`/proc/${id}/cmdline`, 'utf8') } catch { continue }
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+    const f = statFields(stat)
     let session = null
     try { session = /(?:^|\0)CODEX_SESSION_ID=([^\0]*)/.exec(fs.readFileSync(`/proc/${id}/environ`, 'utf8'))?.[1] ?? '' } catch { /* unreadable: null */ }
     procs.push({ pid: Number(id), ppid: Number(f[1]), state: f[0], start: Number(f[19]), argv0: cmd.split('\0')[0], session })
