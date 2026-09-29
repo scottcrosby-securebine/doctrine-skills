@@ -70,7 +70,7 @@ if (args[0] === 'pane' && args[1] === 'get') {
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
 } else if (args[0] === 'pane' && args[1] === 'read') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  process.stdout.write(st.clearedAt ? (st.after ?? st.before) : st.before)
+  process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt ? (st.after ?? st.before) : st.before)
 } else if (args[0] === 'pane' && args[1] === 'run') {
   if (args[3] === '/clear') {
     st.clearedAt = Date.now()
@@ -79,11 +79,14 @@ if (args[0] === 'pane' && args[1] === 'get') {
     if (st.userStarts) { st.resumed = true; fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript })) }
     save()
   }
-  else if (st.onResume === 'write') {
+  else if (st.onResume === 'write' || st.onResume === 'abort' || st.onResume === 'silent') {
     st.resumed = true; save()
     fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
     const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
-    fs.appendFileSync(st.newTranscript, [...(st.firstLines || []), msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')].join('\\n') + '\\n')
+    // abort: the resume turn interrupted before any answer (st.abortLines, RESUME_ABORTED); silent: no answer yet.
+    const lines = st.onResume === 'abort' ? st.abortLines : st.onResume === 'silent' ? [msg('user', args[3])]
+      : [...(st.firstLines || []), msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')]
+    fs.appendFileSync(st.newTranscript, lines.join('\\n') + '\\n')
   }
 }
 process.exit(0)
@@ -544,6 +547,25 @@ clause('clause 1e8 — typer on Codex, the user submitted a prompt in the new ch
 const tAgents = typerCase('agents', { firstLines: [F.AGENTS_MD_TURN[1]] })
 clause('clause 1e9 — typer on Codex, the new chat opens with the injected AGENTS.md block: the cycle confirms with no pause (clear 1, resume 1, E10H-B7)',
   tAgents.sends === '1,1' && tAgents.paused.length === 0 && tAgents.cycled.length === 1, td(tAgents))
+
+// E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
+// NARROW_BEFORE with a draft in its composer; NARROW_AFTER after the resume line was submitted and interrupted
+// (INTERRUPTED_LINE, probe B6's pane) above a draft.
+const R16_LINE = '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]'
+const DRAFT_BEFORE = F.NARROW_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
+const RETRY_DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› my own draft`)
+const tInterrupted = typerCase('interrupted', { onResume: 'abort', abortLines: F.RESUME_ABORTED, afterResume: RETRY_DRAFT })
+clause('clause 1e10 — typer on Codex, the resume turn interrupted (Esc) before its first answer, a draft left in the composer, the pane unfocused: the resume line is not sent again, paused R16 (clear 1, resume 1, E10H-R4-B1)',
+  tInterrupted.sends === '1,1' && JSON.stringify(tInterrupted.paused) === R16_LINE && tInterrupted.otherSends.length === 0 && tInterrupted.cycled.length === 1, td(tInterrupted))
+const tRetryDraft = typerCase('retry-draft', { onResume: 'silent', afterResume: RETRY_DRAFT })
+clause('clause 1e11 — typer on Codex, no first turn within the wait and a draft in the composer: the retry is not sent into the draft, paused R16 (clear 1, resume 1, E10H-R4-B1)',
+  tRetryDraft.sends === '1,1' && JSON.stringify(tRetryDraft.paused) === R16_LINE && tRetryDraft.otherSends.length === 0, td(tRetryDraft))
+const tInterruptedEmpty = typerCase('interrupted-empty', { onResume: 'abort', abortLines: F.RESUME_ABORTED, afterResume: RETRY_DRAFT.replace('› my own draft', '› Ask Codex to do anything') })
+clause('clause 1e13 — typer on Codex, the resume turn interrupted before its first answer and the composer left empty: the resume line is not sent again, paused R16 (clear 1, resume 1, E10H-R4-B1)',
+  tInterruptedEmpty.sends === '1,1' && JSON.stringify(tInterruptedEmpty.paused) === R16_LINE && tInterruptedEmpty.otherSends.length === 0, td(tInterruptedEmpty))
+const tClearDraft = typerCase('clear-draft', { before: DRAFT_BEFORE, after: DRAFT_BEFORE })
+clause('clause 1e12 — typer on Codex, a draft in the composer before the /clear: the /clear is not sent into it, paused R16 (clear 0, resume 0, E10H-R4-B1)',
+  tClearDraft.sends === '0,0' && JSON.stringify(tClearDraft.paused) === R16_LINE && tClearDraft.otherSends.length === 0, td(tClearDraft))
 
 // ---------------------------------------------------------------- clause 2: known-good inputs stay quiet
 

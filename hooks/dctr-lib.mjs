@@ -1544,6 +1544,22 @@ export function composerEmpty(text, oldId) {
   return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
 }
 
+/** Whether the pane's composer, its last `›` line, is empty (E10H-R4-B1): the check before the /clear and before a
+ *  second resume line, where no continue line anchors it. A submitted prompt sits above the composer, so the last `›`
+ *  line is the composer; a pane showing none is not empty. Null when the pane text was not read. */
+export function composerIdle(text) {
+  if (typeof text !== 'string') return null
+  const composer = text.split('\n').map((l) => l.trim()).findLast((l) => l.startsWith('›'))
+  return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
+}
+
+/** Whether a rollout holds a turn_aborted event, the one mark Esc leaves on a turn (probe B6: no Stop fires, and
+ *  herdr reads done). Null when the rollout was not read (E10H-R4-B1). */
+export function codexAborted(text) {
+  if (typeof text !== 'string') return null
+  return text.split('\n').some((l) => { try { const e = JSON.parse(l); return e?.type === 'event_msg' && e.payload?.type === 'turn_aborted' } catch { return false } })
+}
+
 /** Whether a Codex process belongs to a Claude Code session: a Codex hook payload whose environment carries
  *  CLAUDE_CODE_SESSION_ID, as `codex app-server` does when codex:codex-rescue starts it from Claude Code's shell. Its
  *  hooks stand down, since the herdr pane, the project and the record are the Claude session's, and a gate it launches
@@ -1709,9 +1725,12 @@ export function watchStep(o) {
  * for herdr to report that session, then for the first turn, as on Claude Code.
  */
 function codexTyperAct(o) {
-  if (o.stage === 'clear') return typerAct(o)
   const t = o.times || TYPER_TIMES
   const pause = (code, arg) => ({ act: 'pause', code, reason: pauseReason(code, arg, 'codex') })
+  if (o.stage === 'clear') {
+    const step = typerAct(o)
+    return step.act === 'clear' ? codexSendGuard(o, t, pause) || step : step
+  }
   const guard = typerGuard(o, t, pause)
   if (guard) return guard
   if (o.stage === 'resume') {
@@ -1721,9 +1740,8 @@ function codexTyperAct(o) {
     if (o.restore || (s !== null && s !== o.oldSession)) return pause('R16')
     if (o.took === null || o.took === undefined) return pause('R17', R17_WHY.lookup)
     if (!o.took) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the /clear to take' } : pause('R18', o.oldSession)
-    // `o.composer` is composerEmpty's answer: a draft, or a prompt submitted after the continue line, is typing.
-    if (o.composer !== true) return pause('R16')
-    return typerReady(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line and an empty composer' }
+    // `o.composer` is composerEmpty's answer here: a draft, or a prompt submitted after the continue line, is typing.
+    return codexSendGuard(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line and an empty composer' }
   }
   if (!o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
   const s = paneSession(o.pane)
@@ -1733,10 +1751,25 @@ function codexTyperAct(o) {
   }
   if (o.typedNew) return pause('R16')
   if (o.firstTurn) return { act: 'confirm', reason: 'the new session took its first turn' }
+  // Esc on the resume turn before its first answer: turn_aborted, no Stop, herdr done (probe B6). The user holds the
+  // pane, so nothing is sent again (E10H-R4-B1).
+  if (o.aborted) return pause('R16')
   if (o.waited < t.firstTurn) return { act: 'wait', reason: 'waiting for the first turn' }
   if (o.typedNew === null) return pause('R17', R17_WHY.transcript)
   if (o.resumes >= 2) return pause('R15')
-  return typerReady(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
+  return codexSendGuard(o, t, pause) || { act: 'resume', reason: 'no first turn yet, so the resume line once more' }
+}
+
+/**
+ * The checks before every Codex send, the /clear, the first resume line and a second one alike (E10H-R4-B1): a
+ * composer that is not empty (`o.composer`, composerEmpty's after the /clear and composerIdle's otherwise) is typing,
+ * R16 whether or not the pane is focused; then typerReady (a session named, unfocused, ready); then a composer nobody
+ * read (null) pauses with R17, since only a read pane says it is empty. A step, or null when the typer may send. What
+ * the new chat's rollout shows (typing, an interrupted resume turn) is checked before the retry reaches this.
+ */
+function codexSendGuard(o, t, pause) {
+  if (o.composer === false) return pause('R16')
+  return typerReady(o, t, pause) || (o.composer === true ? null : pause('R17', R17_WHY.lookup))
 }
 
 // ---------------------------------------------------------------- the Codex install (E10-D1 to E10-D6)

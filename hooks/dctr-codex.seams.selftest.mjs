@@ -24,6 +24,7 @@ const {
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision, codexAncestor, codexBackground,
   composerEmpty, codexUnderClaude,
 } = await import('./dctr-lib.mjs')
+const lib = await import('./dctr-lib.mjs')
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
 const J = (l) => JSON.parse(l)
@@ -232,7 +233,7 @@ clause('clause 1i — the Codex resume line is the skill\'s $-mention with the n
 const T = { poll: 20, idle: 150, restore: 400, session: 400, firstTurn: 300 }
 const idle = { status: 'done', focused: false, session: 'old' }
 const NEW = { session: 'new', transcript: '/n.jsonl' }
-const base = { host: 'codex', stage: 'clear', active: true, pausedSinceClaim: false, pane: idle, oldSession: 'old', grew: false, restore: null, waited: 0, notIdle: 0, sessionWait: 0, resumes: 0, firstTurn: false, times: T }
+const base = { host: 'codex', stage: 'clear', active: true, pausedSinceClaim: false, pane: idle, oldSession: 'old', grew: false, restore: null, waited: 0, notIdle: 0, sessionWait: 0, resumes: 0, firstTurn: false, composer: true, aborted: false, times: T }
 const ts = (o) => typerStep({ ...base, ...o })
 clause('clause 1j — Codex typerStep before /clear is Claude Code\'s: idle, unfocused, the old session and nothing new clears; focused waits; typing is R16',
   ts({}).act === 'clear' && ts({ pane: { ...idle, focused: true } }).act === 'wait' && ts({ grew: true }).code === 'R16' && !ts({}).cycle,
@@ -286,6 +287,32 @@ clause('clause 1n2 — Codex typerStep after /clear sends no resume line into a 
   ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, session: 'new' } }).code === 'R16' &&
   ts({ stage: 'resume', took: false, waited: 100, restore: NEW }).code === 'R16' && ts({ stage: 'resume', took: true, composer: true }).act === 'resume',
   JSON.stringify([ts({ stage: 'resume', took: true, composer: false }), ts({ stage: 'resume', took: true, composer: true, restore: NEW })]))
+
+// E10H-R4-B1: every Codex send (the /clear, the first resume and the retry) checks the same guards: focus, ready, an
+// empty composer read from the pane, and, once the resume is sent, no turn_aborted or typed turn in the new chat.
+// Derived pane texts: NARROW_BEFORE with a draft in its composer; NARROW_AFTER after the resume line was submitted and
+// interrupted (INTERRUPTED_LINE, B6's pane), above a composer holding `c`.
+const DRAFT_BEFORE = F.NARROW_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
+const RETRY_PANE = (c) => F.NARROW_AFTER.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› ${c}`)
+const composerIdle = lib.composerIdle || (() => 'missing'), codexAborted = lib.codexAborted || (() => 'missing')
+const abortedNew = transcriptEntries(text(F.RESUME_ABORTED), 'codex')
+const RETRY = { stage: 'confirm', resumes: 1, restore: NEW, pane: NP, typedNew: false }
+clause('clause 1j6 — Codex typerStep confirming: a resume turn interrupted before its first answer (turn_aborted, no assistant message, nothing typed) pauses with R16 and never sends the resume line again, inside or past the first-turn wait; a first turn still confirms (E10H-R4-B1)',
+  codexAborted(text(F.RESUME_ABORTED)) === true && codexAborted(text(F.TUI_TURN)) === false && codexAborted(null) === null &&
+  !abortedNew.entries.some(userTyped) && !abortedNew.entries.some((e) => e.type === 'assistant') &&
+  [100, 400].every((waited) => ts({ ...RETRY, waited, aborted: true, composer: false }).code === 'R16' && ts({ ...RETRY, waited, aborted: true }).code === 'R16') &&
+  ts({ ...RETRY, aborted: true, firstTurn: true }).act === 'confirm',
+  JSON.stringify([codexAborted(text(F.RESUME_ABORTED)), ts({ ...RETRY, waited: 400, aborted: true, composer: false }), ts({ ...RETRY, waited: 400, aborted: true })]))
+clause('clause 1j7 — Codex typerStep: the retry sends nothing into a draft (R16, focused or not) or when the pane text was not read (R17), the /clear likewise (a focused pane waits first, as before), and each goes ahead on an empty composer (E10H-R4-B1)',
+  ts({ ...RETRY, waited: 400, composer: false }).code === 'R16' && ts({ ...RETRY, waited: 400, composer: null }).reason === 'could not type into the pane: herdr could not read the pane' &&
+  ts({ ...RETRY, waited: 400 }).act === 'resume' &&
+  ts({ composer: false }).code === 'R16' && ts({ composer: null }).reason === 'could not type into the pane: herdr could not read the pane' && ts({}).act === 'clear' &&
+  ts({ ...RETRY, waited: 400, composer: false, pane: { ...NP, focused: true } }).code === 'R16' && ts({ composer: false, pane: { ...idle, focused: true } }).act === 'wait',
+  JSON.stringify([ts({ ...RETRY, waited: 400, composer: false }), ts({ composer: false }), ts({ composer: null })]))
+clause('clause 1n3 — composerIdle reads the pane\'s composer, its last › line: the placeholder or nothing is empty; a draft before the /clear or under an interrupted resume is not; a pane showing no composer is not; an unread pane says nothing (E10H-R4-B1)',
+  composerIdle(F.NARROW_BEFORE) === true && composerIdle(F.NARROW_AFTER) === true && composerIdle(RETRY_PANE('Ask a follow-up question')) === true && composerIdle(RETRY_PANE('')) === true &&
+  composerIdle(DRAFT_BEFORE) === false && composerIdle(RETRY_PANE('my own draft')) === false && composerIdle('• working\n') === false && composerIdle(null) === null,
+  JSON.stringify([composerIdle(F.NARROW_BEFORE), composerIdle(DRAFT_BEFORE), composerIdle(RETRY_PANE('my own draft')), composerIdle(RETRY_PANE(''))]))
 
 // N1: a Codex process under a Claude Code session (codex app-server started by codex:codex-rescue) is the Claude session's.
 clause('clause 1o — codexUnderClaude: a Codex payload with CLAUDE_CODE_SESSION_ID set; not without it, and never a Claude Code payload (N1)',
@@ -353,6 +380,15 @@ const sandbox = under(F.PROC_WS.TTY, codexPid(F.PROC_WS.TTY)).filter((p) => /cod
 clause('clause 3p — without the lib: in every capture the hook\'s parent is the codex binary and the hook is under it; its descendants carry CODEX_SESSION_ID exactly while a loop or cell runs, codex-code-mode-host never does; in workspace-write the sandbox\'s own processes carry it; the probe\'s detached child sits under pid 1',
   proofWrong.length === 0 && sandbox.length === 3 && sandbox.every((p) => p.session) && CAPS.filter(([, c]) => c.listing.procs.some((p) => p.argv0 === 'sleep' && p.ppid === 1)).length >= 4,
   JSON.stringify(proofWrong.map(([k]) => k)))
+const lastPrompt = (t) => t.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('›')).at(-1)
+clause('clause 3q — without the lib: RESUME_ABORTED is a task_started, the resume line typed (user.text), the developer <turn_aborted> note and a turn_aborted event (reason interrupted), with no assistant message; the retry pane shows the resume line submitted, the interrupted line, then the draft as its last › line; DRAFT_BEFORE\'s last › line is the draft (E10H-R4-B1)',
+  J(F.RESUME_ABORTED[0]).payload.type === 'task_started' && J(F.RESUME_ABORTED[1]).payload.content[0].text === CODEX_RESUME_LINE &&
+  J(F.RESUME_ABORTED[1]).payload.internal_chat_message_metadata_passthrough.content_item_kinds.includes('user.text') &&
+  J(F.RESUME_ABORTED[2]).payload.role === 'developer' && J(F.RESUME_ABORTED[2]).payload.content[0].text.startsWith('<turn_aborted>') &&
+  J(F.RESUME_ABORTED[3]).payload.type === 'turn_aborted' && J(F.RESUME_ABORTED[3]).payload.reason === 'interrupted' &&
+  F.RESUME_ABORTED.every((l) => J(l).payload.role !== 'assistant') &&
+  lastPrompt(RETRY_PANE('my own draft')) === '› my own draft' && RETRY_PANE('x').includes(`› ${CODEX_RESUME_LINE}`) && RETRY_PANE('x').includes(F.INTERRUPTED_LINE) &&
+  lastPrompt(DRAFT_BEFORE) === '› my own draft' && lastPrompt(F.NARROW_BEFORE) === '› Ask Codex to do anything', 'R4-B1 fixtures wrong')
 clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
   [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
   F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')
