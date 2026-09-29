@@ -42,6 +42,6 @@ A dead pid, or a terminal status with no result, is a failed seat. A wrapper tha
 
 ## Auto-cycle and the hooks
 
-The hooks, auto-cycle and the herdr seat panes run on Claude Code only.
+On Claude Code the plugin loads the hooks, auto-cycle and the herdr seat panes itself. On Codex they run once the user installs them, as the Codex reference says.
 
 When you pause auto-cycle yourself, send a PushNotification whose text is exactly the pause text the hub gives. Where the PushNotification tool is not in your tool list, say in your turn that you rely on the herdr alert alone.

@@ -20,7 +20,7 @@ A long file's middle is cut from a single read on Codex.
 | Run a workflow | Codex has no workflow runner. Dispatch the wave's seats with `spawn_agent` and wait on them. |
 | Wait on a file | Run a shell loop that exits when the file appears (`until [ -f <file> ]; do sleep 15; done`), repeating it if your shell's timeout ends it first, then read the file. |
 | Wait on seats | `wait_agent`. |
-| Notify the user | No notification tool. Say it in your turn. |
+| Notify the user | No notification tool. Say it in your turn. When you pause auto-cycle yourself, run `node <plugin-root>/hooks/dctr-notify.mjs <phase> <reason>`, which shows `<phase>: doctrine auto-cycle paused, <reason>` as a herdr notification. Where it stands down or prints that herdr refused, say in your turn that no notification was sent. |
 | Project instructions | Codex loads AGENTS.md (or AGENTS.override.md), one file per directory from the repo root down to the working directory, and stops at 32 KiB in all by default. Read the rest yourself where the files run longer, and read a CLAUDE.md yourself where it exists, since Codex does not load it unless it is configured as a fallback name. |
 
 ## The red team from the other model family
@@ -77,6 +77,7 @@ The hub's Fallbacks row then applies, and its substitute is a same-model red tea
 
 ## Auto-cycle and the hooks
 
-- The doctrine's hooks, auto-cycle and the herdr seat panes run on Claude Code only. On Codex, auto-cycle is off: no gauge warns you and no hook types `/clear`.
+- The user installs the hooks with `node <plugin-root>/hooks/dctr-codex.mjs install`, adding `--codex-home <dir>` for a home other than `$CODEX_HOME` or `~/.codex`, and runs it again after each plugin update. It writes the entries into that home's `hooks.json`, trusts them in its `config.toml`, and sets `sandbox_workspace_write.network_access = true` so a command you run in the workspace-write sandbox can reach herdr.
+- Once installed, the herdr seat panes, the restore after `/clear`, the context gauge and auto-cycle run on Codex as they do on Claude Code. The typer types `/clear` and then `$doctrine:doctrine-resume`, and reads the pane only to confirm the `/clear` took and to find the composer empty before each send. It pauses rather than type into a draft. Without the install none of them runs, and auto-cycle is off: no gauge warns you and no hook types `/clear`.
 - `doctrine-pane` does not run on Codex, because its launcher needs a Claude Code session.
-- The gate launcher does run. Outside herdr it runs the check detached and writes `<out-file>.result` itself. Wait on that file as the table says.
+- The gate launcher does run. Outside herdr it runs the check detached and writes `<out-file>.result` itself; inside Codex's sandbox, where a detached child dies with the command, it runs the check to completion first. Either way, wait on that file as the table says.

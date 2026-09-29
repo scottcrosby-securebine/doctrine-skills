@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -23,10 +23,13 @@ export const seatsDir = (sessionId) => path.join(stateDir(sessionId), 'seats')
 /** Best-effort append to the session's hook.log; never throws. Hook output goes to a stream nobody
  *  reads, so a stand-down or a fallback that fired left no trace the first time it mattered (F14,
  *  2026-08-31). The launcher writes here too, so a gate that stood down is found where a seat is. */
-export function hookLog(sessionId, msg) {
+export function hookLog(sessionId, msg, create = true) {
   if (!sessionId) return
   try {
-    fs.mkdirSync(stateDir(sessionId), { recursive: true })
+    // `create` false: a process that may outlive its session (the Codex watcher) never re-creates the state dir the
+    // session's end removed (R4-N2); it appends only while the dir is there.
+    if (create) fs.mkdirSync(stateDir(sessionId), { recursive: true })
+    else if (!fs.existsSync(stateDir(sessionId))) return
     fs.appendFileSync(path.join(stateDir(sessionId), 'hook.log'), `${new Date().toISOString()} ${msg}\n`)
   } catch { /* logging must never be the failure */ }
 }
@@ -47,6 +50,8 @@ export const HERDR_TIMEOUT_MS = 30000
 /** How long a placement lock may sit before a provably dead holder loses it. */
 export const PLACEMENT_STALE_MS = 10000
 export const herdr = (args) => parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }))
+/** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
+export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
 
 /** herdr answers a pane that does not exist with **exit 1 and a structured error code**, not with a
  *  null pane, so `execFileSync` throws and every caller that read a throw as "I could not look"
@@ -171,6 +176,28 @@ export function movedGatePath(marker) {
   return path.join(gatesDir(path.dirname(state)), movedGateName(base.slice(PREFIX.length + 1), path.basename(marker, '.json')))
 }
 
+/**
+ * A detached gate's marker (E10H-B4): the claude -p red team the Codex reference launches runs with no pane, and
+ * nothing else shows the Stop hook it is running (liveWork reads markers). So it gets a gate marker with no pane,
+ * `detached: true`, in the session's seats directory, under the next free gate name; seatLive keeps it live until
+ * `<file>.result` exists, and the launcher's --run drops it when it writes that file. It holds no column slot
+ * (sideOccupants) and is never closed or moved by a sweep (sweepAction). Returns the marker's path, or null when none
+ * could be written, which leaves the gate running as it always has, unseen.
+ */
+export function writeDetachedGate(sessionId, file, label) {
+  try {
+    fs.mkdirSync(seatsDir(sessionId), { recursive: true })
+    const taken = liveSeatsPartial(sessionId).seats.map((s) => s.agent).concat(movedGateNames(sessionId))
+    for (let n = nextIndex(GATE_ROLE, taken); n; n = nextIndex(GATE_ROLE, taken)) {
+      const agent = agentName(GATE_ROLE, n), marker = path.join(seatsDir(sessionId), `${agent}.json`)
+      try { reserveMarker(marker) } catch (e) { if (e.code !== 'EEXIST') throw e; taken.push(agent); continue }
+      writeMarker(marker, { agent, role: GATE_ROLE, n, tabId: '', paneId: '', file, label, detached: true })
+      return marker
+    }
+  } catch { /* no marker: the gate still runs */ }
+  return null
+}
+
 /** The gate names this session id holds in the unowned directory, readable or not: a name is taken
  *  by the file, whatever is in it. A directory not there yet holds none. */
 export function movedGateNames(sessionId) {
@@ -279,7 +306,8 @@ export function sideOccupants(seats, layout) {
   let moved
   try { moved = movedGates() } catch { return null }
   if (moved.unreadable.length) return null
-  const inLayout = (m) => !m.paneId || layout.some((l) => l.pane_id === m.paneId)
+  // A detached gate (writeDetachedGate) has no pane and holds no slot; a marker still being placed has none yet and does.
+  const inLayout = (m) => !m.detached && (!m.paneId || layout.some((l) => l.pane_id === m.paneId))
   return seats.filter(inLayout).concat(panes.filter(inLayout), moved.gates.filter(inLayout))
 }
 
@@ -498,6 +526,48 @@ export function readMeta(file, retryMs = 200) {
   return null
 }
 
+/** A Codex seat's spawn metadata in readMeta's shape, `{ description: <task_name> }`, from its rollout's session_meta
+ *  (codexTaskName, E10-D8), or null. The same one retry as readMeta, for a first record not flushed yet. */
+export function readCodexSeat(file, retryMs = 200) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let text = null
+    try { text = fs.readFileSync(file, 'utf8') } catch { /* not written yet */ }
+    const name = codexTaskName(text)
+    if (name) return { description: name }
+    if (attempt) return null
+    sleepMs(retryMs)
+  }
+  return null
+}
+
+/** The index the Codex /clear sweep finds a pane's sessions by: one empty file `<pane token>.<session id>` per Codex
+ *  session that placed a pane from that pane, written at placement. The new chat's hook is not told the ending chat's
+ *  id, and listing the temp root instead cost 330 ms warm on a host whose /tmp held 400,000 entries, which a live
+ *  /clear pushed past the sweep's budget. Claude Code sessions write none: they sweep on SessionEnd. */
+export const paneIndexDir = () => path.join(tmpRoot(), `${PREFIX}-by-pane`)
+const paneIndexFile = (paneId, sessionId) => path.join(paneIndexDir(), `${paneToken(paneId)}.${sessionId}`)
+
+/** Records that `sessionId` placed a pane from `paneId`. Best effort: a missing entry costs that session its /clear
+ *  sweep, and SessionEnd still sweeps it when the process exits. */
+export function indexPaneSession(paneId, sessionId) {
+  if (!paneId || !sessionId) return
+  try { fs.mkdirSync(paneIndexDir(), { recursive: true }); fs.writeFileSync(paneIndexFile(paneId, sessionId), '') } catch { /* see above */ }
+}
+
+/** The sessions the index names for `paneId`, each with its readable seat markers: `[{ id, seats }]`. An entry whose
+ *  state directory is gone (swept by SessionEnd or by a detached sweep) is removed here and not returned. */
+export function sessionsOfPane(paneId) {
+  let names
+  try { names = fs.readdirSync(paneIndexDir()) } catch { return [] }
+  const prefix = `${paneToken(paneId)}.`
+  const out = []
+  for (const id of names.filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length))) {
+    if (!fs.existsSync(stateDir(id))) { try { fs.rmSync(paneIndexFile(paneId, id), { force: true }) } catch { /* next time */ } continue }
+    try { out.push({ id, seats: liveSeatsPartial(id).seats }) } catch { /* unreadable: not a target */ }
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- auto-cycle (E8-D15, E8-D16, E8-D17, E8-D26)
 
 /** Where auto-cycle's working files live (B0): beside dctr-panes and dctr-gates, never under dctr-<session>/,
@@ -555,6 +625,9 @@ export function sessionStartLine(recordPath) {
 }
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
 export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
+/** A Codex Stop's own decision, per turn: whether it waited for live work (E10H-R2-B2). The watcher retries the Stop
+ *  from this, never from the rollout, which Codex writes the turn's end into only after the Stop returns. */
+export const stopHeldFile = (sessionId) => path.join(autoCycleDir(), `held-${sessionId}.json`)
 const tokenFile = (paneId) => path.join(autoCycleDir(), `token-${paneToken(paneId)}.txt`)
 
 /** A claim is held when its file exists and the pid written into it is alive (S3). A claim whose pid is not
@@ -655,6 +728,27 @@ export function liveWork(sessionId) {
     if (seatLive(s, Boolean(s.file) && fs.existsSync(`${s.file}.result`), status)) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
   }
   return null
+}
+
+/**
+ * Every process on the host as codexAncestor and codexBackground in dctr-lib.mjs read them (E10H-R3-B4): pid, ppid,
+ * state and start time from /proc/<pid>/stat, argv0 from its cmdline, and `session`, the CODEX_SESSION_ID in its
+ * environment: '' when it has none, null when the environment cannot be read. A process that exits mid-read is left
+ * out, as it is gone. `{ error }` when /proc cannot be listed (a host without it).
+ */
+export function processListing() {
+  let pids
+  try { pids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)) } catch (e) { return { error: `/proc could not be read (${e.code || e.message})` } }
+  const procs = []
+  for (const id of pids) {
+    let stat, cmd
+    try { stat = fs.readFileSync(`/proc/${id}/stat`, 'utf8'); cmd = fs.readFileSync(`/proc/${id}/cmdline`, 'utf8') } catch { continue }
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+    let session = null
+    try { session = /(?:^|\0)CODEX_SESSION_ID=([^\0]*)/.exec(fs.readFileSync(`/proc/${id}/environ`, 'utf8'))?.[1] ?? '' } catch { /* unreadable: null */ }
+    procs.push({ pid: Number(id), ppid: Number(f[1]), state: f[0], start: Number(f[19]), argv0: cmd.split('\0')[0], session })
+  }
+  return { procs }
 }
 
 /**

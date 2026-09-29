@@ -2,7 +2,8 @@
 //
 // Spawned detached by dctr-cycle.mjs's Stop with one JSON argument: the pane, the session, the Stop's transcript path
 // and byte length, the Stop's start time, the record, the tree hash, the session's repo, the cycle number, the phase
-// and the claim key (claimKey at launch). It never reads the screen (E8-R12). It reserves the claim
+// and the claim key (claimKey at launch), and the host. It never reads the screen (E8-R12), except on Codex, where it reads
+// the pane before each send, for the continue line that shows the /clear took (Q6) and for an empty composer (E10H-R4-B1), and for nothing else. It reserves the claim
 // `<autocycle dir>/<session>.<key>.claim` and writes its pid into it, ending with nothing sent when the claim is
 // already taken (one launch per record state, RB3-1). Then it loops: each poll it gathers what typerStep in
 // dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
@@ -16,10 +17,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY } from './dctr-lib.mjs'
+import {
+  typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY,
+  CODEX_RESUME_LINE, clearTook, composerEmpty, composerIdle, codexAborted,
+} from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
-  herdr, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
+  herdr, herdrText, claimFile, restoreFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
   hookLog, sleepMs,
 } from './dctr-state.mjs'
 
@@ -29,6 +33,9 @@ let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
 if (!a?.pane || !a.session || !a.record || !a.transcript || !Number.isFinite(a.length) || !Number.isFinite(a.stopAt) || !Number.isInteger(a.keyLine)) process.exit(0) // not a launch the Stop hook made: nothing began, nothing to record
 const log = (m) => hookLog(a.session, `auto-cycle typer: ${m}`)
+// Codex (E10): the rollout is read as Codex writes it, the resume line is the skill's $-mention, and after the /clear
+// the pane is read for the continue line that shows the /clear took (Q6) and the composer every send checks.
+const codex = a.host === 'codex'
 let times = TYPER_TIMES
 try { times = { ...TYPER_TIMES, ...JSON.parse(process.env.DCTR_TYPER_TIMES || '{}') } } catch { /* the defaults */ }
 
@@ -47,9 +54,10 @@ function entriesFrom(file, from = 0) {
       text = buf.toString('utf8')
     } finally { fs.closeSync(fd) }
   } catch (e) { log(`the transcript ${file} could not be read (${e.code || e.message})`); return null }
-  const read = transcriptEntries(text)
+  const read = transcriptEntries(text, codex ? 'codex' : 'claude')
   if (read === null) log(`the transcript ${file} holds a line that does not parse before its last line`)
-  return read
+  // Codex: whether the chat's rollout shows a turn interrupted, which transcriptEntries' messages cannot (E10H-R4-B1).
+  return read && codex ? { ...read, aborted: codexAborted(text) } : read
 }
 
 function pausing(reason) {
@@ -89,8 +97,15 @@ try {
     } catch { return null }
   }
 
+  // The pane's recent text, or null when herdr could not read it: Codex only, before and after the /clear (Q6).
+  const paneText = () => {
+    try { return herdrText(['pane', 'read', a.pane, '--source', 'recent', '--lines', '80']) } // herdr-lint: a failed read is null, which never reads as the /clear taking
+    catch (e) { log(`herdr pane read failed (${String(e.message).split('\n')[0]})`); return null }
+  }
+
   // The typer's clock: poll intervals waited, not wall time (RB2-4).
   let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null, cycled = false
+  let before = null
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const stopRepo = stopFileRepo(repos, fs.existsSync)
@@ -100,7 +115,9 @@ try {
     // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
     // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
     const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > a.keyLine)
-    if (stage === 'resume' && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
+    // Claude Code writes the restore file before the resume is typed; Codex only once it is sent (its SessionStart
+    // fires at the new chat's first prompt), so on Codex it is read while confirming.
+    if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
     // The old transcript before the /clear, the new session's after it, read once per poll: typing into either (K2-R16,
@@ -108,11 +125,17 @@ try {
     const old = stage === 'clear' ? entriesFrom(a.transcript, a.length) : null
     const fresh = stage !== 'clear' && restore ? entriesFrom(restore.transcript) : null
     partialSince = old?.partial || fresh?.partial ? (partialSince ?? now) : null
+    // Codex: the pane read each poll the typer may send on (Q6), for the composer before every send (E10H-R4-B1) and,
+    // after the /clear, whether it took; before the /clear it is also the text clearTook compares against (E10H-B1).
+    const text = codex && pane ? paneText() : undefined
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
       midWrite: partialSince === null ? null : now - partialSince,
       grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
       typedNew: fresh === null ? null : fresh.entries.some(userTyped),
+      host: a.host, took: stage !== 'resume' || text === undefined ? undefined : text === null ? null : clearTook(before, text, a.session),
+      composer: typeof text !== 'string' ? null : stage === 'resume' ? composerEmpty(text, a.session) : composerIdle(text),
+      aborted: stage === 'confirm' && fresh ? fresh.aborted : null,
       firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
@@ -128,12 +151,14 @@ try {
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)
     if (step.act === 'clear') {
+      // typerStep sends a Codex /clear only on pane text it read this poll (codexSendGuard).
+      if (codex) before = text
       fs.rmSync(restoreFile(a.pane), { force: true })
       send('/clear')
       log(`sent /clear, cycle ${a.n}`)
       stage = 'resume'; stageStart = now
     } else if (step.act === 'resume') {
-      send(RESUME_LINE)
+      send(codex ? CODEX_RESUME_LINE : RESUME_LINE)
       resumes += 1
       log(`sent the resume line (${resumes})`)
       stage = 'confirm'; stageStart = now

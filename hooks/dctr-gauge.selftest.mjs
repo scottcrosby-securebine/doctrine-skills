@@ -16,6 +16,8 @@ let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-gauge-'))
+// Removed at every exit, a throw included (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
 const { gaugeSkip, lastOnOffEntry, readUsage, resolveTier, gaugeStep, gaugeContext, GAUGE_MAX, HANDOFF_COST_TOKENS } = lib

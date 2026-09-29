@@ -18,7 +18,7 @@
 // in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads around them.
 
 import fs from 'node:fs'
-import { restoreSkip, followKickoff, restoreContext } from './dctr-lib.mjs'
+import { restoreSkip, followKickoff, restoreContext, hostOf, codexUnderClaude, UNDER_CLAUDE_WHY } from './dctr-lib.mjs'
 import { hookLog, standDown, restoreFile, writeMarker, writeSessionStart } from './dctr-state.mjs'
 
 let sessionId = null
@@ -30,8 +30,11 @@ try {
   sessionId = payload.session_id || null
   const why = restoreSkip(payload)
   if (why) stand_down(why)
+  if (codexUnderClaude(process.env, hostOf(payload))) stand_down(UNDER_CLAUDE_WHY)
 
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || payload.cwd
+  // Codex sets no project variable; a CLAUDE_PROJECT_DIR in its environment is one it inherited from whatever
+  // launched it, so a Codex session reads its own cwd (E10).
+  const projectDir = (hostOf(payload) === 'codex' ? null : process.env.CLAUDE_PROJECT_DIR) || payload.cwd
   if (!projectDir) stand_down('no CLAUDE_PROJECT_DIR and no cwd in the payload')
   const chain = followKickoff({ projectDir, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
   if (chain.why) stand_down(chain.why)

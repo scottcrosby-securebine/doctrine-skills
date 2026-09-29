@@ -114,6 +114,29 @@ jobs:
         # case, the claim, focus, the restore file, the first-turn confirm, and zero herdr calls when contained.
         run: node hooks/dctr-typer.selftest.mjs
 
+      - name: Codex seams tamper test
+        # The Codex host's pure readers and decisions (transcripts, usage, the typer's pane check, the watcher's
+        # observations) on fixtures cut from real Codex 0.156.1 captures. Pure node.
+        run: node hooks/dctr-codex.seams.selftest.mjs
+
+      - name: Codex hooks tamper test
+        # Restore, gauge, auto-cycle, typer and watcher driven end to end on Codex payloads and rollouts, with a
+        # logging herdr shim on PATH.
+        run: node hooks/dctr-codex.hooks.selftest.mjs
+
+      - name: Codex seat panes tamper test
+        # The seat hook, renderer, gate session and /clear sweep on Codex payloads, with a tripwire herdr.
+        run: node hooks/dctr-seat.codex.selftest.mjs
+
+      - name: Codex install tamper test
+        # dctr-codex.mjs install on scratch Codex homes: entries, trust hashes, network access, foreign entries
+        # byte-identical, a second run a no-op. Needs python3 with tomllib (3.11+).
+        run: node hooks/dctr-codex.selftest.mjs
+
+      - name: pause notification tamper test
+        # dctr-notify.mjs: one herdr notification with the hub's exact title and no body, and the stand-downs.
+        run: node hooks/dctr-notify.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
