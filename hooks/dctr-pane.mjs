@@ -128,8 +128,8 @@ async function withDirLock(lock, fn) {
     if (held) { try { return await fn() } finally { releaseLock(lock) } }
     // Age alone is not evidence the holder is dead. An operation makes several bounded herdr calls
     // and sleeps between them, so a live one can outlast LOCK_STALE_MS; breaking its lock on age
-    // lets two operations write the same session. breakIfOrphaned reads the pid once, tests that
-    // pid, and condemns that same pid, so the lock it renames away is the lock it judged.
+    // lets two operations write the same session. breakIfOrphaned reads the holder once, judges that
+    // holder, and condemns that same holder, so the lock it renames away is the lock it judged.
     breakIfOrphaned(lock, LOCK_STALE_MS)
     if (Date.now() > deadline) die(`another dctr-pane operation holds ${path.basename(lock)}; not writing`)
     await sleep(50)

@@ -317,16 +317,43 @@ export function sideOccupants(seats, layout) {
 // a holder that died is stolen after 10s so one crashed hook cannot blind every later seat.
 // ONE LOCK PROTOCOL, used by both loops below and by dctr-pane.mjs. It was written twice, and the
 // copies drifted until each carried defects the other did not, so the protocol lives here and the
-// loops differ only in how they wait. A holder is identified by the pid it publishes, and every
-// step is expressed against that pid rather than against the pathname, which a competitor can take.
+// loops differ only in how they wait. A holder is identified by the pid it publishes AND the pid
+// namespace that pid belongs to, and every step is expressed against that pair rather than against
+// the pathname, which a competitor can take. The namespace is there because a pid means something
+// only inside the namespace that issued it: Codex runs a model's commands in a sandbox with its own,
+// where the launcher is pid 2, and on the host pid 2 is kthreadd and always alive. Two sandboxes can
+// each hand out the same pid, so a pid alone cannot say whose lock it is either.
 
-/** The holder's pid: a string, `null` when there is provably no pid file, and `undefined` when the
- *  file is there and could not be read. Collapsing those two into one answer is what let a transient
- *  read error condemn a live holder — "I could not look" is not "nobody is there". */
-const lockPid = (lock) => {
-  try { return fs.readFileSync(path.join(lock, 'pid'), 'utf8').trim() }
+/** This process's pid namespace as the kernel names it (`pid:[4026531836]`), or null where there is
+ *  no /proc to ask, as on macOS, where every holder and judge then agree on null and nothing changes. */
+export const ownPidNs = () => { try { return fs.readlinkSync('/proc/self/ns/pid') } catch { return null } }
+
+/** One published file of a lock: a string, `null` when there is provably no such file, and
+ *  `undefined` when it is there and could not be read. Collapsing those two into one answer is what
+ *  let a transient read error condemn a live holder — "I could not look" is not "nobody is there". */
+const readLockFile = (lock, name) => {
+  try { return fs.readFileSync(path.join(lock, name), 'utf8').trim() }
   catch (e) { return e.code === 'ENOENT' ? null : undefined }
 }
+
+/** The holder: `{ pid, ns }`, `null` when there is provably no pid file, and `undefined` when either
+ *  file is there and could not be read. `ns` is null when no namespace was published: a holder on a
+ *  platform with no /proc, or one running the previous revision of this file, which published a pid
+ *  and nothing else. The namespace sits in its OWN file so that previous revision, still running in a
+ *  consuming session that has not restarted, reads the pid file exactly as it always did. */
+export const lockHolder = (lock) => {
+  const pid = readLockFile(lock, 'pid')
+  if (pid === null || pid === undefined) return pid
+  const ns = readLockFile(lock, 'ns')
+  return ns === undefined ? undefined : { pid, ns }
+}
+
+/** Whether two holder readings name the same holder: the pid and the namespace together. Two nulls
+ *  (no pid file either time) are the same; an unreadable reading is never the same as anything. */
+const sameHolder = (a, b) => a === b || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
+
+/** This process as a holder, in the shape lockHolder reads back. */
+const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
 
 /** Take `lock` if it is free. Returns false if someone else holds it. **Throws** if the directory
  *  was taken but the pid could not be published: a holder no waiter can identify is indistinguish-
@@ -341,15 +368,26 @@ export function publishPid(lock, pid) {
   fs.writeFileSync(path.join(lock, 'pid'), String(pid), { flag: 'wx' })
 }
 
+/** Publish the holder's pid namespace, exclusively, for the reason publishPid is. */
+export function publishNs(lock, ns) {
+  fs.writeFileSync(path.join(lock, 'ns'), ns, { flag: 'wx' })
+}
+
 export function acquireLock(lock) {
   try { fs.mkdirSync(lock, { recursive: false }) } catch { return false }
+  const me = selfHolder()
   try {
     // `wx` is what ties the write to the directory we created. Writing by pathname does not: a
     // holder that stalls between the mkdir and the write can have its directory reaped and replaced,
     // then write its pid into the REPLACEMENT, read it back happily, and enter alongside the new
     // holder. O_EXCL makes exactly one of them win the publication and the other refuse.
-    publishPid(lock, String(process.pid))
-    if (lockPid(lock) !== String(process.pid)) throw new Error('pid readback did not match')
+    // The namespace goes FIRST. A holder killed between the two writes then leaves a namespace and no
+    // pid, which is a pid-less lock and is broken on the pid-less window. The other order leaves a
+    // pid with no namespace, which reads as the previous revision and is judged by that pid: from
+    // the host, a sandboxed pid 2 that is alive forever, the defect the namespace exists to end.
+    if (me.ns !== null) publishNs(lock, me.ns)
+    publishPid(lock, me.pid)
+    if (!sameHolder(lockHolder(lock), me)) throw new Error('pid readback did not match')
   } catch (e) {
     // Hand it back safely. Simply deleting by pathname is the race a previous repair removed: the
     // empty directory can be reaped and re-acquired between the check and the delete, and a live
@@ -361,8 +399,10 @@ export function acquireLock(lock) {
     // BOTH, because the failure can be either. A hostile umask makes the directory unsearchable AND
     // the pid file unreadable; chmodding only the directory left the pid unreadable, so the break
     // below saw "I could not look", put the lock back, and nothing could ever acquire or reap it.
+    // The namespace file is read beside the pid, so an unreadable one does exactly the same.
     try { fs.chmodSync(lock, 0o700) } catch { /* not ours to fix */ }
     try { fs.chmodSync(path.join(lock, 'pid'), 0o600) } catch { /* it may not exist at all */ }
+    try { fs.chmodSync(path.join(lock, 'ns'), 0o600) } catch { /* nor this */ }
     const reaped = breakStaleLock(lock, null)
     throw new Error(`took ${path.basename(lock)} but could not publish a pid (${e.message}); not entering. ${reaped ? 'The empty lock was removed.' : 'Something else holds that name now; it was left alone.'}`)
   }
@@ -373,7 +413,7 @@ export function acquireLock(lock) {
  *  removing it by pathname would take their critical section with it. Returns whether we still
  *  held it, so a caller that cares can tell it was stolen mid-section. */
 export function releaseLock(lock) {
-  if (lockPid(lock) !== String(process.pid)) return false
+  if (!sameHolder(lockHolder(lock), selfHolder())) return false
   try { fs.rmSync(lock, { recursive: true, force: true }) } catch { /* already released */ }
   return true
 }
@@ -387,15 +427,28 @@ function pidAlive(raw) {
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
 }
 
-/** The whole steal decision, in one place, for both waiting loops. The pid is read ONCE and the
- *  same value is both tested and condemned, so the lock that is renamed away is the lock that was
+/** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false
+ *  when the holder's namespace is the judge's, and **null** when it is another one, because a pid
+ *  issued in another namespace names some other process here or none. A holder that published no
+ *  namespace (the previous revision, or a platform with no /proc) is judged by its pid, as it always
+ *  was, which is also what makes both-absent count as the same namespace. */
+export function holderAlive(holder, ownNs) {
+  if (holder.ns !== null && holder.ns !== ownNs) return null
+  return pidAlive(holder.pid)
+}
+
+/** The whole steal decision, in one place, for both waiting loops. The holder is read ONCE and the
+ *  same reading is both judged and condemned, so the lock that is renamed away is the lock that was
  *  judged. Doing this twice, differently, is where two of the lock defects came from. */
 /** How much longer a PID-LESS lock must sit before it is treated as an orphan.
  *
- *  A lock carrying a pid can be judged directly: the pid is alive or it is not. A lock with none
- *  cannot be, and there are two ways to get one — a holder that died between its mkdir and its pid
- *  write, and a holder running the PREVIOUS revision of this file, which published no pid at all.
- *  Those are indistinguishable from the outside, and the second one is ALIVE and inside its section.
+ *  A lock carrying a pid from the judge's own namespace can be judged directly: the pid is alive or
+ *  it is not. A lock with none cannot be, and there are two ways to get one — a holder that died
+ *  between its mkdir and its pid write, and a holder running an old revision of this file, which
+ *  published no pid at all. Those are indistinguishable from the outside, and the second one is ALIVE
+ *  and inside its section. A lock whose pid belongs to ANOTHER namespace cannot be judged either
+ *  (holderAlive), so it takes this window too: it may be a live sandboxed holder or a dead one, and
+ *  from here the two look the same.
  *
  *  withPlacementLock's own comment states the rule this branch was breaking: age alone never breaks
  *  a lock, because a holder waiting on a herdr call bounded at HERDR_TIMEOUT_MS can legitimately
@@ -411,30 +464,33 @@ export const PIDLESS_STALE_FACTOR = 6
 export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STALE_FACTOR) {
   let age = null
   try { age = Date.now() - fs.statSync(lock).mtimeMs } catch { return false }   // vanished: nothing to break
-  const condemned = lockPid(lock)
+  const condemned = lockHolder(lock)
   if (condemned === undefined) return false          // could not look; never break on that
-  // The window depends on what the lock told us about itself. Read the pid FIRST so the choice of
-  // window is made on evidence rather than on a single figure that has to serve both cases.
-  if (age <= (condemned === null ? pidlessMs : staleMs)) return false
-  if (pidAlive(condemned)) return false
+  // The window depends on what the lock told us about itself. Read the holder FIRST so the choice of
+  // window is made on evidence rather than on a single figure that has to serve both cases. `alive`
+  // is null for a lock that cannot be judged: no pid at all, or a pid from another namespace.
+  const alive = condemned === null ? null : holderAlive(condemned, ownPidNs())
+  if (age <= (alive === null ? pidlessMs : staleMs)) return false
+  if (alive) return false
   return breakStaleLock(lock, condemned)
 }
 
 /** Break a lock we have judged orphaned. The rename is atomic, but the judgement is not tied to it:
  *  between the check and the rename another waiter can break the lock and a third process acquire
- *  the freed name, and an unconditional rename then carries off that live holder's lock. So the pid
- *  that was condemned is passed in and verified against whatever actually moved, and a mismatch is
+ *  the freed name, and an unconditional rename then carries off that live holder's lock. So the
+ *  holder that was condemned (`{ pid, ns }` as lockHolder read it, or null for a pid-less lock) is
+ *  passed in and verified against whatever actually moved, pid and namespace both, and a mismatch is
  *  put straight back. Residual, stated rather than papered over: if the put-back loses a race for
  *  the name, the moved lock is dropped and its holder finds out at releaseLock. */
-export function breakStaleLock(lock, condemnedPid = null) {
+export function breakStaleLock(lock, condemned = null) {
   const aside = `${lock}.dead.${process.pid}.${Date.now()}`
   try { fs.renameSync(lock, aside) } catch { return false }
-  // Compared in EVERY case, null included. Skipping the check when the condemned pid was null meant
+  // Compared in EVERY case, null included. Skipping the check when the condemned holder was null meant
   // breaking a genuinely pid-less orphan renamed away whatever had replaced it in the meantime —
   // which is a live holder's lock, taken by the one branch that did no verification at all.
   {
-    const moved = lockPid(aside)
-    if (moved !== condemnedPid) {
+    const moved = lockHolder(aside)
+    if (!sameHolder(moved, condemned)) {
       try { fs.renameSync(aside, lock); return false } catch { /* the name was retaken; drop what we hold */ }
     }
   }
