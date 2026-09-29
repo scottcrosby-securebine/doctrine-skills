@@ -1,4 +1,4 @@
-# The gates that need nothing installed. Every one of these is documented in CLAUDE.md as a
+# The gates that need nothing installed beyond bubblewrap. Every one of these is documented in CLAUDE.md as a
 # command run by hand; this file is the same commands, run on push, and it is not a substitute
 # for the ones it cannot run.
 #
@@ -22,6 +22,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: bubblewrap for the pane selftest's namespace clauses
+        # The one install here. Without `bwrap --unshare-pid` the pane selftest skips its namespace
+        # clauses and the mutation gate fails on the repairs only they pin. The runner image
+        # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
+        # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --ro-bind / / --dev /dev --unshare-pid --die-with-parent --proc /proc sh -c 'readlink /proc/self/ns/pid'
 
       - name: prose gate over every skill
         run: node tools/doc-check.mjs
