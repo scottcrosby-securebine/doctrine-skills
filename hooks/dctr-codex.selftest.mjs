@@ -27,6 +27,8 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 
 const cli = path.join(import.meta.dirname, 'dctr-codex.mjs')
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-')))
+// Removed at every exit, pass, fail or throw (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 
 // The probe's port of Codex 0.156.1's hook_hash(), which reproduced all 12 hashes Codex wrote and Scott's herdr
 // entry (doctrine-skills-project .doctrine/records/e10-hookport/probes/A-evidence/trusted_hash.py), extended only
@@ -432,6 +434,5 @@ clause("clause 3h — without the install: the dotted-key fixture parses and tru
   tomlOk(dottedConfig(dottedHome)).ok && dottedBefore.length === 2 && allTrusted(dottedBefore) && !allTrusted(dottedMoved),
   `${JSON.stringify(dottedBefore)} ${JSON.stringify(dottedMoved)}`)
 
-fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

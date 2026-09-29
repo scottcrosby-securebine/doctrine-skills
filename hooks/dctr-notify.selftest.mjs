@@ -26,6 +26,8 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 
 const cmd = path.join(import.meta.dirname, 'dctr-notify.mjs')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-notify-'))
+// Removed at every exit, pass, fail or throw (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
 const log = path.join(tmp, 'herdr.log')
 // One JSON array of argv per call; exits with $SHIM_EXIT so a refusal can be staged.
@@ -89,6 +91,5 @@ clause('clause 3a — the shim first on PATH logs each call\'s argv exactly, so 
 clause('clause 3b — each stand-down fixture differs from the sending one only in the variable it names',
   Object.values(standDowns).every((e) => [...new Set([...Object.keys(inHerdr), ...Object.keys(e)])].filter((k) => e[k] !== inHerdr[k]).length === 1), 'a fixture changes more than one variable')
 
-fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

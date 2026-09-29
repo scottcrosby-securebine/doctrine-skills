@@ -58,6 +58,8 @@ const PARENT_SPAWN = '{"timestamp":"2026-09-28T13:01:37.899Z","ordinal":12,"type
 const PARENT_SPAWN_OUT = '{"timestamp":"2026-09-28T13:01:37.994Z","ordinal":15,"type":"response_item","payload":{"type":"function_call_output","id":"fco_01a0e81b-4b4a-72e2-b399-f17cd20c6bb5","call_id":"call_SdAv8h0y9zwTrmpiNTHyAPTW","output":"{\\"task_name\\":\\"/root/echo_task\\"}","internal_chat_message_metadata_passthrough":{"turn_id":"01a0e81b-2b4a-7b93-885d-fe18dcd91f39","create_time":1790600497.9947078}},"metadata":{"client_authored":false,"fallback_token_limit_override":12000}}'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-'))
+// Removed at every exit, pass, fail or throw (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const ROLLOUTS = path.join(tmp, 'sessions/2026/09/28')
 fs.mkdirSync(ROLLOUTS, { recursive: true })
 const SEAT_ROLLOUT = path.join(ROLLOUTS, 'rollout-2026-09-28T13-01-37-01a0e81b-4af7-7330-a113-bad47ba77c3e.jsonl')
@@ -409,6 +411,5 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
     `${r.code} ${r.out}\ncalls:\n${callText()}`)
 }
 
-fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

@@ -22,6 +22,8 @@ let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
+// Removed at every exit, a throw included, which left about 2,600 inodes per run (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
 const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt } = lib
