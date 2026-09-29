@@ -22,9 +22,8 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision, codexAncestor, codexBackground,
-  composerEmpty, codexUnderClaude,
+  composerEmpty, codexUnderClaude, composerIdle, codexAborted, PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason,
 } = await import('./dctr-lib.mjs')
-const lib = await import('./dctr-lib.mjs')
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
 const J = (l) => JSON.parse(l)
@@ -238,7 +237,6 @@ clause('clause 1h2 — cycleDecision on Codex names Codex in the different-sessi
 // resume start a new one, so there its action must name those; before the warned line the session's next turn goes
 // on. The Codex kinds: the unknown background work, and every D2 reason Codex words differently (R9 and R12 today).
 const { parseRecord } = await import('./dctr-record.mjs')
-const { PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason } = lib
 const codexWorded = Object.keys(PAUSES).filter((c) => PAUSES[c].reason('x', 'codex') !== PAUSES[c].reason('x'))
 const codexKinds = [unknownBackgroundReason('the Codex process is gone'), unknownBackgroundReason('the environment of process 4242 could not be read'),
   ...codexWorded.map((c) => pauseReason(c, 'internal_server_error', 'codex'))]
@@ -325,7 +323,6 @@ clause('clause 1n2 — Codex typerStep after /clear sends no resume line into a 
 // interrupted (INTERRUPTED_LINE, B6's pane), above a composer holding `c`.
 const DRAFT_BEFORE = F.NARROW_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
 const RETRY_PANE = (c) => F.NARROW_AFTER.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› ${c}`)
-const composerIdle = lib.composerIdle || (() => 'missing'), codexAborted = lib.codexAborted || (() => 'missing')
 const abortedNew = transcriptEntries(text(F.RESUME_ABORTED), 'codex')
 const RETRY = { stage: 'confirm', resumes: 1, restore: NEW, pane: NP, typedNew: false }
 clause('clause 1j6 — Codex typerStep confirming: a resume turn interrupted before its first answer (turn_aborted, no assistant message, nothing typed) pauses with R16 and never sends the resume line again, inside or past the first-turn wait; a first turn still confirms (E10H-R4-B1)',
