@@ -563,6 +563,11 @@ clause('clause 1e — typer on Codex, normal: the pane read before /clear, /clea
 const tNoTake = typerCase('notake', { after: F.NARROW_BEFORE })
 clause('clause 1e2 — typer on Codex, the /clear did not take (no continue line appears): no resume sent, no cycle line, paused naming the /clear not taking and the old session id (clear 1, resume 0, E8-D28 through the table)',
   tNoTake.sends === '1,0' && tNoTake.cycled.length === 0 && JSON.stringify(tNoTake.paused) === `["- auto-cycle paused: /clear did not take: session ${OLD} still running"]`, td(tNoTake))
+// E10H-R5-B1: the old session's continue line is already on the pane before the /clear (a codex resume in the same
+// pane), and the /clear does not take. Only the before/after comparison (Q6) tells the stale line from a new one.
+const tSeen = typerCase('seen-before', { before: F.NARROW_AFTER, after: F.NARROW_AFTER })
+clause('clause 1e14 — typer on Codex, the old session\'s continue line already on the pane before the /clear and the /clear does not take: no resume sent, paused naming the /clear not taking (clear 1, resume 0; the pre-/clear pane is what clearTook compares against, Q6)',
+  tSeen.sends === '1,0' && tSeen.cycled.length === 0 && JSON.stringify(tSeen.paused) === `["- auto-cycle paused: /clear did not take: session ${OLD} still running"]`, td(tSeen))
 const tNoRestore = typerCase('norestore', { onResume: 'none' })
 clause('clause 1e3 — typer on Codex, the resume sent and no restore file follows: paused with the no-restore reason (clear 1, resume 1, E8-D15 through the table)',
   tNoRestore.sends === '1,1' && JSON.stringify(tNoRestore.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]' && tNoRestore.cycled.length === 1, td(tNoRestore))

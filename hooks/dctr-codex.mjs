@@ -7,8 +7,9 @@
 // config.toml, and sandbox_workspace_write.network_access = true, which a command Codex runs in its workspace-write
 // sandbox needs to reach herdr. What it writes is codexInstallPlan's in dctr-lib.mjs; this file only reads, copies
 // and writes. CODEX_HOME is resolved as Codex resolves it: --codex-home, else $CODEX_HOME, each of which must be an
-// existing directory and is canonicalized, else ~/.codex. Exit 0 installed or already current, 1 refused (nothing
-// written), 2 usage.
+// existing directory and is canonicalized, else ~/.codex. Exit 0 installed or already current, 2 usage, 1 failed: a
+// refusal (a layout it cannot edit in place, an unreadable file) writes nothing, but a write that fails after the hooks
+// copy or hooks.json has landed leaves those changes in place, and the message says it failed part way.
 
 import fs from 'node:fs'
 import os from 'node:os'
