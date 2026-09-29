@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { PIDLESS_STALE_FACTOR, PLACEMENT_STALE_MS, readMeta, sleepMs, sideOccupants } from './dctr-state.mjs'
+import { ownPidNs, PIDLESS_STALE_FACTOR, PLACEMENT_STALE_MS, readMeta, sleepMs, sideOccupants } from './dctr-state.mjs'
 import { seatPlacement } from './dctr-lib.mjs'
 
 const hook = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dctr-seat.mjs')
@@ -1047,11 +1047,12 @@ console.log('clause 1 — a placement lock left by a holder in another pid names
 {
   // A Codex-sandboxed launcher publishes a pid from its own namespace (2, observed), which the host
   // sees as a process that is always alive. Killed while holding the placement lock, it used to
-  // block every seat of the session for good. The namespace is WRITTEN, not entered: this host
-  // refuses an unprivileged `unshare --pid`.
+  // block every seat of the session for good. The namespace is WRITTEN, not entered, so this runs on
+  // any host; dctr-pane.selftest.mjs enters real ones with `bwrap --unshare-pid` where that runs.
   const lockDir = path.join(stateDir, 'placement.lock')
   const FOREIGN = 'pid:[1]'
-  let own = null; try { own = fs.readlinkSync('/proc/self/ns/pid') } catch { /* no /proc */ }
+  // This process's identity as the lock code publishes it (the link plus its init's start time).
+  const own = ownPidNs()
   const plant = (ns) => {
     reset(); fs.mkdirSync(lockDir)
     if (ns !== null) fs.writeFileSync(path.join(lockDir, 'ns'), ns)
