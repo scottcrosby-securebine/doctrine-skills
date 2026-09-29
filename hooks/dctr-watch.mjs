@@ -89,7 +89,7 @@ try {
     if (step.act === 'unknown') { fire('Notification', { notification_type: 'background_unknown', dctr_why: obs.backgroundUnknown, dctr_watch: true }); process.exit(0) }
     if (step.act === 'stop') {
       firedAt = fact.at
-      fire('Stop', { stop_hook_active: false, last_assistant_message: last, dctr_watch: true })
+      fire('Stop', { stop_hook_active: false, last_assistant_message: last, dctr_watch: true, dctr_codex: a.codex ?? null })
     }
     sleepMs(times.poll); now += times.poll
   }

@@ -306,11 +306,22 @@ clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active start
 // ---------------------------------------------------------------- clause 1d: the watcher end to end
 
 const WT = JSON.stringify({ poll: 20, idle: 150, max: 5000 })
+// Started as the UserPromptSubmit hook starts it, detached from a process that exits at once, so it runs orphaned
+// (under pid 1 or a subreaper) and never under the suite's Codex: a watcher is never under Codex (probe P-PROC, the
+// detached `sleep 301`), and the live tty run (R3 repair notes) found a retried Stop that looked for Codex above
+// itself. Resolves once the watcher has exited.
 function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: process.pid, start: null }) {
   return new Promise((resolve) => {
-    const c = spawn('node', [path.join(here, 'dctr-watch.mjs'), JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn, codex })],
-      { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: 'ignore' })
-    c.on('exit', (code) => resolve(code))
+    const args = JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn, codex })
+    const sh = spawn('sh', ['-c', 'node "$0" "$1" </dev/null >/dev/null 2>&1 & echo $!', path.join(here, 'dctr-watch.mjs'), args],
+      { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    sh.stdout.on('data', (d) => { out += d })
+    sh.on('exit', () => {
+      const pid = Number(out.trim())
+      const gone = () => { try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] === 'Z' } catch { return true } }
+      const t = setInterval(() => { if (gone()) { clearInterval(t); resolve() } }, 20)
+    })
   })
 }
 const we = project('watch-err')
