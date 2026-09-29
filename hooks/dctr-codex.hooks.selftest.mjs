@@ -16,6 +16,15 @@ import path from 'node:path'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import * as F from './dctr-codex.fixtures.mjs'
 
+// The hooks read the session's background work under the Codex process above them (codexAncestor: the nearest ancestor
+// whose argv0 is `codex`), so the suite runs as that process: it runs itself again under argv0 `codex`, and every hook
+// and watcher it spawns sits under it, as they sit under Codex (probe P-PROC).
+if (path.basename(process.argv0) !== 'codex') {
+  const r = spawnSync(process.execPath, process.argv.slice(1), { argv0: 'codex', stdio: 'inherit' })
+  if (r.status === null) console.log(`FAIL  the suite under argv0 codex ended without an exit code (${r.signal || r.error?.message})`)
+  process.exit(r.status ?? 1)
+}
+
 let bad = 0
 // A throw outside a clause (a mutated function called while deriving a clause's input) is a FAIL line naming the
 // last clause that ran, never an exit with no verdict, which the mutation gate cannot judge (E10H-B8).
@@ -27,6 +36,9 @@ process.on('uncaughtException', (e) => {
 const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-hooks-'))
+// Removed at every exit, pass, fail or throw: a run left about 2,500 inodes, and the mutation gate runs it hundreds of
+// times (E10H-R3-B3).
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE } = await import('./dctr-lib.mjs')
 const { stateDir, restoreFile, stopFactsFile, stopHeldFile } = await import('./dctr-state.mjs')
@@ -103,6 +115,12 @@ function hook(name, f, payload, env = {}) {
   let j = null
   try { j = r.stdout ? JSON.parse(r.stdout) : null } catch { /* the clause reports it */ }
   return { code: r.status, out: r.stdout, err: r.stderr, j }
+}
+/** Background work of the session: a command as Codex runs one, CODEX_SESSION_ID in its environment, under this
+ *  process (the suite's Codex). `end` kills it and resolves once it is reaped, so no listing reads it after. */
+const work = () => {
+  const c = spawn('sleep', ['120'], { env: { ...baseEnv, CODEX_SESSION_ID: 'work' }, stdio: 'ignore' })
+  return { pid: c.pid, end: () => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) r(); else { c.on('exit', r); c.kill() } }) }
 }
 const recLines = (f, re) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => re.test(l))
 const calls = (f) => (fs.existsSync(f.shimLog) ? fs.readFileSync(f.shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
@@ -227,19 +245,21 @@ const stopBg = (more = {}) => hook('dctr-cycle.mjs', bg, as(F.STOP_BG, bg, 'b1',
 shim(bg, { session: 'b1' })
 // Read inside the try, file name and all: under a mutation the name itself may throw, and a clause must still judge.
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file(), 'utf8')) } catch { return null } }
+const bgWork = work()
 const b1 = stopBg()
 const facts1 = readJson(() => stopFactsFile('b1')), held1 = readJson(() => stopHeldFile('b1'))
 const launches1 = fs.existsSync(bgLog) ? fs.readFileSync(bgLog, 'utf8').trim().split('\n').length : 0
 fs.appendFileSync(bgT, jl(F.BG_DONE))
+await bgWork.end()
 const b2 = stopBg()
 const held2 = readJson(() => stopHeldFile('b1'))
 await sleep(500)
 const launch = (() => { try { return JSON.parse(fs.readFileSync(bgLog, 'utf8').trim().split('\n').at(-1)) } catch { return null } })()
-clause('clause 1c4 — a Codex Stop with a background terminal the rollout shows running launches no typer and records it live; once its completion is in the rollout the same Stop launches the typer, told the host (E8-D7 through the table)',
+clause('clause 1c4 — a Codex Stop with background work running under its Codex process launches no typer and records it live; once that work has exited the same Stop launches the typer, told the host (E8-D7 through the table, E10H-R3-B4)',
   b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
   (b2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && launch?.host === 'codex' && launch?.session === 'b1' && recLines(bg, /paused/).length === 0 && !/"decision"/.test(b1.out + b2.out),
   `b1 ${b1.out} ${b1.err} b2 ${b2.out} ${b2.err} launch ${JSON.stringify(launch)} paused ${JSON.stringify(recLines(bg, /paused/))}`)
-clause('clause 1c8 — a Codex Stop persists its own decision for its turn: held for the running terminal, then not held once the Stop launched (E10H-R2-B2)',
+clause('clause 1c8 — a Codex Stop persists its own decision for its turn: held for the running work, then not held once the Stop launched (E10H-R2-B2)',
   held1?.turn === F.STOP_BG.turn_id && held1.held === true && Number.isFinite(held1.at) && held2?.turn === F.STOP_BG.turn_id && held2.held === false,
   `${JSON.stringify(held1)} ${JSON.stringify(held2)}`)
 // E10H-B4: the claude -p red team's marker, captured from a real dispatch (REDTEAM_MARKER), in the session's seats with
@@ -279,16 +299,16 @@ const upOff = project('ups-off', { on: '- auto-cycle: off' })
 hook('dctr-cycle.mjs', upOff, as(F.UPS_MAIN, upOff, 'w3', rollout(upOff, 'w3', [])), { DCTR_WATCH_SCRIPT: stub, STUB_LOG: path.join(upOff.dir, 'w.log') })
 await sleep(300)
 const watchArgs = (() => { try { return JSON.parse(fs.readFileSync(upLog, 'utf8').trim()) } catch { return null } })()
-clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active starts the watcher on its rollout from the rollout\'s length, told its turn (whose Stop decision it reads, E10H-R2-B2); a Claude Code one and an inactive record start none',
-  watchArgs?.session === 'w1' && watchArgs.transcript === upT && watchArgs.from === fs.statSync(upT).size && watchArgs.pane === 'wX:p1' && watchArgs.turn === F.UPS_MAIN.turn_id &&
+clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active starts the watcher on its rollout from the rollout\'s length, told its turn (whose Stop decision it reads, E10H-R2-B2) and the Codex process above the hook (E10H-R3-B4); a Claude Code one and an inactive record start none',
+  watchArgs?.session === 'w1' && watchArgs.transcript === upT && watchArgs.from === fs.statSync(upT).size && watchArgs.pane === 'wX:p1' && watchArgs.turn === F.UPS_MAIN.turn_id && watchArgs.codex?.pid === process.pid &&
   !fs.existsSync(upOffLog) && !fs.existsSync(path.join(upOff.dir, 'w.log')), JSON.stringify(watchArgs))
 
 // ---------------------------------------------------------------- clause 1d: the watcher end to end
 
 const WT = JSON.stringify({ poll: 20, idle: 150, max: 5000 })
-function watcher(f, id, transcript, from, env = {}, turn = null) {
+function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: process.pid, start: null }) {
   return new Promise((resolve) => {
-    const c = spawn('node', [path.join(here, 'dctr-watch.mjs'), JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn })],
+    const c = spawn('node', [path.join(here, 'dctr-watch.mjs'), JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn, codex })],
       { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: 'ignore' })
     c.on('exit', (code) => resolve(code))
   })
@@ -318,15 +338,17 @@ function heldProject(name, id) {
 const stopNow = (f, id, t, more = {}) => hook('dctr-cycle.mjs', f, as(F.STOP_BG, f, id, t, more), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: path.join(f.dir, 'typer.log') })
 const wb = heldProject('watch-bg', 'v1')
 const wbT = rollout(wb, 'v1', F.BG_RUNNING)
+const wbWork = work()
 stopNow(wb, 'v1', wbT)
 const wbLog = path.join(wb.dir, 'events.log')
 const wbRun = watcher(wb, 'v1', wbT, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wbLog }, F.STOP_BG.turn_id)
 await sleep(400)
 const wbBefore = fs.existsSync(wbLog) ? fs.readFileSync(wbLog, 'utf8') : ''
 fs.appendFileSync(wbT, jl(F.BG_DONE))
+await wbWork.end()
 await wbRun
 const wbEvents = fs.readFileSync(wbLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-clause('clause 1d3 — the watcher fires nothing while the background terminal runs, then, once its completion lands, hands the hook the Stop again with the turn\'s last message (E8-D7 through the table)',
+clause('clause 1d3 — the watcher fires nothing while the background work runs, then, once it has exited, hands the hook the Stop again with the turn\'s last message (E8-D7 through the table, E10H-R3-B4)',
   wbBefore === '' && wbEvents[0]?.hook_event_name === 'Stop' && wbEvents[0].last_assistant_message === 'started' && wbEvents[0].stop_hook_active === false && wbEvents[0].session_id === 'v1',
   `${wbBefore} || ${JSON.stringify(wbEvents)}`)
 // E10H-R2-B2, the order Codex writes (probe B5b: Stop at 54.324, task_complete at 54.334): the Stop reads the rollout
@@ -335,8 +357,10 @@ clause('clause 1d3 — the watcher fires nothing while the background terminal r
 const events = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } }
 const wb2 = heldProject('watch-bg-between', 'v2')
 const wb2T = rollout(wb2, 'v2', F.BG_RUNNING.slice(0, -1))
+const wb2Work = work()
 stopNow(wb2, 'v2', wb2T)
 const wb2Held = readJson(() => stopHeldFile('v2'))
+await wb2Work.end()
 fs.appendFileSync(wb2T, jl(F.BG_DONE, F.BG_RUNNING.at(-1)))
 const wb2Log = path.join(wb2.dir, 'events.log')
 await watcher(wb2, 'v2', wb2T, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wb2Log }, F.STOP_BG.turn_id)
@@ -362,6 +386,47 @@ const wgtEvents = events(wgtLog)
 clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
   wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
   `${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
+// E10H-R3-B4 point 3, on probe B5 run 1 (P3-B1): the tty cell whose output reports "running" and that nothing in the
+// rollout ever ends. Derived: its turn's task_complete ends on the ready line (the capture ends "started"), and the
+// loop is a work process under the suite's Codex. It must end in the typer launching once the loop has exited.
+const B5_TURN = '01a0e95a-6186-7120-8a91-6828965a9158', READY = 'Handoff written.\nauto-cycle: ready'
+const b5Lines = F.CELL_RUNNING.map((l) => l.replace('"last_agent_message":"started"', `"last_agent_message":${JSON.stringify(READY)}`))
+const b5 = heldProject('watch-b5', 'v6')
+const b5T = rollout(b5, 'v6', b5Lines)
+const b5Work = work()
+stopNow(b5, 'v6', b5T, { turn_id: B5_TURN, last_assistant_message: READY })
+const b5Held = readJson(() => stopHeldFile('v6'))
+const b5Log = path.join(b5.dir, 'typer.log')
+const b5Run = watcher(b5, 'v6', b5T, 0, { DCTR_TYPER_SCRIPT: stub, STUB_LOG: b5Log }, B5_TURN)
+await sleep(400)
+const b5Before = fs.existsSync(b5Log)
+fs.appendFileSync(b5T, jl(F.CELL_DONE))
+await b5Work.end()
+await b5Run
+await sleep(300)
+const b5Launches = fs.existsSync(b5Log) ? fs.readFileSync(b5Log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
+clause('clause 1d11 — probe B5 run 1 on the ready line, its cell reporting running forever: the Stop holds while the loop runs under its Codex process, and once the loop has exited the watcher re-runs the real Stop hook, which launches the typer once; no paused line (E10H-R3-B4, P3-B1)',
+  b5Held?.turn === B5_TURN && b5Held.held === true && !b5Before && b5Launches.length === 1 && b5Launches[0].session === 'v6' && b5Launches[0].host === 'codex' && recLines(b5, /paused/).length === 0,
+  `${JSON.stringify(b5Held)} ${b5Before} ${JSON.stringify(b5Launches)} ${JSON.stringify(recLines(b5, /paused/))}`)
+// The same held Stop, its background work unreadable to the watcher (the Codex process it was told of is gone): past the
+// idle grace it hands the hook the unknown, which writes the paused line and alerts; the next turn's Stop reads its own
+// listing and holds nothing, whatever the earlier turn could not read.
+const b6 = heldProject('watch-unknown', 'v7')
+const b6T = rollout(b6, 'v7', b5Lines)
+const b6Work = work()
+stopNow(b6, 'v7', b6T, { turn_id: B5_TURN, last_assistant_message: READY })
+const b6Held = readJson(() => stopHeldFile('v7'))
+await b6Work.end()
+await watcher(b6, 'v7', b6T, 0, {}, B5_TURN, { pid: 999999999, start: null })
+const b6Paused = recLines(b6, /paused/)
+stopNow(b6, 'v7', b6T, { turn_id: 'a-later-turn', last_assistant_message: READY })
+const b6Later = readJson(() => stopHeldFile('v7'))
+const UNKNOWN_LINE = '- auto-cycle paused: could not tell whether background work is still running: the Codex process is gone'
+clause('clause 1d12 — a held Stop whose background work the watcher cannot read (its Codex process gone): past the idle grace the hook writes the paused line naming it and herdr raises the notification; a later turn\'s Stop holds nothing (E10H-R3-B4, E8-D16, E8-D26)',
+  b6Held?.held === true && JSON.stringify(b6Paused) === JSON.stringify([UNKNOWN_LINE]) &&
+  calls(b6).some((c) => c[0] === 'notification' && String(c[c.indexOf('--body') + 1]).startsWith(UNKNOWN_LINE.slice('- auto-cycle paused: '.length))) &&
+  b6Later?.turn === 'a-later-turn' && b6Later.held === false,
+  `${JSON.stringify(b6Held)} ${JSON.stringify(b6Paused)} ${JSON.stringify(b6Later)} ${JSON.stringify(calls(b6).filter((c) => c[0] === 'notification'))}`)
 // Spec N2: the user quit Codex and a later session runs in the pane; herdr names that session, so the old watcher ends.
 const wos = project('watch-other-session')
 shim(wos, { session: 'someone-else', status: 'done' })
@@ -505,6 +570,17 @@ clause('clause 3b — without the hooks: the background rollout\'s turn ended wh
   F.BG_RUNNING.map(J).at(-1).payload.type === 'task_complete' && J(F.BG_DONE[0]).timestamp > F.BG_RUNNING.map(J).at(-1).timestamp && !('background_tasks' in F.STOP_BG), 'bg fixture wrong')
 clause('clause 3c — without the hooks: the typer\'s narrow pane text holds the old session id only after the /clear, and the gauge tier 10000 is below the rollout\'s 17503 while 100000 is above it',
   !F.NARROW_BEFORE.includes(OLD) && F.NARROW_AFTER.includes(OLD) && F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+const b5Out = F.CELL_RUNNING.filter((l) => /Script running with cell ID 6/.test(l))
+const envWork = work()
+await sleep(200)
+const workEnv = (() => { try { return fs.readFileSync(`/proc/${envWork.pid}/environ`, 'utf8') } catch { return '' } })()
+await envWork.end()
+clause('clause 3f — without the hooks: B5 run 1 reports cell 6 running and no later output of cell 6, its turn ends in a task_complete, CELL_DONE is the loop\'s completion after it; the derived lines differ from the capture only in that task_complete\'s last message; the suite runs as argv0 codex, and a work process carries CODEX_SESSION_ID',
+  b5Out.length === 1 && F.CELL_DONE.every((l) => !/cell ID 6|Script completed/.test(l)) && J(F.CELL_RUNNING.at(-1)).payload.type === 'task_complete' &&
+  J(F.CELL_DONE[0]).payload.item.type === 'CommandExecution' && b5Lines.filter((l, i) => l !== F.CELL_RUNNING[i]).length === 1 &&
+  J(b5Lines.at(-1)).payload.last_agent_message === READY && path.basename(process.argv0) === 'codex' &&
+  workEnv.split("\0").includes("CODEX_SESSION_ID=work"),
+  'B5 run 1 fixture wrong')
 clause('clause 3e — without the hooks: the captured red-team marker is a gate with no pane, marked detached, naming a red-team transcript and the red-team label',
   F.REDTEAM_MARKER.role === 'gate' && F.REDTEAM_MARKER.paneId === '' && F.REDTEAM_MARKER.detached === true && F.REDTEAM_MARKER.label === 'red-team' &&
   /red-team\.out$/.test(F.REDTEAM_MARKER.file), 'marker fixture wrong')

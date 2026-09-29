@@ -728,6 +728,27 @@ export function liveWork(sessionId) {
 }
 
 /**
+ * Every process on the host as codexAncestor and codexBackground in dctr-lib.mjs read them (E10H-R3-B4): pid, ppid,
+ * state and start time from /proc/<pid>/stat, argv0 from its cmdline, and `session`, the CODEX_SESSION_ID in its
+ * environment: '' when it has none, null when the environment cannot be read. A process that exits mid-read is left
+ * out, as it is gone. `{ error }` when /proc cannot be listed (a host without it).
+ */
+export function processListing() {
+  let pids
+  try { pids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)) } catch (e) { return { error: `/proc could not be read (${e.code || e.message})` } }
+  const procs = []
+  for (const id of pids) {
+    let stat, cmd
+    try { stat = fs.readFileSync(`/proc/${id}/stat`, 'utf8'); cmd = fs.readFileSync(`/proc/${id}/cmdline`, 'utf8') } catch { continue }
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+    let session = null
+    try { session = /(?:^|\0)CODEX_SESSION_ID=([^\0]*)/.exec(fs.readFileSync(`/proc/${id}/environ`, 'utf8'))?.[1] ?? '' } catch { /* unreadable: null */ }
+    procs.push({ pid: Number(id), ppid: Number(f[1]), state: f[0], start: Number(f[19]), argv0: cmd.split('\0')[0], session })
+  }
+  return { procs }
+}
+
+/**
  * B7's tree hash (E8-D17): for each repo, `git add -A` into a fresh temporary index, the excluded paths then removed
  * from it, then `git write-tree`. Fresh, not copied from the real index: a copy carries the real index's stat cache,
  * and an edit of the same size in the same second as that cache's entry is invisible to `git add` (RB4). One repo gives its tree id; two

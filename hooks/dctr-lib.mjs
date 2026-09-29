@@ -1342,6 +1342,8 @@ function typerAct(o) {
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown', f.host)
   if (event === 'permission_prompt') return pauseReason('R7')
+  // Codex only: the watcher's held Stop whose background work stayed unknown past the idle grace (E10H-R3-B4).
+  if (event === 'background_unknown') return unknownBackgroundReason(f.why || 'unknown')
   if (event !== 'idle_prompt') return null
   if (f.claimHeld || f.liveWork || f.lastStop?.backgroundEmpty !== true || f.lastStop?.cronsEmpty !== true || f.lastStop?.ready !== false) return null
   return pauseReason('R8')
@@ -1501,17 +1503,20 @@ export const CODEX_RESUME_LINE = `$doctrine:doctrine-resume ${RESUME_ARGS}`
  *  (<session id>)` (probe-clear-screen.txt). */
 export const CLEAR_TOOK_TEXT = 'To continue this session, run codex resume'
 
-/** Each continue line in a pane's text, joined with the lines Codex wrapped it onto: it breaks the line itself at the
- *  pane's width, which puts the session id on the next line in a narrow pane (III-evidence/popup-after-clear.txt). The
- *  wrap ends at a blank line or the composer's `›`. */
+/** Each continue line in a pane's text: `text`, what follows CLEAR_TOOK_TEXT up to a blank line or the composer's
+ *  `›`, and `end`, the index of its last line. Codex breaks the line itself at the pane's width, anywhere: at a space,
+ *  after a hyphen inside the session id, or mid-word (III-evidence/popup-after-clear.txt; r3 realenv
+ *  main-pane-read-step5-R18.txt, a 45-column tab: "(01a0ea5c-7200-70c2-" then "9556-138eea3f9cde)"). So the lines are
+ *  joined with every space and break taken out, the continue text too, never rejoined with a space (E10H-R3-B5). */
+const squeeze = (s) => s.replace(/\s+/g, '')
 function continueLines(text) {
-  const ls = String(text ?? '').split('\n'), out = []
-  ls.forEach((l, i) => {
-    if (!l.includes(CLEAR_TOOK_TEXT)) return
-    let s = l.trim()
-    for (let j = i + 1; j < ls.length && j <= i + 3 && ls[j].trim() && !ls[j].trim().startsWith('›'); j++) s += ` ${ls[j].trim()}`
-    out.push(s)
-  })
+  const ls = String(text ?? '').split('\n'), out = [], key = squeeze(CLEAR_TOOK_TEXT)
+  const open = (l) => l !== undefined && l.trim() !== '' && !l.trim().startsWith('›')
+  for (let i = 0; i < ls.length; i++) {
+    let s = ''
+    for (; open(ls[i]); i++) s += squeeze(ls[i])
+    for (const after of s.split(key).slice(1)) out.push({ text: after, end: i - 1 })
+  }
   return out
 }
 
@@ -1519,7 +1524,7 @@ function continueLines(text) {
  *  the old session than the text read before it, so one appeared that was not there. */
 export function clearTook(before, after, oldId) {
   if (!oldId) return false
-  const count = (t) => continueLines(t).filter((l) => l.includes(oldId)).length
+  const count = (t) => continueLines(t).filter((l) => l.text.includes(oldId)).length
   return count(after) > count(before)
 }
 
@@ -1533,10 +1538,9 @@ const COMPOSER_PLACEHOLDERS = ['Ask Codex to do anything', 'Ask a follow-up ques
  *  Null when no continue line names `oldId`, so it says nothing (E10H-B1). */
 export function composerEmpty(text, oldId) {
   if (!oldId) return null
-  const ls = String(text ?? '').split('\n')
-  const at = ls.findLastIndex((l, i) => l.includes(CLEAR_TOOK_TEXT) && ls.slice(i, i + 4).join(' ').includes(oldId))
-  if (at < 0) return null
-  const composer = ls.slice(at + 1).map((l) => l.trim()).find((l) => l.startsWith('›'))
+  const at = continueLines(text).findLast((l) => l.text.includes(oldId))
+  if (!at) return null
+  const composer = String(text ?? '').split('\n').slice(at.end + 1).map((l) => l.trim()).find((l) => l.startsWith('›'))
   return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
 }
 
@@ -1547,35 +1551,13 @@ export function composerEmpty(text, oldId) {
 export const codexUnderClaude = (env, host) => host === 'codex' && Boolean(env?.CLAUDE_CODE_SESSION_ID)
 export const UNDER_CLAUDE_WHY = 'a Codex process under a Claude Code session (CLAUDE_CODE_SESSION_ID set), whose own hooks own its pane and record'
 
-/** A process Codex's own exec result says is still running: the result object Codex writes for a command that
- *  outlived its yield (`{"chunk_id":…,"wall_time_seconds":…,"session_id":N,…}`, bare or inside Promise.allSettled's
- *  `{"status":"fulfilled","value":…}`), at the start of a part or of a line, where a model that prints the result
- *  whole puts it. A finished command's result carries exit_code in session_id's place. Text a command printed sits
- *  inside the result's `output` string, escaped, so a `"session_id":N` there is never read as one (N11). */
-const CODEX_RUNNING = /(?:^|\n)(?:\{"status":"fulfilled","value":)?\{"chunk_id":"[^"\\]*","wall_time_seconds":[^,{}"]*,"session_id":(\d+)/g
-/** exec_command's own text result, on the path without code mode: its header, before `Output:`, names the process. */
-const PROCESS_RUNNING = /^Process running with session ID (\d+)$/m
-
 /**
- * The state of a rollout's last turn and its background terminals, read line by line. A turn starts at task_started
- * or at a user message the user typed, and ends at task_complete (its error and last_agent_message kept) or
- * turn_aborted. Esc ends the turn and not what it started: the terminals run on, and nothing but their own
- * completion ends them (probe P-ESC, r2 repair notes). A background terminal is a command still running when its call
- * returned (probe B5):
- * - a process: Codex's own exec result carries its session_id (CODEX_RUNNING, PROCESS_RUNNING) and it ends when an
- *   item_completed CommandExecution names that process_id;
- * - a code-mode cell: an output reading `Script running with cell ID N`, whether the cell's own call's or a `wait`
- *   poll's (a wait call's arguments name its cell_id). It ends only at a later output of the same cell that is not
- *   running (`Script completed`, `Script failed`). No command's completion ends a cell, named or not: one cell can run
- *   several commands, built as it goes, and a completion proves only that one of them finished (E10H-R2-B1, red team
- *   R2-B1). A cell the rollout never shows ending stays running, the direction that waits (E8-D7).
+ * The state of a rollout's last turn: a turn starts at task_started or at a user message the user typed, and ends at
+ * task_complete (its error and last_agent_message kept) or turn_aborted. Background work is not read from here: a
+ * rollout shows a background terminal only in text the model chose to print, which three gate rounds found could say
+ * "running" forever or "finished" while it ran (E10H-R3-B4); codexBackground reads the process tree instead.
  */
 function codexTurnState(text) {
-  const running = new Map() // process id -> the turn that started it
-  const exited = new Map() // process id -> the turn its completion came in
-  const start = (id, turn) => { if (exited.get(id) !== turn) running.set(id, turn) }
-  const cells = new Map() // cell id -> the turn it last reported running in
-  const calls = new Map() // call id -> the cell it answers for (a wait's cell_id, or the cell its own call started)
   let ended = false, error = null, lastMessage = null
   for (const l of String(text ?? '').split('\n')) {
     if (!l.trim()) continue
@@ -1590,49 +1572,81 @@ function codexTurnState(text) {
       lastMessage = typeof p.last_agent_message === 'string' ? p.last_agent_message : null
       error = p.error ? String(p.error.codex_error_info || p.error.message || 'unknown') : null
     }
-    if (e.type === 'response_item' && (p.type === 'custom_tool_call' || p.type === 'function_call')) {
-      let cell = null
-      if (p.name === 'wait') { try { cell = String(JSON.parse(p.arguments).cell_id ?? '') || null } catch { /* no cell named */ } }
-      calls.set(p.call_id, cell)
-    }
-    if (e.type === 'response_item' && (p.type === 'custom_tool_call_output' || p.type === 'function_call_output')) {
-      const turn = p.internal_chat_message_metadata_passthrough?.turn_id ?? null
-      const parts = typeof p.output === 'string' ? [p.output] : Array.isArray(p.output) ? p.output.map((o) => (typeof o?.text === 'string' ? o.text : '')) : []
-      // A process that exited between its yield and its output being written has its completion first (real rollout
-      // 2026-09-27T22-34-11 lines 179 and 181): that output's "running" is already answered.
-      for (const part of parts) for (const m of part.matchAll(CODEX_RUNNING)) start(m[1], turn)
-      const head = PROCESS_RUNNING.exec(String(parts[0] ?? '').split('\nOutput:\n')[0])
-      if (head) start(head[1], turn)
-      const owner = calls.get(p.call_id)
-      const cell = /^Script running with cell ID (\d+)/.exec(parts[0] ?? '')?.[1]
-      if (cell) {
-        cells.set(cell, turn)
-        if (owner === null) calls.set(p.call_id, cell)
-      } else if (owner) cells.delete(owner)
-    }
-    if (e.type === 'event_msg' && p.type === 'item_completed' && p.item?.type === 'CommandExecution') {
-      const pid = String(p.item.process_id)
-      running.delete(pid)
-      exited.set(pid, p.turn_id ?? null)
-    }
   }
-  return { ended, error, lastMessage, backgroundRunning: running.size > 0 || cells.size > 0 }
+  return { ended, error, lastMessage }
+}
+
+/** The Codex process a hook runs under (E10H-R3-B4): in a processListing, the nearest ancestor of `pid` whose argv0's
+ *  last path segment is `codex`, the native binary that runs every hook as its child (probe P-PROC, R3 repair notes:
+ *  hook > codex > the npm launcher `node .../bin/codex`). Never the launcher (argv0 `node`), and never the sandbox's
+ *  own process (argv0 `codex-linux-sandbox`). `{ pid, start }`, or null when no ancestor is one. */
+export function codexAncestor(listing, pid) {
+  const byPid = new Map((listing?.procs || []).map((p) => [p.pid, p]))
+  const seen = new Set()
+  for (let p = byPid.get(byPid.get(pid)?.ppid); p && !seen.has(p.pid); p = byPid.get(p.ppid)) {
+    seen.add(p.pid)
+    if (String(p.argv0 || '').split('/').at(-1) === 'codex') return { pid: p.pid, start: p.start ?? null }
+  }
+  return null
 }
 
 /**
- * The observations Codex's hooks do not carry (seam S5), from the session's rollout and herdr's agent_status for its
- * pane (null when there is no pane, or none may be read): `backgroundRunning`, a background terminal the session
- * started with no completion item yet (E8-D7's background_tasks); `apiError`, the error a task_complete carries after
- * the last user turn, as a 5xx ends a turn with no Stop (probe B6, E8-D18's StopFailure), else null; `idle`, the turn
- * ended with no error and no background terminal, its last assistant message not the ready line, and herdr reporting
- * the pane ready for input where it was read (E8-D18's idle_prompt).
+ * Whether the session's background work is live (E8-D7's background_tasks on Codex, E10H-R3-B4, R3-B1, R3-B2), from
+ * a processListing and the session's Codex process (codexAncestor's). The work is every live (not zombie) descendant
+ * of that process whose environment carries CODEX_SESSION_ID: Codex sets it on every command it runs, and on the
+ * sandbox's own processes for one, and never on a hook, on codex-code-mode-host or on anything else it keeps for the
+ * whole session (probe P-PROC, both postures). A process that left the tree (a detached daemon) is no background
+ * terminal of Codex's, and is not counted. `{ running, unknown, pids }`: `unknown` names why it cannot tell (no
+ * listing, no Codex process, that process gone or its pid reused, a descendant whose environment cannot be read), and
+ * then `running` is true, the direction E8-D7 takes.
  */
-export function codexObservations(rolloutText, herdrStatus) {
+export function codexBackground(listing, codex) {
+  const unknown = (why) => ({ running: true, unknown: why, pids: [] })
+  if (!listing?.procs) return unknown(listing?.error || 'no process listing')
+  if (!codex) return unknown('no Codex process above the hook')
+  const kids = new Map()
+  let root = null
+  for (const p of listing.procs) {
+    if (p.pid === codex.pid) root = p
+    if (!kids.has(p.ppid)) kids.set(p.ppid, [])
+    kids.get(p.ppid).push(p)
+  }
+  if (!root || (codex.start != null && root.start != null && root.start !== codex.start)) return unknown('the Codex process is gone')
+  const live = []
+  for (let queue = [...(kids.get(root.pid) || [])], seen = new Set([root.pid]); queue.length;) {
+    const p = queue.shift()
+    if (seen.has(p.pid)) continue
+    seen.add(p.pid)
+    if (p.state !== 'Z') live.push(p)
+    queue.push(...(kids.get(p.pid) || []))
+  }
+  const work = live.filter((p) => p.session)
+  if (work.length) return { running: true, unknown: null, pids: work.map((p) => p.pid) }
+  const blind = live.find((p) => p.session === null || p.session === undefined)
+  return blind ? unknown(`the environment of process ${blind.pid} could not be read`) : { running: false, unknown: null, pids: [] }
+}
+
+/**
+ * The observations Codex's hooks do not carry (seam S5), from the session's rollout, herdr's agent_status for its pane
+ * (null when there is no pane, or none may be read) and `procs`, `{ listing, codex }` for codexBackground (absent, it
+ * is unknown): `backgroundRunning`, the session's background work live or unknown (E8-D7's background_tasks), with
+ * `backgroundUnknown` naming why it is unknown, else null; `apiError`, the error a task_complete carries after the
+ * last user turn, as a 5xx ends a turn with no Stop (probe B6, E8-D18's StopFailure), else null; `idle`, the turn
+ * ended with no error and no background work, its last assistant message not the ready line, and herdr reporting the
+ * pane ready for input where it was read (E8-D18's idle_prompt).
+ */
+export function codexObservations(rolloutText, herdrStatus, procs) {
   const t = codexTurnState(rolloutText)
+  const bg = codexBackground(procs?.listing, procs?.codex)
   const apiError = t.ended && t.error ? t.error : null
   const ready = herdrStatus === null || herdrStatus === undefined || READY_STATUSES.includes(herdrStatus)
-  return { backgroundRunning: t.backgroundRunning, apiError, idle: t.ended && !apiError && !t.backgroundRunning && !endsReady(t.lastMessage) && ready }
+  return { backgroundRunning: bg.running, backgroundUnknown: bg.unknown, apiError, idle: t.ended && !apiError && !bg.running && !endsReady(t.lastMessage) && ready }
 }
+
+/** The paused line for background work the watcher could not read past its idle grace (E10H-R3-B4, E8-D16): E8-D7's
+ *  direction holds the Stop, and this makes the hold visible, so E8-D26 alerts. Not a D2 table code: its reason is its
+ *  text, and its action the default. */
+export const unknownBackgroundReason = (why) => `could not tell whether background work is still running: ${why}`
 
 /** The watcher's turn, from the rollout text written since it started (at its UserPromptSubmit): `ended` once a
  *  task_complete or turn_aborted is there, and `newTurn` once a task_started follows that end. */
@@ -1661,10 +1675,12 @@ export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
  * task_complete, so what the rollout shows at the turn's end is not what the Stop read: E10H-R2-B2), `o.liveWork`
  * liveWork's reason or null, `o.session` the watched session and `o.paneSession` the session herdr names in the pane
  * (null when unread), `o.ready` whether the turn's last message ends with the ready line, `o.idleFor` ms the
- * observation has read idle, `o.age` ms watched. A turn ended on the ready line with no terminal running and no Stop
- * held leaves nothing to watch: its Stop decided, and an idle pause never follows the ready line (E8-D18).
+ * observation has read idle, `o.unknownFor` ms it has read the background work unknown, `o.age` ms watched. A turn
+ * ended on the ready line with no terminal running and no Stop held leaves nothing to watch: its Stop decided, and an
+ * idle pause never follows the ready line (E8-D18). A held Stop whose background work cannot be read stays held, E8-D7's
+ * direction, but never silently: past the idle grace the watcher hands on the unknown (E10H-R3-B4).
  * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the work that held the Stop back is gone:
- * the background terminals finished and no seat or gate is live, so the Stop is decided again) and `idle`.
+ * the background work finished and no seat or gate is live, so the Stop is decided again), `idle` and `unknown`.
  */
 export function watchStep(o) {
   const t = o.times || WATCH_TIMES
@@ -1674,6 +1690,9 @@ export function watchStep(o) {
   if (o.age >= t.max) return { act: 'exit', reason: 'the turn was watched for the longest time allowed' }
   if (!o.turn.ended) return { act: 'wait', reason: 'the turn is running' }
   if (o.obs.apiError) return { act: 'stopFailure', reason: `the turn ended with an API error (${o.obs.apiError})` }
+  if (o.held && !o.liveWork && o.obs.backgroundUnknown) {
+    return o.unknownFor >= t.idle ? { act: 'unknown', reason: `the background work could not be read (${o.obs.backgroundUnknown})` } : { act: 'wait', reason: 'the background work could not be read, inside the grace' }
+  }
   if (o.held) return o.obs.backgroundRunning || o.liveWork ? { act: 'wait', reason: 'the Stop is held for live work' } : { act: 'stop', reason: 'the work that held the Stop back is gone' }
   if (o.ready && !o.obs.backgroundRunning) return { act: 'exit', reason: 'the turn ended on the ready line, so the Stop hook and the typer take it from here' }
   if (o.obs.idle && o.idleFor >= t.idle) return { act: 'idle', reason: 'the session has been idle, waiting for the user' }

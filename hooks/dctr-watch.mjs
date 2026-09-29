@@ -3,10 +3,12 @@
 // Codex fires no hook for three things the auto-cycle hook acts on under Claude Code: a turn ended by an API error
 // (Claude Code's StopFailure), a session left idle waiting for the user (Notification idle_prompt), and the exit of a
 // background terminal that held a Stop back (Claude Code fires a Stop again). Probes B5 and B6 found that only the
-// session's rollout shows them. So dctr-cycle.mjs, on each Codex UserPromptSubmit while auto-cycle is active, spawns
-// this detached with one JSON argument: the session, its rollout, its cwd and project, its herdr pane (null when
-// contained or outside herdr), the rollout's byte length at the prompt and the turn's id. Each poll it reads the
-// rollout, herdr's agent_status and agent_session, and, for a background terminal's exit, what this turn's Stop itself
+// session's rollout shows the first two, and only the process tree the third (probe P-PROC, E10H-R3-B4). So
+// dctr-cycle.mjs, on each Codex UserPromptSubmit while auto-cycle is active, spawns this detached with one JSON
+// argument: the session, its rollout, its cwd and project, its herdr pane (null when contained or outside herdr), the
+// rollout's byte length at the prompt, the turn's id and the Codex process above that hook (codexAncestor's, null when
+// none). Each poll it reads the rollout, herdr's agent_status and agent_session, once the turn has ended the process
+// listing for codexBackground, and, for the background work's exit, what this turn's Stop itself
 // persisted about waiting (stopHeldFile), never the rollout's state at the turn end, which Codex writes only after the
 // Stop returns (E10H-R2-B2). It does what watchStep in dctr-lib.mjs decides: wait, exit, or hand dctr-cycle.mjs the event Claude
 // Code would have fired, as that event's payload on stdin, so the hook's own decisions (notifyDecision, cycleDecision)
@@ -17,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { watchStep, watchedTurn, codexObservations, followKickoff, autoCycleActive, stopFileRepo, repoOf, endsReady, WATCH_TIMES } from './dctr-lib.mjs'
-import { herdr, hookLog, sleepMs, isPaneNotFound, stopHeldFile, liveWork } from './dctr-state.mjs'
+import { herdr, hookLog, sleepMs, isPaneNotFound, stopHeldFile, liveWork, processListing } from './dctr-state.mjs'
 
 let a = null
 try { a = JSON.parse(process.argv[2]) } catch { /* not ours to run */ }
@@ -58,7 +60,7 @@ const heldFact = () => {
 }
 
 try {
-  let now = 0, idleSince = null, firedAt = null
+  let now = 0, idleSince = null, unknownSince = null, firedAt = null
   for (;;) {
     const chain = followKickoff({ projectDir: a.project, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
     const active = !chain.why && autoCycleActive(chain.record.entries, Boolean(stopFileRepo([a.project, repoOf(chain.recordPath, fs.existsSync)], fs.existsSync)))
@@ -69,17 +71,22 @@ try {
     // Asked every poll, not only once the turn ends: a TUI closed mid-turn never ends its turn, and only herdr saying
     // the pane is gone lets the watcher stop before its longest watch (E10H-B9).
     const pane = paneState()
-    const obs = text === null ? { backgroundRunning: true, apiError: null, idle: false } : codexObservations(text, turn.ended ? pane.status : null)
+    // The session's background work from the process tree under the Codex process its UserPromptSubmit named
+    // (codexBackground), read only once the turn has ended; an unreadable rollout is a turn not yet ended.
+    const obs = text === null ? { backgroundRunning: true, backgroundUnknown: null, apiError: null, idle: false }
+      : codexObservations(text, turn.ended ? pane.status : null, turn.ended ? { listing: processListing(), codex: a.codex ?? null } : undefined)
     idleSince = obs.idle ? (idleSince ?? now) : null
+    unknownSince = turn.ended && obs.backgroundUnknown ? (unknownSince ?? now) : null
     const last = turn.ended ? lastMessage(text) : null
     // A held Stop already retried and not decided again (its fact unchanged) no longer holds: the retry was its answer.
     const fact = turn.ended ? heldFact() : null
     const held = fact?.held === true && fact.at !== firedAt
     const step = watchStep({ active, turn, obs, held, liveWork: held ? liveWork(a.session) : null, session: a.session, paneSession: pane.session,
-      ready: endsReady(last), idleFor: idleSince === null ? 0 : now - idleSince, age: now, times })
+      ready: endsReady(last), idleFor: idleSince === null ? 0 : now - idleSince, unknownFor: unknownSince === null ? 0 : now - unknownSince, age: now, times })
     if (step.act === 'exit') { log(`exit: ${step.reason}`); process.exit(0) }
     if (step.act === 'stopFailure') { fire('StopFailure', { error: obs.apiError, dctr_watch: true }); process.exit(0) }
     if (step.act === 'idle') { fire('Notification', { notification_type: 'idle_prompt', dctr_watch: true }); process.exit(0) }
+    if (step.act === 'unknown') { fire('Notification', { notification_type: 'background_unknown', dctr_why: obs.backgroundUnknown, dctr_watch: true }); process.exit(0) }
     if (step.act === 'stop') {
       firedAt = fact.at
       fire('Stop', { stop_hook_active: false, last_assistant_message: last, dctr_watch: true })
