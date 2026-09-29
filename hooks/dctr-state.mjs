@@ -524,9 +524,7 @@ export function breakIfOrphaned(lock, staleMs, pidlessMs = staleMs * PIDLESS_STA
   const alive = condemned === null ? null : holderAlive(condemned, ownPidNs())
   if (age <= (alive === null ? pidlessMs : staleMs)) return false
   if (alive) return false
-  // The age and the holder are two reads, and the lock can be broken and re-taken between them: the
-  // orphan's age then sits beside a fresh holder, and for one that cannot be judged by its pid the age
-  // is the whole verdict. So the break re-checks the age on the directory it actually moved.
+  // The lock can be re-taken between the age read and the holder read; the break re-checks the age.
   return breakStaleLock(lock, condemned, observedAt - (alive === null ? pidlessMs : staleMs))
 }
 

@@ -548,7 +548,7 @@ console.log('pid namespaces — a holder is judged only from the namespace that 
   try { raced = breakIfOrphaned(lk, STALE) } finally { fs.statSync = realStat }
   let retakenAge = null; try { retakenAge = Date.now() - realStat(lk).mtimeMs } catch { /* broken: the clause above says so */ }
   check('a lock re-taken between the age read and the holder read is not broken', swapped && raced === false && fs.existsSync(lk))
-  check('the re-taken fixture really is fresh', swapped && retakenAge !== null ? retakenAge < STALE : swapped)
+  check('the re-taken fixture really is fresh', swapped && (retakenAge === null || retakenAge < STALE))
 
   // acquireLock publishes the namespace beside the pid, and a waiter reads back this process.
   fs.rmSync(lk, { recursive: true, force: true })
