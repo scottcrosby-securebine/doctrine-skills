@@ -154,8 +154,8 @@ const MUTATIONS = [
     from: "  catch (e) { return e.code === 'ENOENT' ? null : undefined }",
     to: '  catch { return null }' },
   { name: 'the break verifies even a null condemned pid', file: 'dctr-state.mjs', clause: 'a lock that acquired a pid since being condemned',
-    from: '    if (!sameHolder(moved, condemned)) {',
-    to: '    if (condemned !== null && !sameHolder(moved, condemned)) {' },
+    from: '    if (!sameHolder(moved, condemned) || !stale) {',
+    to: '    if ((condemned !== null && !sameHolder(moved, condemned)) || !stale) {' },
   // A holder's pid is judged only from its own pid namespace (a Codex-sandboxed launcher is pid 2, which
   // the host sees as kthreadd), and holder identity is the pid and the namespace together.
   { name: 'a holder in another pid namespace is judged by its pid', file: 'dctr-state.mjs',
@@ -184,7 +184,7 @@ const MUTATIONS = [
     to: '  if (lockHolder(lock)?.pid !== String(process.pid)) return false' },
   { name: 'breakStaleLock compares the pid alone', file: 'dctr-state.mjs',
     clause: 'breakStaleLock puts back a lock whose namespace differs from the condemned one',
-    from: '    if (!sameHolder(moved, condemned)) {', to: '    if (moved?.pid !== condemned?.pid) {' },
+    from: '    if (!sameHolder(moved, condemned) || !stale) {', to: '    if (moved?.pid !== condemned?.pid || !stale) {' },
   { name: 'acquireLock publishes no namespace', file: 'dctr-state.mjs',
     clause: "acquireLock publishes this process's namespace beside its pid",
     from: '    if (me.ns !== null) publishNs(lock, me.ns)\n', to: '    me.ns = null\n' },

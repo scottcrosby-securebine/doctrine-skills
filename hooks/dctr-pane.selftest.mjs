@@ -15,6 +15,17 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { seatPlacement, SIDE_CAP, isSideSeat } from './dctr-lib.mjs'
 import { acquireLock, breakIfOrphaned, breakStaleLock, herdr, HERDR_TIMEOUT_MS, holderAlive, interactivePanes, isPaneNotFound, liveSeatsPartial, lockHolder, ownPidNs, panesDir, PIDLESS_STALE_FACTOR, PLACEMENT_STALE_MS, publishNs, publishPid, releaseLock, reserveMarker, seatsDir, sideOccupants, statFields, writeMarker } from './dctr-state.mjs'
+
+// The break re-checks the moved lock's age and puts a fresh one back, so a lock the window check
+// should have left alone survives even when that check is gone: "not broken" cannot pin the window.
+// What can is that the lock was never moved at all. fs is the one module object this suite and
+// dctr-state share, so counting its renames of the lock sees the call under test.
+function unmovedAt(lock, judge) {
+  const realRename = fs.renameSync
+  let moves = 0
+  fs.renameSync = (from, ...rest) => { if (from === lock) moves++; return realRename(from, ...rest) }
+  try { return judge() === false && moves === 0 && fs.existsSync(lock) } finally { fs.renameSync = realRename }
+}
 import { recorderLine, defaultTeeDir, markerDir, openDecision } from './dctr-pane.mjs'
 
 // fileURLToPath, not `.pathname`, which percent-encodes: under a path containing a space the
@@ -322,17 +333,21 @@ console.log('round-5 repairs — each was a live defect, so each gets a clause')
     fs.rmSync(lk, { recursive: true, force: true }); fs.mkdirSync(lk)
     if (pid !== null) fs.writeFileSync(path.join(lk, 'pid'), pid)
   }
+  const unmoved = (judge) => unmovedAt(lk, judge)
 
   // A pid-less lock, NOT aged: only the age guard can save it. With a live pid this clause passed
   // whether the age guard existed or not, so deleting that guard left the whole suite green.
   fresh(null)
-  check('a lock inside its window is not examined at all', breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+  check('a lock inside its window is not examined at all', unmoved(() => breakIfOrphaned(lk, STALE)))
 
   fresh(String(process.pid)); age()
   check('an aged lock whose holder is running survives', breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
 
   fresh('2147483646'); age()
   check('an aged lock whose holder is gone is broken', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
+  // Clause 3 for unmoved(): it sees a move the lock code makes. A break that goes through counts one.
+  fresh('2147483646'); age()
+  check('unmoved() notices a lock the code does move', unmoved(() => breakIfOrphaned(lk, STALE)) === false && !fs.existsSync(lk))
 
   fresh(null); age()
   check('an aged lock with no pid at all is an orphan and is broken', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
@@ -345,7 +360,7 @@ console.log('round-5 repairs — each was a live defect, so each gets a clause')
   // second half this clause would also pass if the window had simply been made long for everyone.
   const mid = new Date(Date.now() - STALE * 3)
   fresh(null); fs.utimesSync(lk, mid, mid)
-  check('a pid-less lock is given the longer window', breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+  check('a pid-less lock is given the longer window', unmoved(() => breakIfOrphaned(lk, STALE)))
   fresh('2147483646'); fs.utimesSync(lk, mid, mid)
   check('while a dead pid at the same age is still broken', breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
 
@@ -500,7 +515,7 @@ console.log('pid namespaces — a holder is judged only from the namespace that 
   // The steal decision, through breakIfOrphaned, on each kind of holder.
   make(LIVE, FOREIGN, MID)
   check('a foreign-namespace lock with a live-looking pid is NOT broken inside the pid-less window',
-    breakIfOrphaned(lk, STALE) === false && fs.existsSync(lk))
+    unmovedAt(lk, () => breakIfOrphaned(lk, STALE)))
   make(LIVE, FOREIGN, OLD)
   check('a foreign-namespace lock with a live-looking pid IS broken past the pid-less window',
     breakIfOrphaned(lk, STALE) === true && !fs.existsSync(lk))
@@ -645,7 +660,7 @@ console.log('lock liveness across time — a live holder renews its lock, and a 
   // The holder: take the lock, (off-sandbox) name a foreign namespace, then make `calls` herdr calls,
   // each one slow. It reports whether the lock still carries its pid at the end.
   const HOLDER = `if (!S.acquireLock(argv[0])) process.exit(3)
-    if (argv[2]) { fs.rmSync(path.join(argv[0], 'ns')); fs.writeFileSync(path.join(argv[0], 'ns'), argv[2]) }
+    if (argv[2]) { fs.rmSync(path.join(argv[0], 'ns'), { force: true }); fs.writeFileSync(path.join(argv[0], 'ns'), argv[2]) }
     fs.writeFileSync(argv[0] + '.entered', '')
     for (let i = 0; i < Number(argv[1]); i++) { try { S.herdr(['pane', 'list']) } catch { /* only the wait matters */ } }
     process.stdout.write(fs.readFileSync(path.join(argv[0], 'pid'), 'utf8') === String(process.pid) ? 'held' : 'lost')`
