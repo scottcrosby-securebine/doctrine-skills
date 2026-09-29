@@ -37,8 +37,12 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-codex-hooks-'))
 // Removed at every exit, pass, fail or throw: a run left about 2,500 inodes, and the mutation gate runs it hundreds of
-// times (E10H-R3-B3).
-process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
+// times (E10H-R3-B3). The orphaned watchers it started are killed first, so none writes into it while it goes.
+const orphans = []
+process.on('exit', () => {
+  for (const pid of orphans) { try { process.kill(pid) } catch { /* already gone */ } }
+  try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }) } catch (e) { console.log(`FAIL  the suite's temp dir ${tmp} was not removed: ${e.code || e.message}`); process.exitCode = 1 }
+})
 process.env.TMPDIR = tmp
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE } = await import('./dctr-lib.mjs')
 const { stateDir, restoreFile, stopFactsFile, stopHeldFile } = await import('./dctr-state.mjs')
@@ -317,8 +321,12 @@ function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: 
       { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: ['ignore', 'pipe', 'ignore'] })
     let out = ''
     sh.stdout.on('data', (d) => { out += d })
-    sh.on('exit', () => {
+    // 'close', not 'exit': only once stdout has closed has the pid been read (under load 'exit' came first, the pid
+    // read as 0, and the watcher counted as gone before it ran).
+    sh.on('close', () => {
       const pid = Number(out.trim())
+      if (!pid) { console.log(`FAIL  a watcher for ${id} gave no pid`); bad++; resolve(); return }
+      orphans.push(pid)
       const gone = () => { try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] === 'Z' } catch { return true } }
       const t = setInterval(() => { if (gone()) { clearInterval(t); resolve() } }, 20)
     })
