@@ -350,7 +350,7 @@ export const lockHolder = (lock) => {
 
 /** Whether two holder readings name the same holder: the pid and the namespace together. Two nulls
  *  (no pid file either time) are the same; an unreadable reading is never the same as anything. */
-const sameHolder = (a, b) => a === b || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
+const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
 
 /** This process as a holder, in the shape lockHolder reads back. */
 const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
