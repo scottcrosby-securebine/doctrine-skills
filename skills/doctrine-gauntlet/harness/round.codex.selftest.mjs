@@ -81,6 +81,9 @@ function misses(result, expect) {
 }
 const judge = async (script, name, expect = FIXTURES[name].expect) => { try { return misses(await run(script, FIXTURES[name].args), expect) } catch (e) { return [`threw: ${e.message}`] } }
 
+// Args on which the round script throws, used by clause 1e and proved to throw by clause 3d.
+const THROW_ARGS = { ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }
+
 // A script with one check removed. The anchor must occur exactly once, or the mutation proves nothing.
 const ANCHOR = "if (!a.floorPrompt) block('floor: not run"
 const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
@@ -99,8 +102,7 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
   clause(`3a every stub prompt (${stubs.length}) states the reply the stand-in gives, read as the prompt's own text`, stubs.length > 100 && !unread.length, unread[0])
   const count = SCRIPT.split(ANCHOR).length - 1
   clause('3b the mutation anchor occurs exactly once, and the mutant no longer carries it', count === 1 && !MUTANT.includes(ANCHOR), `count ${count}`)
-  const throwArgs = { ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }
-  const threw = await step(SCRIPT, throwArgs, {}).then(() => null, (e) => e)
+  const threw = await step(SCRIPT, THROW_ARGS, {}).then(() => null, (e) => e)
   clause('3d the throwing args clause 1e uses really make the script throw', threw instanceof TypeError, String(threw))
   clause('3c the floor-not-run fixture really runs with no floor prompt', FIXTURES['floor-not-run-blocks'] && FIXTURES['floor-not-run-blocks'].args.floorPrompt === '', 'fixture missing or floorPrompt set')
 }
@@ -192,7 +194,12 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     writeFileSync(join(dir, 'notadir'), '')
     r = cliIn(argsFile, join(dir, 'notadir')); seen.push(['a journal the runner cannot write exits 2, not as a script throw', r.status === 2 && /runner failed/.test(r.stderr)])
     const throwing = join(dir, 'throw.json')
-    writeFileSync(throwing, JSON.stringify({ ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }))
+    writeFileSync(throwing, JSON.stringify(THROW_ARGS))
+    const dup = join(dir, 'dup.json')
+    writeFileSync(dup, JSON.stringify({ ...FIXTURES.clean.args, sections: [FIXTURES.clean.args.sections[0], FIXTURES.clean.args.sections[0]] }))
+    r = cliIn(dup, join(dir, 'd')); seen.push(['two sections of one name exit 2 before any call is asked', r.status === 2 && /distinct names/.test(r.stderr) && !existsSync(join(dir, 'd', 'asked'))])
+    const falsy = await step('throw null', {}, {}).then(() => 'completed', () => 'threw')
+    seen.push(['a script that throws a falsy value is not read as finished', falsy === 'threw'])
     const two = join(dir, 'two.json')
     writeFileSync(two, JSON.stringify({ ...FIXTURES.clean.args, sections: [FIXTURES.clean.args.sections[0], { ...FIXTURES.clean.args.sections[0], name: 'footer' }] }))
     r = cliIn(two, join(dir, 't')); seen.push(['two sections pend both builders at once', r.status === 3 && ['build:hero#1', 'build:footer#1'].every((k) => existsSync(join(dir, 't', 'pending', encodeURIComponent(k) + '.md')))])
@@ -226,7 +233,7 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     clause('1g the CLI reached through a symlinked directory runs, and does not exit 0 having done nothing', r.status === 3 && existsSync(join(dir, 'viaLink', 'pending')), `exit ${r.status}`)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 
-  const args = structuredClone(FIXTURES['section-deadlock'] ? FIXTURES['section-deadlock'].args : FIXTURES.clean.args)
+  const args = structuredClone(FIXTURES['section-deadlock'].args)
   const before = JSON.stringify(args)
   await run(SCRIPT, args)
   clause('1f a round run through step() leaves the caller\'s args as given', JSON.stringify(args) === before, 'args changed')

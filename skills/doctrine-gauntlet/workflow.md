@@ -62,9 +62,11 @@ Workflow tool.
    whole, in chunks where your host cuts a long read (the hub's host reference, Reading). Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
    that died or returned nothing. Then run step 2 again.
 4. Exit 2 names what it refused. A reply its schema does not allow: re-ask that seat once with the
-   same message, still in `pending/`, then answer `null`. A journal begun for other args, or an answer
+   same message, still in `pending/`, and write its new reply, answering `null` only if that is
+   refused too. A journal begun for other args, or an answer
    given to another prompt, or a pending call whose prompt changed: the journal no longer matches the
-   round, so start a new journal directory. Any other exit 2 is a miscall or a journal the runner
+   round, so start a new journal directory. Any other exit 2 is a miscall (two sections of one name,
+   say) or a journal the runner
    cannot use, named on stderr, and exit 1 is the script throwing.
 5. Exit 0: `<journal-dir>/result.json` is the round's return, the same one the Workflow tool gives.
 

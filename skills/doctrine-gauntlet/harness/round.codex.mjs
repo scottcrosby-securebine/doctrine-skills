@@ -82,7 +82,7 @@ export async function step(scriptSource, argsIn, answers) {
   run(args, agent, parallel, pipeline, noop, noop, {}, {}).then((result) => { settled = { result } }, (error) => { settled = { error } })
   await new Promise((r) => setImmediate(r))
   if (refused) return { done: false, refused, pending: [] }
-  if (settled && settled.error) throw settled.error
+  if (settled && 'error' in settled) throw settled.error
   if (settled) return { done: true, result: settled.result }
   if (!pending.length) throw new Error('the round stopped with no call pending')
   return { done: false, pending }
@@ -99,6 +99,11 @@ async function main([argsFile, dir]) {
   if (!argsFile || !dir) { console.error('usage: node round.codex.mjs <args.json> <journal-dir>'); return 2 }
   let args
   try { args = JSON.parse(readFileSync(argsFile, 'utf8')) } catch (e) { console.error(`cannot read ${argsFile}: ${e.message}`); return 2 }
+  // A call's key is its label and its place among that label's calls; two sections of one name share
+  // labels, so their keys would follow whichever answers a resume found, and the script's own counters
+  // are keyed by name too.
+  const names = Array.isArray(args.sections) ? args.sections.map((s) => s && s.name) : []
+  if (new Set(names).size !== names.length) { console.error('sections must have distinct names: two of one name cannot be told apart on resume'); return 2 }
   const here = dirname(fileURLToPath(import.meta.url))
   const script = readFileSync(join(here, 'round.workflow.mjs'), 'utf8')
   const round = createHash('sha256').update(JSON.stringify(args)).update('\0').update(script).digest('hex')
@@ -118,7 +123,7 @@ async function main([argsFile, dir]) {
     const asked = existsSync(askedFile) ? readAsked(askedFile) : null
     if (!asked) { console.error(`${key}: answered, but no call was asked under that key`); return 2 }
     const got = readAnswer(readFileSync(join(dir, 'answers', f), 'utf8'), asked.schema)
-    if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once with its message, then answer null`); return 2 }
+    if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once with its message, and answer null only if that reply is refused too`); return 2 }
     answers[key] = { hash: asked.hash, value: got.value }
   }
   let r
