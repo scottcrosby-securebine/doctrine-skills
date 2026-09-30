@@ -4,11 +4,13 @@
 //
 // Every seat here is a stand-in that returns the exact text its stub prompt in round.tamper.json
 // states. Clause 1 breaks things and confirms each is caught: an altered expect is reported, a script
-// with one check removed fails that check's fixture, and the runner refuses an answer asked under
-// another prompt or one its schema rejects. Clause 2 runs every fixture through the runner and
-// confirms each meets its expect, and runs one end to end through the CLI. Clause 3 proves, without
-// the runner, that the stand-in's returns are the stub prompts' own text and that the mutated script
-// really lacks the check.
+// with one check removed fails that check's fixture, the runner refuses an answer asked under
+// another prompt or one its schema rejects, the CLI exits as its header says on every refusal, a
+// runner failure and a throw, runs through a symlinked directory, leaves the caller's args as given,
+// hands a schema call its schema, and pends every section's builder at once. Clause 2 runs every
+// fixture through the runner and confirms each meets its expect, and runs one end to end through the
+// CLI. Clause 3 proves, without the CLI, that the stand-in's returns are the stub prompts' own text,
+// that the mutated script really lacks the check, and that the throwing args really throw.
 
 import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -97,6 +99,9 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
   clause(`3a every stub prompt (${stubs.length}) states the reply the stand-in gives, read as the prompt's own text`, stubs.length > 100 && !unread.length, unread[0])
   const count = SCRIPT.split(ANCHOR).length - 1
   clause('3b the mutation anchor occurs exactly once, and the mutant no longer carries it', count === 1 && !MUTANT.includes(ANCHOR), `count ${count}`)
+  const throwArgs = { ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }
+  const threw = await step(SCRIPT, throwArgs, {}).then(() => null, (e) => e)
+  clause('3d the throwing args clause 1e uses really make the script throw', threw instanceof TypeError, String(threw))
   clause('3c the floor-not-run fixture really runs with no floor prompt', FIXTURES['floor-not-run-blocks'] && FIXTURES['floor-not-run-blocks'].args.floorPrompt === '', 'fixture missing or floorPrompt set')
 }
 
@@ -188,6 +193,13 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     r = cliIn(argsFile, join(dir, 'notadir')); seen.push(['a journal the runner cannot write exits 2, not as a script throw', r.status === 2 && /runner failed/.test(r.stderr)])
     const throwing = join(dir, 'throw.json')
     writeFileSync(throwing, JSON.stringify({ ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }))
+    const two = join(dir, 'two.json')
+    writeFileSync(two, JSON.stringify({ ...FIXTURES.clean.args, sections: [FIXTURES.clean.args.sections[0], { ...FIXTURES.clean.args.sections[0], name: 'footer' }] }))
+    r = cliIn(two, join(dir, 't')); seen.push(['two sections pend both builders at once', r.status === 3 && ['build:hero#1', 'build:footer#1'].every((k) => existsSync(join(dir, 't', 'pending', encodeURIComponent(k) + '.md')))])
+    answer(join(dir, 't'), 'build:hero#1', 'stub build of hero'); answer(join(dir, 't'), 'build:footer#1', 'stub build of hero')
+    r = cliIn(two, join(dir, 't'))
+    const critMsg = r.status === 3 ? readFileSync(join(dir, 't', 'pending', encodeURIComponent('critic:hero#1') + '.md'), 'utf8') : ''
+    seen.push(['a schema call\'s message carries its schema and the one-JSON-value instruction', critMsg.includes('Reply with one JSON value') && critMsg.includes('"required": [') && critMsg.includes('"accept"')])
     r = cliIn(throwing, join(dir, 'k')); seen.push(['a script that throws exits 1', r.status === 1])
     const wrong = seen.filter(([, ok]) => !ok).map(([n]) => n)
     clause('1e the CLI refuses a schema-breaking reply, a stale answer, an unasked answer, changed args, a changed pending prompt and an unusable journal with exit 2, and a throw with exit 1', !wrong.length, wrong.join('; '))
