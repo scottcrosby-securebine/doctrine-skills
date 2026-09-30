@@ -58,12 +58,14 @@ Workflow tool.
    `<plugin-root>` being the plugin directory that holds `skills/`.
 3. Exit 3: each `pending ...` line names a message file and the answer file it needs. Dispatch one blind
    `spawn_agent` seat per message file, as many at once as your session runs and the rest as seats
-   finish, with the file's content verbatim as its message, and wait on them. Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
+   finish, with the file's content verbatim as its message, and wait on them. Read each message file
+   whole, in chunks where your host cuts a long read (the hub's host reference, Reading). Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
    that died or returned nothing. Then run step 2 again.
 4. Exit 2 names what it refused. A reply its schema does not allow: re-ask that seat once with the
    same message, still in `pending/`, then answer `null`. A journal begun for other args, or an answer
-   given to another prompt: the journal no longer matches the round, so start a new journal directory.
-   Any other exit 2 is a miscall to fix, and exit 1 is the script throwing.
+   given to another prompt, or a pending call whose prompt changed: the journal no longer matches the
+   round, so start a new journal directory. Any other exit 2 is a miscall or a journal the runner
+   cannot use, named on stderr, and exit 1 is the script throwing.
 5. Exit 0: `<journal-dir>/result.json` is the round's return, the same one the Workflow tool gives.
 
 Answered calls replay on every run, which is the resume: after a crash, run step 2 again with the same

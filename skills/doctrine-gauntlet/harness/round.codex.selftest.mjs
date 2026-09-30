@@ -10,7 +10,7 @@
 // the runner, that the stand-in's returns are the stub prompts' own text and that the mutated script
 // really lacks the check.
 
-import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -177,11 +177,24 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     rmSync(join(j, 'answers', 'bogus%231.txt'))
     writeFileSync(argsFile, JSON.stringify({ ...FIXTURES.clean.args, waived: ['contrast on the banner'] }))
     r = cliIn(argsFile, j); seen.push(['changed args in the same journal exit 2 and name a new journal', r.status === 2 && /new journal/.test(r.stderr) && !existsSync(join(j, 'result.json'))])
+    writeFileSync(argsFile, JSON.stringify(FIXTURES.clean.args))
+    const j2 = join(dir, 'j2')
+    cliIn(argsFile, j2)
+    answer(j2, 'build:hero#1', 'build A')
+    r = cliIn(argsFile, j2); seen.push(['with the critic asked on build A', r.status === 3])
+    answer(j2, 'build:hero#1', 'build B')
+    r = cliIn(argsFile, j2); seen.push(['a pending call whose prompt changed since it was asked exits 2 and names a new journal', r.status === 2 && /new journal/.test(r.stderr)])
+    writeFileSync(join(dir, 'notadir'), '')
+    r = cliIn(argsFile, join(dir, 'notadir')); seen.push(['a journal the runner cannot write exits 2, not as a script throw', r.status === 2 && /runner failed/.test(r.stderr)])
     const throwing = join(dir, 'throw.json')
     writeFileSync(throwing, JSON.stringify({ ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }))
     r = cliIn(throwing, join(dir, 'k')); seen.push(['a script that throws exits 1', r.status === 1])
     const wrong = seen.filter(([, ok]) => !ok).map(([n]) => n)
-    clause('1e the CLI refuses a schema-breaking reply, a stale answer, an unasked answer and changed args with exit 2, and a throw with exit 1', !wrong.length, wrong.join('; '))
+    clause('1e the CLI refuses a schema-breaking reply, a stale answer, an unasked answer, changed args, a changed pending prompt and an unusable journal with exit 2, and a throw with exit 1', !wrong.length, wrong.join('; '))
+    const link = join(dir, 'link')
+    symlinkSync(here, link)
+    r = spawnSync(process.execPath, [join(link, 'round.codex.mjs'), argsFile, join(dir, 'viaLink')], { encoding: 'utf8' })
+    clause('1g the CLI reached through a symlinked directory runs, and does not exit 0 having done nothing', r.status === 3 && existsSync(join(dir, 'viaLink', 'pending')), `exit ${r.status}`)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 
   const args = structuredClone(FIXTURES['section-deadlock'] ? FIXTURES['section-deadlock'].args : FIXTURES.clean.args)

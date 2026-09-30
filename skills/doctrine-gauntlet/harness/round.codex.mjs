@@ -12,11 +12,12 @@
 // refused, since a ruling or a counter changes the round's result without changing any prompt.
 //
 // Exit 0 the round finished and <journal-dir>/result.json holds its return; 3 calls are pending;
-// 2 a miscall, or a refusal named on stderr: a journal begun for other args or another script, an
-// answer asked under another prompt (both mean a new journal), or an answer the call's schema does
-// not allow (re-ask the seat); 1 the script threw.
+// 2 a miscall, a runner failure (a journal it cannot write, say), or a refusal named on stderr: a
+// journal begun for other args or another script, an answer asked under another prompt or a pending
+// call whose prompt changed since it was asked (each means a new journal), or an answer the call's
+// schema does not allow (re-ask the seat); 1 the script threw.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, realpathSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -118,6 +119,10 @@ async function main([argsFile, dir]) {
   let r
   try { r = await step(script, args, answers) } catch (e) { console.error(e && e.stack || String(e)); return 1 }
   if (r.refused) { console.error(`${r.refused.key}: answer refused: ${r.refused.why}; the journal no longer matches this round: start a new journal directory`); return 2 }
+  for (const p of r.pending || []) {
+    const askedFile = join(dir, 'asked', fileOf(p.key) + '.json')
+    if (existsSync(askedFile) && JSON.parse(readFileSync(askedFile, 'utf8')).hash !== p.hash) { console.error(`${p.key}: its prompt changed since it was asked; the journal no longer matches this round: start a new journal directory`); return 2 }
+  }
   rmSync(join(dir, 'pending'), { recursive: true, force: true })
   mkdirSync(join(dir, 'pending'))
   if (r.done) {
@@ -133,4 +138,7 @@ async function main([argsFile, dir]) {
   return 3
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2)).then((c) => process.exit(c))
+// Both paths through realpath: Node resolves symlinks in import.meta.url, so a symlinked plugin root
+// would otherwise make the CLI exit 0 having done nothing (ORC7-1 in hooks/).
+const isMain = (() => { try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) } catch { return false } })()
+if (isMain) main(process.argv.slice(2)).then((c) => process.exit(c), (e) => { console.error(`runner failed: ${e && e.stack || e}`); process.exit(2) })
