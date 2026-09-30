@@ -10,7 +10,7 @@
 // the runner, that the stand-in's returns are the stub prompts' own text and that the mutated script
 // really lacks the check.
 
-import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
+import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -150,6 +150,44 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
   ]
   const wrong = verdicts.filter(([, ok]) => !ok).map(([n]) => n)
   clause('1d readAnswer refuses what its schema rejects and reads what it accepts', !wrong.length, wrong.join(', '))
+}
+
+// ---- Clause 1, the CLI's refusals: each exits as its header says, and the pass after it does not run ----
+{
+  const dir = mkdtempSync(join(tmpdir(), 'round-codex-'))
+  try {
+    const cliIn = (argsFile, j) => spawnSync(process.execPath, [join(here, 'round.codex.mjs'), argsFile, j], { encoding: 'utf8' })
+    const answer = (j, key, text) => writeFileSync(join(j, 'answers', encodeURIComponent(key) + '.txt'), text)
+    const argsFile = join(dir, 'args.json')
+    writeFileSync(argsFile, JSON.stringify(FIXTURES.clean.args))
+    const j = join(dir, 'j')
+    const seen = []
+    let r = cliIn(argsFile, j); seen.push(['first run pends the builder', r.status === 3 && existsSync(join(j, 'pending', encodeURIComponent('build:hero#1') + '.md'))])
+    answer(j, 'build:hero#1', stubReply(readFileSync(join(j, 'pending', encodeURIComponent('build:hero#1') + '.md'), 'utf8')))
+    r = cliIn(argsFile, j); seen.push(['then the critic', r.status === 3 && existsSync(join(j, 'pending', encodeURIComponent('critic:hero#1') + '.md'))])
+    answer(j, 'critic:hero#1', 'I accept it')
+    r = cliIn(argsFile, j); seen.push(['a reply its schema refuses exits 2, keeps the message to re-ask with, and writes no result', r.status === 2 && /re-ask/.test(r.stderr) && existsSync(join(j, 'pending', encodeURIComponent('critic:hero#1') + '.md')) && !existsSync(join(j, 'result.json'))])
+    answer(j, 'critic:hero#1', '{"accept": true, "notes": []}')
+    r = cliIn(argsFile, j); seen.push(['a valid re-ask is taken', r.status === 3])
+    answer(j, 'build:hero#1', 'a different build')
+    r = cliIn(argsFile, j); seen.push(['an answer asked under another prompt exits 2 and names a new journal', r.status === 2 && /new journal/.test(r.stderr) && !existsSync(join(j, 'result.json'))])
+    answer(j, 'build:hero#1', 'stub build of hero')
+    writeFileSync(join(j, 'answers', 'bogus%231.txt'), 'x')
+    r = cliIn(argsFile, j); seen.push(['an answer no call asked for exits 2', r.status === 2 && /no call was asked/.test(r.stderr)])
+    rmSync(join(j, 'answers', 'bogus%231.txt'))
+    writeFileSync(argsFile, JSON.stringify({ ...FIXTURES.clean.args, waived: ['contrast on the banner'] }))
+    r = cliIn(argsFile, j); seen.push(['changed args in the same journal exit 2 and name a new journal', r.status === 2 && /new journal/.test(r.stderr) && !existsSync(join(j, 'result.json'))])
+    const throwing = join(dir, 'throw.json')
+    writeFileSync(throwing, JSON.stringify({ ...FIXTURES.clean.args, sections: [{ ...FIXTURES.clean.args.sections[0], priorNotes: [5] }] }))
+    r = cliIn(throwing, join(dir, 'k')); seen.push(['a script that throws exits 1', r.status === 1])
+    const wrong = seen.filter(([, ok]) => !ok).map(([n]) => n)
+    clause('1e the CLI refuses a schema-breaking reply, a stale answer, an unasked answer and changed args with exit 2, and a throw with exit 1', !wrong.length, wrong.join('; '))
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+
+  const args = structuredClone(FIXTURES['section-deadlock'] ? FIXTURES['section-deadlock'].args : FIXTURES.clean.args)
+  const before = JSON.stringify(args)
+  await run(SCRIPT, args)
+  clause('1f a round run through step() leaves the caller\'s args as given', JSON.stringify(args) === before, 'args changed')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')

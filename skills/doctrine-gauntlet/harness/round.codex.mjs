@@ -8,9 +8,13 @@
 // <journal-dir>/answers/<key>.txt and runs this again. A seat that returned nothing is answered with
 // exactly `null`. workflow.md is the manual.
 //
+// A journal belongs to one args file and one round.workflow.mjs: a run with either changed is
+// refused, since a ruling or a counter changes the round's result without changing any prompt.
+//
 // Exit 0 the round finished and <journal-dir>/result.json holds its return; 3 calls are pending;
-// 2 a miscall, or an answer refused (asked under another prompt, or not what the call's schema
-// allows), named on stderr; 1 the script threw.
+// 2 a miscall, or a refusal named on stderr: a journal begun for other args or another script, an
+// answer asked under another prompt (both mean a new journal), or an answer the call's schema does
+// not allow (re-ask the seat); 1 the script threw.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -49,7 +53,8 @@ export function readAnswer(text, schema) {
 
 // One pass over the round. `answers` maps a call's key to { hash, value }. Every answered call
 // resolves in the same tick, so one macrotask drains the round as far as it can go.
-export async function step(scriptSource, args, answers) {
+export async function step(scriptSource, argsIn, answers) {
+  const args = structuredClone(argsIn)   // the round writes its counters into args; the caller's copy stays as given
   const body = scriptSource.replace(/^export const meta/m, 'const meta')
   const seen = {}
   const pending = []
@@ -93,7 +98,11 @@ async function main([argsFile, dir]) {
   try { args = JSON.parse(readFileSync(argsFile, 'utf8')) } catch (e) { console.error(`cannot read ${argsFile}: ${e.message}`); return 2 }
   const here = dirname(fileURLToPath(import.meta.url))
   const script = readFileSync(join(here, 'round.workflow.mjs'), 'utf8')
+  const round = createHash('sha256').update(JSON.stringify(args)).update('\0').update(script).digest('hex')
+  const roundFile = join(dir, 'round.sha256')
+  if (existsSync(roundFile) && readFileSync(roundFile, 'utf8').trim() !== round) { console.error(`${dir} was begun for other args or another round.workflow.mjs: start a new journal directory`); return 2 }
   for (const d of ['pending', 'answers', 'asked']) mkdirSync(join(dir, d), { recursive: true })
+  writeFileSync(roundFile, round + '\n')
   const answers = {}
   for (const f of readdirSync(join(dir, 'answers'))) {
     if (!f.endsWith('.txt')) continue
@@ -103,12 +112,12 @@ async function main([argsFile, dir]) {
     if (!existsSync(askedFile)) { console.error(`${key}: answered, but no call was asked under that key`); return 2 }
     const asked = JSON.parse(readFileSync(askedFile, 'utf8'))
     const got = readAnswer(readFileSync(join(dir, 'answers', f), 'utf8'), asked.schema)
-    if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once, then answer null`); return 2 }
+    if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once with its message, then answer null`); return 2 }
     answers[key] = { hash: asked.hash, value: got.value }
   }
   let r
   try { r = await step(script, args, answers) } catch (e) { console.error(e && e.stack || String(e)); return 1 }
-  if (r.refused) { console.error(`${r.refused.key}: answer refused: ${r.refused.why}`); return 2 }
+  if (r.refused) { console.error(`${r.refused.key}: answer refused: ${r.refused.why}; the journal no longer matches this round: start a new journal directory`); return 2 }
   rmSync(join(dir, 'pending'), { recursive: true, force: true })
   mkdirSync(join(dir, 'pending'))
   if (r.done) {

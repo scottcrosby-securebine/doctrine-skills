@@ -40,7 +40,7 @@ node hooks/dctr-codex.hooks.selftest.mjs   # restore, gauge, auto-cycle, typer a
 node hooks/dctr-seat.codex.selftest.mjs    # the seat hook, renderer, gate session and /clear sweep on Codex payloads
 node hooks/dctr-codex.selftest.mjs         # Codex install on scratch homes: entries, trust hashes, network access, foreign entries byte-identical, rerun a no-op; needs python3 3.11+
 node hooks/dctr-notify.selftest.mjs        # the orchestrator's pause notification on Codex: exact title, no body, the stand-downs
-node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs   # the gauntlet round on Codex: every tamper fixture through the runner meets its expect, an altered expect and a removed check are caught, a stale or schema-breaking answer is refused
+node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs   # the gauntlet round on Codex: every tamper fixture through the runner meets its expect, an altered expect and a removed check are caught, and the CLI refuses a schema-breaking reply, a stale answer, an unasked answer and changed args
 node hooks/dctr-mutations.mjs       # reverts each named repair and FAILS if no clause notices — the check that answers whether the other checks pin anything; a suite that renders no verdict (a failed spawn, a signal, or an exit with no FAIL line) is retried once and then reported as unjudged with the first line it printed, never as a repair nothing pins
 python3 -m json.tool hooks/hooks.json
 ```

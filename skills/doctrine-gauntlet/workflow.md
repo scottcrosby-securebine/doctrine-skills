@@ -57,16 +57,18 @@ Workflow tool.
 2. Run `node <plugin-root>/skills/doctrine-gauntlet/harness/round.codex.mjs <args.json> <journal-dir>`,
    `<plugin-root>` being the plugin directory that holds `skills/`.
 3. Exit 3: each `pending ...` line names a message file and the answer file it needs. Dispatch one blind
-   `spawn_agent` seat per message file, all at once, with the file's content verbatim as its message,
-   and wait on them. Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
+   `spawn_agent` seat per message file, as many at once as your session runs and the rest as seats
+   finish, with the file's content verbatim as its message, and wait on them. Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
    that died or returned nothing. Then run step 2 again.
-4. Exit 2 names a refused answer: re-ask that seat once with the same message, then answer `null`. Any
-   other exit 2 is a miscall to fix, and exit 1 is the script throwing.
+4. Exit 2 names what it refused. A reply its schema does not allow: re-ask that seat once with the
+   same message, still in `pending/`, then answer `null`. A journal begun for other args, or an answer
+   given to another prompt: the journal no longer matches the round, so start a new journal directory.
+   Any other exit 2 is a miscall to fix, and exit 1 is the script throwing.
 5. Exit 0: `<journal-dir>/result.json` is the round's return, the same one the Workflow tool gives.
 
 Answered calls replay on every run, which is the resume: after a crash, run step 2 again with the same
-files. An answer is keyed to the prompt it was given for, so changed `args` refuse it. Start a new
-journal directory for a new round or changed `args`.
+files. A journal belongs to one `args` file, so a run with changed `args`, a ruling or a counter among
+them, is refused. Start a new journal directory for each round.
 
 `args`:
 
