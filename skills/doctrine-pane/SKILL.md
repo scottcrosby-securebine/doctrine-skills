@@ -8,7 +8,10 @@ description: Use when the user asks you to pop a pane, ssh into a box, log into 
 An interactive terminal session in a herdr pane, so the user sees exactly what you see and can take
 the keyboard whenever they want it.
 
-**On Codex CLI this skill does not run.** Its launcher needs a Claude Code session and herdr. Tell the user it does not run on Codex, and do not run the launcher.
+**On Codex CLI it needs the doctrine hooks installed**, which the user does, not you: ask them to run
+`node <plugin-root>/hooks/dctr-codex.mjs install` (`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
+workspace-write sandbox reach herdr. Without it the launcher's herdr calls fail and it refuses. The pane
+itself runs on the host, outside Codex's sandbox, so whatever you type into it runs unsandboxed.
 
 This skill does **not** require the `doctrine` hub. You are usually invoked mid-task, and loading
 the whole posture to run two commands would be wrong. A doctrine run may still reach for this skill;
@@ -61,9 +64,10 @@ serve. The launcher prints `overflow=tab` when that happens, so you can say whic
 cannot close anything for you.
 
 It refuses when it cannot tell which session it belongs to, because the cap is counted against that
-session. It reads `CLAUDE_CODE_SESSION_ID` from the environment — the same variable the gate
-launcher reads, deliberately, since a second accepted name would let the two lock different
-sessions and a lock that is not the same lock is not a lock.
+session. It reads the session from the environment exactly as the gate launcher does,
+`CLAUDE_CODE_SESSION_ID`, else Codex's `CODEX_SESSION_ID`, through one shared resolver, deliberately:
+two launchers resolving the session differently could lock different sessions, and a lock that is not
+the same lock is not a lock.
 
 It refuses outside herdr and inside a contained agent, because a pane is a host process and an
 interactive session nobody can watch has no purpose. In a doctrine run that refusal is recorded as

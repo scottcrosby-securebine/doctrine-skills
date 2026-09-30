@@ -196,7 +196,7 @@ node ~/.codex/plugins/cache/doctrine-skills/doctrine/<version>/hooks/dctr-codex.
 
 It writes the hook entries into `~/.codex/hooks.json` (or `$CODEX_HOME`'s), trusts them in
 `config.toml`, and sets `sandbox_workspace_write.network_access = true` so commands in the
-workspace-write sandbox can reach herdr. `doctrine-pane` runs on Claude Code only.
+workspace-write sandbox can reach herdr. `doctrine-pane` needs the same install on Codex.
 
 ## Try it on one file
 
