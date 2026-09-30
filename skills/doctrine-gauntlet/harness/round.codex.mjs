@@ -10,6 +10,8 @@
 //
 // A journal belongs to one args file and one round.workflow.mjs: a run with either changed is
 // refused, since a ruling or a counter changes the round's result without changing any prompt.
+// The runner writes its own records (round.sha256, asked/) once, and one a crash left half written
+// is written again, since no answer can rest on it yet; so a crash is resumed by running again.
 //
 // Exit 0 the round finished and <journal-dir>/result.json holds its return; 3 calls are pending;
 // 2 a miscall, a runner failure (a journal it cannot write, say), or a refusal named on stderr: a
@@ -101,17 +103,20 @@ async function main([argsFile, dir]) {
   const script = readFileSync(join(here, 'round.workflow.mjs'), 'utf8')
   const round = createHash('sha256').update(JSON.stringify(args)).update('\0').update(script).digest('hex')
   const roundFile = join(dir, 'round.sha256')
-  if (existsSync(roundFile) && readFileSync(roundFile, 'utf8').trim() !== round) { console.error(`${dir} was begun for other args or another round.workflow.mjs: start a new journal directory`); return 2 }
+  const had = existsSync(roundFile) ? readFileSync(roundFile, 'utf8').trim() : null
+  const answered = existsSync(join(dir, 'answers')) && readdirSync(join(dir, 'answers')).some((f) => f.endsWith('.txt'))
+  if (had !== null && had !== round && (/^[0-9a-f]{64}$/.test(had) || answered)) { console.error(`${dir} was begun for other args or another round.workflow.mjs: start a new journal directory`); return 2 }
   for (const d of ['pending', 'answers', 'asked']) mkdirSync(join(dir, d), { recursive: true })
-  writeFileSync(roundFile, round + '\n')
+  if (had !== round) writeFileSync(roundFile, round + '\n')
+  const readAsked = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return null } }
   const answers = {}
   for (const f of readdirSync(join(dir, 'answers'))) {
     if (!f.endsWith('.txt')) continue
     const name = f.slice(0, -4)
     const key = decodeURIComponent(name)
     const askedFile = join(dir, 'asked', name + '.json')
-    if (!existsSync(askedFile)) { console.error(`${key}: answered, but no call was asked under that key`); return 2 }
-    const asked = JSON.parse(readFileSync(askedFile, 'utf8'))
+    const asked = existsSync(askedFile) ? readAsked(askedFile) : null
+    if (!asked) { console.error(`${key}: answered, but no call was asked under that key`); return 2 }
     const got = readAnswer(readFileSync(join(dir, 'answers', f), 'utf8'), asked.schema)
     if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once with its message, then answer null`); return 2 }
     answers[key] = { hash: asked.hash, value: got.value }
@@ -119,9 +124,11 @@ async function main([argsFile, dir]) {
   let r
   try { r = await step(script, args, answers) } catch (e) { console.error(e && e.stack || String(e)); return 1 }
   if (r.refused) { console.error(`${r.refused.key}: answer refused: ${r.refused.why}; the journal no longer matches this round: start a new journal directory`); return 2 }
+  const askedBefore = {}
   for (const p of r.pending || []) {
     const askedFile = join(dir, 'asked', fileOf(p.key) + '.json')
-    if (existsSync(askedFile) && JSON.parse(readFileSync(askedFile, 'utf8')).hash !== p.hash) { console.error(`${p.key}: its prompt changed since it was asked; the journal no longer matches this round: start a new journal directory`); return 2 }
+    askedBefore[p.key] = existsSync(askedFile) ? readAsked(askedFile) : null
+    if (askedBefore[p.key] && askedBefore[p.key].hash !== p.hash) { console.error(`${p.key}: its prompt changed since it was asked; the journal no longer matches this round: start a new journal directory`); return 2 }
   }
   rmSync(join(dir, 'pending'), { recursive: true, force: true })
   mkdirSync(join(dir, 'pending'))
@@ -131,7 +138,7 @@ async function main([argsFile, dir]) {
     return 0
   }
   for (const p of r.pending) {
-    writeFileSync(join(dir, 'asked', fileOf(p.key) + '.json'), JSON.stringify({ key: p.key, hash: p.hash, schema: p.schema }) + '\n')
+    if (!askedBefore[p.key]) writeFileSync(join(dir, 'asked', fileOf(p.key) + '.json'), JSON.stringify({ key: p.key, hash: p.hash, schema: p.schema }) + '\n')
     writeFileSync(join(dir, 'pending', fileOf(p.key) + '.md'), message(p))
     console.log(`pending ${p.key}: ${join(dir, 'pending', fileOf(p.key) + '.md')} -> ${join(dir, 'answers', fileOf(p.key) + '.txt')}`)
   }

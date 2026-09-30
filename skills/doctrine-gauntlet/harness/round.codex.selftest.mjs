@@ -6,13 +6,13 @@
 // states. Clause 1 breaks things and confirms each is caught: an altered expect is reported, a script
 // with one check removed fails that check's fixture, the runner refuses an answer asked under
 // another prompt or one its schema rejects, the CLI exits as its header says on every refusal, a
-// runner failure and a throw, runs through a symlinked directory, leaves the caller's args as given,
+// runner failure and a throw, runs through a symlinked directory, resumes past a half-written record of its own, leaves the caller's args as given,
 // hands a schema call its schema, and pends every section's builder at once. Clause 2 runs every
 // fixture through the runner and confirms each meets its expect, and runs one end to end through the
 // CLI. Clause 3 proves, without the CLI, that the stand-in's returns are the stub prompts' own text,
 // that the mutated script really lacks the check, and that the throwing args really throw.
 
-import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from 'node:fs'
+import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync, chmodSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -203,6 +203,23 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     r = cliIn(throwing, join(dir, 'k')); seen.push(['a script that throws exits 1', r.status === 1])
     const wrong = seen.filter(([, ok]) => !ok).map(([n]) => n)
     clause('1e the CLI refuses a schema-breaking reply, a stale answer, an unasked answer, changed args, a changed pending prompt and an unusable journal with exit 2, and a throw with exit 1', !wrong.length, wrong.join('; '))
+    // A crash mid-write: the runner's own records are written once, and a half-written one is written again.
+    const c = join(dir, 'c')
+    r = cliIn(argsFile, c)
+    // Read-only records make any rewrite fail (EACCES), so a resume that still runs wrote neither. Root ignores the mode.
+    const records = ['round.sha256', join('asked', encodeURIComponent('build:hero#1') + '.json')].map((f) => join(c, f))
+    for (const f of records) chmodSync(f, 0o444)
+    r = cliIn(argsFile, c)
+    const kept = r.status === 3 && process.getuid() !== 0
+    for (const f of records) chmodSync(f, 0o644)
+    writeFileSync(join(c, 'asked', encodeURIComponent('build:hero#1') + '.json'), '{"key": "build:he')
+    r = cliIn(argsFile, c)
+    const askedHealed = r.status === 3 && JSON.parse(readFileSync(join(c, 'asked', encodeURIComponent('build:hero#1') + '.json'), 'utf8')).hash
+    const c2 = join(dir, 'c2'); mkdirSync(c2); writeFileSync(join(c2, 'round.sha256'), '')
+    r = cliIn(argsFile, c2)
+    const roundHealed = r.status === 3 && /^[0-9a-f]{64}$/.test(readFileSync(join(c2, 'round.sha256'), 'utf8').trim())
+    clause('1h a resume leaves the runner\'s records as written, and one a crash left half written is written again rather than refusing the journal', kept && !!askedHealed && roundHealed, `kept ${kept}, asked healed ${!!askedHealed}, round healed ${roundHealed}`)
+
     const link = join(dir, 'link')
     symlinkSync(here, link)
     r = spawnSync(process.execPath, [join(link, 'round.codex.mjs'), argsFile, join(dir, 'viaLink')], { encoding: 'utf8' })
