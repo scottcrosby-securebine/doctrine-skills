@@ -3,8 +3,10 @@
 `harness/round.workflow.mjs` runs one fused-gate round of the gauntlet through the
 Workflow tool: the builder/critic pairs, the floor and every documented gate, the blind
 comparison, the integrated critic, the red team, and the counters, in that order. It is
-optional, and it runs fused mode only; pure gauntlet runs in prose. Where the host has no Workflow tool, or the round needs a judgment call the
-script does not model, the prose flow in `SKILL.md` is the round, unchanged.
+optional, and it runs fused mode only; pure gauntlet runs in prose. On Codex, which has no Workflow
+tool, `harness/round.codex.mjs` runs the same script unchanged (On Codex, below). Where the host has
+neither, or the round needs a judgment call the script does not model, the prose flow in `SKILL.md` is
+the round, unchanged.
 
 ## What the script does and does not hold
 
@@ -42,6 +44,35 @@ the one the journal carries. That is observed
 behaviour of the host rather than something it documents, so re-check it if a resume ever returns
 the journalled verdict unchanged. What it means here: a run journaled with no `sections` key resumes
 into that key's block, so re-run it, or resume it with `sections: []` supplied, which is what it meant.
+
+
+## On Codex
+
+`harness/round.codex.mjs` runs `round.workflow.mjs` unchanged and hands every agent call to you,
+since only you can dispatch a seat. The `args` are the table below, assembled exactly as for the
+Workflow tool.
+
+1. Write `args` to a JSON file, and pick a journal directory that outlives the session (never the
+   scratchpad). Both paths go in the ledger's run-state block, where the run id would go.
+2. Run `node <plugin-root>/skills/doctrine-gauntlet/harness/round.codex.mjs <args.json> <journal-dir>`,
+   `<plugin-root>` being the plugin directory that holds `skills/`.
+3. Exit 3: each `pending ...` line names a message file and the answer file it needs. Dispatch one blind
+   `spawn_agent` seat per message file, as many at once as your session runs and the rest as seats
+   finish, with the file's content verbatim as its message, and wait on them. Read each message file
+   whole, in chunks where your host cuts a long read (the hub's host reference, Reading). Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
+   that died or returned nothing. Then run step 2 again.
+4. Exit 2 names what it refused. A reply its schema does not allow: re-ask that seat once with the
+   same message, still in `pending/`, and write its new reply, answering `null` only if that is
+   refused too. A journal begun for other args, or an answer
+   given to another prompt, or a pending call whose prompt changed: the journal no longer matches the
+   round, so start a new journal directory. Any other exit 2 is a miscall (two sections of one name,
+   say) or a journal the runner
+   cannot use, named on stderr, and exit 1 is the script throwing.
+5. Exit 0: `<journal-dir>/result.json` is the round's return, the same one the Workflow tool gives.
+
+Answered calls replay on every run, which is the resume: after a crash, run step 2 again with the same
+files. A journal belongs to one `args` file, so a run with changed `args`, a ruling or a counter among
+them, is refused. Start a new journal directory for each round.
 
 `args`:
 
@@ -265,6 +296,10 @@ fixture's roll call uses in-vocabulary words, so that reason has never been emit
 delete the check and every fixture still passes. Its twin, a line naming something the dispatcher
 never named, is pinned. `critic-axes-not-array` hands a non-array `criticAxes`, so the dispatched
 set falls back to empty and every axis the critic returns is one nobody named.
+
+On Codex the runner has its own three-clause test, `harness/round.codex.selftest.mjs`, which runs every
+fixture here through `round.codex.mjs` with a stand-in seat per call and runs in CI. It checks the runner
+and the script's counting, never the Workflow tool.
 
 Rerun all three clauses after any change that makes the script quieter as well as louder. An agent
 that dies mid-round returns `null`, and the script counts that as "no return", which

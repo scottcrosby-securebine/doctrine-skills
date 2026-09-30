@@ -6,7 +6,9 @@
 #   - the floor harness against fixtures/, which needs Playwright and a Chromium download. Its
 #     package.json is deliberately gitignored (CLAUDE.md, "Commands"), so CI has nothing to
 #     install from and adding one would ship a build shape to every installer.
-#   - harness/round.tamper.json, whose fixtures run through Claude Code's Workflow tool.
+#   - harness/round.tamper.json through Claude Code's Workflow tool. Its fixtures do run below through
+#     the Codex runner, each seat a stand-in, which checks the runner and the script's counting but
+#     not the Workflow tool.
 #   - the driven fresh-context runs through each wrapper, which are agents and not a command.
 name: gates
 
@@ -168,3 +170,8 @@ jobs:
         working-directory: skills/doctrine-gauntlet/harness
         run: |
           node -e 'const s=require("fs").readFileSync("round.workflow.mjs","utf8").replace(/^export const meta/m,"const meta");new Function("args","agent","parallel","pipeline","phase","log","budget","workflow","return (async()=>{"+s+"})()")'
+
+      - name: Codex round runner tamper test
+        # Every fixture in round.tamper.json through round.codex.mjs, each seat a stand-in returning
+        # the text its stub prompt states. Needs only node.
+        run: node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs
