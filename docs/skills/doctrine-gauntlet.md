@@ -55,7 +55,7 @@ Polish goes to a docket, the project's existing polish backlog in the deliverabl
 
 Delivery (doctrine step 7) commits to the deliverable repo by its norms. After the gate line, the run walks your brief item by item, naming the diff that carried each one or its explicit deferral, and verifies against the live page rather than its own summary. If it cannot write where the work must land, it builds in a scratch directory and hands you the diff, the renders and the docket together.
 
-Where your host has the Workflow tool, one fused-gate round can run as a journaled, crash-resumable script, `harness/round.workflow.mjs`. The script holds structure and counters only and no brief text; the prompts are assembled the same way. Without the tool, the prose flow is the round, unchanged.
+Where your host has the Workflow tool, one fused-gate round can run as a journaled, crash-resumable script, `harness/round.workflow.mjs`. The script holds structure and counters only and no brief text; the prompts are assembled the same way. On Codex, which has no Workflow tool, `harness/round.codex.mjs` runs the same script, its agent calls answered by `spawn_agent` seats. Elsewhere without the tool, the prose flow is the round, unchanged.
 
 ## What the gate is for this shape
 
@@ -153,7 +153,7 @@ Not `npx playwright install`: that command belongs to the full `playwright` pack
 - **A browser, via `playwright-core`, and `axe-core`.** Hard requirement. Without a browser the harness refuses to run. Without axe, accessibility is reported as unmeasured, never as passed, and the `[UNMEASURED]` line blocks until you waive it.
 - **The `doctrine` hub.** Installed with this plugin; the wrapper loads it first.
 - **OpenAI's codex plugin.** The default red team, and the image generator for concept comps and assets. Without it, the red team is a fresh-context subagent that must be able to see the screenshots, and the run says the adversary is same-model; art is built natively in CSS, SVG or canvas, or you are asked for assets, and the run says which happened. If no adversary at all can see images, the red team runs over the diff and the critic's reports and the gate is reported as weaker than it claims.
-- **Claude Code's Workflow tool.** Lets one fused-gate round run as a journaled, resumable script. Without it the prose flow is the round.
+- **Claude Code's Workflow tool.** Lets one fused-gate round run as a journaled, resumable script. On Codex the round runs through `harness/round.codex.mjs` instead; without either, the prose flow is the round.
 - **Claude Design.** Optional sync so you can watch finished sections in the Design pane. Git is the source of record either way; without it the run says the sync was skipped.
 - **superpowers.** Parallel dispatch and worktree isolation. Without it, parallel Agent calls and `git worktree add`.
 - **ponytail.** The simplification pass. Without it, `/simplify` or a manual YAGNI pass.

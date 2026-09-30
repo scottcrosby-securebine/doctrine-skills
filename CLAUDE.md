@@ -68,13 +68,15 @@ ignoring one. `floor.md` is the manual.
 The round script's syntax gate is **not** `node --check` (see "The one skill with code in it" for
 why); the one-liner is written down in `skills/doctrine-gauntlet/workflow.md` and is deliberately
 not copied here, because a copy forks the first time the original is corrected. Its tamper fixtures
-(`harness/round.tamper.json`) run through the Workflow tool, per the same file.
+(`harness/round.tamper.json`) run through the Workflow tool, per the same file, and through the Codex
+runner's selftest in the block above, each seat a stand-in.
 
 There is no single command that runs all of these. `.github/workflows/gates.yml` runs the ones that need no
 install — every command in the block above, plus the workflow script's syntax gate — on every push.
 **What it cannot run is the part with the most defects in it**: the floor against `fixtures/`, because
-`package.json` is gitignored on purpose and CI has nothing to install from; `harness/round.tamper.json`, whose
-fixtures run through the Workflow tool; and the driven fresh-context runs, which are agents rather than a
+`package.json` is gitignored on purpose and CI has nothing to install from; `harness/round.tamper.json` through
+the Workflow tool (CI runs its fixtures only through the Codex runner with stand-in seats, which checks the
+script's counting and not the Workflow tool); and the driven fresh-context runs, which are agents rather than a
 command. So a green tick means the prose gate and the parsers are clean, and says nothing about the harness or
 the skills. Read it as the cheap end of the suite, never as the suite. No proportion is written down: it would rot the next time a gate is added, which is what just happened to the one that used to sit here.
 
@@ -112,7 +114,9 @@ Adding, renaming, or rescoping a skill touches all of:
 (the technical floor its critics depend on), `floor.md` (how to drive that
 harness — flags, exit codes, render honesty), `harness/round.workflow.mjs` (one
 fused-gate round as a Workflow-tool script: structure and counters only, never a
-brief), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
+brief), `harness/round.codex.mjs` and its selftest (the same round on Codex, which has no Workflow
+tool: it runs the script unchanged and hands each agent call to `spawn_agent` seats through a
+journal), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
 Design invocation). The sidecars exist so
 SKILL.md carries decision content and gate law while operating manuals and review
 history load on demand. The split rule: if it changes what an agent *decides*, it
@@ -120,15 +124,15 @@ belongs in SKILL.md; if it changes how a tool is *invoked* or records a call alr
 made, it belongs in a sidecar. A third kind existed and no longer ships: a record
 of rulings already made, read by a maintainer and never assembled into a prompt.
 Two of those were removed on 2026-08-29 because this repo is used by people other
-than its author and internal review history is not theirs to download. `harness/floor.mjs`
-and `harness/round.workflow.mjs` are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `tools/herdr-lint.mjs` and its sidecar `tools/herdr-lint.selftest.mjs`, `fixtures/shadcn.sh`, the fixture phase under `fixtures/e9-phase/` and the files under `hooks/`, none of which a skill loads. One qualification since issue #19: the hub's steps 3 and 5 *name* `hooks/dctr-gate.mjs` and `hooks/dctr-token.mjs`, `doctrine-pane` names `hooks/dctr-pane.mjs`, and `doctrine-project` names `hooks/dctr-project.mjs` and `hooks/dctr-token.mjs`, as commands a run invokes — invocation, not loading; no skill carries its content and the harness files stay the only code any skill ships. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
-`node floor.mjs` rather than executed; the workflow script is run only by the Workflow tool,
-which wraps its body in an async function — so `node --check` rejects its top-level `return`
+than its author and internal review history is not theirs to download. `harness/floor.mjs`,
+`harness/round.workflow.mjs` and `harness/round.codex.mjs` with its selftest are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `tools/herdr-lint.mjs` and its sidecar `tools/herdr-lint.selftest.mjs`, `fixtures/shadcn.sh`, the fixture phase under `fixtures/e9-phase/` and the files under `hooks/`, none of which a skill loads. One qualification since issue #19: the hub's steps 3 and 5 *name* `hooks/dctr-gate.mjs` and `hooks/dctr-token.mjs`, `doctrine-pane` names `hooks/dctr-pane.mjs`, and `doctrine-project` names `hooks/dctr-project.mjs` and `hooks/dctr-token.mjs`, as commands a run invokes — invocation, not loading; no skill carries its content and the harness files stay the only code any skill ships. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
+`node floor.mjs` rather than executed; the workflow script is run by the Workflow tool, or on
+Codex by `round.codex.mjs`, each wrapping its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
 shows exactly one mode-100755 file in the repo, and it is `fixtures/shadcn.sh`. The workflow
 script carries no brief text, for the reasons and with the disclosed exceptions `workflow.md` gives, and its
 tamper test is the same three-clause law as the harness's — the fixtures ship as
-`harness/round.tamper.json` and run through the Workflow tool. The harness's portability
+`harness/round.tamper.json` and run through the Workflow tool and through `round.codex.selftest.mjs`. The harness's portability
 is the point: it resolves Playwright and axe from whatever the host project
 has, and reports `[UNMEASURED]` rather than passing something it could not
 check. Never hardcode a path into it.
@@ -220,7 +224,7 @@ names one, against the corpus where it names only a section. Every one of those 
 narrower than that sentence makes it sound, and the tool's own header is where each narrowing is
 written down. **Its
 header states what it does not catch, and that list is longer than what it does** — read it before
-trusting a clean run. It sits outside `skills/`, so no skill loads it and the two harness files are
+trusting a clean run. It sits outside `skills/`, so no skill loads it and the harness files are
 still the only code any skill ships; it is tracked and would be distributed with the repo like
 `fixtures/shadcn.sh`. Run it with `--selftest` for its tamper test, whose third clause asserts the
 synthetic inputs really carry their defects without calling the checker at all.

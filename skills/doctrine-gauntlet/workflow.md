@@ -297,6 +297,10 @@ delete the check and every fixture still passes. Its twin, a line naming somethi
 never named, is pinned. `critic-axes-not-array` hands a non-array `criticAxes`, so the dispatched
 set falls back to empty and every axis the critic returns is one nobody named.
 
+On Codex the runner has its own three-clause test, `harness/round.codex.selftest.mjs`, which runs every
+fixture here through `round.codex.mjs` with a stand-in seat per call and runs in CI. It checks the runner
+and the script's counting, never the Workflow tool.
+
 Rerun all three clauses after any change that makes the script quieter as well as louder. An agent
 that dies mid-round returns `null`, and the script counts that as "no return", which
 blocks — a dead reviewer never reads as clean.
