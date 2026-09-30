@@ -3,8 +3,10 @@
 `harness/round.workflow.mjs` runs one fused-gate round of the gauntlet through the
 Workflow tool: the builder/critic pairs, the floor and every documented gate, the blind
 comparison, the integrated critic, the red team, and the counters, in that order. It is
-optional, and it runs fused mode only; pure gauntlet runs in prose. Where the host has no Workflow tool, or the round needs a judgment call the
-script does not model, the prose flow in `SKILL.md` is the round, unchanged.
+optional, and it runs fused mode only; pure gauntlet runs in prose. On Codex, which has no Workflow
+tool, `harness/round.codex.mjs` runs the same script unchanged (On Codex, below). Where the host has
+neither, or the round needs a judgment call the script does not model, the prose flow in `SKILL.md` is
+the round, unchanged.
 
 ## What the script does and does not hold
 
@@ -42,6 +44,29 @@ the one the journal carries. That is observed
 behaviour of the host rather than something it documents, so re-check it if a resume ever returns
 the journalled verdict unchanged. What it means here: a run journaled with no `sections` key resumes
 into that key's block, so re-run it, or resume it with `sections: []` supplied, which is what it meant.
+
+
+## On Codex
+
+`harness/round.codex.mjs` runs `round.workflow.mjs` unchanged and hands every agent call to you,
+since only you can dispatch a seat. The `args` are the table below, assembled exactly as for the
+Workflow tool.
+
+1. Write `args` to a JSON file, and pick a journal directory that outlives the session (never the
+   scratchpad). Both paths go in the ledger's run-state block, where the run id would go.
+2. Run `node <plugin-root>/skills/doctrine-gauntlet/harness/round.codex.mjs <args.json> <journal-dir>`,
+   `<plugin-root>` being the plugin directory that holds `skills/`.
+3. Exit 3: each `pending ...` line names a message file and the answer file it needs. Dispatch one blind
+   `spawn_agent` seat per message file, all at once, with the file's content verbatim as its message,
+   and wait on them. Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
+   that died or returned nothing. Then run step 2 again.
+4. Exit 2 names a refused answer: re-ask that seat once with the same message, then answer `null`. Any
+   other exit 2 is a miscall to fix, and exit 1 is the script throwing.
+5. Exit 0: `<journal-dir>/result.json` is the round's return, the same one the Workflow tool gives.
+
+Answered calls replay on every run, which is the resume: after a crash, run step 2 again with the same
+files. An answer is keyed to the prompt it was given for, so changed `args` refuse it. Start a new
+journal directory for a new round or changed `args`.
 
 `args`:
 

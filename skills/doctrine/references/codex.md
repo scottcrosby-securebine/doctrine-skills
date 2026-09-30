@@ -17,7 +17,7 @@ A long file's middle is cut from a single read on Codex.
 | Read a skill that is not model-invocable | Its SKILL.md under `~/.agents/skills/<name>/`, `.agents/skills/<name>/`, or `$CODEX_HOME/skills/<name>/`, whichever holds it. |
 | Dispatch a seat | `spawn_agent`. |
 | Dispatch a blind seat | Every seat is blind: builders, finders, reviewers, red teams and research engines. Pass the no-history setting of the spawn schema your tool list shows: `fork_turns: "none"` under v2, where an omitted `fork_turns` copies your whole history into the child; `fork_context: false` or omitted under v1. A seat that spawns a seat of its own passes the same setting. |
-| Run a workflow | Codex has no workflow runner. Dispatch the wave's seats with `spawn_agent` and wait on them. |
+| Run a workflow | Codex has no workflow runner. Dispatch the wave's seats with `spawn_agent` and wait on them. A gauntlet round runs through `doctrine-gauntlet`'s `harness/round.codex.mjs`, whose seats you dispatch this way (that skill's `workflow.md`, On Codex). |
 | Wait on a file | Run a shell loop that exits when the file appears (`until [ -f <file> ]; do sleep 15; done`), repeating it if your shell's timeout ends it first, then read the file. |
 | Wait on seats | `wait_agent`. |
 | Notify the user | No notification tool. Say it in your turn. When you pause auto-cycle yourself, run `node <plugin-root>/hooks/dctr-notify.mjs <phase> <reason>`, which shows `<phase>: doctrine auto-cycle paused, <reason>` as a herdr notification. Where it stands down or prints that herdr refused, say in your turn that no notification was sent. |

@@ -168,3 +168,8 @@ jobs:
         working-directory: skills/doctrine-gauntlet/harness
         run: |
           node -e 'const s=require("fs").readFileSync("round.workflow.mjs","utf8").replace(/^export const meta/m,"const meta");new Function("args","agent","parallel","pipeline","phase","log","budget","workflow","return (async()=>{"+s+"})()")'
+
+      - name: Codex round runner tamper test
+        # Every fixture in round.tamper.json through round.codex.mjs, each seat a stand-in returning
+        # the text its stub prompt states. Needs only node.
+        run: node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs

@@ -1,0 +1,127 @@
+// Runs one gauntlet round (round.workflow.mjs, unchanged) on a host with no Workflow tool.
+//
+//   node round.codex.mjs <args.json> <journal-dir>
+//
+// Each run replays every agent call answered in the journal and stops once no branch of the round
+// can go further. The calls still unanswered are written to <journal-dir>/pending/<key>.md, each the
+// message to hand one seat verbatim; the orchestrator puts each seat's final reply, verbatim, in
+// <journal-dir>/answers/<key>.txt and runs this again. A seat that returned nothing is answered with
+// exactly `null`. workflow.md is the manual.
+//
+// Exit 0 the round finished and <journal-dir>/result.json holds its return; 3 calls are pending;
+// 2 a miscall, or an answer refused (asked under another prompt, or not what the call's schema
+// allows), named on stderr; 1 the script threw.
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+
+export const promptHash = (prompt, schema) => createHash('sha256').update(JSON.stringify([prompt, schema || null])).digest('hex')
+
+// The keywords the round's schemas use, and nothing else.
+function invalid(v, s, at = 'reply') {
+  if (!s) return null
+  if (s.enum && !s.enum.includes(v)) return `${at} is not one of ${s.enum.join(', ')}`
+  const t = s.type
+  if (t === 'object') {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return `${at} is not an object`
+    for (const k of s.required || []) if (!(k in v)) return `${at} lacks ${k}`
+    for (const [k, sub] of Object.entries(s.properties || {})) if (k in v) { const e = invalid(v[k], sub, `${at}.${k}`); if (e) return e }
+  } else if (t === 'array') {
+    if (!Array.isArray(v)) return `${at} is not an array`
+    for (let i = 0; i < v.length; i++) { const e = invalid(v[i], s.items, `${at}[${i}]`); if (e) return e }
+  } else if (t === 'integer') { if (!Number.isInteger(v)) return `${at} is not an integer` }
+  else if (t && typeof v !== t) return `${at} is not a ${t}`
+  return null
+}
+
+export function readAnswer(text, schema) {
+  const raw = text.trim()
+  if (raw === 'null') return { ok: true, value: null }
+  if (!schema) return { ok: true, value: text }
+  const fenced = raw.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/)
+  let value
+  try { value = JSON.parse(fenced ? fenced[1] : raw) } catch { return { ok: false, why: 'reply is not one JSON value' } }
+  const why = invalid(value, schema)
+  return why ? { ok: false, why } : { ok: true, value }
+}
+
+// One pass over the round. `answers` maps a call's key to { hash, value }. Every answered call
+// resolves in the same tick, so one macrotask drains the round as far as it can go.
+export async function step(scriptSource, args, answers) {
+  const body = scriptSource.replace(/^export const meta/m, 'const meta')
+  const seen = {}
+  const pending = []
+  let refused = null
+  const agent = (prompt, opts = {}) => {
+    const label = opts.label || 'agent'
+    seen[label] = (seen[label] || 0) + 1
+    const key = `${label}#${seen[label]}`
+    const hash = promptHash(prompt, opts.schema)
+    const a = answers[key]
+    if (a && a.hash !== hash) { refused = refused || { key, why: 'its answer was given to another prompt' }; return new Promise(() => {}) }
+    if (a) return Promise.resolve(a.value)
+    pending.push({ key, label, prompt, schema: opts.schema || null, hash })
+    return new Promise(() => {})
+  }
+  const parallel = (fns) => Promise.all(fns.map((f) => f()))
+  const pipeline = (items, fn) => Promise.all(items.map((x, i) => fn(x, i)))
+  const noop = () => {}
+  let settled = null
+  // The body is round.workflow.mjs from this directory, wrapped as the Workflow tool wraps it.
+  const run = new Function('args', 'agent', 'parallel', 'pipeline', 'phase', 'log', 'budget', 'workflow', `return (async()=>{${body}})()`)
+  run(args, agent, parallel, pipeline, noop, noop, {}, {}).then((result) => { settled = { result } }, (error) => { settled = { error } })
+  await new Promise((r) => setImmediate(r))
+  if (refused) return { done: false, refused, pending: [] }
+  if (settled && settled.error) throw settled.error
+  if (settled) return { done: true, result: settled.result }
+  if (!pending.length) throw new Error('the round stopped with no call pending')
+  return { done: false, pending }
+}
+
+const fileOf = (key) => encodeURIComponent(key)
+
+function message(p) {
+  if (!p.schema) return p.prompt
+  return `${p.prompt}\n\n---\nReply with one JSON value and nothing else: no prose, no code fence. It must match this JSON Schema:\n${JSON.stringify(p.schema, null, 2)}\n`
+}
+
+async function main([argsFile, dir]) {
+  if (!argsFile || !dir) { console.error('usage: node round.codex.mjs <args.json> <journal-dir>'); return 2 }
+  let args
+  try { args = JSON.parse(readFileSync(argsFile, 'utf8')) } catch (e) { console.error(`cannot read ${argsFile}: ${e.message}`); return 2 }
+  const here = dirname(fileURLToPath(import.meta.url))
+  const script = readFileSync(join(here, 'round.workflow.mjs'), 'utf8')
+  for (const d of ['pending', 'answers', 'asked']) mkdirSync(join(dir, d), { recursive: true })
+  const answers = {}
+  for (const f of readdirSync(join(dir, 'answers'))) {
+    if (!f.endsWith('.txt')) continue
+    const name = f.slice(0, -4)
+    const key = decodeURIComponent(name)
+    const askedFile = join(dir, 'asked', name + '.json')
+    if (!existsSync(askedFile)) { console.error(`${key}: answered, but no call was asked under that key`); return 2 }
+    const asked = JSON.parse(readFileSync(askedFile, 'utf8'))
+    const got = readAnswer(readFileSync(join(dir, 'answers', f), 'utf8'), asked.schema)
+    if (!got.ok) { console.error(`${key}: answer refused: ${got.why}; re-ask the seat once, then answer null`); return 2 }
+    answers[key] = { hash: asked.hash, value: got.value }
+  }
+  let r
+  try { r = await step(script, args, answers) } catch (e) { console.error(e && e.stack || String(e)); return 1 }
+  if (r.refused) { console.error(`${r.refused.key}: answer refused: ${r.refused.why}`); return 2 }
+  rmSync(join(dir, 'pending'), { recursive: true, force: true })
+  mkdirSync(join(dir, 'pending'))
+  if (r.done) {
+    writeFileSync(join(dir, 'result.json'), JSON.stringify(r.result, null, 2) + '\n')
+    console.log(join(dir, 'result.json'))
+    return 0
+  }
+  for (const p of r.pending) {
+    writeFileSync(join(dir, 'asked', fileOf(p.key) + '.json'), JSON.stringify({ key: p.key, hash: p.hash, schema: p.schema }) + '\n')
+    writeFileSync(join(dir, 'pending', fileOf(p.key) + '.md'), message(p))
+    console.log(`pending ${p.key}: ${join(dir, 'pending', fileOf(p.key) + '.md')} -> ${join(dir, 'answers', fileOf(p.key) + '.txt')}`)
+  }
+  return 3
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2)).then((c) => process.exit(c))
