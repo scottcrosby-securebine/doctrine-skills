@@ -55,7 +55,7 @@ skill's SKILL.md from your skill list), in this order: `doctrine:<wrapper>` (for
 had you invoke it. With `wrapper: none`, or no wrapper line in the record or the handoff header, invoke only
 `doctrine:doctrine`. Nothing comes before them except step 1's `ls` and the
 reads this step and step 1 already made: no drift check, no `git` or `gh`, no
-other file read. When it reads Blocked, also name the open question in the
+other file read and no other directory listing, even of the directory the handoff sits in. When it reads Blocked, also name the open question in the
 Handoff line: the record's last `question: <id> opened` line with no later
 `question: <id> answered` line for the same id, else the state line's own text.
 When the record reads anything else (Exited, Stopped, Shipped, Unable, or no
