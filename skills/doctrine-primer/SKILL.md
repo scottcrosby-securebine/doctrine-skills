@@ -15,7 +15,7 @@ is usually where issue-tracking and session-completion norms live.
 
 ## 1. Restore state
 
-Run `doctrine-resume` steps 1 to 4 as written there: read the memory file, act on the kickoff's first
+Load `doctrine-resume` first, as your host loads a skill (the hub's host reference says how), and make no call before it but the reads of the instruction files above: its step 1b orders everything that comes before the phase's wrapper, and a recon read made alongside it comes too early. Then run its steps 1 to 4 as written there: read the memory file, act on the kickoff's first
 line, check drift, hydrate Active Work, and produce its report. Put that report at the very top of
 your reply, ahead of everything else; the kickoff in it is a live instruction from the prior session,
 not history. Where it finds drift or an interrupted backup, take its step 5 as written there. Those steps are written there once and not restated here.
