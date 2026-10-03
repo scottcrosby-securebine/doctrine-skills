@@ -184,6 +184,21 @@ const run = (payload, extra) => {
   try { return { code: 0, out: execFileSync('node', [hook], { timeout: 30000, input: JSON.stringify(payload), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: env(extra) }) } }
   catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
 }
+// The hook timed from the moment its payload is handed over. It reads stdin only once its modules have loaded, so
+// waiting until it is blocked in that read (/proc/<pid>/syscall: read, 0 on x86_64 and 63 on arm64, on fd 0) leaves
+// node's start-up, which a loaded host stretches without bound, out of what is timed.
+const runTimed = async (payload) => {
+  const child = spawn('node', [hook], { stdio: ['pipe', 'ignore', 'ignore'], env: env() })
+  const exit = new Promise((resolve) => child.on('exit', (code) => resolve(code)))
+  const reading = () => { try { return /^(0|63) 0x0 /.test(fs.readFileSync(`/proc/${child.pid}/syscall`, 'utf8')) } catch { return false } }
+  for (const end = Date.now() + 30000; !reading() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5))
+  const booted = reading(), t0 = Date.now()
+  child.stdin.end(JSON.stringify(payload))
+  const bound = setTimeout(() => child.kill('SIGKILL'), 30000)
+  const code = await exit
+  clearTimeout(bound)
+  return { code, booted, took: Date.now() - t0 }
+}
 const callText = () => { try { return fs.readFileSync(calls, 'utf8') } catch { return '' } }
 const stateOf = (sid) => path.join(tmp, `dctr-${sid}`)
 const markerOf = (sid, name) => path.join(stateOf(sid), 'seats', `${name}.json`)
@@ -221,14 +236,19 @@ const waitFor = (pred, ms = 8000) => { const until = Date.now() + ms; while (Dat
 }
 {
   // The renderer, run for real on the fixture rollout: what the seat's pane shows.
+  const shown = (text) => text.includes('→ exec  text(await tools.exec_command') && /^ {4}sub-ok$/m.test(text) && /^sub-ok$/m.test(text)
   const out = (() => {
     const child = spawn('node', [path.join(HERE, 'dctr-render.mjs'), SEAT_ROLLOUT], { stdio: ['ignore', 'pipe', 'ignore'] })
     let text = ''; child.stdout.on('data', (d) => { text += d })
-    return new Promise((resolve) => setTimeout(() => { child.kill(); resolve(text) }, 700))
+    // Until it has printed all three, at most 30 s, rather than a fixed 700ms a loaded host's start-up can outlast. It
+    // follows the rollout and never exits on its own; the session_meta comes first in the rollout, so a renderer that
+    // printed it did so before the answer this waits for.
+    const end = Date.now() + 30000
+    return new Promise((resolve) => { const t = setInterval(() => { if (shown(text) || Date.now() > end) { clearInterval(t); child.kill(); resolve(text) } }, 20) })
   })()
   const text = await out
   clause('clause 1o — the renderer, pointed at a Codex rollout, prints the tool call, the command output and the answer, and no session_meta',
-    text.includes('→ exec  text(await tools.exec_command') && /^ {4}sub-ok$/m.test(text) && /^sub-ok$/m.test(text) && !text.includes('base_instructions'),
+    shown(text) && !text.includes('base_instructions'),
     text)
 }
 {
@@ -269,14 +289,14 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   'staging failed')
 {
   stage()
-  const t0 = Date.now(); const r = run(CLEAR); const took = Date.now() - t0
+  const r = await runTimed(CLEAR)
   clause('clause 1r — a Codex /clear closes the ending chat\'s seat pane and moves its running gate, never closing the gate',
     r.code === 0 && /^pane close w1:s1$/m.test(callText()) && !/close w1:g1/.test(callText()) && readJson(movedGate)?.paneId === 'w1:g1',
-    `${r.out}\ncalls:\n${callText()}\nmoved: ${JSON.stringify(readJson(movedGate))}`)
+    `exit ${r.code}\ncalls:\n${callText()}\nmoved: ${JSON.stringify(readJson(movedGate))}`)
   clause('clause 1s — the ending chat\'s state directory goes, and another pane\'s session is untouched',
     !fs.existsSync(stateOf(OLD)) && fs.existsSync(markerOf('other-pane-session', 'dctr-default-1')) && !/w1:o1/.test(callText()),
     `old: ${fs.existsSync(stateOf(OLD))}; calls: ${callText()}`)
-  clause('clause 1t — inside SessionEnd\'s budget: the hook exits under 1,500 ms', took < 1500, `took ${took}ms`)
+  clause('clause 1t — inside SessionEnd\'s budget: the hook exits under 1,500 ms from its payload', r.booted && r.took < 1500, `took ${r.took}ms, booted ${r.booted}`)
   const hadEntry = fs.existsSync(indexOf('w1:p1', OLD))
   run(CLEAR)
   clause('clause 1z — the next /clear drops the index entry of a session whose state directory is gone, and keeps the other pane\'s',
@@ -301,9 +321,9 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
   // E8-D6's K1 through the table: the ending session's lock held by a live process at /clear.
   stage()
   fs.mkdirSync(path.join(stateOf(OLD), 'placement.lock')); fs.writeFileSync(path.join(stateOf(OLD), 'placement.lock', 'pid'), String(process.pid))
-  const t0 = Date.now(); const r = run(CLEAR); const took = Date.now() - t0
-  clause('clause 1u — with the ending session\'s lock held, the hook still exits under 1,500 ms and closes nothing yet',
-    r.code === 0 && took < 1500 && !/close/.test(callText()), `took ${took}ms; calls: ${callText()}`)
+  const r = await runTimed(CLEAR)
+  clause('clause 1u — with the ending session\'s lock held, the hook still exits under 1,500 ms from its payload and closes nothing yet',
+    r.booted && r.code === 0 && r.took < 1500 && !/close/.test(callText()), `took ${r.took}ms, booted ${r.booted}; calls: ${callText()}`)
   fs.rmSync(path.join(stateOf(OLD), 'placement.lock'), { recursive: true, force: true })
   clause('clause 1v — and once the lock is free, the detached sweep closes the seat and moves the gate within 5 s',
     waitFor(() => /^pane close w1:s1$/m.test(callText()) && fs.existsSync(movedGate) && !fs.existsSync(stateOf(OLD)), 5000),
