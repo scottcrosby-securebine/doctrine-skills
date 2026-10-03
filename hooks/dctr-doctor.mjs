@@ -9,7 +9,8 @@
 // in a pane as doctorVerdict in dctr-lib.mjs describes. It prints one row per signal, by stable code, then the hook
 // areas the drive does not exercise (DOCTOR_UNEXERCISED), then the verdict.
 //
-// Exit 0 every signal holds, 1 drift (the rows name each signal), 2 it cannot run (no herdr, no codex or claude
+// Exit 0 no signal drifts (a signal the run could not observe prints `unobs` and the verdict names it), 1 drift (the
+// rows name each signal), 2 it cannot run (no herdr, no codex or claude
 // binary, missing or near-expiry credentials, a socket path too long): the message says which.
 // Cost: one to two minutes, and two cheap model turns per host (on Codex the model ~/.codex/config.toml names, else
 // Codex's default, at low effort; haiku on Claude Code), one more on a host whose gate fails to block.
