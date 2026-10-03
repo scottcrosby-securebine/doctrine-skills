@@ -1,7 +1,8 @@
 // Codex CLI fixtures for the Codex selftests: 0.156.1 for E10 e10-hookport, 0.160.0 where a constant's comment names it
 // and in the e10-clear section at the end. Cut VERBATIM from the probes' real rollouts, hook payloads and pane reads by
-// a script (scratchpad seatIII/genfix.py, genfix-s1.mjs for e10-clear, and e10-clear/realenv-s4/tools/genfix-s4.mjs for
-// API_ERROR, PRIOR_TURN_0160 and STALLED_TURN); every constant names its source and lines.
+// a script (scratchpad seatIII/genfix.py, genfix-s1.mjs for e10-clear, e10-clear/realenv-s4/tools/genfix-s4.mjs for
+// API_ERROR, PRIOR_TURN_0160 and STALLED_TURN, and e10-fix/captures/genfix-e10fix.mjs for PANE_0160_BLANK and
+// PANE_0160_DRAFT_BLANKFIRST); every constant names its source and lines.
 // Rollout constants are arrays of JSONL lines; payload constants are the hook's stdin JSON as the probe logged it.
 // Nothing here is hand-edited: a fixture a selftest needs in another shape is derived in the selftest, and says so.
 
@@ -376,13 +377,16 @@ export const PANE_0160_CLEARED = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/clau
 export const PANE_0160_DRAFT = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/claude-1000/…/fx/d1-open/widget-api\n  permissions: YOLO mode\n\n  Hello, you. Got an idea?\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n› draft text typed after clear, not\n  submitted\n\n  GPT-6.1-Sol low · /tmp/claude-1000/e10c-pr…\n                                    ⚠ 1 · f2\n"
 
 // ---------------------------------------------------------------- e10-fix (E10-D28)
-// codex-cli 0.160.0 pane reads from the e10-fix live capture: a scratch CODEX_HOME, a private herdr 0.9.3 server,
-// `herdr pane read <pane> --source recent --lines 80` polled every 100 ms right after `herdr pane run <pane> /clear`,
-// each distinct read saved verbatim to its own file (named in each note).
+// codex-cli 0.160.0 pane reads taken by the e10-fix capture tool, doctrine-skills-project/.doctrine/records/e10-fix/
+// captures/cap.mjs: a scratch CODEX_HOME, a private herdr 0.9.3 server, `herdr pane read <pane> --source recent --lines
+// 80` polled every 100 ms right after `herdr pane run <pane> /clear`, each distinct read saved verbatim to its own file.
+// Each constant is that file's whole content.
 
 /** The pane read right after a /clear that took, before the new chat is drawn: empty, 0 bytes, at host load 52.7, the
- *  first read after the /clear and every read of the 3 s after it (capture try06-0000ms.txt). */
+ *  first read after the /clear and every read of the 3 s after it. Source:
+ *  doctrine-skills-project/.doctrine/records/e10-fix/captures/try06-0000ms.txt, all lines (cap.log names its try). */
 export const PANE_0160_BLANK = ""
 /** A draft whose first line is blank: ctrl+j, then text, sent into the empty composer after a finished turn: a bare `›`
- *  with the text on the indented line below it, then the blank line above the footer (capture dry/draft-blankfirst-ctrlj.txt, host load 17). */
+ *  with the text on the indented line below it, then the blank line above the footer, at host load 17. Source:
+ *  doctrine-skills-project/.doctrine/records/e10-fix/captures/dry/draft-blankfirst-ctrlj.txt, all lines. */
 export const PANE_0160_DRAFT_BLANKFIRST = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/claude-1000/e10cap-wDYPH2/work\n  permissions: YOLO mode\n\n  Speak, friend, and enter a prompt.\n\n\n› Reply with the single word ok. Use no tools.\n\n\n■ '/clear' is disabled while a task is in progress.\n\n• ok\n\n  Worked for 5s • 14:11\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n›\n  second line draft, never sent\n\n  GPT-6.1-Sol low · /tmp/claude-1000/e10cap-wDYPH2/work · Reply ok\n                                                                                              ⚠ 1 warning · f2 to view\n"
