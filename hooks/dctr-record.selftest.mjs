@@ -242,6 +242,40 @@ try { deepStrictEqual(drive, DRIVE_WANT) } catch (e) { driveOk = false; driveWhy
 clause('clause 1p — every wave form a driven phase wrote parses, the handle the rest of the line with any via split off, an indented item like any other (E8-D24)',
   driveOk, driveWhy)
 
+// R2-B2: a model appends prose to a form's fixed part. Every form still parses: its fixed fields unchanged, and the
+// free-text field that runs to the end of the line (text, evidence, reason, the state value, and a handle with no via)
+// carries the prose. The want for each line is its bare parse, which clause 1n pins against the hand-written table.
+const TRAILS = ['; the seat ran late, see notes.', '. Scott ruled at ten', ', diagnosis sent', ' (copied from the pane)']
+const FREE = { 'finding-raised': ['text'], 'finding-cleared': ['evidence'], ruling: ['text'], 'question-opened': ['text'], 'question-answered': ['text'], state: ['value', 'raw'] }
+const withTail = (e, t) => {
+  const keys = e.kind === 'auto-cycle' && e.sub === 'paused' ? ['reason'] : e.kind === 'wave' && !e.via ? ['handle'] : FREE[e.kind] || []
+  return { ...e, ...Object.fromEntries(keys.map((k) => [k, e[k] + t])) }
+}
+const tailBad = []
+for (const l of FORMS) for (const t of TRAILS) {
+  const [want] = parseRecord(l).entries.map(({ line, ...e }) => withTail(e, t))
+  const got = parseRecord(l + t).entries.map(({ line, ...e }) => e)
+  try { deepStrictEqual(got, [want]) } catch { tailBad.push([l + t, got]) }
+}
+clause('clause 1q — every form with prose appended after its fixed part still parses with its fixed fields, the prose only in the field that runs to the line end (R2-B2)',
+  tailBad.length === 0, JSON.stringify(tailBad.map(([l]) => l)))
+
+// The backup wave line a live Codex drive wrote on every cycle, verbatim: a via token with a clause after it.
+const LIVE_WAVE = '- wave: 2026-10-03T01:00:14Z seat backup-review handle /root/backup_review via doctrine-backup; read-only correctness/completeness review of memory and handoff; deadline 5 minutes.'
+const VIA_MID = [LIVE_WAVE, `- wave: ${T} seat h1 handle agent x (wt/h) via doctrine-handoff, dispatched by the handoff skill`]
+const viaMid = parseRecord(VIA_MID.join('\n')).entries.map((e) => [e.handle, e.via])
+const viaNot = parseRecord([`- wave: ${T} seat s handle x via doctrine-backups`, `- wave: ${T} seat s handle x via doctrine-backup-old; prose`].join('\n')).entries.map((e) => [e.handle, e.via])
+clause('clause 1r — a via token after the handle is read wherever it sits, with prose after it, the handle ending before it; a longer word that only starts with the token is part of the handle (R2-B2)',
+  JSON.stringify(viaMid) === JSON.stringify([['/root/backup_review', 'doctrine-backup'], ['agent x (wt/h)', 'doctrine-handoff']]) &&
+  JSON.stringify(viaNot) === JSON.stringify([['x via doctrine-backups', null], ['x via doctrine-backup-old; prose', null]]),
+  JSON.stringify([viaMid, viaNot]))
+
+// A number field followed straight by more digits or letters is a near miss, not a tail.
+const TAIL_NEAR = [`- round: 3 closed ${T} at abc blockers 2 alarm 1x`, `- alarm: round fired ${T} count 4.5`, '- auto-cycle: offline', '- auto-cycle: readying', '- auto-cycle: cycle 2 tree 9f2c1abz']
+const tailNear = parseRecord(TAIL_NEAR.join('\n')).entries
+clause('clause 1s — a fixed part run straight into more word characters (alarm 1x, count 4.5, offline, readying, a hash with a non-hex letter) is not a form (R2-B2)',
+  tailNear.length === 0, JSON.stringify(tailNear))
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
@@ -275,6 +309,10 @@ clause('clause 3g — without the parser: each drive wave line\'s handle holds a
   DRIVE.every((l) => /\S\s+\S/.test(l.slice(l.indexOf(' handle ') + 8).replace(/\s+via\s+doctrine-(handoff|backup)$/, ''))) &&
   DRIVE.some((l) => /^\s+- wave:/.test(l)) && DRIVE.filter((l) => / via doctrine-(handoff|backup)$/.test(l)).length === 2 &&
   DRIVE.length === DRIVE_WANT.length, 'a drive fixture whose handles were single tokens would let clause 1p pass against the old parser')
+
+clause('clause 3h — without the parser: every trail opens with a space or a punctuation mark and holds a word, the live wave line has prose after its via, and each tail near miss runs a fixed part into a word character',
+  TRAILS.every((t) => /^[\s.,;:(]/.test(t) && /\w/.test(t)) && /via doctrine-backup; \S/.test(LIVE_WAVE) && / via doctrine-handoff, \S/.test(VIA_MID[1]) &&
+  TAIL_NEAR.every((l) => /(\d x|1x|4\.5|offline|readying|abz)$/.test(l)), 'a trail that started with a word character would test a near miss, not a tail')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),

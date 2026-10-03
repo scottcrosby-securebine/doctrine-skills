@@ -109,6 +109,15 @@ const DECIDE = [
 const decideBad = DECIDE.filter(([, o, act, code]) => cd(o).act !== act || (code && cd(o).code !== code))
 clause('clause 1e — cycleDecision: all preconditions true launches, and each one alone false does not, with its act and reason (E8-D7, T2)',
   cd({}).act === 'launch' && cd({}).n === 2 && decideBad.length === 0, JSON.stringify(decideBad.map(([n, o]) => [n, cd(o)])))
+// S2: another Stop hook blocked the Stop that launched the typer, so the session ran on, and its next Stop carries
+// stop_hook_active with this record state's claim taken, whatever the continuation ended on (a live 0.160.0 and
+// 2.1.288 run). Without the claim, stop_hook_active on a message with no ready line still waits.
+const R11_AFTER = [['not ready', { ready: false }], ['background task', { backgroundTasks: true }], ['live seat', { liveWork: 'seat x is live' }],
+  ['session cron', { sessionCrons: true }], ['handoff not landed', { handoffLanded: false }], ['ready', {}]]
+const r11Bad = R11_AFTER.filter(([, o]) => cd({ ...o, stopHookActive: true, claimTaken: true }).code !== 'R11')
+clause('clause 1e2 — cycleDecision: stop_hook_active with this record state\'s claim taken pauses with R11 before the live-work and ready steps; without the claim a message with no ready line still waits, and a pausing state still wins (S2, E8-D15 K3)',
+  r11Bad.length === 0 && cd({ stopHookActive: true, ready: false }).act === 'wait' && cd({ stopHookActive: true, claimTaken: true, blocked: 'b' }).code === 'R2',
+  JSON.stringify([...r11Bad.map(([n, o]) => [n, cd({ ...o, stopHookActive: true, claimTaken: true })]), cd({ stopHookActive: true, ready: false })]))
 let called = 0
 const counted = () => { called += 1; return 's1' }
 cd({ contained: true, paneSession: counted }); cd({ ready: false, paneSession: counted }); cd({ handoffLanded: false, paneSession: counted })
@@ -125,11 +134,14 @@ clause('clause 1g — cycleDecision: the pausing states win over everything late
 const on = '- auto-cycle: on cap 10 tier 60%'
 const cyc = (n, h) => `- auto-cycle: cycle ${n} tree ${h}`
 const backupWave = '- wave: 2026-09-24T01:00:00Z seat r1 handle h1 via doctrine-backup'
+const backupWaveProse = '- wave: 2026-10-03T01:00:14Z seat backup-review handle /root/backup_review via doctrine-backup; read-only correctness/completeness review of memory and handoff; deadline 5 minutes.'
 const round = '- round: 2 closed 2026-09-24T01:00:00Z at abc blockers 0 alarm 0'
 const P = [
   ['cycle 10 with cap 10', rec(on, cyc(10, 'aa')), 'aa', 'cap 10', 11],
   ['cycle 9 with cap 10', rec(on, cyc(9, 'aa')), 'bb', null, 10],
   ['bookkeeping only: backup waves', rec(on, cyc(1, 'aa'), backupWave, cyc(2, 'aa'), backupWave), 'aa', 'no progress', 3],
+  // R2-B2: the backup wave a live Codex drive wrote on every cycle, a clause after its via.
+  ['bookkeeping only: backup waves with prose after the via', rec(on, cyc(1, 'aa'), backupWaveProse, cyc(2, 'aa'), backupWaveProse), 'aa', 'no progress', 3],
   ['a leftover dirty file, unchanged', rec(on, cyc(1, 'dd'), cyc(2, 'dd')), 'dd', 'no progress', 3],
   ['a new uncommitted edit', rec(on, cyc(1, 'dd'), cyc(2, 'dd')), 'ee', null, 3],
   ['only a new round line', rec(on, cyc(1, 'dd'), cyc(2, 'dd'), round), 'dd', null, 3],
@@ -1004,10 +1016,10 @@ clause('clause 2q — the typer is spawned only for the launching fixtures, with
 
 const hj = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).hooks
 const runsCycle = (entry) => entry?.hooks?.[0]?.command?.endsWith('/hooks/dctr-cycle.mjs"') && entry.hooks[0].timeout > 0
-clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification with matcher permission_prompt|idle_prompt, on StopFailure and on UserPromptSubmit (E8-D18, E8-R31)',
+clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification with matcher permission_prompt|idle_prompt, on StopFailure and on UserPromptSubmit, the prompt gate beside it there (E8-D18, E8-R31, E10 S1)',
   hj.Stop?.length === 1 && runsCycle(hj.Stop[0]) && !hj.Stop[0].matcher && hj.Notification?.length === 1 && runsCycle(hj.Notification[0]) &&
   hj.Notification[0].matcher === 'permission_prompt|idle_prompt' && hj.StopFailure?.length === 1 && runsCycle(hj.StopFailure[0]) &&
-  hj.UserPromptSubmit?.length === 1 && runsCycle(hj.UserPromptSubmit[0]) && !hj.UserPromptSubmit[0].matcher,
+  hj.UserPromptSubmit?.length === 2 && runsCycle(hj.UserPromptSubmit[0]) && !hj.UserPromptSubmit[0].matcher,
   JSON.stringify([hj.Stop, hj.Notification, hj.StopFailure, hj.UserPromptSubmit]))
 
 const hjd = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).description

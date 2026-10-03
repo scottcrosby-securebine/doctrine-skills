@@ -180,6 +180,16 @@ model = "o"
 // sandbox_workspace_write as an inline table at the root.
 const INLINE_STATE = `[hooks]\nstate = { "x:session_start:0:0" = { trusted_hash = "sha256:00" } }\n`
 const INLINE_SANDBOX = `sandbox_workspace_write = { writable_roots = ["/tmp"] }\n`
+// F7: an [agents] table already at the doctrine's seat limit, and one holding the user's own limit with a comment and
+// another key beside it (E10-R17).
+const SEATS_EIGHT = `[agents]\nmax_concurrent_threads_per_session = 8\n`
+const SEATS_OTHER = `[agents]\nmax_concurrent_threads_per_session = 3 # my own\nmax_depth = 2\n`
+// F8: the optional settings as inline tables, valid TOML the install cannot add a key to without rewriting the line:
+// agents with the limit set, agents without it, and sandbox_workspace_write with network access on.
+const SEATS_INLINE = `agents = { max_concurrent_threads_per_session = 3, max_depth = 2 }\n`
+const SEATS_INLINE_BARE = `agents = { max_depth = 2 }\n`
+const SANDBOX_INLINE_ON = `sandbox_workspace_write = { network_access = true }\n`
+const SEATS_DOTTED = `agents.max_depth = 2\n`
 
 const hookDirFor = (home) => path.join(home, 'doctrine', 'hooks')
 const planFor = (home, hooksJson, configToml) => codexInstallPlan({ hooksJson, configToml, hookDir: hookDirFor(home), hooksJsonPath: path.join(home, 'hooks.json') })
@@ -197,7 +207,7 @@ function onlyAdded(before, after, allowed) {
   return { ok: i === a.length && extra.every((l) => l === '' || allowed(l)), extra, consumed: i, of: a.length }
 }
 const ourLine = (home) => (l) => l.startsWith(`[hooks.state."${home}/hooks.json:`) || /^trusted_hash = "sha256:[0-9a-f]{64}"$/.test(l) ||
-  l === '[sandbox_workspace_write]' || l === 'network_access = true'
+  l === '[sandbox_workspace_write]' || l === 'network_access = true' || l === '[agents]' || l === 'max_concurrent_threads_per_session = 8'
 
 // ---------------------------------------------------------------- clause 2: known-good inputs
 
@@ -242,7 +252,7 @@ clause('clause 2e — hooks.json gains exactly the doctrine entries CODEX_HOOKS 
 clause("clause 2f — herdr's SessionStart group is byte-identical and still first in its array (E10-D2, E10-D3)",
   after1.hooks.includes(HERDR_GROUP_TEXT) && JSON.stringify(parsed1.hooks.SessionStart[0]) === JSON.stringify(JSON.parse(HERDR_GROUP_TEXT)), after1.hooks)
 const added = onlyAdded(before.config, after1.config, ourLine(home))
-clause("clause 2g — config.toml keeps every line it had, byte for byte and in order, herdr's trust line included, and gains only doctrine trust lines and the network setting (E10-D2)",
+clause("clause 2g — config.toml keeps every line it had, byte for byte and in order, herdr's trust line included, and gains only doctrine trust lines, the network setting and the seat limit (E10-D2)",
   added.ok, `consumed ${added.consumed} of ${added.of}; extra ${JSON.stringify(added.extra)}`)
 const rows1 = trustRows(after1.hooks, after1.config, path.join(home, 'hooks.json'))
 clause('clause 2h — every handler in the new hooks.json, herdr\'s and doctrine\'s, has a trust line equal to the hash the probe\'s Python port of Codex computes (E10-D1, E10-D3)',
@@ -276,10 +286,33 @@ const trickyRows = trustRows(trickyPlan.hooksJson, trickyPlan.configToml, path.j
 clause('clause 2l — a multi-line string and a nested array opening lines with "[" are not read as tables: the output parses, the string is unchanged, and every doctrine entry is trusted',
   trickyToml.ok && trickyToml.doc.developer_instructions === '[hooks.state."fake"]\ntrusted_hash = "not a table"\n' && allTrusted(trickyRows),
   `${JSON.stringify(trickyToml).slice(0, 300)} ${JSON.stringify(trickyRows.filter((r) => r.stored !== r.computed))}`)
-clause('clause 2m — network_access = false in an existing [sandbox_workspace_write] becomes true in place, and its other keys stay',
-  trickyToml.ok && trickyToml.doc.sandbox_workspace_write?.network_access === true && JSON.stringify(trickyToml.doc.sandbox_workspace_write?.writable_roots) === '["/tmp/x"]' &&
-    trickyPlan.configToml.split('\n').filter((l) => l.startsWith('[sandbox_workspace_write]')).length === 1 && trickyToml.doc.profiles?.x?.model === 'o',
-  trickyPlan.configToml)
+// R2-B4, the owner's ruling: a value the user set is left untouched, and the install says so in one line.
+const netMsgs = (plan) => plan.messages.filter((l) => l.includes('network_access'))
+clause('clause 2m — network_access = false in an existing [sandbox_workspace_write] is left byte-identical, comment and all, its other keys stay, and one line says it was left and what that costs',
+  trickyToml.ok && trickyToml.doc.sandbox_workspace_write?.network_access === false && trickyPlan.configToml.includes('\nnetwork_access = false # off by default\n') &&
+    JSON.stringify(trickyToml.doc.sandbox_workspace_write?.writable_roots) === '["/tmp/x"]' &&
+    trickyPlan.configToml.split('\n').filter((l) => l.startsWith('[sandbox_workspace_write]')).length === 1 && trickyToml.doc.profiles?.x?.model === 'o' &&
+    netMsgs(trickyPlan).length === 1 && /network_access = false left as it is/.test(netMsgs(trickyPlan)[0]) && /cannot reach herdr/.test(netMsgs(trickyPlan)[0]),
+  trickyPlan.configToml + JSON.stringify(trickyPlan.messages))
+const NET_DOTTED = 'sandbox_workspace_write.network_access = false # keep this choice\n'
+const netDotted = goodPlan(home, null, NET_DOTTED)
+clause('clause 2m2 — a dotted network_access = false line with a comment is left byte-identical, and one line says it was left',
+  netDotted.configToml.startsWith(NET_DOTTED) && netDotted.configToml.split('\n').filter((l) => l.includes('network_access')).length === 1 &&
+    netMsgs(netDotted).length === 1 && /network_access = false left as it is/.test(netMsgs(netDotted)[0]) && /trust lines written/.test(netDotted.messages.join('\n')),
+  netDotted.configToml + JSON.stringify(netDotted.messages))
+// optionalValue reads only the inline table's own keys: a key of the same name in a nested table or inside a string is
+// not the setting.
+const NESTED = [
+  ['agents = { sub = { max_concurrent_threads_per_session = 3 }, max_depth = 2 }\n', 'agents.max_concurrent_threads_per_session', /add max_concurrent_threads_per_session = 8 inside its braces/],
+  ['agents = { note = "a, max_concurrent_threads_per_session = 2", max_depth = 2 }\n', 'agents.max_concurrent_threads_per_session', /add max_concurrent_threads_per_session = 8 inside its braces/],
+  ['sandbox_workspace_write = { sub = { network_access = true } }\n', 'network_access', /add network_access = true inside its braces/],
+  ["sandbox_workspace_write = { note = 'x,network_access = true' }\n", 'network_access', /add network_access = true inside its braces/],
+]
+const nestedBad = NESTED.map(([text, k, want]) => { const pl = goodPlan(home, null, text), m = pl.messages.filter((l) => l.includes(k)); return [text, pl.configToml.startsWith(text) && m.length === 1 && want.test(m[0]), m] }).filter(([, ok]) => !ok)
+clause('clause 2m3 — a key of the setting\'s name inside a nested inline table or a string is not the setting: the line is left and the install says how to add it',
+  nestedBad.length === 0, JSON.stringify(nestedBad))
+clause('clause 3m3 — without the install: each nested fixture holds the setting\'s key text, but not as a top-level key of its inline table',
+  NESTED.every(([text, k]) => text.includes(k.split('.').at(-1) + ' = ') && /=\s*\{[^{]*[{"']/.test(text)), 'a fixture lacks its nested key')
 
 // An earlier install whose Stop entry had another timeout, a second (duplicate) doctrine Stop group, and a user's
 // Stop group after them. The stale entry is rewritten in place, the duplicate removed, and the user's group, which
@@ -303,6 +336,65 @@ const foreignPlan = goodPlan(home, JSON.stringify({ hooks: { Stop: [foreign] } }
 clause('clause 2p — a dctr script registered from another directory is left in place, and the doctrine entry is added after it',
   JSON.stringify(JSON.parse(foreignPlan.hooksJson).hooks.Stop?.[0]) === JSON.stringify(foreign) && JSON.parse(foreignPlan.hooksJson).hooks.Stop?.length === 2, foreignPlan.hooksJson)
 
+// The seat limit (E10-R17): written where absent, a no-op at 8, and a different value left byte-identical, each with
+// one line of output naming it.
+const seatLines = (out) => out.split('\n').filter((l) => l.includes('agents.max_concurrent_threads_per_session'))
+const seatRun = (configText) => {
+  const h = fs.mkdtempSync(path.join(tmp, 'seats-'))
+  put(path.join(h, 'hooks.json'), scottHooks(h))
+  put(path.join(h, 'config.toml'), configText)
+  const r = run(['install', '--codex-home', h])
+  return { r, config: readOr(path.join(h, 'config.toml')) }
+}
+const seatsAbsent = [seatLines(first.stdout), seatLines(second.stdout)]
+clause('clause 2s — absent, the install sets agents.max_concurrent_threads_per_session = 8 and prints one line saying it set it; the re-run prints one line saying it was already set (E10-R17)',
+  toml1.ok && toml1.doc.agents?.max_concurrent_threads_per_session === 8 && seatsAbsent[0].length === 1 && /set agents\.max_concurrent_threads_per_session = 8/.test(seatsAbsent[0][0]) &&
+    seatsAbsent[1].length === 1 && /already set/.test(seatsAbsent[1][0]), JSON.stringify(seatsAbsent))
+const seatsEight = seatRun(SEATS_EIGHT)
+clause('clause 2t — already 8, the install keeps the [agents] table byte for byte, adds no second limit line, and prints one line saying it was already set (E10-R17)',
+  seatsEight.r.status === 0 && seatsEight.config.startsWith(SEATS_EIGHT) && seatsEight.config.split('\n').filter((l) => l.includes('max_concurrent_threads_per_session')).length === 1 &&
+    seatLines(seatsEight.r.stdout).length === 1 && /already set/.test(seatLines(seatsEight.r.stdout)[0]), `status ${seatsEight.r.status} ${seatsEight.r.stdout} ${seatsEight.r.stderr}`)
+const seatsOther = seatRun(SEATS_OTHER)
+const seatsOtherToml = tomlOk(seatsOther.config)
+clause('clause 2u — a different value present is left byte-identical, still read as 3, and the install prints one line saying it left it (E10-R17, E10-D2)',
+  seatsOther.r.status === 0 && seatsOther.config.startsWith(SEATS_OTHER) && seatsOtherToml.ok && seatsOtherToml.doc.agents?.max_concurrent_threads_per_session === 3 &&
+    seatLines(seatsOther.r.stdout).length === 1 && /= 3 left as it is/.test(seatLines(seatsOther.r.stdout)[0]), `status ${seatsOther.r.status} ${seatsOther.r.stdout} ${seatsOther.r.stderr} ${seatsOther.config}`)
+
+// An optional setting in an inline table: the line is left byte-identical, the install says so in one line (and how
+// to add a setting it could not), does the rest of its work, exits 0, and a re-run changes nothing (E10-D2, E10-D4).
+const netLines = (out) => out.split('\n').filter((l) => l.includes('network_access'))
+const inlineCase = (configText) => {
+  const h = fs.mkdtempSync(path.join(tmp, 'inline-'))
+  put(path.join(h, 'hooks.json'), scottHooks(h))
+  put(path.join(h, 'config.toml'), configText)
+  const r = run(['install', '--codex-home', h]), config = readOr(path.join(h, 'config.toml')), hooks = readOr(path.join(h, 'hooks.json'))
+  const r2 = run(['install', '--codex-home', h])
+  const toml = tomlOk(config)
+  return { r, config, hooks, toml, rows: trustRows(hooks, config, path.join(fs.realpathSync(h), 'hooks.json')),
+    rerunSame: r2.status === 0 && readOr(path.join(h, 'config.toml')) === config && readOr(path.join(h, 'hooks.json')) === hooks, out: r.stdout }
+}
+const done = (c) => c.r.status === 0 && c.toml.ok && allTrusted(c.rows.filter((r) => r.command.includes('/doctrine/hooks/'))) && c.rerunSame && /dctr-cycle\.mjs/.test(c.hooks)
+const cd = (c) => `status ${c.r.status} rerun ${c.rerunSame} toml ${JSON.stringify(c.toml).slice(0, 160)} ${c.out} ${c.r.stderr} ${c.config}`
+const inSet = inlineCase(SEATS_INLINE)
+clause('clause 2x — agents as an inline table holding the limit: the line is left byte-identical, still read as 3, one line says it was left, and the install completes and re-runs as a no-op',
+  done(inSet) && inSet.config.startsWith(SEATS_INLINE) && inSet.toml.doc.agents?.max_concurrent_threads_per_session === 3 &&
+    seatLines(inSet.out).length === 1 && /= 3 left as it is/.test(seatLines(inSet.out)[0]), cd(inSet))
+const inBare = inlineCase(SEATS_INLINE_BARE)
+clause('clause 2y — agents as an inline table without the limit: the line is left byte-identical, one line says the install could not add the limit to an inline table and how to add it, and the install completes and re-runs as a no-op',
+  done(inBare) && inBare.config.startsWith(SEATS_INLINE_BARE) && inBare.toml.doc.agents?.max_concurrent_threads_per_session === undefined &&
+    seatLines(inBare.out).length === 1 && /inline table/.test(seatLines(inBare.out)[0]) && /add max_concurrent_threads_per_session = 8 inside its braces/.test(seatLines(inBare.out)[0]), cd(inBare))
+const dotted = goodPlan(home, null, SEATS_DOTTED)
+clause('clause 2y2 — agents written with dotted keys and no limit: the lines are left byte-identical, one line says the install did not add the limit and why, and the rest of the plan is made',
+  dotted.configToml.startsWith(SEATS_DOTTED) && seatLines(dotted.messages.join('\n')).length === 1 && /did not add .*dotted keys/.test(seatLines(dotted.messages.join('\n'))[0]) &&
+    /trust lines written/.test(dotted.messages.join('\n')), JSON.stringify(dotted.messages))
+const inNet = inlineCase(INLINE_SANDBOX)
+clause('clause 2z — sandbox_workspace_write as an inline table without network_access: the line is left byte-identical, one line says the install could not set it in an inline table and how to, and the install completes and re-runs as a no-op',
+  done(inNet) && inNet.config.startsWith(INLINE_SANDBOX) && inNet.toml.doc.sandbox_workspace_write?.network_access === undefined &&
+    netLines(inNet.out).length === 1 && /inline table/.test(netLines(inNet.out)[0]) && /add network_access = true inside its braces/.test(netLines(inNet.out)[0]), cd(inNet))
+const inNetOn = inlineCase(SANDBOX_INLINE_ON)
+clause('clause 2z2 — sandbox_workspace_write as an inline table with network_access = true: the line is left byte-identical and one line says it was already set',
+  done(inNetOn) && inNetOn.config.startsWith(SANDBOX_INLINE_ON) && netLines(inNetOn.out).length === 1 && /already set/.test(netLines(inNetOn.out)[0]), cd(inNetOn))
+
 // ---------------------------------------------------------------- clause 1: what must trip
 
 const tamperedRows = trustRows(after1.hooks.replace(`"timeout": 60`, `"timeout": 61`), after1.config, path.join(home, 'hooks.json'))
@@ -314,9 +406,8 @@ clause('clause 1b — dropping the matcher, or changing the timeout or the comma
     trustedHash('Stop', { hooks: [{ ...userStop.hooks[0], timeout: 8 }] }) !== trustedHash('Stop', userStop) &&
     trustedHash('Stop', { hooks: [{ ...userStop.hooks[0], command: 'echo other' }] }) !== trustedHash('Stop', userStop), 'a field left out of the identity')
 const inlineErr = throws(() => planFor(home, null, INLINE_STATE))
-const sandboxErr = throws(() => planFor(home, null, INLINE_SANDBOX))
-clause('clause 1c — hooks.state or sandbox_workspace_write set as an inline table is refused, naming the key, rather than rewritten',
-  /hooks\.state/.test(inlineErr || '') && /sandbox_workspace_write/.test(sandboxErr || ''), `${inlineErr} | ${sandboxErr}`)
+clause('clause 1c — hooks.state set as an inline table is refused, naming the key, rather than rewritten',
+  /hooks\.state/.test(inlineErr || ''), `${inlineErr}`)
 clause('clause 1d — a hooks.json that is not JSON, or whose hooks is not an object, is refused',
   Boolean(throws(() => planFor(home, '{ nope', ''))) && Boolean(throws(() => planFor(home, '{"hooks": []}', ''))), 'accepted')
 const refusedHome = fs.mkdtempSync(path.join(tmp, 'refused-'))
@@ -419,6 +510,10 @@ const inlineAppended = tomlOk(INLINE_STATE + `\n[hooks.state."k:stop:0:0"]\ntrus
 const sandboxAppended = tomlOk(INLINE_SANDBOX + `\n[sandbox_workspace_write]\nnetwork_access = true\n`)
 clause('clause 3e — F6 parses as written, and appending a table the naive way to either shape is a TOML error, so the refusal is needed',
   tomlOk(INLINE_STATE).ok && tomlOk(INLINE_SANDBOX).ok && !inlineAppended.ok && !sandboxAppended.ok, `${JSON.stringify(inlineAppended)} ${JSON.stringify(sandboxAppended)}`)
+const seatsAppended = tomlOk(SEATS_INLINE_BARE + `\n[agents]\nmax_concurrent_threads_per_session = 8\n`)
+clause('clause 3e2 — F8 parses as written, holding the limit 3, no limit, and network access on, and appending an [agents] table the naive way is a TOML error, so the line must be left as it is',
+  tomlOk(SEATS_INLINE).doc?.agents?.max_concurrent_threads_per_session === 3 && tomlOk(SEATS_INLINE_BARE).ok && tomlOk(SEATS_INLINE_BARE).doc.agents.max_concurrent_threads_per_session === undefined &&
+    tomlOk(SANDBOX_INLINE_ON).doc?.sandbox_workspace_write?.network_access === true && !seatsAppended.ok, JSON.stringify(seatsAppended))
 const scottParsed = tomlOk(scottConfig(home))
 const scottRows = trustRows(scottHooks(home), scottConfig(home), path.join(home, 'hooks.json'))
 clause("clause 3f — F4 parses, has no sandbox_workspace_write table, and its herdr trust line is already the one Codex computes",
@@ -426,6 +521,11 @@ clause("clause 3f — F4 parses, has no sandbox_workspace_write table, and its h
 clause('clause 3g — without the install: the compact and mixed hooks.json hold the same value as herdr\'s own, only laid out otherwise, and neither survives a round trip through JSON.stringify; under umask 0002 a file written with no mode is 0664, and the dotfiles config.toml is 0600 behind a symlink',
   [COMPACT, MIXED].every((t) => JSON.stringify(JSON.parse(t)) === JSON.stringify(JSON.parse(scottHooks(home))) && JSON.stringify(JSON.parse(t), null, 2) + (t.endsWith('\n') ? '\n' : '') !== t) &&
   freshMode === 0o664 && linkWas, `fresh mode ${freshMode.toString(8)}`)
+
+const eightParsed = tomlOk(SEATS_EIGHT), otherParsed = tomlOk(SEATS_OTHER)
+clause('clause 3i — without the install: F4 has no [agents] table, F7 at 8 reads 8, and F7 with the user\'s limit reads 3 beside another key',
+  scottParsed.ok && scottParsed.doc.agents === undefined && eightParsed.doc?.agents?.max_concurrent_threads_per_session === 8 &&
+    otherParsed.doc?.agents?.max_concurrent_threads_per_session === 3 && otherParsed.doc?.agents?.max_depth === 2, `${JSON.stringify(eightParsed)} ${JSON.stringify(otherParsed)}`)
 
 const dottedPath = path.join(dottedHome, 'hooks.json')
 const dottedBefore = trustRows(dottedHooks, dottedConfig(dottedHome), dottedPath)

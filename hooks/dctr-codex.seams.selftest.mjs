@@ -3,8 +3,8 @@
 //
 //   node hooks/dctr-codex.seams.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
-// Every rollout, payload and pane text is a real Codex 0.156.1 capture, cut verbatim into dctr-codex.fixtures.mjs
-// (each constant names its probe file). A fixture a clause needs in another shape is derived here, and says so.
+// Every rollout, payload and pane text is a real Codex capture (0.156.1, or 0.160.0 where the constant says so), cut
+// verbatim into dctr-codex.fixtures.mjs (each constant names its probe file). A fixture a clause needs in another shape is derived here, and says so.
 // Clause 1 pins each decision on those fixtures. Clause 2 runs the known-good cases that must stay quiet. Clause 3
 // proves, without calling any function under test, that each fixture carries what clause 1 rests on.
 
@@ -20,14 +20,13 @@ process.on('uncaughtException', (e) => {
 })
 const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 const {
-  hostOf, transcriptEntries, readUsage, gaugeSkip, clearTook, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
+  hostOf, transcriptEntries, readUsage, gaugeSkip, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision, codexAncestor, codexBackground,
-  composerEmpty, codexUnderClaude, composerIdle, codexAborted, PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason,
+  codexUnderClaude, composerIdle, codexAborted, PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason,
 } = await import('./dctr-lib.mjs')
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
 const J = (l) => JSON.parse(l)
-const OLD_NARROW = '01a0e972-9d87-7ff1-be2f-23687e355bc9', OLD_WIDE = '01a0e81f-1c1d-7422-9a0f-af38eabd85cc'
 const CLAUDE_T = { ...F.POST_MAIN, hook_event_name: 'PostToolUse', transcript_path: '/home/u/.claude/projects/p/5f1c2e.jsonl' }
 
 // ---------------------------------------------------------------- clause 1: the decisions on the real captures
@@ -73,44 +72,6 @@ clause('clause 1c6 — readUsage called as today reads a Claude Code transcript:
 clause('clause 1d — gaugeSkip: a Codex main-session PostToolUse acts; a Codex seat\'s PostToolUse, a Claude Code PostToolUse and a SessionStart stand down (E8-D21 through the table)',
   gaugeSkip(F.POST_MAIN) === null && gaugeSkip(F.POST_SEAT) === 'a seat batch (agent_id present)' && /not a PostToolBatch/.test(gaugeSkip(CLAUDE_T)) && gaugeSkip(F.SS_CLEAR) !== null,
   JSON.stringify([gaugeSkip(F.POST_MAIN), gaugeSkip(F.POST_SEAT), gaugeSkip(CLAUDE_T)]))
-
-clause('clause 1e — clearTook: a narrow pane whose continue line wraps the old session id onto the next line took; the wide pane\'s one-line form took (S4)',
-  clearTook(F.NARROW_BEFORE, F.NARROW_AFTER, OLD_NARROW) === true && clearTook('', F.CLEAR_SCREEN, OLD_WIDE) === true,
-  JSON.stringify([clearTook(F.NARROW_BEFORE, F.NARROW_AFTER, OLD_NARROW), clearTook('', F.CLEAR_SCREEN, OLD_WIDE)]))
-clause('clause 1e2 — clearTook: a line already there before the send, another session\'s id, no id and the pane before the /clear are not a /clear that took (S4)',
-  !clearTook(F.NARROW_AFTER, F.NARROW_AFTER, OLD_NARROW) && !clearTook(F.NARROW_BEFORE, F.NARROW_AFTER, OLD_WIDE) &&
-  !clearTook(F.NARROW_BEFORE, F.NARROW_AFTER, '') && !clearTook(F.NARROW_BEFORE, F.NARROW_BEFORE, OLD_NARROW) && !clearTook('', F.CLEAR_SCREEN, OLD_NARROW),
-  'a /clear read as taken')
-// E10H-R3-B5: Codex wraps the continue line anywhere. NARROW_R18 is the real 45-column capture, its id broken after a
-// hyphen. The sweep is derived: the same continue line on one line, wrapped at every width from 40 to 120 three ways
-// (at spaces with a word too long cut at the width; after a space or a hyphen; mid-word at exactly the width), each
-// after a token line and before the empty composer, as the capture has them.
-const OLD_R18 = '01a0ea5c-7200-70c2-9556-138eea3f9cde'
-const LINE_R18 = `To continue this session, run codex resume, then select Identify doctrine session metadata (${OLD_R18})`
-const greedy = (tokens, w) => {
-  const out = []
-  let cur = ''
-  for (let t of tokens) {
-    if ((cur + t).trimEnd().length <= w) { cur += t; continue }
-    if (cur) out.push(cur.trimEnd())
-    while (t.length > w) { out.push(t.slice(0, w)); t = t.slice(w) }
-    cur = t
-  }
-  return [...out, cur.trimEnd()].join('\n')
-}
-const WRAPS = {
-  space: (s, w) => greedy(s.match(/[^ ]+ ?/g), w),
-  hyphen: (s, w) => greedy(s.match(/[^ -]+[ -]?|[ -]/g), w),
-  hard: (s, w) => s.match(new RegExp(`.{1,${w}}`, 'g')).join('\n'),
-}
-const sweep = Object.entries(WRAPS).flatMap(([how, wrap]) => Array.from({ length: 81 }, (_, i) => 40 + i)
-  .map((w) => ({ how, w, pane: `Token usage: total=139,195 input=135,309 (+ 1,730,304\ncached) output=3,886\n${wrap(LINE_R18, w)}\n\n› Ask Codex to do anything\n` })))
-clause('clause 1e3 — clearTook and composerEmpty on the real 45-column pane whose continue line breaks the old session id after a hyphen: the /clear took, and the composer is empty (E10H-R3-B5)',
-  clearTook('', F.NARROW_R18, OLD_R18) === true && composerEmpty(F.NARROW_R18, OLD_R18) === true && clearTook(F.NARROW_R18, F.NARROW_R18, OLD_R18) === false,
-  JSON.stringify([clearTook('', F.NARROW_R18, OLD_R18), composerEmpty(F.NARROW_R18, OLD_R18)]))
-const missed = sweep.filter((c) => !(clearTook('', c.pane, OLD_R18) === true && composerEmpty(c.pane, OLD_R18) === true))
-clause('clause 1e4 — clearTook and composerEmpty on the continue line wrapped at every width from 40 to 120, at spaces, after hyphens and mid-word: each took with an empty composer (E10H-R3-B5)',
-  sweep.length === 243 && missed.length === 0, JSON.stringify(missed.slice(0, 5).map((c) => [c.how, c.w])))
 
 // E10H-R3-B4: the background work is read from the process tree, never the rollout. PROC_BYPASS and PROC_WS are the
 // probe P-PROC listings, one per Stop, in each posture; `procs` hands one to codexObservations as the hook does.
@@ -184,7 +145,7 @@ clause('clause 1f5 — codexObservations idle: an ended turn reads idle while he
 clause('clause 1f6 — codexObservations: a new prompt after an API-error turn clears the error (it is read after the last user turn only)',
   obs([F.API_ERROR, F.TUI_NEXT]).apiError === null, JSON.stringify(obs([F.API_ERROR, F.TUI_NEXT])))
 
-const W = { poll: 10, idle: 100, max: 10000 }
+const W = { poll: 10, idle: 100, max: 10000, stall: 120000 }
 const ws = (o) => watchStep({ active: true, turn: { ended: true, newTurn: false }, obs: { backgroundRunning: false, apiError: null, idle: false }, held: false, liveWork: null, session: 's1', paneSession: null, idleFor: 0, age: 0, times: W, ...o })
 clause('clause 1g — watchedTurn: a turn is ended at its task_complete, and a task_started after that end is a new turn',
   watchedTurn(text(F.TUI_TURN.slice(3))).ended === true && watchedTurn(text(F.TUI_TURN.slice(3))).newTurn === false &&
@@ -218,6 +179,16 @@ clause('clause 1g7 — notifyDecision on the watcher\'s unknown background work 
   notifyDecision('background_unknown', { why: 'the Codex process is gone', host: 'codex' }) === 'could not tell whether background work is still running: the Codex process is gone' &&
   notifyDecision('idle_prompt', { lastStop: { backgroundEmpty: true, cronsEmpty: true, ready: false } }) === 'session idle, waiting for you' && notifyDecision('other', {}) === null,
   JSON.stringify(notifyDecision('background_unknown', { why: 'w' })))
+
+const unfinished = { turn: { ended: false, newTurn: false } }
+const STALL_MS = 15 * 60 * 1000
+const STALL_REASON = 'Codex API error: turn stalled, no rollout write for 120 s with the turn unfinished'
+clause('clause 1g8 — watchStep: an unfinished turn whose rollout has not grown for the stall time hands the hook a StopFailure naming the stall, which notifyDecision writes as the Codex API error pause; inside the time it waits, a finished turn never stalls, and the longest watch exits first (E10-R29)',
+  ws({ ...unfinished, stalledFor: 120000 }).act === 'stall' && notifyDecision('StopFailure', { error: ws({ ...unfinished, stalledFor: 120000 }).error, host: 'codex' }) === STALL_REASON &&
+  ws({ ...unfinished, stalledFor: 119990 }).act === 'wait' && ws({ ...unfinished }).act === 'wait' &&
+  ws({ stalledFor: 500000 }).act !== 'stall' && ws({ obs: { idle: true }, idleFor: 150, stalledFor: 500000 }).act === 'idle' &&
+  ws({ ...unfinished, stalledFor: 500000, age: 20000 }).act === 'exit' && WATCH_TIMES.stall === STALL_MS,
+  JSON.stringify([ws({ ...unfinished, stalledFor: 120000 }), ws({ stalledFor: 500000 }), WATCH_TIMES]))
 
 clause('clause 1h — the API-error and different-session pauses name Codex on Codex and Claude as today, and each host\'s text is the same pause (E10 table)',
   pauseReason('R9', 'internal_server_error', 'codex') === 'Codex API error: internal_server_error' && pauseReason('R9', 'x') === 'Claude API error: x' &&
@@ -267,15 +238,30 @@ const ts = (o) => typerStep({ ...base, ...o })
 clause('clause 1j — Codex typerStep before /clear is Claude Code\'s: idle, unfocused, the old session and nothing new clears; focused waits; typing is R16',
   ts({}).act === 'clear' && ts({ pane: { ...idle, focused: true } }).act === 'wait' && ts({ grew: true }).code === 'R16' && !ts({}).cycle,
   JSON.stringify(ts({})))
-clause('clause 1j2 — Codex typerStep after /clear: the pane not showing the continue line waits, then pauses with R18 naming the old session and never resumes (clear 1, resume 0, E8-D28 through the table)',
-  ts({ stage: 'resume', took: false, waited: 100 }).act === 'wait' && ts({ stage: 'resume', took: false, waited: 500 }).code === 'R18' &&
-  ts({ stage: 'resume', took: false, waited: 500 }).reason === '/clear did not take: session old still running' && !ts({ stage: 'resume', took: false, waited: 500 }).cycle,
-  JSON.stringify(ts({ stage: 'resume', took: false, waited: 500 })))
-clause('clause 1j3 — Codex typerStep after /clear: a pane that could not be read pauses with R17; the continue line seen resumes and carries the cycle flag once; focused waits with it (Q6)',
-  ts({ stage: 'resume', took: null }).reason === 'could not type into the pane: herdr could not read the pane' &&
-  ts({ stage: 'resume', took: true, composer: true }).act === 'resume' && ts({ stage: 'resume', took: true, composer: true }).cycle === true && !ts({ stage: 'resume', took: true, composer: true, cycled: true }).cycle &&
-  ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, focused: true } }).act === 'wait' && ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, focused: true } }).cycle === true,
-  JSON.stringify([ts({ stage: 'resume', took: null }), ts({ stage: 'resume', took: true, composer: true })]))
+clause('clause 1j2 — Codex typerStep after /clear reads no screen sign that it took: it waits one poll, then on a ready, unfocused pane with an empty composer and herdr still on the old session it sends the resume line, with no cycle flag (S1)',
+  ts({ stage: 'resume', waited: 0 }).act === 'wait' && ts({ stage: 'resume', waited: 20 }).act === 'resume' && !ts({ stage: 'resume', waited: 20 }).cycle &&
+  ts({ stage: 'resume', waited: 5000 }).act === 'resume', JSON.stringify([ts({ stage: 'resume', waited: 0 }), ts({ stage: 'resume', waited: 20 })]))
+clause('clause 1j3 — Codex typerStep after /clear: a composer that could not be read pauses with R17, a draft with R16, a focused pane waits, a busy one waits inside the grace and then R17; it never waits out the restore wait to R18 (S1)',
+  ts({ stage: 'resume', waited: 20, composer: null }).reason === 'could not type into the pane: herdr could not read the pane' &&
+  ts({ stage: 'resume', waited: 20, composer: false }).code === 'R16' && ts({ stage: 'resume', waited: 20, pane: { ...idle, focused: true } }).act === 'wait' &&
+  ts({ stage: 'resume', waited: 20, pane: { ...idle, status: 'working' }, notIdle: 100 }).act === 'wait' &&
+  ts({ stage: 'resume', waited: 20, pane: { ...idle, status: 'working' }, notIdle: 200 }).reason === 'could not type into the pane: the session stayed busy' &&
+  [0, 20, 500, 5000].every((waited) => ts({ stage: 'resume', waited }).code !== 'R18'),
+  JSON.stringify([ts({ stage: 'resume', waited: 20, composer: null }), ts({ stage: 'resume', waited: 20, composer: false })]))
+clause('clause 1j8 — Codex typerStep after the resume line: a gated marker naming the old session pauses with R18 naming it, no cycle flag; one naming another session pauses with R14; with none it waits for the restore file as before (S1)',
+  ts({ stage: 'confirm', resumes: 1, gated: 'old', waited: 20 }).code === 'R18' && ts({ stage: 'confirm', resumes: 1, gated: 'old', waited: 20 }).reason === '/clear did not take: session old still running' &&
+  !ts({ stage: 'confirm', resumes: 1, gated: 'old', waited: 20 }).cycle &&
+  ts({ stage: 'confirm', resumes: 1, gated: 'new', waited: 20, pane: { ...idle, session: 'new' } }).code === 'R14' &&
+  ts({ stage: 'confirm', resumes: 1, gated: null, waited: 20 }).act === 'wait',
+  JSON.stringify([ts({ stage: 'confirm', resumes: 1, gated: 'old', waited: 20 }), ts({ stage: 'confirm', resumes: 1, gated: 'new', waited: 20 })]))
+clause('clause 1j9 — Codex typerStep, a new session before the resume line (a restore file, or herdr naming it): one poll beside the restore file waits; then typing in the new chat is R16, an unread new rollout waits, nothing typed sends the resume line, a draft is R16; herdr on a new session with no restore file waits for it, then R14, never R16 (S1)',
+  ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 0, typedNew: false }).act === 'wait' &&
+  ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 20, typedNew: true }).code === 'R16' &&
+  ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 20, typedNew: null }).act === 'wait' &&
+  ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 20, typedNew: false }).act === 'resume' &&
+  ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 20, typedNew: false, composer: false }).code === 'R16' &&
+  ts({ stage: 'resume', waited: 100, pane: { ...idle, session: 'new' } }).act === 'wait' && ts({ stage: 'resume', waited: 500, pane: { ...idle, session: 'new' } }).code === 'R14',
+  JSON.stringify([ts({ stage: 'resume', waited: 20, restore: NEW, pane: { ...idle, session: 'new' }, sessionWait: 20, typedNew: false }), ts({ stage: 'resume', waited: 500, pane: { ...idle, session: 'new' } })]))
 clause('clause 1j4 — Codex typerStep after the resume: no restore file waits, then pauses with R14 (clear 1, resume 1); herdr not yet on the new session waits, then R17; a third session is R16',
   ts({ stage: 'confirm', resumes: 1, cycled: true, waited: 100 }).act === 'wait' && ts({ stage: 'confirm', resumes: 1, cycled: true, waited: 500 }).code === 'R14' &&
   ts({ stage: 'confirm', resumes: 1, restore: NEW, sessionWait: 100 }).act === 'wait' &&
@@ -304,25 +290,12 @@ clause('clause 1k — the AGENTS.md block Codex injects (no user.text label) is 
 clause('clause 2i — the AGENTS.md block does not start a turn: the turn it sits in ended, so its rollout reads no running turn (E10H-B7)',
   obs(F.AGENTS_MD_TURN).backgroundRunning === false && obs(F.AGENTS_MD_TURN, 'done').idle === true, JSON.stringify(obs(F.AGENTS_MD_TURN)))
 
-// E10H-B1: after the /clear the composer must be empty, and nothing may show the user started the new chat.
-const DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› my own draft')
-const SUBMITTED = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
-clause('clause 1n — composerEmpty: the new chat\'s placeholder after the continue line is empty; a draft, or a prompt submitted after it, is not; no continue line names nothing (E10H-B1)',
-  composerEmpty(F.NARROW_AFTER, OLD_NARROW) === true && composerEmpty(F.CLEAR_SCREEN, OLD_WIDE) === true && composerEmpty(DRAFT, OLD_NARROW) === false &&
-  composerEmpty(SUBMITTED, OLD_NARROW) === false && composerEmpty(F.NARROW_BEFORE, OLD_NARROW) === null,
-  JSON.stringify([composerEmpty(F.NARROW_AFTER, OLD_NARROW), composerEmpty(DRAFT, OLD_NARROW), composerEmpty(SUBMITTED, OLD_NARROW)]))
-clause('clause 1n2 — Codex typerStep after /clear sends no resume line into a draft or after the user started the new chat: a composer that is not empty, a restore file, or herdr naming another session is R16 (E10H-B1)',
-  ts({ stage: 'resume', took: true, composer: false }).code === 'R16' && ts({ stage: 'resume', took: true, composer: true, restore: NEW }).code === 'R16' &&
-  ts({ stage: 'resume', took: true, composer: true, pane: { ...idle, session: 'new' } }).code === 'R16' &&
-  ts({ stage: 'resume', took: false, waited: 100, restore: NEW }).code === 'R16' && ts({ stage: 'resume', took: true, composer: true }).act === 'resume',
-  JSON.stringify([ts({ stage: 'resume', took: true, composer: false }), ts({ stage: 'resume', took: true, composer: true, restore: NEW })]))
-
 // E10H-R4-B1: every Codex send (the /clear, the first resume and the retry) checks the same guards: focus, ready, an
 // empty composer read from the pane, and, once the resume is sent, no turn_aborted or typed turn in the new chat.
-// Derived pane texts: NARROW_BEFORE with a draft in its composer; NARROW_AFTER after the resume line was submitted and
-// interrupted (INTERRUPTED_LINE, B6's pane), above a composer holding `c`.
-const DRAFT_BEFORE = F.NARROW_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
-const RETRY_PANE = (c) => F.NARROW_AFTER.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› ${c}`)
+// Derived pane texts: PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was
+// submitted and interrupted (INTERRUPTED_LINE, B6's pane), above a composer holding `c`.
+const DRAFT_BEFORE = F.PANE_0160_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
+const RETRY_PANE = (c) => F.PANE_0160_CLEARED.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› ${c}`)
 const abortedNew = transcriptEntries(text(F.RESUME_ABORTED), 'codex')
 const RETRY = { stage: 'confirm', resumes: 1, restore: NEW, pane: NP, typedNew: false }
 clause('clause 1j6 — Codex typerStep confirming: a resume turn interrupted before its first answer (turn_aborted, no assistant message, nothing typed) pauses with R16 and never sends the resume line again, inside or past the first-turn wait; a first turn still confirms (E10H-R4-B1)',
@@ -337,10 +310,11 @@ clause('clause 1j7 — Codex typerStep: the retry sends nothing into a draft (R1
   ts({ composer: false }).code === 'R16' && ts({ composer: null }).reason === 'could not type into the pane: herdr could not read the pane' && ts({}).act === 'clear' &&
   ts({ ...RETRY, waited: 400, composer: false, pane: { ...NP, focused: true } }).code === 'R16' && ts({ composer: false, pane: { ...idle, focused: true } }).act === 'wait',
   JSON.stringify([ts({ ...RETRY, waited: 400, composer: false }), ts({ composer: false }), ts({ composer: null })]))
-clause('clause 1n3 — composerIdle reads the pane\'s composer, its last › line: the placeholder or nothing is empty; a draft before the /clear or under an interrupted resume is not; a pane showing no composer is not; an unread pane says nothing (E10H-R4-B1)',
-  composerIdle(F.NARROW_BEFORE) === true && composerIdle(F.NARROW_AFTER) === true && composerIdle(RETRY_PANE('Ask a follow-up question')) === true && composerIdle(RETRY_PANE('')) === true &&
-  composerIdle(DRAFT_BEFORE) === false && composerIdle(RETRY_PANE('my own draft')) === false && composerIdle('• working\n') === false && composerIdle(null) === null,
-  JSON.stringify([composerIdle(F.NARROW_BEFORE), composerIdle(DRAFT_BEFORE), composerIdle(RETRY_PANE('my own draft')), composerIdle(RETRY_PANE(''))]))
+const SUBMITTED = F.PANE_0160_CLEARED.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
+clause('clause 1n3 — composerIdle reads the pane\'s composer, its last › line, on 0.156.1 and 0.160.0 captures alike: the placeholder or nothing is empty, before the /clear, after it, and under a prompt already answered; a draft (one wrapped onto a second line included), a draft under an interrupted resume, and a pane showing no composer are not; an unread pane says nothing (E10H-R4-B1, S1)',
+  [F.NARROW_BEFORE, F.NARROW_AFTER, F.NARROW_R18, F.CLEAR_SCREEN, F.PANE_0160_BEFORE, F.PANE_0160_CLEARED, SUBMITTED, RETRY_PANE('Ask a follow-up question'), RETRY_PANE('')].every((t) => composerIdle(t) === true) &&
+  composerIdle(F.PANE_0160_DRAFT) === false && composerIdle(DRAFT_BEFORE) === false && composerIdle(RETRY_PANE('my own draft')) === false && composerIdle('• working\n') === false && composerIdle(null) === null,
+  JSON.stringify([F.NARROW_BEFORE, F.NARROW_AFTER, F.NARROW_R18, F.CLEAR_SCREEN, F.PANE_0160_BEFORE, F.PANE_0160_CLEARED, SUBMITTED].map(composerIdle).concat([composerIdle(F.PANE_0160_DRAFT), composerIdle(DRAFT_BEFORE)])))
 
 // N1: a Codex process under a Claude Code session (codex app-server started by codex:codex-rescue) is the Claude session's.
 clause('clause 1o — codexUnderClaude: a Codex payload with CLAUDE_CODE_SESSION_ID set; not without it, and never a Claude Code payload (N1)',
@@ -356,7 +330,7 @@ clause('clause 2b — a Claude Code call as today is untouched: transcriptEntrie
   transcriptEntries(text(F.TUI_TURN)).entries.length === F.TUI_TURN.length && transcriptEntries(text(F.TUI_TURN)).entries[0].type === 'event_msg' &&
   userTyped({ type: 'user', message: { content: CODEX_RESUME_LINE } }) === true, 'Claude path changed')
 clause('clause 2c — Claude typerStep is unchanged by the Codex branch: without the host a resume stage with no restore still waits for the restore file, not the pane',
-  typerStep({ ...base, host: undefined, stage: 'resume', took: false, waited: 100 }).reason === 'waiting for the restore file', JSON.stringify(typerStep({ ...base, host: undefined, stage: 'resume', waited: 100 })))
+  typerStep({ ...base, host: undefined, stage: 'resume', waited: 100 }).reason === 'waiting for the restore file', JSON.stringify(typerStep({ ...base, host: undefined, stage: 'resume', waited: 100 })))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry the defect, no function under test called
 
@@ -366,21 +340,7 @@ clause('clause 3b — without the lib: CELL_RUNNING has a "Script running with c
   'cell fixture wrong')
 clause('clause 3c — without the lib: API_ERROR ends in a task_complete whose error is internal_server_error and whose last_agent_message is null, after the user\'s prompt',
   J(F.API_ERROR.at(-1)).payload.type === 'task_complete' && J(F.API_ERROR.at(-1)).payload.error.codex_error_info === 'internal_server_error' &&
-  J(F.API_ERROR.at(-1)).payload.last_agent_message === null && F.API_ERROR.some((l) => l.includes('reply with the word alpha')), 'api error fixture wrong')
-const nl = F.NARROW_AFTER.split('\n'), ci = nl.findIndex((l) => l.includes('To continue this session, run codex resume'))
-clause('clause 3d — without the lib: the narrow pane\'s continue line does not hold the old session id and the next line does; the pane before holds no continue line; the wide one holds line and id together',
-  ci >= 0 && !nl[ci].includes(OLD_NARROW) && nl[ci + 1].includes(OLD_NARROW) && !F.NARROW_BEFORE.includes('To continue this session') &&
-  F.CLEAR_SCREEN.split('\n').some((l) => l.includes('To continue this session, run codex resume') && l.includes(OLD_WIDE)), 'pane fixtures wrong')
-const r18 = F.NARROW_R18.split('\n'), r18at = r18.findIndex((l) => l.includes('To continue this session, run codex resume'))
-const lineOf = (pane) => pane.split('\n')
-clause('clause 3o — without the lib: NARROW_R18 has the continue text, no line holds the old id whole, the line two below its text ends "(01a0ea5c-7200-70c2-" and the next starts "9556-", then a blank line and the placeholder composer; the sweep breaks the id after a hyphen, breaks it mid-word, and splits the continue text itself',
-  r18at >= 0 && !r18.some((l) => l.includes(OLD_R18)) && r18[r18at + 1].endsWith('(01a0ea5c-7200-70c2-') && r18[r18at + 2].startsWith('9556-138eea3f9cde)') &&
-  !r18[r18at + 3].trim() && r18.slice(r18at).find((l) => l.startsWith('›')) === '› Ask Codex to do anything' &&
-  sweep.some((c) => lineOf(c.pane).some((l, i, a) => l.endsWith('-') && /^[0-9a-f]/.test(a[i + 1] ?? '') && !a.some((x) => x.includes(OLD_R18)))) &&
-  sweep.some((c) => lineOf(c.pane).some((l, i, a) => /[0-9a-f]$/.test(l) && /^[0-9a-f]/.test(a[i + 1] ?? '') && !a.some((x) => x.includes(OLD_R18)))) &&
-  sweep.some((c) => !lineOf(c.pane).some((l) => l.includes('To continue this session, run codex resume'))) &&
-  sweep.every((c) => lineOf(c.pane).join('').replace(/\s+/g, '').includes(OLD_R18)),
-  'wrapped pane fixtures wrong')
+  J(F.API_ERROR.at(-1)).payload.last_agent_message === null && F.API_ERROR.some((l) => l.includes('"role":"user"') && l.includes('Reply with the single word: again.')), 'api error fixture wrong')
 const tc = F.TUI_TURN.filter((l) => J(l).payload?.type === 'token_count').map((l) => J(l).payload.info)
 clause('clause 3e — without the lib: TUI_TURN\'s last token_count reads input 17503 of a 258400 window; the /compact one reads input 0; the rollout before RUN3\'s first hook marker holds no token_count',
   tc.at(-1).last_token_usage.input_tokens === 17503 && tc.at(-1).model_context_window === 258400 &&
@@ -416,8 +376,10 @@ clause('clause 3q — without the lib: RESUME_ABORTED is a task_started, the res
   J(F.RESUME_ABORTED[3]).payload.type === 'turn_aborted' && J(F.RESUME_ABORTED[3]).payload.reason === 'interrupted' &&
   F.RESUME_ABORTED.every((l) => J(l).payload.role !== 'assistant') &&
   lastPrompt(RETRY_PANE('my own draft')) === '› my own draft' && RETRY_PANE('x').includes(`› ${CODEX_RESUME_LINE}`) && RETRY_PANE('x').includes(F.INTERRUPTED_LINE) &&
-  lastPrompt(DRAFT_BEFORE) === '› my own draft' && lastPrompt(F.NARROW_BEFORE) === '› Ask Codex to do anything', 'R4-B1 fixtures wrong')
-clause('clause 3j — without the lib: the draft and submitted panes keep the continue line naming the old session, and their first composer line after it is not the placeholder',
-  [DRAFT, SUBMITTED].every((t) => t.includes(OLD_NARROW) && t.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() !== '› Ask Codex to do anything') &&
-  F.NARROW_AFTER.split('To continue this session')[1].split('\n').find((l) => l.trim().startsWith('›')).trim() === '› Ask Codex to do anything', 'pane fixtures wrong')
+  lastPrompt(DRAFT_BEFORE) === '› my own draft' && lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' &&
+  lastPrompt(F.PANE_0160_DRAFT) === '› draft text typed after clear, not' && lastPrompt(SUBMITTED) === '› Ask Codex to do anything' && SUBMITTED.includes('› hello there'), 'R4-B1 fixtures wrong')
+const stalledTypes = F.STALLED_TURN.map((l) => JSON.parse(l).payload?.type), stalledTimes = F.STALLED_TURN.map((l) => Date.parse(JSON.parse(l).timestamp))
+clause('clause 3r — without the lib: STALLED_TURN starts a turn and never ends it (no task_complete or turn_aborted), and all its lines fall within one second, so a watcher reading it sees no growth after its last line (E10-R29)',
+  stalledTypes.includes('task_started') && !stalledTypes.includes('task_complete') && !stalledTypes.includes('turn_aborted') &&
+  Math.max(...stalledTimes) - Math.min(...stalledTimes) < 1000, JSON.stringify([stalledTypes, stalledTimes]))
 process.exit(bad ? 1 : 0)

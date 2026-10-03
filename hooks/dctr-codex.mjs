@@ -4,8 +4,8 @@
 //
 // Copies this hooks directory to <CODEX_HOME>/doctrine/hooks, so a plugin update never strands the absolute paths
 // hooks.json holds, then writes the doctrine entries into <CODEX_HOME>/hooks.json, a trust line for each into
-// config.toml, and sandbox_workspace_write.network_access = true, which a command Codex runs in its workspace-write
-// sandbox needs to reach herdr. What it writes is codexInstallPlan's in dctr-lib.mjs; this file only reads, copies
+// config.toml, and, each only where it is unset, sandbox_workspace_write.network_access = true, which a command Codex
+// runs in its workspace-write sandbox needs to reach herdr, and agents.max_concurrent_threads_per_session = 8. What it writes is codexInstallPlan's in dctr-lib.mjs; this file only reads, copies
 // and writes. CODEX_HOME is resolved as Codex resolves it: --codex-home, else $CODEX_HOME, each of which must be an
 // existing directory and is canonicalized, else ~/.codex. Exit 0 installed or already current, 2 usage, 1 failed: a
 // refusal (a layout it cannot edit in place, an unreadable file) writes nothing, but a write that fails after the hooks

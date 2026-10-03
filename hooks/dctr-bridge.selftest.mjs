@@ -70,9 +70,17 @@ poll()
 await Promise.all(Array.from({ length: 40 }, (_, i) => race(i % 2 ? 'race-bb' : 'race-a')))
 racing = false
 const complete = (id) => { try { const j = JSON.parse(fs.readFileSync(bridgeFile(id), 'utf8')); return j.session_id === id && j.used === 1000 + id.length } catch { return false } }
-clause('clause 2d — bridge processes for two sessions writing at once each leave a complete file carrying their own session id, and a concurrent reader never sees a partial one',
-  complete('race-a') && complete('race-bb') && torn === 0 && reads > 0 && fs.readdirSync(path.dirname(bridgeFile('race-a'))).every((f) => !f.includes('.tmp')),
-  `torn reads ${torn} of ${reads}, final ${fs.existsSync(bridgeFile('race-a')) && fs.readFileSync(bridgeFile('race-a'), 'utf8').slice(0, 120)}`)
+// The poll sees a torn file only when a read lands inside a write, which host load can starve. The inode
+// does not depend on timing: a write through a temp file and a rename leaves a new inode at the path,
+// and a write in place truncates and refills the inode already there.
+const ino = (id) => { try { return fs.statSync(bridgeFile(id)).ino } catch { return null } }
+const inoBefore = ino('race-a')
+await race('race-a')
+const inoAfter = ino('race-a')
+clause('clause 2d — bridge processes for two sessions writing at once each leave a complete file carrying their own session id, a concurrent reader never sees a partial one, and a write replaces the file rather than rewriting it in place',
+  complete('race-a') && complete('race-bb') && torn === 0 && reads > 0 && fs.readdirSync(path.dirname(bridgeFile('race-a'))).every((f) => !f.includes('.tmp')) &&
+  inoBefore !== null && inoAfter !== null && inoAfter !== inoBefore,
+  `torn reads ${torn} of ${reads}, inode ${inoBefore} then ${inoAfter}, final ${fs.existsSync(bridgeFile('race-a')) && fs.readFileSync(bridgeFile('race-a'), 'utf8').slice(0, 120)}`)
 
 clause('clause 2e — bridgeFile(id) is the bridge.json in the state dir the hooks derive for that session',
   bridgeFile('sess-x') === path.join(stateDir('sess-x'), 'bridge.json'), `${bridgeFile('sess-x')} vs ${stateDir('sess-x')}`)
@@ -193,8 +201,10 @@ clause('clause 3f — without the installer: the hostile config dir exists as na
 const tornFile = path.join(tmp, 'torn.json'); fs.writeFileSync(tornFile, '{"ok":1}')
 const fd = fs.openSync(tornFile, 'w'); const between = fs.readFileSync(tornFile, 'utf8'); fs.closeSync(fd)
 let tornParses = true; try { JSON.parse(between) } catch { tornParses = false }
-clause('clause 3e — without the bridge: a file rewritten in place reads empty between truncate and write, which the race reader counts as torn',
-  between === '' && !tornParses, JSON.stringify(between))
+const inoInPlace = fs.statSync(tornFile).ino; fs.writeFileSync(tornFile, '{"ok":2}'); const inoRewritten = fs.statSync(tornFile).ino
+fs.writeFileSync(`${tornFile}.tmp`, '{"ok":3}'); fs.renameSync(`${tornFile}.tmp`, tornFile); const inoRenamed = fs.statSync(tornFile).ino
+clause('clause 3e — without the bridge: a file rewritten in place reads empty between truncate and write, which the race reader counts as torn, and keeps its inode, while a rename over it gives the path a new one',
+  between === '' && !tornParses && inoRewritten === inoInPlace && inoRenamed !== inoInPlace, `${JSON.stringify(between)} inode ${inoInPlace} ${inoRewritten} ${inoRenamed}`)
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

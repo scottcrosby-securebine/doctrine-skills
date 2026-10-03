@@ -194,9 +194,15 @@ auto-cycle need one install command, run again after each plugin update:
 node ~/.codex/plugins/cache/doctrine-skills/doctrine/<version>/hooks/dctr-codex.mjs install
 ```
 
-It writes the hook entries into `~/.codex/hooks.json` (or `$CODEX_HOME`'s), trusts them in
-`config.toml`, and sets `sandbox_workspace_write.network_access = true` so commands in the
-workspace-write sandbox can reach herdr. `doctrine-pane` needs the same install on Codex.
+It writes the hook entries into `~/.codex/hooks.json` (or `$CODEX_HOME`'s) and trusts them in
+`config.toml`. Where `sandbox_workspace_write.network_access` is unset it sets it to `true`, so
+commands in the workspace-write sandbox can reach herdr, and where
+`agents.max_concurrent_threads_per_session` is unset it sets it to 8, so Codex does not refuse a seat
+past its default limit. A value you set for either is left as it is, comment and all, and the install
+prints a line saying so. Where either setting's table is written inline (`agents = { ... }`) or with
+dotted keys and the setting is unset, it leaves that line as it is and prints how to add the setting
+by hand.
+`doctrine-pane` needs the same install on Codex.
 
 ## Try it on one file
 

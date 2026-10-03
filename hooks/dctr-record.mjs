@@ -1,7 +1,7 @@
 // doctrine — the parser for a phase record's event lines (E8-D24).
 //
 // Pure: a string in, a value out. No filesystem, no clock, no herdr. The line forms are the ones hub step 5
-// (skills/doctrine/SKILL.md) defines; this file pins exactly those and nothing looser, and the selftest's fixture
+// (skills/doctrine/SKILL.md) defines, each read with prose allowed after its fixed part (TAIL), and the selftest's fixture
 // record holds every key and every auto-cycle sub-form as a list item and bare, and every parsed entry is compared whole
 // against a hand-written table, so a form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
 //
@@ -27,7 +27,12 @@ export function unwrapLine(l) {
 }
 
 const TIME = '(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?Z)'
-const form = (body) => new RegExp(`^(?:-\\s+)?${body}$`, 'i')
+/** What may follow a form's fixed part: nothing, or one optional `.`, `,`, `;` or `:` and then whitespace and
+ *  prose, or an opening parenthesis after whitespace. A model appends a clause to a line it writes, and a hook that
+ *  stopped reading the line would act as if it were missing. A fixed part run straight into more word characters
+ *  (`alarm 1x`, `count 4.5`, `offline`) is a near miss, not a tail. */
+const TAIL = '(?:[.,;:]?(?:\\s.*)?)'
+const form = (body, tail = TAIL) => new RegExp(`^(?:-\\s+)?${body}${tail}$`, 'i')
 const num = Number
 
 /** Marks a form the agent writes (the on, off, ready and paused lines, hub step 5), which is also read through
@@ -37,11 +42,12 @@ const AGENT = true
 /** Each form: its regex and how its captures become fields. The tier is kept as written, since judging a
  *  malformed tier is the gauge's job (E8-D11) and a parser that dropped the line would hide it. */
 const FORMS = [
-  // The handle is the rest of the line, trimmed, with a trailing via split off (E8-D24): drives write
-  // `handle agent:<id> (worktree <path>, branch <name>)` and `handle worktree <path> branch <name>`.
-  [form(`wave:\\s+${TIME}\\s+seat\\s+(\\S+)\\s+handle\\s+(\\S.*?)(?:\\s+via\\s+(doctrine-handoff|doctrine-backup))?\\s*`),
+  // The handle is the rest of the line, trimmed, up to the first via token, which may carry prose after it (E8-D24):
+  // drives write `handle agent:<id> (worktree <path>, branch <name>)`, `handle worktree <path> branch <name>`
+  // and `handle <path> via doctrine-backup; <what the seat does>`. With no via the handle runs to the line end.
+  [form(`wave:\\s+${TIME}\\s+seat\\s+(\\S+)\\s+handle\\s+(\\S.*?)(?:\\s+via\\s+(doctrine-handoff|doctrine-backup)${TAIL}|\\s*)`, ''),
     (m) => ({ kind: 'wave', time: m[1], seat: m[2], handle: m[3], via: m[4] ? m[4].toLowerCase() : null })],
-  [form(`round:\\s+(\\d+)\\s+closed\\s+${TIME}\\s+at\\s+(\\S+)\\s+blockers\\s+(\\d+)\\s+alarm\\s+(\\d+)\\s*`),
+  [form(`round:\\s+(\\d+)\\s+closed\\s+${TIME}\\s+at\\s+(\\S+)\\s+blockers\\s+(\\d+)\\s+alarm\\s+(\\d+)`),
     (m) => ({ kind: 'round', n: num(m[1]), time: m[2], revision: m[3], blockers: num(m[4]), alarm: num(m[5]) })],
   [form(`finding:\\s+(\\S+)\\s+raised\\s+${TIME}\\s+(blocking|non-blocking)\\s+(\\S.*)`),
     (m) => ({ kind: 'finding-raised', id: m[1], time: m[2], blocking: m[3].toLowerCase() === 'blocking', text: m[4].trim() })],
@@ -49,15 +55,15 @@ const FORMS = [
     (m) => ({ kind: 'finding-cleared', id: m[1], time: m[2], evidence: m[3].trim() })],
   [form(`ruling:\\s+(\\S+)\\s+${TIME}\\s+(\\S.*)`),
     (m) => ({ kind: 'ruling', id: m[1], time: m[2], text: m[3].trim() })],
-  [form(`alarm:\\s+(round|time)\\s+fired\\s+${TIME}\\s+count\\s+(\\d+)\\s*`),
+  [form(`alarm:\\s+(round|time)\\s+fired\\s+${TIME}\\s+count\\s+(\\d+)`),
     (m) => ({ kind: 'alarm', which: m[1].toLowerCase(), time: m[2], count: num(m[3]) })],
   [form(`question:\\s+(\\S+)\\s+(opened|answered)\\s+${TIME}\\s+(\\S.*)`),
     (m) => ({ kind: `question-${m[2].toLowerCase()}`, id: m[1], time: m[3], text: m[4].trim() })],
-  [form('auto-cycle:\\s+on\\s+cap\\s+(\\d+)\\s+tier\\s+(\\S+)\\s*'), (m) => ({ kind: 'auto-cycle', sub: 'on', cap: num(m[1]), tier: m[2] }), AGENT],
-  [form('auto-cycle:\\s+off\\s*'), () => ({ kind: 'auto-cycle', sub: 'off' }), AGENT],
-  [form('auto-cycle:\\s+warned\\s+(\\S+)\\s+(\\S+)\\s*'), (m) => ({ kind: 'auto-cycle', sub: 'warned', session: m[1], tier: m[2] })],
-  [form('auto-cycle:\\s+cycle\\s+(\\d+)\\s+tree\\s+([0-9a-f]+)\\s*'), (m) => ({ kind: 'auto-cycle', sub: 'cycle', n: num(m[1]), hash: m[2] })],
-  [form('auto-cycle:\\s+ready\\s*'), () => ({ kind: 'auto-cycle', sub: 'ready' }), AGENT],
+  [form('auto-cycle:\\s+on\\s+cap\\s+(\\d+)\\s+tier\\s+(\\S+?)'), (m) => ({ kind: 'auto-cycle', sub: 'on', cap: num(m[1]), tier: m[2] }), AGENT],
+  [form('auto-cycle:\\s+off'), () => ({ kind: 'auto-cycle', sub: 'off' }), AGENT],
+  [form('auto-cycle:\\s+warned\\s+(\\S+)\\s+(\\S+?)'), (m) => ({ kind: 'auto-cycle', sub: 'warned', session: m[1], tier: m[2] })],
+  [form('auto-cycle:\\s+cycle\\s+(\\d+)\\s+tree\\s+([0-9a-f]+)'), (m) => ({ kind: 'auto-cycle', sub: 'cycle', n: num(m[1]), hash: m[2] })],
+  [form('auto-cycle:\\s+ready'), () => ({ kind: 'auto-cycle', sub: 'ready' }), AGENT],
   [form('auto-cycle paused:\\s+(\\S.*)'), (m) => ({ kind: 'auto-cycle', sub: 'paused', reason: m[1].trim() }), AGENT],
 ]
 

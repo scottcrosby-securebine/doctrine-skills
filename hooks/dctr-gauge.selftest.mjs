@@ -95,13 +95,13 @@ clause('clause 1k — resolveTier: a malformed tier is an error and resolves to 
   rt('12k').tier === null && rt('12k').errors.includes('malformed tier "12k"') && rt('60').tier === 60 && rt('%').tier === null,
   JSON.stringify(rt('12k')))
 clause('clause 1l — resolveTier: a tier above 90% of the window is an error, as tokens or as a percent',
-  rt('190000').errors.includes('tier above 90% of the window') && rt('95%').errors.includes('tier above 90% of the window') &&
-  !rt('90%').errors.includes('tier above 90% of the window'),
+  rt('190000').errors.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use') && rt('95%').errors.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use') &&
+  !rt('90%').errors.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use'),
   JSON.stringify([rt('190000'), rt('95%')]))
 const FU = Math.ceil(W * 0.9) - HANDOFF_COST_TOKENS + 1
 clause('clause 1l2 — resolveTier: the 90% check reads the tier after the floor raise, so a floor above 90% of the window is an error',
-  rt('60%', W, FU).tier === FU + HANDOFF_COST_TOKENS && rt('60%', W, FU).errors.includes('tier above 90% of the window') &&
-  !rt('20000', W, 10000).errors.includes('tier above 90% of the window'),
+  rt('60%', W, FU).tier === FU + HANDOFF_COST_TOKENS && rt('60%', W, FU).errors.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use') &&
+  !rt('20000', W, 10000).errors.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use'),
   JSON.stringify([rt('60%', W, FU), rt('20000', W, 10000)]))
 clause('clause 1m0 — the handoff cost is E8-D22\'s opus measurement, 64,268 tokens rounded up to the thousand: a first reading of 10000 floors a 20000 tier at 75000 (E8-D11, E8-R42)',
   HANDOFF_COST_TOKENS === 65000 && rt('20000', W, 10000).tier === 75000 && rt('20000', W, 10000).tierText === '75000',
@@ -353,7 +353,7 @@ const hi = fixture('high', { cycle: ['- auto-cycle: on cap 10 tier 95%'] })
 bridge('sess-h'); write(hi.transcript, lines(entry(10000)))
 const ha = run(hi, 'sess-h'), hb = run(hi, 'sess-h')
 clause('clause 2l — a tier above 90% of the window: the named error on every batch (E8-D11)',
-  ha.ctx.includes('tier above 90% of the window') && hb.ctx.includes('tier above 90% of the window'), `${ha.out} | ${hb.out}`)
+  ha.ctx.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use') && hb.ctx.includes('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use'), `${ha.out} | ${hb.out}`)
 const low = fixture('low', { cycle: ['- auto-cycle: on cap 10 tier 1000'] })
 bridge('sess-l'); write(low.transcript, lines(entry(10000)))
 const floor = 10000 + HANDOFF_COST_TOKENS
