@@ -739,7 +739,7 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
   const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
-  // A CONDITION, not a duration — the same repair the latency block below carries, which this block
+  // A CONDITION, not a duration — the same repair the poll-interval clause below carries, which this block
   // did not get. The watcher drains the log only inside a poll, so its output proves a poll ran and
   // therefore that the record was READ while it still said `queued`. A fixed sleep proved nothing:
   // a watcher that started after the flip never saw `queued` at all and the clause passed green
@@ -761,64 +761,6 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const qRenames = callLines(/^pane rename w1:s1 /)
   check('with exactly one rename, to completed', qRenames.length === 1 && qRenames[0] === `pane rename w1:s1 ${LABEL} · completed`, qRenames.join(' | '))
 
-  // The injected interval must be HONOURED, not merely accepted. Reverting dctr-seat.mjs to the
-  // literal 250/2000 leaves every OTHER clause in this suite green — a reviewer proved it by doing
-  // exactly that — because every bound here is generous enough to swallow a 2000ms poll. So this
-  // measures the latency the interval decides: a job that turns terminal while the watcher runs is
-  // noticed one poll later. At the injected 25ms that is tens of milliseconds; at the production
-  // 2000ms it cannot come in under the bound, which is what makes this clause discriminate.
-  reset()
-  const latencyJob = job('task-latency', now, WS, 'running')
-  const lw = spawn('node', [hook, '--codex-tail', latencyJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_POLL_MS: '25' } })
-  let lwOut = ''
-  lw.stdout.on('data', (d) => { lwOut += d })
-  const lwExit = new Promise((resolve) => lw.on('exit', (code) => resolve(code)))
-  // A CONDITION, not a duration: wait until the watcher has drained the log, which only happens
-  // inside a poll, so we know it has read the record as `running` before we flip it. A fixed sleep
-  // let the very first poll land AFTER the flip, and the clause then passed at any interval.
-  const drained = async (marker) => {
-    const until = Date.now() + 8000
-    while (!lwOut.includes(marker) && Date.now() < until) await new Promise((r) => setTimeout(r, 5))
-    return lwOut.includes(marker)
-  }
-  const OFF_BEAT_MS = 3000   // midway between two PRODUCTION polls, counted from the watcher's first, see below
-  // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
-  // watcher start AFTER the flip and exit on its own first poll, passing at any interval.
-  //
-  // FLIP OFF THE PRODUCTION BEAT. An earlier repair claimed two log markers proved a record read had
-  // completed between them; they do not. `pump` runs on its OWN setInterval, independent of the poll
-  // (dctr-seat.mjs), so both drains can come from the pump with no record read anywhere between
-  // them — a red team produced a schedule passing at 249ms with the injected interval ignored.
-  //
-  // What the clause can actually prove is timing, so prove timing, on the WATCHER's clock. Its first
-  // poll runs synchronously at startup and is the first thing to drain the log, so the moment that
-  // output arrives is the watcher's own time zero, and a watcher on the PRODUCTION 2000ms interval
-  // then polls at 2000, 4000, .... Counting from this process's spawn call instead let the watcher's
-  // boot latency slide a production poll to just after the flip, inside the bound. Flipping 3000ms
-  // after the first poll puts the nearest production poll ~1000ms away on either side, twice the
-  // 500ms bound. A watcher honouring the injected 25ms interval notices within one interval wherever
-  // the flip lands. The bound is what discriminates, and the off-beat offset is what stops a
-  // production-interval poll landing on the flip by luck.
-  const latencyLog = path.join(jobs, 'task-latency.log')
-  const ready = await drained('codex output for task-latency')
-  const firstPoll = Date.now()
-  if (ready) {
-    const untilOffBeat = firstPoll + OFF_BEAT_MS
-    while (Date.now() < untilOffBeat) await new Promise((r) => setTimeout(r, 10))
-  }
-  const flipped = Date.now()
-  fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
-  const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)
-  const lwCode = await lwExit
-  clearTimeout(lwBound)
-  const latency = Date.now() - flipped
-  // Deterministic in BOTH directions, which a bare latency bound is not. The next poll after the flip
-  // is ~25ms away as injected and ~1000ms away if the injection is ignored. 500ms sits an order of
-  // magnitude above the first and a factor of two below the second.
-  check('the injected poll interval is HONOURED: a job turning terminal right after a poll is noticed within one INJECTED interval, not one production interval',
-    ready && lwCode === 0 && latency < 500,
-    `ready ${ready}, exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 1000ms`)
-
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs
   // every quarter second, so no ordinary fixture can put bytes into that window: the record is served
@@ -838,10 +780,11 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     for (let fd = openWriter(); fd !== null && Date.now() < until; fd = openWriter()) { fs.closeSync(fd); sleepMs(5) }
     let fd = null
     while (fd === null && Date.now() < until) { fd = openWriter(); if (fd === null) sleepMs(5) }
-    if (fd === null) return
+    if (fd === null) return false
     if (beforeWrite) beforeWrite()
     fs.writeSync(fd, JSON.stringify({ id: 'task-fifo', workspaceRoot: WS, createdAt: new Date(now).toISOString(), status, pid: null, logFile: fifoLog }))
     fs.closeSync(fd)
+    return true
   }
   const fw = spawn('node', [hook, '--codex-tail', fifo, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   let fwOut = ''
@@ -849,6 +792,24 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const fwExit = new Promise((resolve) => fw.on('exit', (code) => resolve(code)))
   serve('running')   // the read that starts the watcher
   serve('running')   // its first poll
+  // The injected interval must be HONOURED, not merely accepted. Reverting dctr-seat.mjs to the
+  // literal 250/2000 leaves every OTHER clause in this suite green, because every bound here is
+  // generous enough to swallow a 2000ms poll. So this counts the watcher's own record reads: each
+  // serve above and below is one, since a writer open succeeds only once a new reader holds the FIFO.
+  // A wall-clock latency from one flip did not hold: the honoured interval's ~25ms grew past a 500ms
+  // bound on a loaded host, and the bound could not rise, since the production poll after an off-beat
+  // flip is only ~1000ms away. Here READS reads at the production interval cannot come in under
+  // (READS - 1) * 2000ms whatever the host does (the first may follow at once if this process was
+  // slow to serve the poll before it), and a stall only lengthens them, so the bound below never
+  // passes a watcher ignoring the injection; at the injected interval they take READS * 50ms, and
+  // only a host stalled for seconds can push them past it.
+  const READS = 5, READS_BOUND_MS = READS * 1000
+  const readsFrom = Date.now()
+  let reads = 0
+  while (reads < READS && Date.now() - readsFrom < READS_BOUND_MS && serve('running')) reads++
+  const readsTook = Date.now() - readsFrom
+  check('the injected poll interval is HONOURED: the watcher reads its record five more times, each served through the FIFO, sooner than five reads at the production interval can come',
+    reads === READS && readsTook < READS_BOUND_MS, `${reads} reads in ${readsTook}ms; at the 2000ms default five take at least 8000ms`)
   let appendedWhileHeld = false
   serve('completed', () => { fs.appendFileSync(fifoLog, 'last line of task-fifo\n'); appendedWhileHeld = true })
   const fwBound = setTimeout(() => fw.kill('SIGKILL'), 8000)
