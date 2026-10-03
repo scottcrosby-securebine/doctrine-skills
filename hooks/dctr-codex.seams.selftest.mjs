@@ -22,7 +22,7 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 const {
   hostOf, transcriptEntries, readUsage, gaugeSkip, codexObservations, watchedTurn, watchStep, WATCH_TIMES, typerStep,
   pauseReason, pauseCode, samePause, userTyped, CODEX_RESUME_LINE, RESUME_LINE, notifyDecision, cycleDecision, codexAncestor, codexBackground,
-  codexUnderClaude, composerIdle, codexAborted, PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason,
+  codexUnderClaude, composerIdle, composerLine, codexAborted, PAUSES, pauseActionAt, pausedAfterWarned, unknownBackgroundReason,
 } = await import('./dctr-lib.mjs')
 
 const text = (...ls) => ls.flat(Infinity).join('\n') + '\n'
@@ -311,10 +311,24 @@ clause('clause 1j7 — Codex typerStep: the retry sends nothing into a draft (R1
   ts({ ...RETRY, waited: 400, composer: false, pane: { ...NP, focused: true } }).code === 'R16' && ts({ composer: false, pane: { ...idle, focused: true } }).act === 'wait',
   JSON.stringify([ts({ ...RETRY, waited: 400, composer: false }), ts({ composer: false }), ts({ composer: null })]))
 const SUBMITTED = F.PANE_0160_CLEARED.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
-clause('clause 1n3 — composerIdle reads the pane\'s composer, its last › line, on 0.156.1 and 0.160.0 captures alike: the placeholder or nothing is empty, before the /clear, after it, and under a prompt already answered; a draft (one wrapped onto a second line included), a draft under an interrupted resume, and a pane showing no composer are not; an unread pane says nothing (E10H-R4-B1, S1)',
+clause('clause 1n3 — composerIdle reads the pane\'s composer, its last › line, on 0.156.1 and 0.160.0 captures alike: the placeholder or nothing is empty, before the /clear, after it, and under a prompt already answered; a draft (one wrapped onto a second line included), and a draft under an interrupted resume are not; an unread pane says nothing (E10H-R4-B1, S1)',
   [F.NARROW_BEFORE, F.NARROW_AFTER, F.NARROW_R18, F.CLEAR_SCREEN, F.PANE_0160_BEFORE, F.PANE_0160_CLEARED, SUBMITTED, RETRY_PANE('Ask a follow-up question'), RETRY_PANE('')].every((t) => composerIdle(t) === true) &&
-  composerIdle(F.PANE_0160_DRAFT) === false && composerIdle(DRAFT_BEFORE) === false && composerIdle(RETRY_PANE('my own draft')) === false && composerIdle('• working\n') === false && composerIdle(null) === null,
+  composerIdle(F.PANE_0160_DRAFT) === false && composerIdle(DRAFT_BEFORE) === false && composerIdle(RETRY_PANE('my own draft')) === false && composerIdle(null) === null,
   JSON.stringify([F.NARROW_BEFORE, F.NARROW_AFTER, F.NARROW_R18, F.CLEAR_SCREEN, F.PANE_0160_BEFORE, F.PANE_0160_CLEARED, SUBMITTED].map(composerIdle).concat([composerIdle(F.PANE_0160_DRAFT), composerIdle(DRAFT_BEFORE)])))
+
+// E10-D28: a pane read with no composer line is absent, never a draft: a blank read right after the /clear and the
+// new chat's splash before its composer is drawn (SPLASH_0160 below) wait, a draft on the composer line still reads
+// draft, and a draft whose first line is blank (a bare ›, its text on the line below) reads draft too.
+// SPLASH_0160 is CONSTRUCTED, not captured: PANE_0160_CLEARED cut above its composer line, since the live captures after
+// a /clear caught the pane blank or fully drawn and never the splash without its composer.
+const SPLASH_0160 = F.PANE_0160_CLEARED.slice(0, F.PANE_0160_CLEARED.indexOf('› Ask Codex to do anything'))
+const ABSENT = [F.PANE_0160_BLANK, SPLASH_0160, '• working\n']
+clause('clause 1n4 — composerIdle on a pane with no composer line is absent, never a draft and never empty: codex-cli 0.160.0\'s blank read right after a /clear, the new chat\'s splash before its composer is drawn, and a working pane; an unread pane stays null (E10-D28, S1)',
+  ABSENT.every((t) => composerIdle(t) === 'absent') && composerIdle(null) === null && composerIdle(undefined) === null,
+  JSON.stringify(ABSENT.map(composerIdle)))
+clause('clause 1n5 — composerIdle on a draft whose first line is blank (a bare › with the draft on the indented line below, codex-cli 0.160.0) is a draft; a bare › with the blank line under it is still empty (E10-D28, Q2)',
+  composerIdle(F.PANE_0160_DRAFT_BLANKFIRST) === false && composerLine(F.PANE_0160_DRAFT_BLANKFIRST) === '' && composerIdle(RETRY_PANE('')) === true,
+  JSON.stringify([composerIdle(F.PANE_0160_DRAFT_BLANKFIRST), composerLine(F.PANE_0160_DRAFT_BLANKFIRST), composerIdle(RETRY_PANE(''))]))
 
 // N1: a Codex process under a Claude Code session (codex app-server started by codex:codex-rescue) is the Claude session's.
 clause('clause 1o — codexUnderClaude: a Codex payload with CLAUDE_CODE_SESSION_ID set; not without it, and never a Claude Code payload (N1)',
@@ -378,6 +392,10 @@ clause('clause 3q — without the lib: RESUME_ABORTED is a task_started, the res
   lastPrompt(RETRY_PANE('my own draft')) === '› my own draft' && RETRY_PANE('x').includes(`› ${CODEX_RESUME_LINE}`) && RETRY_PANE('x').includes(F.INTERRUPTED_LINE) &&
   lastPrompt(DRAFT_BEFORE) === '› my own draft' && lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' &&
   lastPrompt(F.PANE_0160_DRAFT) === '› draft text typed after clear, not' && lastPrompt(SUBMITTED) === '› Ask Codex to do anything' && SUBMITTED.includes('› hello there'), 'R4-B1 fixtures wrong')
+const blankFirst = F.PANE_0160_DRAFT_BLANKFIRST.split('\n').map((l) => l.trim()), bare = blankFirst.findLastIndex((l) => l.startsWith('›'))
+clause('clause 3s — without the lib: PANE_0160_BLANK and the constructed splash carry no › line, the splash keeps the new chat\'s greeting and art; PANE_0160_DRAFT_BLANKFIRST\'s last › line is a bare ›, the draft on the line under it and a blank line after that (E10-D28)',
+  F.PANE_0160_BLANK === '' && !SPLASH_0160.includes('›') && SPLASH_0160.includes('Hello, you. Got an idea?') && SPLASH_0160.includes('⣿') &&
+  blankFirst[bare] === '›' && blankFirst[bare + 1] === 'second line draft, never sent' && blankFirst[bare + 2] === '', 'E10-D28 fixtures wrong')
 const stalledTypes = F.STALLED_TURN.map((l) => JSON.parse(l).payload?.type), stalledTimes = F.STALLED_TURN.map((l) => Date.parse(JSON.parse(l).timestamp))
 clause('clause 3r — without the lib: STALLED_TURN starts a turn and never ends it (no task_complete or turn_aborted), and all its lines fall within one second, so a watcher reading it sees no growth after its last line (E10-R29)',
   stalledTypes.includes('task_started') && !stalledTypes.includes('task_complete') && !stalledTypes.includes('turn_aborted') &&

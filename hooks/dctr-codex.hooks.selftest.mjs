@@ -71,7 +71,14 @@ if (args[0] === 'pane' && args[1] === 'get') {
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
 } else if (args[0] === 'pane' && args[1] === 'read') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
+  // readSeq: what the first reads return, one each, whatever the stage; blankReads: what the first reads after a /clear
+  // that took return, one each, before the new chat's composer is drawn; blankStays: what every read after it returns
+  // until the resume line.
+  if (st.readSeq?.length) { const t = st.readSeq.shift(); save(); process.stdout.write(t) }
+  else if (st.cleared && !st.resumed && (st.blankStays !== undefined || st.blankReads?.length)) {
+    const t = st.blankReads?.length ? st.blankReads.shift() : st.blankStays
+    save(); process.stdout.write(t)
+  } else process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
 } else if (args[0] === 'pane' && args[1] === 'run') {
   const restore = () => fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
   const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
@@ -149,6 +156,13 @@ const work = () => {
 const recLines = (f, re) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => re.test(l))
 const calls = (f) => (fs.existsSync(f.shimLog) ? fs.readFileSync(f.shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
 const shim = (f, st) => write(f.shimState, JSON.stringify(st))
+/** A CONDITION, not a duration: until `pred` holds, at most 30 s, so a loaded host only slows the clause. */
+const until = async (pred) => { for (const end = Date.now() + 30000; !pred() && Date.now() < end;) await sleep(20); return pred() }
+const gets = (f) => calls(f).filter((c) => c[0] === 'pane' && c[1] === 'get').length
+/** Each watcher poll asks herdr for its pane before it decides, so a second pane read since `from` means its first
+ *  poll has decided and fired whatever it fires; a fixed sleep let a loaded host read before that poll ran. */
+const polled = (f, from) => until(() => gets(f) >= from + 2)
+const hasLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim() !== '' } catch { return false } }
 
 // ---------------------------------------------------------------- clause 1a: restore on SessionStart clear (E8-D1, D1b)
 
@@ -277,7 +291,7 @@ fs.appendFileSync(bgT, jl(F.BG_DONE))
 await bgWork.end()
 const b2 = stopBg()
 const held2 = readJson(() => stopHeldFile('b1'))
-await sleep(500)
+await until(() => hasLine(bgLog))
 const launch = (() => { try { return JSON.parse(fs.readFileSync(bgLog, 'utf8').trim().split('\n').at(-1)) } catch { return null } })()
 clause('clause 1c4 — a Codex Stop with background work running under its Codex process launches no typer and records it live; once that work has exited the same Stop launches the typer, told the host (E8-D7 through the table, E10H-R3-B4)',
   b1.code === 0 && launches1 === 0 && !(b1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && facts1?.backgroundEmpty === false &&
@@ -312,7 +326,7 @@ const rt1 = stopRt()
 const rtHook1 = (() => { try { return fs.readFileSync(path.join(stateDir('t1'), 'hook.log'), 'utf8') } catch { return '' } })()
 write(`${rtOut}.result`, 'exit=0\n')
 const rt2 = stopRt()
-await sleep(500)
+await until(() => fs.existsSync(rtLog))
 clause('clause 1c7 — a Codex Stop with the claude -p red team\'s marker (captured from a real dispatch) and no result file waits on it and launches no typer; once the result file exists the same Stop launches the typer (E10H-B4, E8-D7 through the table)',
   rt1.code === 0 && /Stop decided wait: gate dctr-gate-1 is live/.test(rtHook1) && !(rt1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) &&
   (rt2.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && fs.existsSync(rtLog) && recLines(rt, /paused/).length === 0,
@@ -332,7 +346,7 @@ const upOffLog = path.join(up.dir, 'watch-claude.log')
 hook('dctr-cycle.mjs', up, { ...as(F.UPS_MAIN, up, 'w2', path.join(up.dir, 'claude.jsonl')) }, { DCTR_WATCH_SCRIPT: stub, STUB_LOG: upOffLog })
 const upOff = project('ups-off', { on: '- auto-cycle: off' })
 hook('dctr-cycle.mjs', upOff, as(F.UPS_MAIN, upOff, 'w3', rollout(upOff, 'w3', [])), { DCTR_WATCH_SCRIPT: stub, STUB_LOG: path.join(upOff.dir, 'w.log') })
-await sleep(300)
+await until(() => hasLine(upLog))
 const watchArgs = (() => { try { return JSON.parse(fs.readFileSync(upLog, 'utf8').trim()) } catch { return null } })()
 clause('clause 1c6 — a Codex UserPromptSubmit while auto-cycle is active starts the watcher on its rollout from the rollout\'s length, told its turn (whose Stop decision it reads, E10H-R2-B2) and the Codex process above the hook (E10H-R3-B4); a Claude Code one and an inactive record start none',
   watchArgs?.session === 'w1' && watchArgs.transcript === upT && watchArgs.from === fs.statSync(upT).size && watchArgs.pane === 'wX:p1' && watchArgs.turn === F.UPS_MAIN.turn_id && watchArgs.codex?.pid === process.pid &&
@@ -391,16 +405,17 @@ const wbT = rollout(wb, 'v1', F.BG_RUNNING)
 const wbWork = work()
 stopNow(wb, 'v1', wbT)
 const wbLog = path.join(wb.dir, 'events.log')
+const wbGets0 = gets(wb)
 const wbRun = watcher(wb, 'v1', wbT, Buffer.byteLength(jl(F.BG_RUNNING.slice(0, 2))), { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wbLog }, F.STOP_BG.turn_id)
-await sleep(400)
+const wbPolled = await polled(wb, wbGets0)
 const wbBefore = fs.existsSync(wbLog) ? fs.readFileSync(wbLog, 'utf8') : ''
 fs.appendFileSync(wbT, jl(F.BG_DONE))
 await wbWork.end()
 await wbRun
 const wbEvents = fs.readFileSync(wbLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
 clause('clause 1d3 — the watcher fires nothing while the background work runs, then, once it has exited, hands the hook the Stop again with the turn\'s last message (E8-D7 through the table, E10H-R3-B4)',
-  wbBefore === '' && wbEvents[0]?.hook_event_name === 'Stop' && wbEvents[0].last_assistant_message === 'started' && wbEvents[0].stop_hook_active === false && wbEvents[0].session_id === 'v1',
-  `${wbBefore} || ${JSON.stringify(wbEvents)}`)
+  wbPolled && wbBefore === '' && wbEvents[0]?.hook_event_name === 'Stop' && wbEvents[0].last_assistant_message === 'started' && wbEvents[0].stop_hook_active === false && wbEvents[0].session_id === 'v1',
+  `polled ${wbPolled} ${wbBefore} || ${JSON.stringify(wbEvents)}`)
 // E10H-R2-B2, the order Codex writes (probe B5b: Stop at 54.324, task_complete at 54.334): the Stop reads the rollout
 // before its task_complete, sees the terminal running and holds; the terminal's completion lands next, and the
 // task_complete after it. Read at the task_complete, nothing was running; the Stop still held and must be re-run.
@@ -447,15 +462,16 @@ const readyTurn = F.TUI_TURN.map((l) => l.replace('"last_agent_message":"alpha"'
 const wgtT = rollout(wgt, 'v3', readyTurn)
 stopNow(wgt, 'v3', wgtT, { turn_id: 'turn-v3', last_assistant_message: 'Handoff written.\nauto-cycle: ready' })
 const wgtLog = path.join(wgt.dir, 'events.log')
+const wgtGets0 = gets(wgt)
 const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3')
-await sleep(400)
+const wgtPolled = await polled(wgt, wgtGets0)
 const wgtBefore = events(wgtLog)
 write(`${wgtOut}.result`, 'exit=0\n')
 await wgtRun
 const wgtEvents = events(wgtLog)
 clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
-  wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
-  `${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
+  wgtPolled && wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
+  `polled ${wgtPolled} ${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
 // E10H-R3-B4 point 3, on probe B5 run 1 (P3-B1): the tty cell whose output reports "running" and that nothing in the
 // rollout ever ends. Derived: its turn's task_complete ends on the ready line (the capture ends "started"), and the
 // loop is a work process under the suite's Codex. It must end in the typer launching once the loop has exited.
@@ -467,16 +483,17 @@ const b5Work = work()
 stopNow(b5, 'v6', b5T, { turn_id: B5_TURN, last_assistant_message: READY })
 const b5Held = readJson(() => stopHeldFile('v6'))
 const b5Log = path.join(b5.dir, 'typer.log')
+const b5Gets0 = gets(b5)
 const b5Run = watcher(b5, 'v6', b5T, 0, { DCTR_TYPER_SCRIPT: stub, STUB_LOG: b5Log }, B5_TURN)
-await sleep(400)
+const b5Polled = await polled(b5, b5Gets0)
 const b5Before = fs.existsSync(b5Log)
 fs.appendFileSync(b5T, jl(F.CELL_DONE))
 await b5Work.end()
 await b5Run
-await sleep(300)
+await until(() => hasLine(b5Log))
 const b5Launches = fs.existsSync(b5Log) ? fs.readFileSync(b5Log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []
 clause('clause 1d11 — probe B5 run 1 on the ready line, its cell reporting running forever: the Stop holds while the loop runs under its Codex process, and once the loop has exited the watcher re-runs the real Stop hook, which launches the typer once; no paused line (E10H-R3-B4, P3-B1)',
-  b5Held?.turn === B5_TURN && b5Held.held === true && !b5Before && b5Launches.length === 1 && b5Launches[0].session === 'v6' && b5Launches[0].host === 'codex' && recLines(b5, /paused/).length === 0,
+  b5Polled && b5Held?.turn === B5_TURN && b5Held.held === true && !b5Before && b5Launches.length === 1 && b5Launches[0].session === 'v6' && b5Launches[0].host === 'codex' && recLines(b5, /paused/).length === 0,
   `${JSON.stringify(b5Held)} ${b5Before} ${JSON.stringify(b5Launches)} ${JSON.stringify(recLines(b5, /paused/))}`)
 // The same held Stop, its background work unreadable to the watcher (the Codex process it was told of is gone): past the
 // idle grace it hands the hook the unknown, which writes the paused line and alerts; the next turn's Stop reads its own
@@ -679,6 +696,30 @@ const tAgents = typerCase('agents', { firstLines: [F.AGENTS_MD_TURN[1]] })
 clause('clause 1e9 — typer on Codex, the new chat opens with the injected AGENTS.md block: the cycle confirms with no pause (clear 1, resume 1, E10H-B7)',
   tAgents.sends === '1,1' && tAgents.paused.length === 0 && tAgents.cycled.length === 1, td(tAgents))
 
+// E10-D28: after a /clear that took, codex-cli 0.160.0's pane reads blank (PANE_0160_BLANK) before the new chat is drawn.
+// The typer waits on a pane with no composer line and sends the resume line once the empty composer shows; a pane that
+// stays blank past the session bound pauses R17 naming the composer, and never R16.
+const R17_COMPOSER = '["- auto-cycle paused: could not type into the pane: the pane showed no composer within 30 s"]'
+const tBlank = typerCase('blank-then-composer', { blankReads: Array(5).fill(F.PANE_0160_BLANK) })
+clause('clause 1e19 — typer on Codex, the pane blank for several polls after a /clear that took, then the new chat\'s empty composer: /clear once, the resume line once, the cycle line, no pause (clear 1, resume 1, E10-D28)',
+  tBlank.sends === '1,1' && tBlank.paused.length === 0 && tBlank.cycled.length === 1 && tBlank.turn && tBlank.otherSends.length === 0, td(tBlank))
+const tBlankStays = typerCase('blank-stays', { blankStays: F.PANE_0160_BLANK })
+clause('clause 1e20 — typer on Codex, the pane still blank past the session bound after the /clear: no resume line, paused R17 naming the composer, never R16 (clear 1, resume 0, E10-D28)',
+  tBlankStays.sends === '1,0' && JSON.stringify(tBlankStays.paused) === R17_COMPOSER && tBlankStays.otherSends.length === 0 &&
+  tBlankStays.calls.filter((c) => c[1] === 'read').length > 3, td(tBlankStays))
+// The absent clock restarts when a composer shows: with the pane focused, RESET.before blank reads, the empty composer
+// once, then RESET.after blank reads past the moment focus leaves (after RESET.focus polls), then the pane as typerCase
+// stages it (PANE_0160_BEFORE). Counted from the first blank read that is past the session bound; counted from the
+// restart it is not, so the typer waits and sends the /clear once the composer shows. Clause 3j checks the arithmetic.
+const RESET = { focus: 25, before: 12, after: 15 }
+const RESET_SEQ = [...Array(RESET.before).fill(F.PANE_0160_BLANK), F.PANE_0160_BEFORE, ...Array(RESET.after).fill(F.PANE_0160_BLANK)]
+const tBlankReset = typerCase('blank-reset', { focusedGets: RESET.focus, readSeq: RESET_SEQ })
+// One read per poll: every staged read, then the one showing the composer that lets the /clear go.
+const resetReads = tBlankReset.calls.slice(0, tBlankReset.calls.findIndex((c) => c[1] === 'run' && c[3] === '/clear')).filter((c) => c[1] === 'read').length
+clause('clause 1e21 — typer on Codex, blank reads, the empty composer, then blank reads again that together outlast the session bound but not since the composer showed: no pause, /clear once and the resume line once, after the shim served every staged read (E10-D28)',
+  tBlankReset.sends === '1,1' && tBlankReset.paused.length === 0 && tBlankReset.otherSends.length === 0 && resetReads === RESET_SEQ.length + 1,
+  `reads before the /clear ${resetReads}, staged ${RESET_SEQ.length}; ${td(tBlankReset)}`)
+
 // E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
 // PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was submitted and
 // interrupted (INTERRUPTED_LINE, probe B6's pane) above a draft.
@@ -732,8 +773,9 @@ clause('clause 1e17 — two Stop entries, the second blocking: the typer the fir
 // 22, the start time in clock ticks. The zombie and its state are found with ps(1), not the listing.
 const zParent = spawn('sh', ['-c', 'true & exec sleep 5'], { stdio: 'ignore' })
 orphans.push(zParent.pid)
-await sleep(300)
-const psZ = (() => { try { return execFileSync('ps', ['-o', 'pid=,stat=', '--ppid', String(zParent.pid)], { encoding: 'utf8' }).trim().split(/\s+/) } catch { return [] } })()
+const psZOf = () => { try { return execFileSync('ps', ['-o', 'pid=,stat=', '--ppid', String(zParent.pid)], { encoding: 'utf8' }).trim().split(/\s+/) } catch { return [] } }
+await until(() => /^Z/.test(psZOf()[1] || ''))
+const psZ = psZOf()
 const zPid = Number(psZ[0])
 const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfFields = selfStat.slice(selfStat.lastIndexOf(') ') + 2).split(' ')
 const nowList = processListing()
@@ -793,6 +835,18 @@ clause('clause 3c — without the hooks: the 0.160.0 pane before and after the /
   lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything' &&
   lastPrompt(F.PANE_0160_DRAFT) === '› draft text typed after clear, not' && tStale.stagedGated?.session_id === OLD && tNormal.stagedGated === null &&
   F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+clause('clause 3i — without the typer: the blank read the shim plays after the /clear has no › line, and the cleared pane the composer reads after it ends in the empty composer\'s placeholder (E10-D28)',
+  typeof F.PANE_0160_BLANK === 'string' && lastPrompt(F.PANE_0160_BLANK) === undefined && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything', 'blank fixture wrong')
+// Poll i (from 1) reads RESET_SEQ[i - 1] at TT.poll * (i - 1) ms; the pane is focused through poll RESET.focus.
+const TTv = JSON.parse(TT), boundPolls = TTv.session / TTv.poll, blank = (t) => lastPrompt(t) === undefined
+const firstUnfocused = RESET.focus + 1, restartPoll = RESET.before + 2
+clause('clause 3j — without the typer or the shim: the staged reads are RESET.before blank reads, one showing the empty composer, RESET.after blank reads, then the pane typerCase stages; the blank reads together exceed the session bound in polls and those after the composer do not; focus leaves while the second blank run lasts, past the bound from the first blank read and inside it from the restart (E10-D28)',
+  RESET_SEQ.length === RESET.before + 1 + RESET.after && RESET_SEQ.slice(0, RESET.before).every(blank) && lastPrompt(RESET_SEQ[RESET.before]) === '› Ask Codex to do anything' &&
+  RESET_SEQ.slice(RESET.before + 1).every(blank) && lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' &&
+  RESET.before + RESET.after > boundPolls && RESET.after <= boundPolls &&
+  firstUnfocused > RESET.before + 1 && firstUnfocused <= RESET_SEQ.length &&
+  (firstUnfocused - 1) * TTv.poll >= TTv.session && (RESET_SEQ.length - restartPoll) * TTv.poll < TTv.session,
+  JSON.stringify({ len: RESET_SEQ.length, boundPolls, firstUnfocused, restartPoll }))
 const bc = F.BLOCK_CONTINUATION.map(J)
 clause('clause 3h — without the hooks: the blocked Stop\'s continuation is a user message carrying the block reason and an assistant answer with no ready line, both in one turn',
   bc.length === 2 && bc[0].payload.role === 'user' && /^<hook_prompt /.test(bc[0].payload.content[0].text) && bc[1].payload.role === 'assistant' &&

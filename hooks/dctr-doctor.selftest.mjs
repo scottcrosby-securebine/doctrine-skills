@@ -4,7 +4,9 @@
 // the summary the doctor prints, the scan of hooks/ and skills/ for account identifiers with the redaction --save
 // applies, --save taking no path, and the doctor's cleanup when it is interrupted, which runs the doctor itself under
 // a stub herdr and reads /proc for what it left running (Linux).
-//   1. each tampered capture makes exactly the signals named for it drift, and the exit code 1;
+//   1. each tampered capture makes exactly the signals named for it drift, and the exit code 1; a capture tampered so
+//      a signal cannot be observed reads that row unobserved (ok null), with no drift, the exit code 0 and the summary
+//      naming it;
 //   2. the captures as taken drift nothing, every signal for the host is reported, and the exit code is 0;
 //   3. each tampered capture really differs from the capture in the fact named, checked without the verdict.
 
@@ -19,7 +21,7 @@ let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 const caps = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'dctr-doctor.fixtures.json'), 'utf8'))
 const copy = (o) => JSON.parse(JSON.stringify(o))
-const drifted = (obs) => doctorVerdict(obs).filter((r) => !r.ok).map((r) => r.code).sort()
+const drifted = (obs) => doctorVerdict(obs).filter((r) => r.ok === false).map((r) => r.code).sort()
 const sessionOf = (obs, source) => obs.log.find((e) => e.event === 'SessionStart' && e.source === source)?.session_id
 const mark = (e) => String(e.prompt ?? '').includes('(typed by doctrine auto-cycle, not a ruling)')
 /** The transcript text with `edit` applied to each line that parses and passes `pick`. */
@@ -74,6 +76,9 @@ const TAMPERS = [
     (o) => !o.composer.cleared.includes('›')],
   ['a draft reads as an empty composer', 'codex', ['C2'], (o) => { o.composer.draft = o.composer.cleared },
     (o) => o.composer.draft === o.composer.cleared],
+  // C3 reads composer.afterClear, the first pane read after the /clear, which in the capture shows no composer line;
+  // one showing a composer line is unobserved, below.
+  ['no pane read was taken right after /clear', 'codex', ['C3'], (o) => { delete o.composer.afterClear }, (o) => !('afterClear' in o.composer)],
   ['herdr reports the pane working', 'claude', ['H1'], (o) => { o.pane.agent_status = 'working' }, (o) => o.pane.agent_status === 'working'],
   ['herdr keeps the old session for the pane', 'codex', ['H2'], (o) => { o.pane.agent_session = sessionOf(o, 'startup') },
     (o) => o.pane.agent_session === sessionOf(o, 'startup')],
@@ -86,8 +91,8 @@ const TAMPERS = [
     (o) => !o.transcript.text.includes('"last_agent_message"')],
   ['the composer placeholder after /clear is reworded', 'codex', ['C1'], (o) => { o.composer.cleared = o.composer.cleared.replaceAll('Ask Codex to do anything', 'What should Codex do?') },
     (o) => !o.composer.cleared.includes('Ask Codex to do anything')],
-  ['the draft screen shows no composer line', 'codex', ['C2'], (o) => { o.composer.draft = o.composer.draft.split('\n').filter((l) => !l.trim().startsWith('›')).join('\n') },
-    (o) => !o.composer.draft.split('\n').some((l) => l.trim().startsWith('›'))],
+  ['the draft screen\'s composer line holds other text than the draft', 'codex', ['C2'], (o) => { o.composer.draft = o.composer.draft.replace('› doctor draft, never sent', '› other text, never sent') },
+    (o) => o.composer.draft.split('\n').some((l) => l.trim() === '› other text, never sent') && !o.composer.draft.includes('doctor draft, never sent')],
   ['the user message text moved out of content[].text', 'codex', ['R2'], (o) => { o.transcript.text = editLines(o.transcript.text, codexMsg('user'), (e) => e.payload.content.forEach((c) => renameKey(c, 'text', 'body'))) },
     (o) => !lineHas(o.transcript.text, codexMsg('user'), (e) => e.payload.content.some((c) => 'text' in c))],
   ['token_count drops model_context_window', 'codex', ['R3'], (o) => { o.transcript.text = o.transcript.text.replaceAll('"model_context_window"', '"context_window_tokens"') },
@@ -163,10 +168,15 @@ for (const [name, host, want, tamper, proof] of TAMPERS) {
   clause(`3 ${host}: the capture tampered for "${name}" carries the defect`, proof(o) && !proof(copy(caps[host])), 'the tamper did not change the fact it names')
 }
 
+// The codex capture's composer.afterClear is codex-cli 0.160.0's first pane read after a /clear, taken under herdr
+// 0.9.3 outside the doctor (the doctor's own capture predates C3): it shows no composer line.
+clause('3 codex: the capture\'s first read after /clear shows no › line, read without the verdict',
+  typeof caps.codex.composer.afterClear === 'string' && !caps.codex.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')), JSON.stringify(caps.codex.composer.afterClear))
+
 for (const host of ['codex', 'claude']) {
   const rows = doctorVerdict(caps[host])
   const want = Object.keys(DOCTOR_SIGNALS).filter((c) => host === 'codex' || !DOCTOR_SIGNALS[c].codexOnly)
-  clause(`2 ${host}: the capture drifts nothing and exits 0`, rows.every((r) => r.ok) && doctorExit(rows) === 0, JSON.stringify(rows.filter((r) => !r.ok)))
+  clause(`2 ${host}: the capture drifts nothing, leaves nothing unobserved and exits 0`, rows.every((r) => r.ok === true) && doctorExit(rows) === 0, JSON.stringify(rows.filter((r) => r.ok !== true)))
   clause(`2 ${host}: every signal for the host is reported once`, JSON.stringify(rows.map((r) => r.code).sort()) === JSON.stringify(want.sort()), JSON.stringify(rows.map((r) => r.code)))
 }
 // The summary the doctor prints: its rows, then the hook areas the drive does not exercise, then the verdict, so a
@@ -180,6 +190,20 @@ clause('2 the green summary names every area the drive does not exercise, after 
 const drift1 = copy(caps.codex); drift1.pane.agent_status = 'working'
 clause('1 a drifted summary names the drift and still lists the areas not exercised', /drift in codex H1/.test(summary({ codex: doctorVerdict(drift1) })) && /does not exercise/.test(summary({ codex: doctorVerdict(drift1) })), summary({ codex: doctorVerdict(drift1) }))
 clause('3 the drifted capture differs from the capture in the fact named', drift1.pane.agent_status === 'working' && caps.codex.pane.agent_status !== 'working', 'tamper did nothing')
+// C3 on a host whose first read after /clear already shows a composer line: the absent path never ran, so the row is
+// unobserved (ok null), neither a pass nor a drift: the exit stays 0 when nothing drifts, and the summary marks the row
+// and names it in the verdict, so a green run never reads as covering it.
+const SHOWN = [['the empty composer', (o) => o.composer.cleared], ['a composer holding text', (o) => o.composer.draft]]
+for (const [name, pick] of SHOWN) {
+  const o = copy(caps.codex); o.composer.afterClear = pick(o)
+  const rows = doctorVerdict(o), c3 = rows.find((r) => r.code === 'C3'), text = summary({ codex: rows })
+  clause(`1 codex: the read right after /clear shows ${name}: C3 is unobserved, neither ok nor drift, the exit 0 and the summary names it`,
+    c3?.ok === null && drifted(o).length === 0 && doctorExit(rows) === 0 && /^ {2}unobs {2}C3 /m.test(text) && /not observed: codex C3/.test(text.split('\n').at(-1)),
+    JSON.stringify([c3, text.split('\n').filter((l) => /C3|signal|drift/.test(l))]))
+  clause(`3 codex: the read tampered to show ${name} has a › line and the capture's has none, read without the verdict`,
+    o.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')) && !caps.codex.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')), 'tamper did nothing')
+}
+clause('2 the summary of the capture marks no row unobserved and names none', !/^ {2}unobs /m.test(green) && !/not observed:/.test(green), green)
 
 // Account identifiers never ship: every file under hooks/ and skills/ is scanned. The planted identifiers are
 // built at run time, so this file carries none of them.
@@ -398,7 +422,7 @@ clause('1 a doctor interrupted while a host answers --version exits 130 and remo
 clause('3 the --version run was signalled with the scratch dir made and the stub server not yet started, read without the doctor',
   ints.version.window?.roots === 1 && ints.version.window?.server === false, JSON.stringify(ints.version.window))
 
-clause('2 an empty observation drifts every signal and never throws', (() => { try { return doctorVerdict({ host: 'codex' }).every((r) => !r.ok) } catch { return false } })(), 'it threw or passed a signal')
+clause('2 an empty observation drifts every signal and never throws', (() => { try { return doctorVerdict({ host: 'codex' }).every((r) => r.ok === false) } catch { return false } })(), 'it threw or passed a signal')
 
 fs.rmSync(SYS, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

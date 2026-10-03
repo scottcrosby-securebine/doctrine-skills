@@ -165,6 +165,7 @@ const seat = (agent, paneId, agentId) => {
   fs.writeFileSync(path.join(seatsDir, `${agent}.json`), JSON.stringify({ agent, agent_id: agentId ?? `id-${agent}`, role: 'Explore', n: 1, tabId: null, paneId, file: '/t/x.jsonl' }))
 }
 const reset = () => { fs.rmSync(stateDir, { recursive: true, force: true }); fs.mkdirSync(seatsDir, { recursive: true }); fs.writeFileSync(calls, '') }
+const hookEnv = (env = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...env })
 const run = (payload, env = {}) => {
   try {
     return { code: 0, out: execFileSync('node', [hook], {
@@ -174,9 +175,26 @@ const run = (payload, env = {}) => {
       // A hang is a failure here, not a wait.
       timeout: 30000,
       input: JSON.stringify({ session_id: SESSION, ...payload }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...env },
+      env: hookEnv(env),
     }) }
   } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+}
+// The hook timed from the moment its payload is handed over. It reads stdin only once its modules have loaded, so
+// waiting until it is blocked in that read (/proc/<pid>/syscall: read, 0 on x86_64 and 63 on arm64, on fd 0) leaves
+// node's start-up, which a loaded host stretches without bound, out of what is timed; what is left is the hook's own
+// lock waits, closes and hand-off. `atStart` runs at that moment, so a fixture timed against the hook starts there.
+const runTimed = async (payload, atStart = () => {}) => {
+  const child = spawn('node', [hook], { stdio: ['pipe', 'ignore', 'ignore'], env: hookEnv() })
+  const exit = new Promise((resolve) => child.on('exit', (code) => resolve(code)))
+  const reading = () => { try { return /^(0|63) 0x0 /.test(fs.readFileSync(`/proc/${child.pid}/syscall`, 'utf8')) } catch { return false } }
+  for (const end = Date.now() + 30000; !reading() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5))
+  const booted = reading(), t0 = Date.now()
+  atStart()
+  child.stdin.end(JSON.stringify({ session_id: SESSION, ...payload }))
+  const bound = setTimeout(() => child.kill('SIGKILL'), 30000)
+  const code = await exit
+  clearTimeout(bound)
+  return { code, booted, t0, took: Date.now() - t0 }
 }
 const called = (re) => { try { return re.test(fs.readFileSync(calls, 'utf8')) } catch { return false } }
 const callLines = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').filter((l) => re.test(l)) } catch { return [] } }
@@ -437,7 +455,8 @@ console.log('clause 1: a seat pane is named for its status-line title and starts
   // within the same second. The second read has to happen for any parse failure, not only absence.
   const midWrite = path.join(proj, 'sess', 'subagents', 'agent-a9.meta.json')
   fs.writeFileSync(midWrite, '{"agentType":"Explore","descrip')
-  const finisher = spawn('node', ['-e', `setTimeout(() => require('fs').writeFileSync(process.argv[1], JSON.stringify({ description: 'Finished later' })), 100)`, midWrite], { stdio: 'ignore' })
+  // sh, not node: the write has to land inside readMeta's retry, and node's start-up on a loaded host could outlast it.
+  const finisher = spawn('sh', ['-c', 'sleep 0.1; printf %s "$1" > "$2"', 'sh', JSON.stringify({ description: 'Finished later' }), midWrite], { stdio: 'ignore' })
   const late = readMeta(midWrite, 600)
   check('a meta file that is invalid JSON at first read and valid shortly after yields the description', late && late.description === 'Finished later', JSON.stringify(late))
   finisher.kill()
@@ -739,7 +758,7 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
   const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
-  // A CONDITION, not a duration — the same repair the latency block below carries, which this block
+  // A CONDITION, not a duration — the same repair the poll-interval clause below carries, which this block
   // did not get. The watcher drains the log only inside a poll, so its output proves a poll ran and
   // therefore that the record was READ while it still said `queued`. A fixed sleep proved nothing:
   // a watcher that started after the flip never saw `queued` at all and the clause passed green
@@ -761,64 +780,6 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const qRenames = callLines(/^pane rename w1:s1 /)
   check('with exactly one rename, to completed', qRenames.length === 1 && qRenames[0] === `pane rename w1:s1 ${LABEL} · completed`, qRenames.join(' | '))
 
-  // The injected interval must be HONOURED, not merely accepted. Reverting dctr-seat.mjs to the
-  // literal 250/2000 leaves every OTHER clause in this suite green — a reviewer proved it by doing
-  // exactly that — because every bound here is generous enough to swallow a 2000ms poll. So this
-  // measures the latency the interval decides: a job that turns terminal while the watcher runs is
-  // noticed one poll later. At the injected 25ms that is tens of milliseconds; at the production
-  // 2000ms it cannot come in under the bound, which is what makes this clause discriminate.
-  reset()
-  const latencyJob = job('task-latency', now, WS, 'running')
-  const lw = spawn('node', [hook, '--codex-tail', latencyJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_POLL_MS: '25' } })
-  let lwOut = ''
-  lw.stdout.on('data', (d) => { lwOut += d })
-  const lwExit = new Promise((resolve) => lw.on('exit', (code) => resolve(code)))
-  // A CONDITION, not a duration: wait until the watcher has drained the log, which only happens
-  // inside a poll, so we know it has read the record as `running` before we flip it. A fixed sleep
-  // let the very first poll land AFTER the flip, and the clause then passed at any interval.
-  const drained = async (marker) => {
-    const until = Date.now() + 8000
-    while (!lwOut.includes(marker) && Date.now() < until) await new Promise((r) => setTimeout(r, 5))
-    return lwOut.includes(marker)
-  }
-  const OFF_BEAT_MS = 3000   // midway between two PRODUCTION polls, counted from the watcher's first, see below
-  // Readiness is REQUIRED, not best-effort: flipping unconditionally after the deadline let a slow
-  // watcher start AFTER the flip and exit on its own first poll, passing at any interval.
-  //
-  // FLIP OFF THE PRODUCTION BEAT. An earlier repair claimed two log markers proved a record read had
-  // completed between them; they do not. `pump` runs on its OWN setInterval, independent of the poll
-  // (dctr-seat.mjs), so both drains can come from the pump with no record read anywhere between
-  // them — a red team produced a schedule passing at 249ms with the injected interval ignored.
-  //
-  // What the clause can actually prove is timing, so prove timing, on the WATCHER's clock. Its first
-  // poll runs synchronously at startup and is the first thing to drain the log, so the moment that
-  // output arrives is the watcher's own time zero, and a watcher on the PRODUCTION 2000ms interval
-  // then polls at 2000, 4000, .... Counting from this process's spawn call instead let the watcher's
-  // boot latency slide a production poll to just after the flip, inside the bound. Flipping 3000ms
-  // after the first poll puts the nearest production poll ~1000ms away on either side, twice the
-  // 500ms bound. A watcher honouring the injected 25ms interval notices within one interval wherever
-  // the flip lands. The bound is what discriminates, and the off-beat offset is what stops a
-  // production-interval poll landing on the flip by luck.
-  const latencyLog = path.join(jobs, 'task-latency.log')
-  const ready = await drained('codex output for task-latency')
-  const firstPoll = Date.now()
-  if (ready) {
-    const untilOffBeat = firstPoll + OFF_BEAT_MS
-    while (Date.now() < untilOffBeat) await new Promise((r) => setTimeout(r, 10))
-  }
-  const flipped = Date.now()
-  fs.writeFileSync(`${latencyJob}.tmp`, JSON.stringify({ ...R(latencyJob), status: 'completed' })); fs.renameSync(`${latencyJob}.tmp`, latencyJob)
-  const lwBound = setTimeout(() => lw.kill('SIGKILL'), 8000)
-  const lwCode = await lwExit
-  clearTimeout(lwBound)
-  const latency = Date.now() - flipped
-  // Deterministic in BOTH directions, which a bare latency bound is not. The next poll after the flip
-  // is ~25ms away as injected and ~1000ms away if the injection is ignored. 500ms sits an order of
-  // magnitude above the first and a factor of two below the second.
-  check('the injected poll interval is HONOURED: a job turning terminal right after a poll is noticed within one INJECTED interval, not one production interval',
-    ready && lwCode === 0 && latency < 500,
-    `ready ${ready}, exit ${lwCode} after ${latency}ms; reverted to the 2000ms default this lands near 1000ms`)
-
   // The bytes the job writes between the watcher's last periodic read of the log and its read of the
   // record would be lost without one more read of the log after the record. The interval read runs
   // every quarter second, so no ordinary fixture can put bytes into that window: the record is served
@@ -838,10 +799,11 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
     for (let fd = openWriter(); fd !== null && Date.now() < until; fd = openWriter()) { fs.closeSync(fd); sleepMs(5) }
     let fd = null
     while (fd === null && Date.now() < until) { fd = openWriter(); if (fd === null) sleepMs(5) }
-    if (fd === null) return
+    if (fd === null) return false
     if (beforeWrite) beforeWrite()
     fs.writeSync(fd, JSON.stringify({ id: 'task-fifo', workspaceRoot: WS, createdAt: new Date(now).toISOString(), status, pid: null, logFile: fifoLog }))
     fs.closeSync(fd)
+    return true
   }
   const fw = spawn('node', [hook, '--codex-tail', fifo, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   let fwOut = ''
@@ -849,6 +811,24 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const fwExit = new Promise((resolve) => fw.on('exit', (code) => resolve(code)))
   serve('running')   // the read that starts the watcher
   serve('running')   // its first poll
+  // The injected interval must be HONOURED, not merely accepted. Reverting dctr-seat.mjs to the
+  // literal 250/2000 leaves every OTHER clause in this suite green, because every bound here is
+  // generous enough to swallow a 2000ms poll. So this counts the watcher's own record reads: each
+  // serve above and below is one, since a writer open succeeds only once a new reader holds the FIFO.
+  // A wall-clock latency from one flip did not hold: the honoured interval's ~25ms grew past a 500ms
+  // bound on a loaded host, and the bound could not rise, since the production poll after an off-beat
+  // flip is only ~1000ms away. Here READS reads at the production interval cannot come in under
+  // (READS - 1) * 2000ms whatever the host does (the first may follow at once if this process was
+  // slow to serve the poll before it), and a stall only lengthens them, so the bound below never
+  // passes a watcher ignoring the injection; at the injected interval they take READS * 50ms, and
+  // only a host stalled for seconds can push them past it.
+  const READS = 5, READS_BOUND_MS = READS * 1000
+  const readsFrom = Date.now()
+  let reads = 0
+  while (reads < READS && Date.now() - readsFrom < READS_BOUND_MS && serve('running')) reads++
+  const readsTook = Date.now() - readsFrom
+  check('the injected poll interval is HONOURED: the watcher reads its record five more times, each served through the FIFO, sooner than five reads at the production interval can come',
+    reads === READS && readsTook < READS_BOUND_MS, `${reads} reads in ${readsTook}ms; at the 2000ms default five take at least 8000ms`)
   let appendedWhileHeld = false
   serve('completed', () => { fs.appendFileSync(fifoLog, 'last line of task-fifo\n'); appendedWhileHeld = true })
   const fwBound = setTimeout(() => fw.kill('SIGKILL'), 8000)
@@ -977,8 +957,8 @@ console.log('clause 1 — SessionEnd exits inside its budget when the lock is bu
 {
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true })
   seat('dctr-explore-1', 'w1:s1'); holdLock(stateDir)
-  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
-  check('the hook exits 0 in under 1,500ms with the placement lock held by a live process', r.code === 0 && took < 1500, `took ${took}ms, code ${r.code}`)
+  const r = await runTimed({ hook_event_name: 'SessionEnd' })
+  check('the hook exits 0 in under 1,500ms from its payload with the placement lock held by a live process', r.booted && r.code === 0 && r.took < 1500, `took ${r.took}ms, code ${r.code}, booted ${r.booted}`)
   check('and closed nothing while it could not hold the lock', !called(/^pane close w1:s1$/m))
   fs.rmSync(path.join(stateDir, 'placement.lock'), { recursive: true, force: true })
   check('once the lock is free, the detached sweep closes the seat and removes the state directory',
@@ -989,10 +969,10 @@ console.log('clause 1 — a move into the unowned directory waits for THAT direc
 {
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
   gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(gatesDir)
-  const t0 = Date.now(); run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
+  const { took, booted } = await runTimed({ hook_event_name: 'SessionEnd' })
   check('with the gate directory locked, the gate is not moved and the hook still exits inside its budget',
-    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && took < 1500,
-    `took ${took}ms; moved ${fs.existsSync(movedFile(SESSION, 'dctr-gate-1'))}`)
+    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && booted && took < 1500,
+    `took ${took}ms, booted ${booted}; moved ${fs.existsSync(movedFile(SESSION, 'dctr-gate-1'))}`)
   fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
   check('and once it is free, the detached sweep moves it',
     waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
@@ -1005,11 +985,15 @@ console.log('clause 1 — the two lock waits share ONE deadline, so both busy in
   // wait that restarted the clock would run the hook past 1,500ms; one deadline holds it inside.
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
   gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(stateDir); holdLock(gatesDir)
-  const freer = spawn('bash', ['-c', `sleep 0.7; rm -rf ${JSON.stringify(path.join(stateDir, 'placement.lock'))}`], { stdio: 'ignore' })
-  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
-  await new Promise((res) => (freer.exitCode !== null ? res() : freer.on('exit', res)))
+  // Freed 700ms after the payload is handed over, not after the spawn: timed from the spawn, a start-up past 700ms
+  // found the lock already free and the restarted wait could no longer show. A wait that restarts its clock at the
+  // second lock exits no sooner than 700 + 800ms after the payload; one deadline exits at 800ms. A free that lands
+  // past the 800ms wait shows neither, so it fails the clause rather than pass it.
+  let freed = null
+  const r = await runTimed({ hook_event_name: 'SessionEnd' }, () => setTimeout(() => { fs.rmSync(path.join(stateDir, 'placement.lock'), { recursive: true, force: true }); freed = Date.now() }, 700))
   check('with the placement lock freed at 700ms and the gate directory still held, the hook exits in under 1,500ms',
-    r.code === 0 && took < 1500 && fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')), `took ${took}ms`)
+    r.booted && freed !== null && freed - r.t0 < 800 && r.code === 0 && r.took < 1500 && fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')),
+    `took ${r.took}ms, booted ${r.booted}, freed at ${freed === null ? 'never' : `${freed - r.t0}ms`}`)
   fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
   check('and the detached sweep it handed off to still moves the gate', waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
 }
