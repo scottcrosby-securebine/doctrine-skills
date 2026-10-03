@@ -71,9 +71,11 @@ if (args[0] === 'pane' && args[1] === 'get') {
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
 } else if (args[0] === 'pane' && args[1] === 'read') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  // blankReads: what the first reads after a /clear that took return, one each, before the new chat's composer is drawn;
-  // blankStays: what every read after it returns until the resume line.
-  if (st.cleared && !st.resumed && (st.blankStays !== undefined || st.blankReads?.length)) {
+  // readSeq: what the first reads return, one each, whatever the stage; blankReads: what the first reads after a /clear
+  // that took return, one each, before the new chat's composer is drawn; blankStays: what every read after it returns
+  // until the resume line.
+  if (st.readSeq?.length) { const t = st.readSeq.shift(); save(); process.stdout.write(t) }
+  else if (st.cleared && !st.resumed && (st.blankStays !== undefined || st.blankReads?.length)) {
     const t = st.blankReads?.length ? st.blankReads.shift() : st.blankStays
     save(); process.stdout.write(t)
   } else process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
@@ -695,6 +697,12 @@ const tBlankStays = typerCase('blank-stays', { blankStays: F.PANE_0160_BLANK })
 clause('clause 1e20 — typer on Codex, the pane still blank past the session bound after the /clear: no resume line, paused R17 naming the composer, never R16 (clear 1, resume 0, E10-D28)',
   tBlankStays.sends === '1,0' && JSON.stringify(tBlankStays.paused) === R17_COMPOSER && tBlankStays.otherSends.length === 0 &&
   tBlankStays.calls.filter((c) => c[1] === 'read').length > 3, td(tBlankStays))
+// The absent clock restarts when a composer shows: with the pane focused, 12 blank reads, the empty composer once, then
+// blank reads past the moment focus leaves, at 25 polls. Counted from the first blank read that is past the session
+// bound (20 polls); counted from the restart it is not, so the typer waits and sends the /clear once the composer shows.
+const tBlankReset = typerCase('blank-reset', { focusedGets: 25, readSeq: [...Array(12).fill(F.PANE_0160_BLANK), F.PANE_0160_BEFORE, ...Array(15).fill(F.PANE_0160_BLANK)] })
+clause('clause 1e21 — typer on Codex, blank reads, the empty composer, then blank reads again that together outlast the session bound but not since the composer showed: no pause, /clear once and the resume line once (E10-D28)',
+  tBlankReset.sends === '1,1' && tBlankReset.paused.length === 0 && tBlankReset.otherSends.length === 0, td(tBlankReset))
 
 // E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
 // PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was submitted and
