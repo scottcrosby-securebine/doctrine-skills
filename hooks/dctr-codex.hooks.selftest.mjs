@@ -447,15 +447,22 @@ const readyTurn = F.TUI_TURN.map((l) => l.replace('"last_agent_message":"alpha"'
 const wgtT = rollout(wgt, 'v3', readyTurn)
 stopNow(wgt, 'v3', wgtT, { turn_id: 'turn-v3', last_assistant_message: 'Handoff written.\nauto-cycle: ready' })
 const wgtLog = path.join(wgt.dir, 'events.log')
+const wgtGets = () => calls(wgt).filter((c) => c[0] === 'pane' && c[1] === 'get').length
+const wgtGets0 = wgtGets()
 const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3')
-await sleep(400)
+// A CONDITION, not a duration: each poll asks herdr for the pane before it decides, so the watcher's second pane read
+// means its first poll, which saw the held Stop and the live gate, has decided and fired whatever it fires. A fixed
+// sleep let a loaded host read the events before that poll ran, and the clause then passed with the gate unasked.
+const wgtUntil = Date.now() + 30000
+while (wgtGets() < wgtGets0 + 2 && Date.now() < wgtUntil) await sleep(20)
+const wgtPolled = wgtGets() >= wgtGets0 + 2
 const wgtBefore = events(wgtLog)
 write(`${wgtOut}.result`, 'exit=0\n')
 await wgtRun
 const wgtEvents = events(wgtLog)
 clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
-  wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
-  `${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
+  wgtPolled && wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
+  `polled ${wgtPolled} ${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)
 // E10H-R3-B4 point 3, on probe B5 run 1 (P3-B1): the tty cell whose output reports "running" and that nothing in the
 // rollout ever ends. Derived: its turn's task_complete ends on the ready line (the capture ends "started"), and the
 // loop is a work process under the suite's Codex. It must end in the typer launching once the loop has exited.
