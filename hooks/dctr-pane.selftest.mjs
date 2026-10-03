@@ -628,7 +628,11 @@ console.log('lock liveness across time — a live holder renews its lock, and a 
   // The bound renewal gives: a live holder's lock ages at most one herdr call between renewals.
   check('one herdr call fits inside the placement lock\'s pid-less window', HERDR_TIMEOUT_MS < PLACEMENT_STALE_MS * PIDLESS_STALE_FACTOR,
     `${HERDR_TIMEOUT_MS} vs ${PLACEMENT_STALE_MS * PIDLESS_STALE_FACTOR}`)
-  const STALE = 100
+  // The window is wide against one fixture herdr call (a 0.3s sleep), because what a live holder's
+  // lock ages between renewals is that call plus the spawns around it, and a loaded host stretches
+  // the spawns: at a 600ms window the gap crossed it and a live holder was broken. A holder that
+  // does not renew still ages past it within the section, which outlasts two windows.
+  const STALE = 500
   const PIDLESS = STALE * PIDLESS_STALE_FACTOR
   const OWN = ownPidNs()
   const slowbin = path.join(tmp, 'slowbin')
@@ -668,7 +672,7 @@ console.log('lock liveness across time — a live holder renews its lock, and a 
 
   {
     const lk = path.join(tmp, 'renew-live.lock')
-    const child = run(HOLDER, [lk, '8', FAKE], { async: true })
+    const child = run(HOLDER, [lk, '24', FAKE], { async: true })
     let out = ''; child.stdout.on('data', (d) => { out += d })
     const done = exited(child)
     const entered = await until(() => fs.existsSync(`${lk}.entered`), 20000)
