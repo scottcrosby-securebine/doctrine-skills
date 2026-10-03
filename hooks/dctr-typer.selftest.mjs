@@ -43,6 +43,15 @@ clause('clause 1e — typerStep: not ready waits inside the grace, then pauses w
   ts({ pane: { ...idle, status: 'working' }, notIdle: 10 }).act === 'wait' &&
   ts({ pane: { ...idle, status: 'working' }, notIdle: 200 }).reason === 'could not type into the pane: the session stayed busy' &&
   ts({ pane: { error: true } }).reason === 'could not type into the pane: herdr could not read the pane', 'wrong')
+// S2: the session ran on after the Stop (another Stop hook blocked it, or the user typed a prompt), so the turn
+// running ends in a Stop that decides, R11 for the first; the busy grace does not cut it short. Codex's clear stage is
+// typerAct's.
+const BUSY = { ...idle, status: 'working' }
+clause('clause 1e8 — typerStep before /clear: a busy or focused pane after new entries waits past the grace, on both hosts; with no new entries the grace still pauses with R17, and new entries on a ready pane still pause with R16 (S2)',
+  ts({ grew: true, pane: BUSY, notIdle: 200 }).act === 'wait' && ts({ grew: true, pane: { ...BUSY, focused: true }, notIdle: 200 }).act === 'wait' &&
+  ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: 200 }).act === 'wait' &&
+  ts({ grew: false, pane: BUSY, notIdle: 200 }).code === 'R17' && ts({ grew: true }).code === 'R16',
+  JSON.stringify([ts({ grew: true, pane: BUSY, notIdle: 200 }), ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: 200 })]))
 // RB1: one observation per agent_status value herdr 0.9.1 reports, plus a missing one.
 const STATUS = [['idle', 'clear'], ['done', 'clear'], ['working', 'pause'], ['blocked', 'pause'], ['unknown', 'pause'], [undefined, 'pause']]
 const statusBad = STATUS.filter(([st, act]) => ts({ pane: { ...idle, status: st }, notIdle: 200 }).act !== act ||
@@ -150,6 +159,38 @@ clause('clause 1j4 — typerStep: a transcript ending in a line still being writ
   ts({ stage: 'resume', restore: NEW, pane: NEWP, typedNew: false, midWrite: 40 }).act === 'wait' && ts({ midWrite: null }).act === 'clear', 'wrong')
 clause('clause 1i — the typer\'s default timings are the spec\'s: 30 s for the new session, 2 min for the first turn, and it types the doctrine-resume command (E8-R32)',
   TYPER_TIMES.session === 30000 && TYPER_TIMES.firstTurn === 120000 && RESUME_LINE === '/doctrine:doctrine-resume (typed by doctrine auto-cycle, not a ruling)', JSON.stringify(TYPER_TIMES))
+
+// ---------------------------------------------------------------- clause 1k: the prompt gate's decision (S1a)
+
+// Claude Code 2.1.288 UserPromptSubmit payloads, verbatim from doctrine-skills-project/.doctrine/records/e10-clear/
+// probe-ups/hooklog.jsonl: line 27, a prompt typed in session 6b0cfa50; line 42, the resume line as the first prompt in
+// d60053b3, the session SessionStart(clear) started at the /clear that ended 6b0cfa50.
+const CC_UPS_PLAIN = {"session_id":"6b0cfa50-71fd-4829-a1de-6bc495ab318a","transcript_path":"/tmp/claude-1000/e10c-ups/claude-cfg/projects/-tmp-claude-1000-e10c-ups-proj/6b0cfa50-71fd-4829-a1de-6bc495ab318a.jsonl","cwd":"/tmp/claude-1000/e10c-ups/proj","scratchpad_dir":"/tmp/claude-1000/e10c-ups/cases/cc/tmp/claude-1000/-tmp-claude-1000-e10c-ups-proj/6b0cfa50-71fd-4829-a1de-6bc495ab318a/scratchpad","prompt_id":"d76f75ca-b16b-41ec-8b98-7760975aa5d9","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"Reply with the single word ok. probe-cc-a0"}
+const CC_UPS_RESUME = {"session_id":"d60053b3-a67b-42da-8146-6b0f96a2ba3b","transcript_path":"/tmp/claude-1000/e10c-ups/claude-cfg/projects/-tmp-claude-1000-e10c-ups-proj/d60053b3-a67b-42da-8146-6b0f96a2ba3b.jsonl","cwd":"/tmp/claude-1000/e10c-ups/proj","scratchpad_dir":"/tmp/claude-1000/e10c-ups/cases/cc/tmp/claude-1000/-tmp-claude-1000-e10c-ups-proj/d60053b3-a67b-42da-8146-6b0f96a2ba3b/scratchpad","prompt_id":"d248ac44-18dd-4670-b6ef-a0033b28356d","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"/doctrine:doctrine-resume (typed by doctrine auto-cycle, not a ruling)"}
+const F = await import('./dctr-codex.fixtures.mjs')
+// Each host's pair: the session before the /clear (the plain prompt's), the session the /clear started (the resume's).
+const HOSTS = [['claude', CC_UPS_PLAIN, CC_UPS_RESUME], ['codex', F.UPS_PLAIN_0160, F.UPS_RESUME_0160]]
+const { promptGate } = await import('./dctr-lib.mjs')
+const pg = (payload, more = {}) => promptGate({ prompt: payload.prompt, session: payload.session_id, pane: 'w1:p1', restored: null, ...more })
+const gateBad = []
+for (const [host, plain, resume] of HOSTS) {
+  const oldId = plain.session_id, newId = resume.session_id
+  const want = [
+    ['marked, fresh session named by the restore file', pg(resume, { restored: newId }), 'pass'],
+    ['marked, in the old session', pg({ ...resume, session_id: oldId }, { restored: null }), 'block'],
+    ['marked, in the old session, the restore file naming the new one', pg({ ...resume, session_id: oldId }, { restored: newId }), 'block'],
+    ['marked, no restore file', pg(resume, { restored: null }), 'block'],
+    ['marked, another session\'s restore file', pg(resume, { restored: oldId }), 'block'],
+    ['marked, no pane', pg(resume, { restored: newId, pane: null }), 'block'],
+    ['marked, no session id', pg({ ...resume, session_id: undefined }, { restored: undefined }), 'block'],
+    ['unmarked, no restore file', pg(plain), 'pass'],
+    ['unmarked, no pane', pg(plain, { pane: null }), 'pass'],
+    ['marked mid-text', pg({ ...plain, prompt: `please ${resume.prompt.split(' ').slice(1).join(' ')} now` }), 'block'],
+  ]
+  for (const [what, got, act] of want) if (got?.act !== act || (act === 'block' && !/auto-cycle/.test(got.reason))) gateBad.push(`${host} ${what}: ${JSON.stringify(got)}`)
+}
+clause('clause 1k — promptGate on both hosts\' captured payloads: a marked prompt passes only in the session the pane\'s restore file names; marked in the old session, with no restore file, another session\'s, no pane or no session blocks with a reason naming the auto-cycle; an unmarked prompt passes (S1a)',
+  gateBad.length === 0, gateBad.join(' || '))
 
 // ---------------------------------------------------------------- clause 2: the typer end to end (T7)
 
@@ -394,6 +435,124 @@ clause('clause 2s2 — every R17 line the typer wrote is one of the fixed phrase
 clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
   [changed, working, grew, fail, noRestore, didNotTake, lookupLost, stale, silent, runFails].every((c) => c.state === '- State: Open'), 'a state line moved')
 
+// ---------------------------------------------------------------- clause 2w: the prompt gate end to end (S1a)
+
+// The gate script run as each host runs it: the payload on stdin, HERDR_PANE_ID and TMPDIR in its environment. A block
+// is stdout {"decision":"block","reason":...} and exit 0, the form both hosts honour (probe-ups U1, U4).
+const gateScript = path.join(import.meta.dirname, 'dctr-promptgate.mjs')
+const { gatedFile } = await import('./dctr-state.mjs')
+function gateRun(name, payload, { restored, pane = `w9:p-${name}`, tmpdir, script = gateScript, raw } = {}) {
+  const dir = tmpdir ?? path.join(tmp, 'gate', name)
+  fs.mkdirSync(path.join(tmp, 'gate'), { recursive: true })
+  if (!tmpdir) fs.mkdirSync(dir, { recursive: true })
+  const at = (fn) => { const was = process.env.TMPDIR; process.env.TMPDIR = dir; try { return fn() } finally { process.env.TMPDIR = was } }
+  if (restored !== undefined && pane) at(() => write(restoreFile(pane), JSON.stringify({ session_id: restored, transcript_path: '/x.jsonl' })))
+  const e = { ...env, TMPDIR: dir }
+  delete e.HERDR_PANE_ID
+  if (pane) e.HERDR_PANE_ID = pane
+  const r = spawnSync(process.execPath, [script], { input: raw ?? JSON.stringify(payload), env: e, encoding: 'utf8', timeout: 20000 })
+  let out = null
+  try { out = r.stdout === '' ? '' : JSON.parse(r.stdout) } catch { out = { unparsed: r.stdout } }
+  const gated = pane && fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory() ? at(() => { try { return JSON.parse(fs.readFileSync(gatedFile(pane), 'utf8')) } catch { return null } }) : null
+  return { code: r.status, out, gated, err: r.stderr }
+}
+const blocked = (g) => g.code === 0 && g.out?.decision === 'block' && /auto-cycle/.test(g.out.reason) && Object.keys(g.out).length === 2
+const passed = (g) => g.code === 0 && g.out === '' && g.gated === null
+const e2eBad = []
+for (const [host, plain, resume] of HOSTS) {
+  const oldId = plain.session_id, newId = resume.session_id
+  const cases = [
+    ['marked, fresh', gateRun(`${host}-fresh`, resume, { restored: newId }), passed],
+    ['marked, old session', gateRun(`${host}-old`, { ...resume, session_id: oldId }), (g) => blocked(g) && g.gated?.session_id === oldId],
+    ['marked, no restore file', gateRun(`${host}-norestore`, resume), (g) => blocked(g) && g.gated?.session_id === newId],
+    ['marked, another session\'s restore file', gateRun(`${host}-other`, resume, { restored: oldId }), (g) => blocked(g) && g.gated?.session_id === newId],
+    ['marked, no pane', gateRun(`${host}-nopane`, resume, { restored: newId, pane: null }), blocked],
+    ['unmarked', gateRun(`${host}-plain`, plain), passed],
+    ['unmarked, the restore file naming another session', gateRun(`${host}-plain-other`, plain, { restored: newId }), passed],
+  ]
+  for (const [what, g, ok] of cases) if (!ok(g)) e2eBad.push(`${host} ${what}: ${JSON.stringify(g)}`)
+}
+clause('clause 2w — the gate script on both hosts\' captured payloads: marked and fresh passes printing nothing; marked in the old session, with no restore file or another session\'s blocks with the block JSON and writes the gated marker naming the payload\'s session; marked with no pane blocks; unmarked passes, printing nothing and writing no marker (S1a)',
+  e2eBad.length === 0, e2eBad.join(' || '))
+// A thrown error blocks: TMPDIR a regular file (no directory can be made under it), the gate copied away from the
+// modules it imports, and stdin that is not JSON. An unmarked prompt passes untouched under each of the first two.
+const notDir = path.join(tmp, 'gate', 'not-a-dir'); write(notDir, 'x')
+const lone = path.join(tmp, 'gate', 'lone'); fs.mkdirSync(lone, { recursive: true }); fs.copyFileSync(gateScript, path.join(lone, 'dctr-promptgate.mjs'))
+const throwBad = []
+for (const [host, plain, resume] of HOSTS) {
+  const g = [
+    ['marked, TMPDIR a file', gateRun(`${host}-t1`, resume, { tmpdir: notDir }), blocked],
+    ['marked, the lib missing', gateRun(`${host}-t2`, resume, { script: path.join(lone, 'dctr-promptgate.mjs') }), blocked],
+    ['marked, stdin not JSON', gateRun(`${host}-t3`, resume, { raw: `{"prompt":"${resume.prompt}"` }), blocked],
+    ['unmarked, TMPDIR a file', gateRun(`${host}-t4`, plain, { tmpdir: notDir }), (r) => r.code === 0 && r.out === ''],
+    ['unmarked, the lib missing', gateRun(`${host}-t5`, plain, { script: path.join(lone, 'dctr-promptgate.mjs') }), passed],
+  ]
+  for (const [what, r, ok] of g) if (!ok(r)) throwBad.push(`${host} ${what}: ${JSON.stringify(r)}`)
+}
+clause('clause 2w2 — the gate fails closed: a marked prompt blocks when the gate throws (TMPDIR not a directory, its modules missing, stdin not JSON); an unmarked prompt still passes untouched (S1a)',
+  throwBad.length === 0, throwBad.join(' || '))
+// The marker hidden from a check of the serialized text: escaped in the JSON (the prompt still carries it once
+// decoded), and a marked payload whose prompt is not a string. Each blocks, as the plain marked line does.
+const { RESUME_MARK } = await import('./dctr-promptgate.mjs')
+const escaped = (p) => JSON.stringify(p).replace('(typed by doctrine', '\\u0028typed by doctrine')
+const hideBad = [], hideProof = []
+for (const [host, plain, resume] of HOSTS) {
+  const old = { ...resume, session_id: plain.session_id }, arr = { ...old, prompt: [old.prompt] }
+  const g = [
+    ['marked once decoded, escaped in the JSON', gateRun(`${host}-h1`, old, { raw: escaped(old) }), (r) => blocked(r) && r.gated?.session_id === old.session_id],
+    ['marked text, the prompt not a string', gateRun(`${host}-h2`, arr), (r) => blocked(r) && r.gated?.session_id === old.session_id],
+    ['marked text, the prompt not a string, in the session the restore file names', gateRun(`${host}-h4`, { ...resume, prompt: [resume.prompt] }, { restored: resume.session_id }), (r) => blocked(r) && r.gated?.session_id === resume.session_id],
+    ['unmarked, the prompt not a string', gateRun(`${host}-h3`, { ...plain, prompt: [plain.prompt] }), passed],
+  ]
+  for (const [what, r, ok] of g) if (!ok(r)) hideBad.push(`${host} ${what}: ${JSON.stringify(r)}`)
+  if (escaped(old).includes(RESUME_MARK) || !JSON.parse(escaped(old)).prompt.includes(RESUME_MARK) || !JSON.stringify(arr).includes(RESUME_MARK) || typeof arr.prompt === 'string') hideProof.push(host)
+}
+clause('clause 2w4 — a marker the serialized text hides still blocks: escaped in the JSON, or carried by a prompt that is not a string; an unmarked prompt that is not a string passes untouched',
+  hideBad.length === 0, hideBad.join(' || '))
+clause('clause 3w4 — without the gate: the escaped payload\'s text does not contain the marker while its decoded prompt does, and the second payload\'s text carries the marker in a prompt that is not a string',
+  hideProof.length === 0, hideProof.join(', '))
+// R2-B5: every combination of prompt shape (a string, an array, an object, a number), marker form (literal or
+// JSON-escaped, in the prompt or, for a string prompt, in another field), and pane (none, the old session's, the
+// fresh session the restore file names). Marked means the marker is in the raw text or in any decoded string. A marked
+// payload whose prompt is not a string blocks wherever it runs; a marked string prompt passes only in the fresh
+// session. An unmarked prompt of each shape passes.
+const escAll = (raw) => raw.replaceAll('(typed by doctrine', '\\u0028typed by doctrine')
+const SHAPES = { string: (m) => m, array: (m) => [m], object: (m) => ({ text: m }), number: () => 5 }
+const comboBad = [], comboProof = []
+for (const [host, plain, resume] of HOSTS) {
+  for (const [shape, make] of Object.entries(SHAPES)) {
+    for (const where of ['prompt', 'beside']) {
+      if (where === 'prompt' && shape === 'number') continue
+      for (const form of ['literal', 'escaped']) {
+        for (const pane of ['none', 'old', 'fresh']) {
+          const session = pane === 'old' ? plain.session_id : resume.session_id
+          const payload = where === 'prompt' ? { ...resume, session_id: session, prompt: make(resume.prompt) } : { ...resume, session_id: session, prompt: make(plain.prompt), note: resume.prompt }
+          const raw = form === 'escaped' ? escAll(JSON.stringify(payload)) : JSON.stringify(payload)
+          const name = `${host}-c-${shape}-${where}-${form}-${pane}`
+          const r = gateRun(name, payload, { raw, pane: pane === 'none' ? null : `w9:p-${name}`, ...(pane === 'fresh' ? { restored: resume.session_id } : {}) })
+          const want = shape === 'string' && pane === 'fresh' ? 'pass' : 'block'
+          if (!(want === 'pass' ? passed(r) : blocked(r) && (pane === 'none' || r.gated?.session_id === session))) comboBad.push(`${name}: want ${want}, got ${JSON.stringify(r.out)}`)
+          if ((form === 'escaped') === raw.includes(RESUME_MARK)) comboProof.push(`${name}: the escaped form holds the literal marker, or the literal form lacks it`)
+        }
+      }
+    }
+    const un = gateRun(`${host}-c-${shape}-unmarked`, { ...plain, prompt: make(plain.prompt) })
+    if (!passed(un)) comboBad.push(`${host} ${shape} unmarked: ${JSON.stringify(un)}`)
+  }
+}
+clause('clause 2w5 — every combination of prompt shape, marker form and place, and pane: a marked non-string prompt blocks everywhere, a marked string prompt passes only in the fresh session, an unmarked prompt of any shape passes (R2-B5)',
+  comboBad.length === 0, comboBad.slice(0, 8).join(' || '))
+clause('clause 3w5 — without the gate: each escaped payload\'s text lacks the literal marker and each literal one carries it',
+  comboProof.length === 0, comboProof.slice(0, 4).join(', '))
+const hj = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).hooks
+const { CODEX_HOOKS } = await import('./dctr-lib.mjs')
+const gateEntries = (hj.UserPromptSubmit || []).flatMap((g) => g.hooks).filter((h) => /dctr-promptgate\.mjs/.test(h.command))
+const codexGate = CODEX_HOOKS.filter(([ev, script]) => script === 'dctr-promptgate.mjs')
+clause('clause 2w3 — the gate is registered on both hosts: one UserPromptSubmit entry in hooks.json and one in the Codex install, each with a timeout of at least 30 s, and on no other event',
+  gateEntries.length === 1 && gateEntries[0].timeout >= 30 && codexGate.length === 1 && codexGate[0][0] === 'UserPromptSubmit' && codexGate[0][2] >= 30 &&
+  Object.entries(hj).every(([ev, gs]) => ev === 'UserPromptSubmit' || !JSON.stringify(gs).includes('dctr-promptgate')),
+  JSON.stringify([gateEntries, codexGate]))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const entriesAfter = (file, from) => fs.readFileSync(file).subarray(from).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -441,6 +600,11 @@ clause('clause 3d2 — without the typer: after /clear the did-not-take shim ans
 clause('clause 3d — without the typer: the late-session shim answered the old session after /clear at least once, and the silent one wrote no reply',
   late.calls.filter((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session).length === 3 &&
   fs.readFileSync(silent.newTranscript, 'utf8') === '' && fs.readFileSync(normal.newTranscript, 'utf8').includes('"assistant"'), 'shim fixtures wrong')
+
+clause('clause 3e — without the gate: on each host the resume payload carries the marker and a session other than the plain prompt\'s, the plain prompt carries no marker, and the TMPDIR stand-in is a regular file',
+  HOSTS.every(([, plain, resume]) => resume.prompt.includes('(typed by doctrine auto-cycle, not a ruling)') && !plain.prompt.includes('typed by doctrine auto-cycle') &&
+    resume.session_id !== plain.session_id && resume.hook_event_name === 'UserPromptSubmit' && plain.hook_event_name === 'UserPromptSubmit') &&
+  fs.statSync(notDir).isFile() && !fs.existsSync(path.join(lone, 'dctr-lib.mjs')), 'gate fixtures wrong')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

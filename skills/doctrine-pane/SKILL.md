@@ -117,6 +117,11 @@ What it refuses, and none of it is advisory:
 - Writing when it **could not observe** something. A failed stat or a failed pane lookup is "I could
   not look", never "safe".
 
+Any refusal from any launcher command, these and the ones this skill names elsewhere, goes to the
+user quoted verbatim, the line exactly as the launcher printed it, never paraphrased. Never work
+around a refusal: when `read` refuses, do not read the session's tee file yourself, and when `open`
+refuses, do not start the session some other way.
+
 ## Ownership
 
 The pane is the user's after connect, and after every handover back. They give it to you in a

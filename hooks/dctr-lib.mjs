@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { wrapperValue, parseRecord, unwrapLine } from './dctr-record.mjs'
+import { RESUME_MARK, carriesMark } from './dctr-promptgate.mjs'
 
 // Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
 // (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
@@ -777,7 +778,7 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
     }
   }
   // Read after the floor raise, so a floor above 90% of the window is reported too.
-  if (win && tier !== null && tier > win * 0.9) errors.push('tier above 90% of the window')
+  if (win && tier !== null && tier > win * 0.9) errors.push('configuration error: the auto-cycle tier set in the record is above 90% of the window, not a reading of context use')
   return { tier, tierText: label, errors }
 }
 
@@ -856,10 +857,30 @@ export const STOP_FILE = '.doctrine/auto-cycle.stop'
 /** The last line of the assistant message that says the handoff is done and the session may be cleared. */
 export const READY_LINE = 'auto-cycle: ready'
 export const RESUME_COMMAND = '/doctrine:doctrine-resume'
-export const RESUME_ARGS = '(typed by doctrine auto-cycle, not a ruling)'
+export const RESUME_ARGS = RESUME_MARK
 /** What the typer types after /clear (E8-R24, E8-R32): the doctrine-resume skill's slash command, so the new session
  *  runs doctrine-resume, with an argument saying it is not a ruling. */
 export const RESUME_LINE = `${RESUME_COMMAND} ${RESUME_ARGS}`
+/**
+ * The prompt gate's decision (E10 S1, dctr-promptgate.mjs) over one UserPromptSubmit: `prompt` and `session` from the
+ * payload, `pane` the HERDR_PANE_ID, `restored` the session id this pane's restore file names, or null, `raw` the
+ * payload's text. A line is marked when `prompt` carries RESUME_MARK or `raw` does (carriesMark: in its text or any
+ * string once decoded); an unmarked one passes, and a marked one
+ * whose `prompt` is not a string is blocked. A marked one passes only when the restore file names this session, which
+ * is the session the auto-cycle's /clear started; it is blocked with no pane, no session id, no restore file, or one
+ * naming another session. Returns `{ act: 'pass' | 'block', reason }`.
+ */
+export function promptGate({ prompt, session, pane, restored, raw }) {
+  const block = (why) => ({ act: 'block', reason: `doctrine auto-cycle: not sent, ${why}` })
+  const marked = (typeof prompt === 'string' && prompt.includes(RESUME_MARK)) || carriesMark(raw)
+  if (!marked) return { act: 'pass', reason: 'not a line the auto-cycle typed' }
+  if (typeof prompt !== 'string') return block('the payload is marked but its prompt is not text the gate can read')
+  if (!pane) return block('this session has no herdr pane')
+  if (!session) return block('the prompt names no session')
+  if (!restored) return block('no session was started in this pane by the auto-cycle\'s /clear')
+  if (restored !== session) return block(`the auto-cycle's /clear started session ${restored} in this pane, not this one`)
+  return { act: 'pass', reason: 'the session the auto-cycle\'s /clear started' }
+}
 /** What the Stop hook prints in the pane when it launches the typer (E8-R23). */
 export const LAUNCH_MESSAGE = 'doctrine auto-cycle: will type /clear and resume here once you move focus off this pane'
 /** The sidebar token's source and lifetime (E8-R23): its own source, apart from the orchestrator's custom:doctrine. */
@@ -1165,6 +1186,9 @@ export function cycleDecision(f) {
   // 2, 3. An ordinary turn, or an unresolved pause after this session's warning (E8-R25).
   if (!f.warned) return { act: 'none', reason: 'no warned line for this session' }
   if (f.pausedAfterWarned) return { act: 'none', reason: "an unresolved paused line follows this session's warned line" }
+  // A Stop after this record state's typer launched, carrying stop_hook_active: another Stop hook blocked the Stop that
+  // launched it and the session ran on, whatever the continuation ended on. Written here, the line stops that typer.
+  if (f.stopHookActive && f.claimTaken) return pause('R11')
   // 4. Live work: wait for the next Stop.
   if (f.backgroundTasks) return { act: 'wait', reason: 'background tasks are running' }
   if (f.liveWork) return { act: 'wait', reason: f.liveWork }
@@ -1206,12 +1230,13 @@ export const typedAfter = (e, stopAt) =>
  */
 export function userTyped(e) {
   if (e?.type !== 'user' || e.isMeta) return false
-  const c = e.message?.content
-  const parts = typeof c === 'string' ? [c] : Array.isArray(c) ? c : []
-  if (parts.some((x) => x?.type === 'tool_result')) return false
-  const text = parts.map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')).join('').trim()
+  if (contentParts(e).some((x) => x?.type === 'tool_result')) return false
+  const text = entryText(e).trim()
   return !text.startsWith('<command-name>/clear</command-name>') && !ownResume(text)
 }
+const contentParts = (e) => { const c = e?.message?.content; return typeof c === 'string' ? [c] : Array.isArray(c) ? c : [] }
+/** A transcript entry's text: its string content, or its text parts joined. */
+export const entryText = (e) => contentParts(e).map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')).join('')
 
 /** The typer's own resume command as Claude Code records it: the three command tags and nothing else. */
 const ownResume = (text) => {
@@ -1271,8 +1296,7 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
 export function typerStep(o) {
   const step = o.host === 'codex' ? codexTyperAct(o) : typerAct(o)
   const s = paneSession(o.pane)
-  // On Codex the pane's continue line naming the old session (clearTook) is the first sight of the /clear taking (Q6).
-  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession) || (o.host === 'codex' && o.took === true)
+  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession)
   return o.stage !== 'clear' && !o.cycled && step.act !== 'abort' && took ? { ...step, cycle: true } : step
 }
 
@@ -1299,6 +1323,10 @@ function typerReady(o, t, pause) {
   if (paneSession(o.pane) === null) return pause('R17', R17_WHY.lookup)
   if (o.pane.focused !== false) return { act: 'wait', reason: 'the pane is focused' }
   if (!READY_STATUSES.includes(o.pane.status)) {
+    // New entries since the Stop: the session ran on (a prompt, or another Stop hook that blocked), and the turn
+    // running ends in a Stop, which pauses with R11 for the second. herdr reads it ready only once that Stop's hooks
+    // have returned, so the typer waits for it rather than pausing on the busy grace.
+    if (o.stage === 'clear' && o.grew === true) return { act: 'wait', reason: 'the session ran on after the Stop' }
     return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
   }
   return null
@@ -1511,58 +1539,22 @@ function readCodexUsage(text, lastUuid) {
  *  never opens and one Enter submits it (seat III live run, III-evidence/popup-resume-line-rollout.jsonl). */
 export const CODEX_RESUME_LINE = `$doctrine:doctrine-resume ${RESUME_ARGS}`
 
-/** The line Codex prints when /clear ends a session: `To continue this session, run codex resume, then select <title>
- *  (<session id>)` (probe-clear-screen.txt). */
-export const CLEAR_TOOK_TEXT = 'To continue this session, run codex resume'
-
-/** Each continue line in a pane's text: `text`, what follows CLEAR_TOOK_TEXT up to a blank line or the composer's
- *  `›`, and `end`, the index of its last line. Codex breaks the line itself at the pane's width, anywhere: at a space,
- *  after a hyphen inside the session id, or mid-word (III-evidence/popup-after-clear.txt; r3 realenv
- *  main-pane-read-step5-R18.txt, a 45-column tab: "(01a0ea5c-7200-70c2-" then "9556-138eea3f9cde)"). So the lines are
- *  joined with every space and break taken out, the continue text too, never rejoined with a space (E10H-R3-B5). */
-const squeeze = (s) => s.replace(/\s+/g, '')
-function continueLines(text) {
-  const ls = String(text ?? '').split('\n'), out = [], key = squeeze(CLEAR_TOOK_TEXT)
-  const open = (l) => l !== undefined && l.trim() !== '' && !l.trim().startsWith('›')
-  for (let i = 0; i < ls.length; i++) {
-    let s = ''
-    for (; open(ls[i]); i++) s += squeeze(ls[i])
-    for (const after of s.split(key).slice(1)) out.push({ text: after, end: i - 1 })
-  }
-  return out
-}
-
-/** Whether the typer's /clear took (seam S4, Q6): the pane text read after the send holds more continue lines naming
- *  the old session than the text read before it, so one appeared that was not there. */
-export function clearTook(before, after, oldId) {
-  if (!oldId) return false
-  const count = (t) => continueLines(t).filter((l) => l.text.includes(oldId)).length
-  return count(after) > count(before)
-}
-
 /** What the TUI shows in an empty composer: a new chat's placeholder, and a follow-up's (both in the 0.156.1 binary). */
 const COMPOSER_PLACEHOLDERS = ['Ask Codex to do anything', 'Ask a follow-up question']
 
-/** Whether the composer after the last continue line naming `oldId` is empty, the state the E10 table's typer row
- *  names ("followed by an empty composer", probe-clear-screen.txt): the first composer line (`›`) after that
- *  continue line holds nothing or the placeholder. False for a draft, for a prompt the user already submitted in the
- *  new chat (its own `›` line comes first, the fresh composer after its answer), and when no composer line shows.
- *  Null when no continue line names `oldId`, so it says nothing (E10H-B1). */
-export function composerEmpty(text, oldId) {
-  if (!oldId) return null
-  const at = continueLines(text).findLast((l) => l.text.includes(oldId))
-  if (!at) return null
-  const composer = String(text ?? '').split('\n').slice(at.end + 1).map((l) => l.trim()).find((l) => l.startsWith('›'))
-  return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
-}
-
-/** Whether the pane's composer, its last `›` line, is empty (E10H-R4-B1): the check before the /clear and before a
- *  second resume line, where no continue line anchors it. A submitted prompt sits above the composer, so the last `›`
- *  line is the composer; a pane showing none is not empty. Null when the pane text was not read. */
+/** Whether the pane's composer, its last `›` line, is empty (E10H-R4-B1, E10 S1): the check before every Codex send.
+ *  A submitted prompt sits above the composer, so the last `›` line is the composer; a pane showing none is not empty.
+ *  Null when the pane text was not read. */
 export function composerIdle(text) {
   if (typeof text !== 'string') return null
-  const composer = text.split('\n').map((l) => l.trim()).findLast((l) => l.startsWith('›'))
-  return composer !== undefined && ['', ...COMPOSER_PLACEHOLDERS].includes(composer.slice(1).trim())
+  const composer = composerLine(text)
+  return composer !== null && ['', ...COMPOSER_PLACEHOLDERS].includes(composer)
+}
+
+/** The text in the pane's composer, its last `›` line, trimmed; null when the pane shows none or was not read. */
+export function composerLine(text) {
+  const line = String(text ?? '').split('\n').map((l) => l.trim()).findLast((l) => l.startsWith('›'))
+  return line === undefined ? null : line.slice(1).trim()
 }
 
 /** Whether a rollout holds a turn_aborted event, the one mark Esc leaves on a turn (probe B6: no Stop fires, and
@@ -1696,8 +1688,12 @@ export function watchedTurn(text) {
 }
 
 /** The watcher's timings in ms: poll, how long a turn end stays idle before the idle pause (Claude Code raises
- *  idle_prompt after about 60 s), and the longest it watches one turn. */
-export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
+ *  idle_prompt after about 60 s), the longest it watches one turn, and how long an unfinished turn's rollout may go
+ *  without growing before the turn reads stalled (E10-R29). A turn whose provider stops answering never ends and
+ *  writes nothing more (Codex retries "waiting for network"). A healthy turn also goes quiet: a wait on seats writes
+ *  nothing until its timeout, which Codex sessions have set to 600 s, and a long answer or a compaction has run past
+ *  5 minutes with no write. The stall time sits above all of those. */
+export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000, stall: 15 * 60 * 1000 }
 
 /**
  * The Codex watcher's next action (E10 table rows for idle_prompt, StopFailure and background_tasks): Codex fires no
@@ -1708,11 +1704,13 @@ export const WATCH_TIMES = { poll: 2000, idle: 60000, max: 12 * 3600 * 1000 }
  * task_complete, so what the rollout shows at the turn's end is not what the Stop read: E10H-R2-B2), `o.liveWork`
  * liveWork's reason or null, `o.session` the watched session and `o.paneSession` the session herdr names in the pane
  * (null when unread), `o.ready` whether the turn's last message ends with the ready line, `o.idleFor` ms the
- * observation has read idle, `o.unknownFor` ms it has read the background work unknown, `o.age` ms watched. A turn
+ * observation has read idle, `o.unknownFor` ms it has read the background work unknown, `o.stalledFor` ms the
+ * rollout has not grown while the turn is unfinished, `o.age` ms watched. A turn
  * ended on the ready line with no terminal running and no Stop held leaves nothing to watch: its Stop decided, and an
  * idle pause never follows the ready line (E8-D18). A held Stop whose background work cannot be read stays held, E8-D7's
  * direction, but never silently: past the idle grace the watcher hands on the unknown (E10H-R3-B4).
- * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stop` (the work that held the Stop back is gone:
+ * Acts: `exit`, `wait`, `stopFailure` (an API error ended the turn), `stall` (the turn stalled: handed on as a
+ * StopFailure whose `error` names the stall, E10-R29), `stop` (the work that held the Stop back is gone:
  * the background work finished and no seat or gate is live, so the Stop is decided again), `idle` and `unknown`.
  */
 export function watchStep(o) {
@@ -1721,7 +1719,11 @@ export function watchStep(o) {
   if (o.turn.newTurn) return { act: 'exit', reason: 'a new turn started, and its own watcher follows it' }
   if (o.paneSession && o.paneSession !== o.session) return { act: 'exit', reason: 'herdr names another session in the pane' }
   if (o.age >= t.max) return { act: 'exit', reason: 'the turn was watched for the longest time allowed' }
-  if (!o.turn.ended) return { act: 'wait', reason: 'the turn is running' }
+  if (!o.turn.ended) {
+    return o.stalledFor >= t.stall
+      ? { act: 'stall', error: `turn stalled, no rollout write for ${Math.round(t.stall / 1000)} s with the turn unfinished`, reason: 'the turn is unfinished and its rollout has not grown for the stall time' }
+      : { act: 'wait', reason: 'the turn is running' }
+  }
   if (o.obs.apiError) return { act: 'stopFailure', reason: `the turn ended with an API error (${o.obs.apiError})` }
   if (o.held && !o.liveWork && o.obs.backgroundUnknown) {
     return o.unknownFor >= t.idle ? { act: 'unknown', reason: `the background work could not be read (${o.obs.backgroundUnknown})` } : { act: 'wait', reason: 'the background work could not be read, inside the grace' }
@@ -1733,12 +1735,18 @@ export function watchStep(o) {
 }
 
 /**
- * typerAct on Codex (E10 table rows for the typer). Before the /clear it is typerAct itself. Then Codex writes nothing
- * on disk until the next prompt, so the typer reads the pane (Q6): `o.took` is clearTook's answer, null when the pane
- * could not be read. Once it took, the resume line is sent as the new chat's first prompt; a /clear that did not take
- * within the restore wait pauses with R18 naming the old session, and nothing is sent (clear 1, resume 0). After the
- * resume the typer waits for the restore file carrying the new session id (R14 past the wait: clear 1, resume 1) and
- * for herdr to report that session, then for the first turn, as on Claude Code.
+ * typerAct on Codex (E10 table rows for the typer, E10 S1). Before the /clear it is typerAct itself. After it the
+ * typer waits one poll, then sends the resume line once herdr reads the pane ready and unfocused and the composer read
+ * finds it empty; it never reads the screen for a sign that the /clear took. The prompt gate (dctr-promptgate.mjs)
+ * blocks the resume line in any session but the one this pane's restore file names, and its gated marker (`o.gated`,
+ * the session it blocked) settles the /clear: the old session means it did not take, R18, nothing more sent; another
+ * session means the new chat started without doctrine, R14. Otherwise the restore file and the first turn confirm,
+ * as on Claude Code.
+ *
+ * A new session before the resume line (a restore file, or herdr naming a session other than the old one) is one the
+ * user started by typing in the new chat, as codex-cli 0.160.0 starts it at the first prompt, or one a host started at
+ * the /clear itself, as Claude Code does. Only the new chat's rollout tells them apart, so after one poll beside the
+ * restore file the step is typerAct's: typing pauses R16, nothing typed sends the resume line.
  */
 function codexTyperAct(o) {
   const t = o.times || TYPER_TIMES
@@ -1750,15 +1758,16 @@ function codexTyperAct(o) {
   const guard = typerGuard(o, t, pause)
   if (guard) return guard
   if (o.stage === 'resume') {
-    // The user started the new chat before the resume line: Codex writes the restore file, and herdr's hook names the
-    // new session, only at a new chat's first prompt, and the typer has sent none (E10H-B1).
+    if (o.waited < t.poll) return { act: 'wait', reason: 'one poll after the /clear before the next send' }
     const s = paneSession(o.pane)
-    if (o.restore || (s !== null && s !== o.oldSession)) return pause('R16')
-    if (o.took === null || o.took === undefined) return pause('R17', R17_WHY.lookup)
-    if (!o.took) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the /clear to take' } : pause('R18', o.oldSession)
-    // `o.composer` is composerEmpty's answer here: a draft, or a prompt submitted after the continue line, is typing.
-    return codexSendGuard(o, t, pause) || { act: 'resume', reason: 'the /clear took: the pane shows the old session\'s continue line and an empty composer' }
+    if (o.restore || (s !== null && s !== o.oldSession)) {
+      if (o.restore && o.sessionWait < t.poll) return { act: 'wait', reason: 'one poll beside the restore file, for the new chat\'s rollout' }
+      const step = typerAct(o)
+      return step.act === 'resume' ? codexSendGuard(o, t, pause) || step : step
+    }
+    return codexSendGuard(o, t, pause) || { act: 'resume', reason: 'the pane is ready, unfocused and its composer empty after the /clear' }
   }
+  if (o.gated) return o.gated === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   if (!o.restore) return o.waited < t.restore ? { act: 'wait', reason: 'waiting for the restore file' } : pause('R14')
   const s = paneSession(o.pane)
   if (s !== o.restore.session) {
@@ -1778,7 +1787,7 @@ function codexTyperAct(o) {
 
 /**
  * The checks before every Codex send, the /clear, the first resume line and a second one alike (E10H-R4-B1): a
- * composer that is not empty (`o.composer`, composerEmpty's after the /clear and composerIdle's otherwise) is typing,
+ * composer that is not empty (`o.composer`, composerIdle's) is typing,
  * R16 whether or not the pane is focused; then typerReady (a session named, unfocused, ready); then a composer nobody
  * read (null) pauses with R17, since only a read pane says it is empty. A step, or null when the typer may send. What
  * the new chat's rollout shows (typing, an interrupted resume turn) is checked before the retry reaches this.
@@ -1809,6 +1818,7 @@ export const CODEX_HOOKS = [
   ['PostToolUse', 'dctr-gauge.mjs', 5],
   ['Stop', 'dctr-cycle.mjs', 60],
   ['UserPromptSubmit', 'dctr-cycle.mjs', 5],
+  ['UserPromptSubmit', 'dctr-promptgate.mjs', 30],
   ['PermissionRequest', 'dctr-cycle.mjs', 30],
 ]
 /** `SessionStart` -> `session_start`, the label Codex keys trust lines and hashes by. */
@@ -1937,6 +1947,42 @@ function tomlSet(lines, tablePath, key, value, anchor = null) {
   lines.splice(at, 0, ...(at > 0 && lines[at - 1].trim() !== '' ? [''] : []), `[${tomlPath(tablePath)}]`, `${tomlKey(key)} = ${value}`)
   return true
 }
+/** A setting at `full` (table path plus key) as config.toml holds it: `value`, its text, as a `key = value` line or as
+ *  a key inside an inline table on the table's own line; `inline`, whether the table is such a line. */
+function optionalValue(lines, full) {
+  const rows = tomlLines(lines.join('\n'))
+  const row = rows.find((r) => r.kind === 'key' && eqPath(r.path, full))
+  if (row) return { value: row.text.slice(row.eq + 1, row.commentAt ?? row.text.length).trim(), inline: false }
+  const table = rows.find((r) => r.kind === 'key' && eqPath(r.path, full.slice(0, -1)))
+  if (!table) return { value: undefined, inline: false }
+  return { value: inlineTopValue(table.text.slice(table.eq + 1, table.commentAt ?? table.text.length), full.at(-1)), inline: true }
+}
+/** The text of `key`'s value among the top-level keys of the inline table `text` (`{ k = v, ... }`), or undefined: a
+ *  key of that name in a nested table or inside a string is not it. */
+function inlineTopValue(text, key) {
+  const parts = []
+  let depth = 0, q = null, start = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (q) { if (c === '\\' && q === '"') i++; else if (c === q) q = null; continue }
+    if (c === '"' || c === "'") q = c
+    else if (c === '{' || c === '[') { if (depth++ === 0) start = i + 1 }
+    else if (c === '}' || c === ']') { if (--depth === 0) parts.push(text.slice(start, i)) }
+    else if (c === ',' && depth === 1) { parts.push(text.slice(start, i)); start = i + 1 }
+  }
+  for (const p of parts) {
+    const t = p.trimStart(), k = parseTomlKey(t, 0)
+    if (k && k.segs.length === 1 && k.segs[0] === key && t[k.end] === '=') return t.slice(k.end + 1).trim()
+  }
+  return undefined
+}
+
+/** tomlSet for a setting the install does not own: true when written, false when already so, and tomlSet's refusal
+ *  message, not thrown, where it would have to rewrite a line the user wrote (an inline table, dotted keys). */
+function optionalSet(lines, full, value) {
+  try { return tomlSet(lines, full.slice(0, -1), full.at(-1), value) } catch (e) { return e.message }
+}
+
 /** Remove a table's block and the blank line before it. */
 function tomlRemove(lines, tablePath) {
   const rows = tomlLines(lines.join('\n'))
@@ -1950,9 +1996,13 @@ function tomlRename(lines, from, to) {
   if (h >= 0) lines[h] = `[${tomlPath(to)}]`
 }
 
+/** The concurrent seats a Codex session may run, which the install writes as agents.max_concurrent_threads_per_session (E10-R17). */
+const CODEX_SEATS = 8
+
 /**
  * The install as text in, text out: hooks.json with the CODEX_HOOKS entries running the scripts in `hookDir`, and
- * config.toml with a trust line for each and sandbox_workspace_write.network_access = true (Q3). An entry is the
+ * config.toml with a trust line for each, and sandbox_workspace_write.network_access = true (Q3) and the seat limit
+ * where each is absent. An entry is the
  * install's own when its group is one handler running `node '<hookDir>/dctr-*.mjs'`; every other entry and trust
  * line is left byte-identical (E10-D2). Own entries are rewritten in place, so no foreign group changes index and
  * its trust key still names it; a foreign group that does move, because a surplus own entry before it went, has
@@ -2019,10 +2069,230 @@ export function codexInstallPlan({ hooksJson, configToml, hookDir, hooksJsonPath
   for (const k of drops) tomlRemove(lines, k)
   for (const [from, to] of moves) tomlRename(lines, from, to)
   const written = trust.filter(([k, hash]) => tomlSet(lines, k, 'trusted_hash', JSON.stringify(hash), ['hooks', 'state'])).length
-  const net = tomlSet(lines, ['sandbox_workspace_write'], 'network_access', 'true')
   messages.push(written || drops.length || moves.length ? `config.toml: ${written} doctrine hook trust lines written` : 'config.toml: the doctrine trust lines are current')
-  messages.push(net
+  // The two settings below are not the install's to own. Where the user wrote the table they sit in on one line (an
+  // inline table), or in another shape tomlSet will not edit, that line is left byte-identical, the install says so
+  // and how to add the setting, and the rest of the install goes ahead; only the trust lines above refuse.
+  // Each is written only where absent; a value the user set, whatever it is, is left byte-identical, comment and all,
+  // and the install says so in one line (the owner's ruling).
+  const NET = ['sandbox_workspace_write', 'network_access']
+  const netNow = optionalValue(lines, NET)
+  const net = netNow.value === undefined ? optionalSet(lines, NET, 'true') : null
+  messages.push(net === true
     ? 'config.toml: set sandbox_workspace_write.network_access = true, so a command Codex runs in its workspace-write sandbox can reach herdr (and the network)'
-    : 'config.toml: sandbox_workspace_write.network_access = true was already set')
+    : netNow.value === 'true' ? 'config.toml: sandbox_workspace_write.network_access = true was already set'
+      : netNow.value !== undefined ? `config.toml: sandbox_workspace_write.network_access = ${netNow.value} left as it is; the doctrine sets true only where it is absent, and while it is not true a command Codex runs in its workspace-write sandbox cannot reach herdr`
+      : netNow.inline ? 'config.toml: sandbox_workspace_write is an inline table, so the install left it as it is and did not set sandbox_workspace_write.network_access = true; add network_access = true inside its braces so a command Codex runs in its workspace-write sandbox can reach herdr'
+        : `config.toml: did not set sandbox_workspace_write.network_access = true, and left the line as it is: ${net}`)
+  // The seat limit (E10-R17): Codex refuses a spawn past agents.max_concurrent_threads_per_session.
+  const SEATS = ['agents', 'max_concurrent_threads_per_session']
+  const seats = optionalValue(lines, SEATS), seatsNow = seats.value
+  const seatsSet = seatsNow === undefined ? optionalSet(lines, SEATS, String(CODEX_SEATS)) : null
+  messages.push(seatsSet === true
+    ? `config.toml: set agents.max_concurrent_threads_per_session = ${CODEX_SEATS}, so Codex runs up to ${CODEX_SEATS} seats at once`
+    : seatsNow === undefined ? (seats.inline ? `config.toml: agents is an inline table, so the install left it as it is and did not add agents.max_concurrent_threads_per_session = ${CODEX_SEATS}; to let Codex run up to ${CODEX_SEATS} seats at once, add max_concurrent_threads_per_session = ${CODEX_SEATS} inside its braces`
+      : `config.toml: did not add agents.max_concurrent_threads_per_session = ${CODEX_SEATS}, and left the line as it is: ${seatsSet}`)
+      : seatsNow === String(CODEX_SEATS) ? `config.toml: agents.max_concurrent_threads_per_session = ${CODEX_SEATS} was already set`
+        : `config.toml: agents.max_concurrent_threads_per_session = ${seatsNow} left as it is; the doctrine sets ${CODEX_SEATS} only where it is absent`)
   return { hooksJson: hooksOut, configToml: lines.join('\n') + (lines.length ? nl(configToml) : ''), messages }
+}
+
+// ---------------------------------------------------------------- the doctor (E10 S12, E10-R33)
+//
+// dctr-doctor.mjs drives the installed Codex and Claude Code in scratch homes under its own herdr server and records
+// what it saw; doctorVerdict reads that record, signal by signal, against the facts the hooks depend on. The drive,
+// per host: launch in a herdr pane, type DOCTOR_MARKED in the startup session (the gate must block it), type
+// DOCTOR_PLAIN (one turn), /clear, type a draft and erase it (Codex), type DOCTOR_MARKED again (the gate must pass
+// it: one turn), quit. `obs` is { host, launched, log, blocked, passed, transcript, composer, pane, hookLogs }:
+// `log` the probe logger's lines in order, each a hook payload's event, the fields below, its keys and `restored`,
+// the session this pane's restore file named when the hook ran; `blocked` and `passed` the pane's gated marker after
+// each marked line; `transcript` the plain turn's transcript path and text read at its Stop; `composer` the pane text
+// after /clear and with the draft (Codex); `pane` herdr's agent_status and agent_session after the last turn;
+// `hookLogs` every doctrine hook.log of the run.
+
+/** The line the doctor types for a plain turn, and the marked line the gate decides on. */
+export const DOCTOR_PLAIN = 'Reply with the single word ok. Use no tools.'
+export const DOCTOR_MARKED = `${DOCTOR_PLAIN} ${RESUME_MARK}`
+/** The draft the doctor types into the Codex composer after /clear and erases unsent. */
+export const DOCTOR_DRAFT = 'doctor draft, never sent'
+
+/** Each signal's stable code and what holds when it is ok. codexOnly: read on Codex only. */
+export const DOCTOR_SIGNALS = {
+  L1: { what: 'the host launches in a herdr pane and reaches its prompt' },
+  E1: { what: 'SessionStart fires for the startup and the /clear session, with session_id, transcript_path, source and cwd' },
+  E2: { what: 'UserPromptSubmit fires with session_id, transcript_path, cwd and the prompt raw as typed (on Codex also turn_id)' },
+  E3: { what: 'Stop fires after a turn with session_id, transcript_path, cwd, stop_hook_active and the reply as last_assistant_message (on Codex also turn_id)' },
+  E4: { what: 'SessionEnd fires with session_id when the session quits' },
+  T1: { what: 'the doctrine hook entries run (on Codex: are trusted): restore, prompt gate, and the cycle hook on UserPromptSubmit and Stop' },
+  O1: { what: 'on a fresh chat, SessionStart(clear) has written the restore file before UserPromptSubmit runs' },
+  G1: { what: 'the gate blocks a marked line in the old session: no turn follows it' },
+  G2: { what: 'the gate passes a marked line in the session /clear started: a turn follows it' },
+  R1: { what: 'hostOf reads the host from the transcript path' },
+  R2: { what: 'transcriptEntries reads the typed prompt and the reply from the transcript, each with its text' },
+  R3: { what: 'readUsage reads a used-token count from the transcript, from every field it sums, with the entry id (and on Codex the window)' },
+  R4: { what: 'codexTurnState and the watcher\'s watchedTurn read the turn\'s start, its end and its last message from the rollout', codexOnly: true },
+  C1: { what: 'composerIdle reads the composer after /clear as empty', codexOnly: true },
+  C2: { what: 'composerIdle reads a composer showing the typed draft as not empty', codexOnly: true },
+  H1: { what: 'herdr reports the pane ready (agent_status idle or done) after the turn' },
+  H2: { what: 'herdr reports the session /clear started as the pane\'s agent_session' },
+}
+
+/** The doctrine hook entries the drive fires, each with the mark it leaves (T1). */
+const DOCTOR_RUNS = [
+  ['SessionStart dctr-restore.mjs', (o) => /SessionStart restore injected/.test(o.hookLogs ?? '')],
+  ['UserPromptSubmit dctr-promptgate.mjs', (o, s0) => Boolean(s0) && o.blocked?.gated?.session_id === s0],
+  ['UserPromptSubmit dctr-cycle.mjs', (o) => / UserPromptSubmit auto-cycle /.test(o.hookLogs ?? '')],
+  ['Stop dctr-cycle.mjs', (o) => / Stop auto-cycle /.test(o.hookLogs ?? '')],
+]
+
+/** The verdict over one host's observations: a row { code, ok, what, why } per signal the host is read for. Every
+ *  field a row reads drifts that row when it is missing or wrong, and a malformed observation never makes the
+ *  verdict throw. */
+export function doctorVerdict(obs) {
+  const o = obs || {}, host = o.host === 'claude' ? 'claude' : 'codex'
+  const log = Array.isArray(o.log) ? o.log.filter((e) => e && typeof e === 'object') : []
+  const marked = (e) => typeof e.prompt === 'string' && e.prompt.includes(RESUME_MARK)
+  const missing = (e, keys) => keys.filter((k) => e?.[k] === null || e?.[k] === undefined)
+  const ss = (source) => log.find((e) => e.event === 'SessionStart' && e.source === source)
+  const start = ss('startup'), clr = ss('clear'), s0 = start?.session_id, s1 = clr?.session_id
+  const at = (e) => log.indexOf(e)
+  const ups = (session, isMarked) => log.find((e) => e.event === 'UserPromptSubmit' && e.session_id === session && marked(e) === isMarked)
+  const upsBlock = s0 && ups(s0, true), upsPlain = s0 && ups(s0, false), upsPass = s1 && ups(s1, true)
+  const stopAfter = (u, session, before = Infinity) => u && log.find((e, i) => e.event === 'Stop' && e.session_id === session && i > at(u) && i < before)
+  const plainStop = stopAfter(upsPlain, s0)
+  const rows = []
+  const stopped = o.launched !== true || o.stuck ? ' (the drive stopped, see L1)' : ''
+  const row = (code, ok, why) => {
+    if (host === 'codex' || !DOCTOR_SIGNALS[code].codexOnly) rows.push({ code, ok: Boolean(ok), what: DOCTOR_SIGNALS[code].what, why: ok ? '' : code === 'L1' ? why : why + stopped })
+  }
+  const lacks = (name, e, keys) => (e ? `${name} lacks ${missing(e, keys).join(', ')}` : `no ${name} seen`)
+  const keysOk = (e, keys) => Boolean(e) && missing(e, keys).length === 0
+
+  const shown = (s) => String(s?.screen ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(-14).join(' / ') || 'nothing read'
+  row('L1', o.launched === true && !o.stuck && !o.covered, o.launched !== true || o.stuck
+    ? `${o.launched === true ? 'the composer did not come back empty' : 'the host did not reach its prompt'} before ${JSON.stringify(o.stuck?.before ?? 'the first line')}, so nothing after it was observed; the pane showed: ${shown(o.stuck)}`
+    : `a screen covered the composer before ${JSON.stringify(o.covered?.before)} and was dismissed with esc: ${shown(o.covered)}`)
+  const ssKeys = ['session_id', 'transcript_path', 'source', 'cwd']
+  row('E1', keysOk(start, ssKeys) && keysOk(clr, ssKeys) && s0 !== s1,
+    !start || !clr ? `no SessionStart with source ${!start ? 'startup' : 'clear'} seen` : s0 === s1 ? 'the /clear session has the startup session\'s id'
+      : lacks(keysOk(start, ssKeys) ? 'SessionStart(clear)' : 'SessionStart(startup)', keysOk(start, ssKeys) ? clr : start, ssKeys))
+  // The turn id the watcher matches a held Stop by, read from UserPromptSubmit and Stop on Codex only.
+  const turnKey = host === 'codex' ? ['turn_id'] : []
+  const upsKeys = ['session_id', 'transcript_path', 'cwd', 'prompt', ...turnKey]
+  row('E2', keysOk(upsPlain, upsKeys) && upsPlain.prompt === DOCTOR_PLAIN,
+    !upsPlain ? 'no UserPromptSubmit for the plain line seen' : upsPlain.prompt !== DOCTOR_PLAIN ? `the prompt arrived as ${JSON.stringify(String(upsPlain.prompt).slice(0, 80))}, not as typed` : lacks('UserPromptSubmit', upsPlain, upsKeys))
+  // The cycle hook reads the reply's last line from last_assistant_message (endsReady), so an empty one drifts.
+  const stopKeys = ['session_id', 'transcript_path', 'cwd', 'stop_hook_active', ...turnKey]
+  const replyOk = typeof plainStop?.last_assistant_message === 'string' && plainStop.last_assistant_message.trim() !== ''
+  row('E3', keysOk(plainStop, stopKeys) && typeof plainStop.stop_hook_active === 'boolean' && replyOk,
+    !plainStop ? 'no Stop after the plain turn seen' : !keysOk(plainStop, stopKeys) ? lacks('Stop', plainStop, stopKeys)
+      : !replyOk ? 'the Stop carries no last_assistant_message with the reply\'s text' : 'the Stop\'s stop_hook_active is not a boolean')
+  row('E4', Boolean(s1) && log.some((e) => e.event === 'SessionEnd' && e.session_id === s1), 'no SessionEnd naming the session that quit seen')
+  const notRun = DOCTOR_RUNS.filter(([, ran]) => !ran(o, s0)).map(([name]) => name)
+  row('T1', notRun.length === 0, `no sign that ${notRun.join(', ')} ran${host === 'codex' ? '; is its trust line in config.toml current?' : ''}`)
+  row('O1', Boolean(upsPass) && at(clr) < at(upsPass) && upsPass.restored === s1,
+    !upsPass ? 'no UserPromptSubmit for the marked line after /clear seen' : `at UserPromptSubmit the restore file named ${upsPass.restored ?? 'no session'}, not ${s1}`)
+  const blockTurn = stopAfter(upsBlock, s0, upsPlain ? at(upsPlain) : Infinity)
+  row('G1', Boolean(upsBlock) && !blockTurn,
+    !upsBlock ? 'no UserPromptSubmit for the marked line in the startup session seen' : 'the marked line ran a turn (a Stop followed it)')
+  row('G2', Boolean(s1) && Boolean(stopAfter(upsPass, s1)),
+    s1 && o.passed?.gated?.session_id === s1 ? 'the gate blocked the marked line in the session /clear started' : 'no turn (Stop) followed the marked line after /clear')
+  const t = o.transcript || {}, text = typeof t.text === 'string' ? t.text : null
+  row('R1', hostOf({ transcript_path: t.path }) === host, `hostOf reads ${hostOf({ transcript_path: t.path })} from ${t.path}`)
+  const read = text === null ? null : transcriptEntries(text, host)
+  const typed = Boolean(read) && read.entries.some((e) => userTyped(e) && entryText(e).includes(DOCTOR_PLAIN))
+  const replied = Boolean(read) && read.entries.some((e) => e?.type === 'assistant' && entryText(e).trim() !== '')
+  row('R2', typed && replied, !read ? 'the transcript was not read or did not parse'
+    : !typed ? 'no typed user entry holding the plain line among its entries' : 'no assistant entry whose text is not empty among its entries')
+  const usage = readUsage(text, null, host)
+  row('R3', Number.isFinite(usage.used) && usage.used > 0 && typeof usage.uuid === 'string' && usageFieldsOk(text, usage, host),
+    usage.unknown ? `readUsage: ${usage.unknown}` : `the usage entry lacks a field readUsage reads (${host === 'codex' ? 'model_context_window' : 'uuid, input_tokens, cache_creation_input_tokens or cache_read_input_tokens'})`)
+  // The rollout read twice over is a turn that ended followed by one that started: the order the watcher reads.
+  const turn = text === null ? null : codexTurnState(text), watched = text === null ? null : watchedTurn(`${text}\n${text}`)
+  row('R4', Boolean(turn?.ended) && typeof turn.lastMessage === 'string' && watched.ended && watched.newTurn,
+    !turn ? 'the rollout was not read' : !turn.ended ? 'no ended turn in the rollout' : typeof turn.lastMessage !== 'string' ? 'the ended turn carries no last_agent_message' : 'no task_started the watcher reads as a new turn')
+  row('C1', composerIdle(o.composer?.cleared) === true, 'the composer after /clear did not read empty')
+  row('C2', composerIdle(o.composer?.draft) === false && composerLine(o.composer?.draft) === DOCTOR_DRAFT,
+    composerLine(o.composer?.draft) === null ? 'no composer line on the screen with the draft' : `the composer read ${JSON.stringify(composerLine(o.composer?.draft))}, not the draft`)
+  row('H1', READY_STATUSES.includes(o.pane?.agent_status), `herdr agent_status is ${o.pane?.agent_status ?? 'unread'}`)
+  row('H2', Boolean(s1) && o.pane?.agent_session === s1, `herdr agent_session is ${o.pane?.agent_session ?? 'unread'}, not ${s1 ?? 'the /clear session'}`)
+  return rows
+}
+
+/** Whether the usage entry readUsage chose carries every field it reads: on Claude Code the entry's uuid and the three
+ *  token counts it sums (one renamed still leaves a total above zero), on Codex the window beside the input count. */
+function usageFieldsOk(text, usage, host) {
+  if (host === 'codex') return Number.isFinite(usage.window)
+  for (const l of String(text).split('\n')) {
+    let e
+    try { e = JSON.parse(l) } catch { continue }
+    if (e?.uuid === usage.uuid && e.type === 'assistant') return ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'].every((k) => Number.isFinite(e.message?.usage?.[k]))
+  }
+  return false
+}
+
+/** 0 when every signal holds, 1 on any drift (2, cannot run, is the driver's). */
+export const doctorExit = (rows) => (rows.every((r) => r.ok) ? 0 : 1)
+
+/** The hook areas the drive never exercises, which a green run says nothing about. */
+export const DOCTOR_UNEXERCISED = [
+  'the context gauge (PostToolBatch, and PostToolUse on Codex)',
+  'the seat hooks (SubagentStart, SubagentStop, and the SessionEnd sweep of seat panes)',
+  'PermissionRequest',
+  'Notification (permission_prompt, idle_prompt) and StopFailure',
+  'a running background terminal holding a Stop',
+  'a turn ended by Esc (turn_aborted) or by an API error (task_complete\'s error)',
+]
+
+/** What the doctor prints for `results`, { host: doctorVerdict rows }: each host's rows, the areas the drive does not
+ *  exercise, and the verdict, which names the drifted signals or says every signal it reads holds. */
+export function doctorSummary(results) {
+  const out = [], drift = []
+  for (const [host, rows] of Object.entries(results)) {
+    out.push(host)
+    for (const r of rows) {
+      out.push(`  ${r.ok ? 'ok   ' : 'DRIFT'}  ${r.code}  ${r.what}${r.ok ? '' : `: ${r.why}`}`)
+      if (!r.ok) drift.push(`${host} ${r.code}`)
+    }
+  }
+  out.push('dctr-doctor: this run does not exercise:', ...DOCTOR_UNEXERCISED.map((a) => `  - ${a}`))
+  out.push(drift.length ? `dctr-doctor: drift in ${drift.join(', ')}` : 'dctr-doctor: every signal it reads holds (not the areas above)')
+  return out.join('\n')
+}
+
+// Account identifiers a capture can carry: a key naming an e-mail, an account, a user or an organization id,
+// any e-mail address, and a connector's tool name (the session's connected MCP servers).
+const PRIVATE_KEY = /email|account_?(id|uuid)|organization_?(id|uuid)|user_?id|org_?id/i
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g
+const MCP_TOOL = /\bmcp__[A-Za-z0-9_-]+/g
+const REDACTED = '[redacted]'
+
+/** The doctor's observations with every account identifier replaced by `[redacted]`: a private key's value, an
+ *  e-mail address and a connector tool name anywhere, and every field of an entry whose type names mcp. A string of
+ *  JSON lines (a transcript) is redacted line by line, and a line that does not parse as a string. */
+export function doctorRedact(obs) {
+  const scrub = (s) => s.replace(EMAIL, REDACTED).replace(MCP_TOOL, REDACTED)
+  const text = (s) => (!/^\s*\{/m.test(s) ? scrub(s) : s.split('\n').map((l) => {
+    let e
+    try { e = JSON.parse(l) } catch { return scrub(l) }
+    return e && typeof e === 'object' ? JSON.stringify(walk(e)) : scrub(l)
+  }).join('\n'))
+  const walk = (v) => {
+    if (typeof v === 'string') return text(v)
+    if (Array.isArray(v)) return v.map(walk)
+    if (!v || typeof v !== 'object') return v
+    const mcp = typeof v.type === 'string' && /mcp/i.test(v.type)
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x !== null && (PRIVATE_KEY.test(k) || (mcp && k !== 'type')) ? REDACTED : walk(x)]))
+  }
+  return walk(obs)
+}
+
+/** The account identifiers in a file's text, one line each: an e-mail address, a connector tool name, or a private
+ *  key holding a string other than `[redacted]`, quoted or JSON-escaped. Empty when it carries none. */
+export function privateFindings(text) {
+  const t = String(text ?? ''), out = []
+  for (const m of t.matchAll(EMAIL)) out.push(`e-mail ${m[0]}`)
+  for (const m of t.matchAll(MCP_TOOL)) out.push(`connector tool ${m[0]}`)
+  for (const m of t.matchAll(/\\?"([A-Za-z_]+)\\?"\s*:\s*\\?"(?!\[redacted\])([^"\\]*)/g)) if (PRIVATE_KEY.test(m[1])) out.push(`${m[1]} ${m[2]}`)
+  return out
 }

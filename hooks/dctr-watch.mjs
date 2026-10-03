@@ -12,8 +12,11 @@
 // persisted about waiting (stopHeldFile), never the rollout's state at the turn end, which Codex writes only after the
 // Stop returns (E10H-R2-B2). It does what watchStep in dctr-lib.mjs decides: wait, exit, or hand dctr-cycle.mjs the event Claude
 // Code would have fired, as that event's payload on stdin, so the hook's own decisions (notifyDecision, cycleDecision)
-// judge it exactly as they judge a real one. It writes nothing itself. Waits are counted in polls, never read off the
-// wall clock. With no pane it reads no herdr, and the idle observation rests on the rollout alone.
+// judge it exactly as they judge a real one. A turn whose provider stops answering never ends, so once the rollout
+// has not been written for WATCH_TIMES.stall while the turn is unfinished it hands on a StopFailure naming the stall
+// (E10-R29). It writes nothing itself. Waits are counted in polls, never read off the wall clock, except the stall:
+// that is the rollout's mtime read against the clock, a disk fact, since a herdr read can take far longer than a poll.
+// With no pane it reads no herdr, and the idle observation rests on the rollout alone.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -71,6 +74,10 @@ try {
     try { text = fs.readFileSync(a.transcript, 'utf8') } catch (e) { log(`the rollout could not be read (${e.code || e.message})`) }
     const start = text === null ? 0 : Buffer.from(text).subarray(0, a.from).toString('utf8').length
     const turn = text === null ? { ended: false, newTurn: false } : watchedTurn(text.slice(start))
+    // The rollout's last write (E10-R29): an unreadable rollout says nothing about it, so it never counts as no growth.
+    // The clock is read beside the stat, so the herdr read below never counts toward the stall.
+    let wroteAt = null, readAt = null
+    try { wroteAt = fs.statSync(a.transcript).mtimeMs; readAt = Date.now() } catch { /* unread */ }
     // Asked every poll, not only once the turn ends: a TUI closed mid-turn never ends its turn, and only herdr saying
     // the pane is gone lets the watcher stop before its longest watch (E10H-B9).
     const pane = paneState()
@@ -85,9 +92,11 @@ try {
     const fact = turn.ended ? heldFact() : null
     const held = fact?.held === true && fact.at !== firedAt
     const step = watchStep({ active, turn, obs, held, liveWork: held ? liveWork(a.session) : null, session: a.session, paneSession: pane.session,
-      ready: endsReady(last), idleFor: idleSince === null ? 0 : now - idleSince, unknownFor: unknownSince === null ? 0 : now - unknownSince, age: now, times })
+      ready: endsReady(last), idleFor: idleSince === null ? 0 : now - idleSince, unknownFor: unknownSince === null ? 0 : now - unknownSince,
+      stalledFor: turn.ended || text === null || wroteAt === null ? 0 : Math.max(0, readAt - wroteAt), age: now, times })
     if (step.act === 'exit') { log(`exit: ${step.reason}`); process.exit(0) }
     if (step.act === 'stopFailure') { fire('StopFailure', { error: obs.apiError, dctr_watch: true }); process.exit(0) }
+    if (step.act === 'stall') { fire('StopFailure', { error: step.error, dctr_watch: true }); process.exit(0) }
     if (step.act === 'idle') { fire('Notification', { notification_type: 'idle_prompt', dctr_watch: true }); process.exit(0) }
     if (step.act === 'unknown') { fire('Notification', { notification_type: 'background_unknown', dctr_why: obs.backgroundUnknown, dctr_watch: true }); process.exit(0) }
     if (step.act === 'stop') {

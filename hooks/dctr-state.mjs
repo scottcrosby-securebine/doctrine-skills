@@ -738,6 +738,9 @@ export function sessionStartLine(recordPath) {
   try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
 }
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+/** Where the prompt gate records that it blocked a line the auto-cycle typed in this pane: `{ session_id, at }`. The
+ *  typer removes it before its /clear and reads it after the resume line (E10 S1). */
+export const gatedFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.gated`)
 export const stopFactsFile = (sessionId) => path.join(autoCycleDir(), `stop-${sessionId}.json`)
 /** A Codex Stop's own decision, per turn: whether it waited for live work (E10H-R2-B2). The watcher retries the Stop
  *  from this, never from the rollout, which Codex writes the turn's end into only after the Stop returns. */

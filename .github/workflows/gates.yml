@@ -150,6 +150,10 @@ jobs:
         # dctr-notify.mjs: one herdr notification with the hub's exact title and no body, and the stand-downs.
         run: node hooks/dctr-notify.selftest.mjs
 
+      - name: doctor verdict tamper test
+        # The verdict over live captures from both hosts; the live doctor itself needs Codex, Claude Code and herdr.
+        run: node hooks/dctr-doctor.selftest.mjs
+
       - name: mutation gate over the hook selftests
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.

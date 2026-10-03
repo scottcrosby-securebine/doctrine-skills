@@ -4,8 +4,9 @@
 //
 //   node hooks/dctr-codex.hooks.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
-// Every payload and rollout line is a real Codex 0.156.1 capture from dctr-codex.fixtures.mjs, with its session id,
-// transcript_path and cwd pointed at the fixture tree (the only fields a case rewrites). Clause 1 drives each hook
+// Every payload, rollout line and pane text is a real Codex capture (0.156.1, or 0.160.0 where the constant says so)
+// from dctr-codex.fixtures.mjs, with its session id, transcript_path and cwd pointed at the fixture tree (the only
+// fields a case rewrites). Clause 1 drives each hook
 // end to end on a fixture tree with a `herdr` PATH shim that logs every call and plays a pane. Clause 2 runs the
 // known-good cases that must stay quiet. Clause 3 proves the staged inputs carry what clause 1 rests on, without
 // running a hook.
@@ -70,23 +71,39 @@ if (args[0] === 'pane' && args[1] === 'get') {
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
 } else if (args[0] === 'pane' && args[1] === 'read') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt ? (st.after ?? st.before) : st.before)
+  process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
 } else if (args[0] === 'pane' && args[1] === 'run') {
+  const restore = () => fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
+  const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
   if (args[3] === '/clear') {
     st.clearedAt = Date.now()
+    // clearTakes false: the /clear never reached Codex (it merged into a draft), so the old session runs on.
+    st.cleared = st.clearTakes !== false
+    // A host that fires SessionStart at /clear, as Claude Code does: the restore file and herdr name the new chat now.
+    if (st.cleared && st.startAtClear) { st.resumed = true; restore() }
     // The user submits a prompt in the new chat before the typer's resume line: Codex fires SessionStart, so the
-    // restore file and herdr's session name the new chat.
-    if (st.userStarts) { st.resumed = true; fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript })) }
+    // restore file and herdr's session name the new chat, and the prompt is the chat's first user message.
+    if (st.cleared && st.userStarts) { st.resumed = true; restore(); fs.appendFileSync(st.newTranscript, msg('user', 'hello there') + '\\n') }
     save()
   }
-  else if (st.onResume === 'write' || st.onResume === 'abort' || st.onResume === 'silent') {
-    st.resumed = true; save()
-    fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
-    const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
-    // abort: the resume turn interrupted before any answer (st.abortLines, RESUME_ABORTED); silent: no answer yet.
-    const lines = st.onResume === 'abort' ? st.abortLines : st.onResume === 'silent' ? [msg('user', args[3])]
-      : [...(st.firstLines || []), msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')]
-    fs.appendFileSync(st.newTranscript, lines.join('\\n') + '\\n')
+  else if (st.onResume === 'write' || st.onResume === 'abort' || st.onResume === 'silent' || st.onResume === 'none') {
+    // Codex 0.160.0: a cleared pane's first prompt starts the new chat, SessionStart (the restore file, unless the
+    // restore hook stood down: onResume none; herdr's own hook names the session) running to its end before
+    // UserPromptSubmit. A /clear that did not take leaves the prompt in the old session. Then the real prompt gate
+    // judges the payload, and a blocked prompt runs no turn and writes no prompt (probe-ups U1, U2).
+    if (st.cleared && !st.resumed) { st.resumed = true; if (st.onResume !== 'none') restore() }
+    const session = st.cleared ? st.newSession : st.session
+    const g = require('child_process').spawnSync(process.execPath, [st.gateScript], { input: JSON.stringify({ ...st.ups, session_id: session, prompt: args[3] }), env: { ...process.env, HERDR_PANE_ID: args[2] }, encoding: 'utf8' })
+    let verdict = 'pass'
+    try { if (g.stdout) verdict = JSON.parse(g.stdout).decision } catch { verdict = 'unparsed' }
+    st.gate = [...(st.gate || []), { session, verdict, code: g.status }]
+    save()
+    if (verdict === 'pass' && g.status === 0) {
+      // abort: the resume turn interrupted before any answer (st.abortLines, RESUME_ABORTED); silent: no answer yet.
+      const lines = st.onResume === 'abort' ? st.abortLines : st.onResume === 'silent' || st.onResume === 'none' ? [msg('user', args[3])]
+        : [...(st.firstLines || []), msg('user', args[3]), msg('user', '<skill>\\n<name>doctrine:doctrine-resume</name>'), msg('assistant', 'Resuming.')]
+      fs.appendFileSync(st.newTranscript, lines.join('\\n') + '\\n')
+    }
   }
 }
 process.exit(0)
@@ -328,9 +345,9 @@ const WT = JSON.stringify({ poll: 20, idle: 150, max: 5000 })
 // (under pid 1 or a subreaper) and never under the suite's Codex: a watcher is never under Codex (probe P-PROC, the
 // detached `sleep 301`), and the live tty run (R3 repair notes) found a retried Stop that looked for Codex above
 // itself. Resolves once the watcher has exited.
-function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: process.pid, start: null }) {
+function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: process.pid, start: null }, pane = 'wX:p1') {
   return new Promise((resolve) => {
-    const args = JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane: 'wX:p1', from, turn, codex })
+    const args = JSON.stringify({ session: id, transcript, cwd: f.proj, project: f.proj, pane, from, turn, codex })
     const sh = spawn('sh', ['-c', 'node "$0" "$1" </dev/null >/dev/null 2>&1 & echo $!', path.join(here, 'dctr-watch.mjs'), args],
       { env: { ...baseEnv, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_WATCH_TIMES: WT, ...env }, stdio: ['ignore', 'pipe', 'ignore'] })
     let out = ''
@@ -498,6 +515,61 @@ await watcher(wst, 'v5', rollout(wst, 'v5', F.TUI_TURN), 0, { DCTR_CYCLE_SCRIPT:
 const wstEvents = events(wstLog)
 clause('clause 1d10 — a held fact written for another turn is not this turn\'s: the watcher hands on the idle_prompt, never a Stop (E10H-R2-B2)',
   wstEvents.length === 1 && wstEvents[0].hook_event_name === 'Notification' && wstEvents[0].notification_type === 'idle_prompt', JSON.stringify(wstEvents))
+// E10-R29: a turn whose provider stopped answering never ends and its rollout stops growing (F.STALLED_TURN, the live
+// capture, after F.PRIOR_TURN_0160, the turn before it in the same rollout). Past the stall time the watcher hands the
+// hook a StopFailure naming the stall and exits, so the turn that stays stalled gets one line and one notification.
+// Contained, the same pause is written with no herdr call.
+const STALL_WT = JSON.stringify({ poll: 20, idle: 150, max: 5000, stall: 1000 })
+const STALL_LINE = '- auto-cycle paused: Codex API error: turn stalled, no rollout write for 1 s with the turn unfinished'
+const wsl = project('watch-stall')
+shim(wsl, { session: 's1', status: 'working' })
+const wslT = rollout(wsl, 's1', [F.PRIOR_TURN_0160, F.STALLED_TURN])
+const wslFrom = Buffer.byteLength(jl(F.PRIOR_TURN_0160, F.STALLED_TURN.slice(0, 2)))
+await watcher(wsl, 's1', wslT, wslFrom, { DCTR_WATCH_TIMES: STALL_WT })
+const wslNotes = calls(wsl).filter((c) => c[0] === 'notification')
+clause('clause 1d17 — the watcher, on an unfinished turn whose rollout has not grown past the stall time, hands the hook a StopFailure: the paused line names the stall, written once and alerted once, and the watcher exits (E10-R29, E8-D18 through the table)',
+  JSON.stringify(recLines(wsl, /^- auto-cycle paused: /)) === JSON.stringify([STALL_LINE]) && wslNotes.length === 1 &&
+    String(wslNotes[0][wslNotes[0].indexOf('--body') + 1]).startsWith(STALL_LINE.slice('- auto-cycle paused: '.length)),
+  `${JSON.stringify(recLines(wsl, /paused/))} ${JSON.stringify(wslNotes)}`)
+const wsc = project('watch-stall-contained')
+shim(wsc, { session: 's2', status: 'working' })
+const wscT = rollout(wsc, 's2', [F.PRIOR_TURN_0160, F.STALLED_TURN])
+await watcher(wsc, 's2', wscT, wslFrom, { DCTR_WATCH_TIMES: STALL_WT, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') }, null, undefined, null)
+clause('clause 1d18 — contained, the stalled turn writes the same paused line and herdr is called zero times (E10-R29, E8-D15)',
+  JSON.stringify(recLines(wsc, /^- auto-cycle paused: /)) === JSON.stringify([STALL_LINE]) && calls(wsc).length === 0,
+  `${JSON.stringify(recLines(wsc, /paused/))} ${JSON.stringify(calls(wsc))}`)
+// A slow turn whose rollout keeps growing, each gap inside the stall time and the whole run past it, then ended by a
+// provider error: the watcher hands on that error, never a stall. Each append moves the rollout's mtime every 100 ms,
+// so only an appender held off the CPU for the whole 2 s stall reads as one, while the 5 s of growth runs well past
+// it.
+const wgr = project('watch-grow')
+shim(wgr, { session: 's3', status: 'working' })
+const wgrT = rollout(wgr, 's3', [F.PRIOR_TURN_0160, F.STALLED_TURN])
+const grower = setInterval(() => fs.appendFileSync(wgrT, jl(F.STALLED_TURN.at(-1))), 100)
+setTimeout(() => { clearInterval(grower); fs.appendFileSync(wgrT, jl(F.API_ERROR.at(-1))) }, 5000)
+const wgrLog = path.join(wgr.dir, 'events.log')
+await watcher(wgr, 's3', wgrT, wslFrom, { DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 60000, stall: 2000 }), DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgrLog })
+clearInterval(grower)
+const wgrEvents = events(wgrLog)
+clause('clause 1d19 — a turn whose rollout grows inside the stall time, for longer than it in all, is not stalled: the watcher hands on only the provider error that ends it (E10-R29)',
+  wgrEvents.length === 1 && wgrEvents[0].hook_event_name === 'StopFailure' && wgrEvents[0].error === 'internal_server_error',
+  JSON.stringify(wgrEvents))
+// The stall is the rollout's last write read against the clock, never a count of polls: a rollout last written two
+// minutes ago is past a one-minute stall at the watcher's first poll, however few polls it has run. Counted in polls
+// (20 ms each here) the watcher would reach its 3 s longest watch first and hand on nothing.
+const wsm = project('watch-stall-mtime')
+shim(wsm, { session: 's4', status: 'working' })
+const wsmT = rollout(wsm, 's4', [F.PRIOR_TURN_0160, F.STALLED_TURN])
+const wsmOld = (Date.now() - 120000) / 1000
+fs.utimesSync(wsmT, wsmOld, wsmOld)
+const wsmMtime = fs.statSync(wsmT).mtimeMs
+const wsmLog = path.join(wsm.dir, 'events.log')
+await watcher(wsm, 's4', wsmT, wslFrom, { DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 3000, stall: 60000 }), DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wsmLog })
+const wsmEvents = events(wsmLog)
+clause('clause 1d20 — the stall is timed from the rollout\'s last write against the clock: a rollout last written two minutes ago hands on the stall at a one-minute stall time, long before the polls would add up to it (E10-R29)',
+  wsmEvents.length === 1 && wsmEvents[0].hook_event_name === 'StopFailure' && /turn stalled, no rollout write for 60 s/.test(wsmEvents[0].error), JSON.stringify(wsmEvents))
+clause('clause 3d20 — without the watcher: the stalled rollout\'s mtime is two minutes old, and its turn has no task_complete or turn_aborted after the watcher\'s start',
+  Date.now() - wsmMtime >= 119000 && !/"task_complete"|"turn_aborted"/.test(fs.readFileSync(wsmT, 'utf8').slice(wslFrom)), String(wsmMtime))
 const wn = project('watch-new')
 const wnLog = path.join(wn.dir, 'events.log')
 await watcher(wn, 'q1', rollout(wn, 'q1', [F.TUI_TURN, F.TUI_COMPACT]), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wnLog })
@@ -527,8 +599,8 @@ clause('clause 1d7 — the watcher exits when its pane is gone while the turn ha
 const wend = project('watch-after-end')
 shim(wend, { session: 'q6', status: 'working' })
 const wendRun = watcher(wend, 'q6', rollout(wend, 'q6', F.TUI_TURN.filter((l) => !l.includes('"task_complete"'))), 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: path.join(wend.dir, 'events.log'), DCTR_WATCH_TIMES: JSON.stringify({ poll: 20, idle: 150, max: 8000 }) })
-await sleep(400)
-const wendStarted = fs.existsSync(stateDir('q6'))
+// Waited for, never slept on: on a loaded host the watcher's first log line, which makes the dir, comes later than any fixed sleep.
+const wendStarted = await (async () => { for (const end = Date.now() + 30000; Date.now() < end; await sleep(50)) if (fs.existsSync(stateDir('q6'))) return true; return false })()
 fs.rmSync(stateDir('q6'), { recursive: true, force: true })
 shim(wend, { gone: true })
 await wendRun
@@ -537,8 +609,10 @@ clause('clause 1d14 — a watcher whose session ended (its state dir removed) an
 clause('clause 1d4 — the watcher exits handing nothing on when a new turn has started, when auto-cycle is off, and when the turn ended on the ready line',
   !fs.existsSync(wnLog) && !fs.existsSync(woLog) && !fs.existsSync(wrLog), [wnLog, woLog, wrLog].filter((p) => fs.existsSync(p)).join(' '))
 
-// ---------------------------------------------------------------- clause 1e: the typer on Codex (E8-D15, D28 through the table)
+// ---------------------------------------------------------------- clause 1e: the typer on Codex (E8-D15, D28 through the table, E10 S1)
 
+// Pane texts are codex-cli 0.160.0 reads (PANE_0160_*): before the /clear, after it (the new chat's splash, nothing
+// naming the old session), and a draft typed after it. The shim runs the real prompt gate on every resume line.
 const OLD = '01a0e972-9d87-7ff1-be2f-23687e355bc9'
 const TT = JSON.stringify({ poll: 20, idle: 150, restore: 400, session: 400, firstTurn: 300 })
 function typerCase(name, st = {}, env = {}) {
@@ -546,50 +620,59 @@ function typerCase(name, st = {}, env = {}) {
   const caseTmp = path.join(f.dir, 'tmp'); fs.mkdirSync(caseTmp)
   const old = rollout(f, OLD, F.TUI_TURN), newT = path.join(f.dir, 'sessions', 'rollout-2026-09-28T19-17-00-new.jsonl')
   write(newT, '')
-  const restorePath = path.join(caseTmp, 'dctr-autocycle', 'pane-wX_p1.restored')
-  shim(f, { session: OLD, newSession: 'new-1', status: 'done', before: F.NARROW_BEFORE, after: F.NARROW_AFTER, onResume: 'write', restoreFile: restorePath, newTranscript: newT, ...st })
+  const restorePath = path.join(caseTmp, 'dctr-autocycle', 'pane-wX_p1.restored'), gatedPath = path.join(caseTmp, 'dctr-autocycle', 'pane-wX_p1.gated')
+  if (st.staleGated) write(gatedPath, JSON.stringify({ session_id: OLD, at: 1 }))
+  const stagedGated = (() => { try { return JSON.parse(fs.readFileSync(gatedPath, 'utf8')) } catch { return null } })()
+  shim(f, { session: OLD, newSession: 'new-1', status: 'done', before: F.PANE_0160_BEFORE, after: F.PANE_0160_CLEARED, onResume: 'write', restoreFile: restorePath, newTranscript: newT,
+    gateScript: path.join(here, 'dctr-promptgate.mjs'), ups: F.UPS_RESUME_0160, ...st })
   const args = { pane: 'wX:p1', session: OLD, transcript: old, length: fs.statSync(old).size, record: f.record, hash: 'h0', project: f.proj, n: 1, phase: 'e10-fixture', stopAt: Date.parse('2026-09-28T18:53:00Z'), keyLine: 6, host: 'codex' }
   const r = spawnSync('node', [path.join(here, 'dctr-typer.mjs'), JSON.stringify(args)], { env: { ...baseEnv, TMPDIR: caseTmp, SHIM_LOG: f.shimLog, SHIM_STATE: f.shimState, DCTR_TYPER_TIMES: TT, ...env }, encoding: 'utf8', timeout: 20000 })
   const runs = calls(f).filter((c) => c[1] === 'run')
+  const gate = (() => { try { return JSON.parse(fs.readFileSync(f.shimState, 'utf8')).gate || [] } catch { return [] } })()
+  const gated = (() => { try { return JSON.parse(fs.readFileSync(gatedPath, 'utf8')) } catch { return null } })()
+  const turn = fs.readFileSync(newT, 'utf8').includes('"Resuming."')
   return { ...f, code: r.status, calls: calls(f), sends: `${runs.filter((c) => c[3] === '/clear').length},${runs.filter((c) => c[3] === CODEX_RESUME_LINE).length}`,
-    paused: recLines(f, /^- auto-cycle paused: /), cycled: recLines(f, /^- auto-cycle: cycle /), otherSends: runs.filter((c) => c[3] !== '/clear' && c[3] !== CODEX_RESUME_LINE) }
+    paused: recLines(f, /^- auto-cycle paused: /), cycled: recLines(f, /^- auto-cycle: cycle /), otherSends: runs.filter((c) => c[3] !== '/clear' && c[3] !== CODEX_RESUME_LINE),
+    gate, gated, turn, newT, stagedGated }
 }
-const td = (c) => `code ${c.code} sends ${c.sends} paused ${JSON.stringify(c.paused)} cycled ${JSON.stringify(c.cycled)} calls ${JSON.stringify(c.calls.map((x) => x.slice(0, 2).join(' ')))}`
+const td = (c) => `code ${c.code} sends ${c.sends} paused ${JSON.stringify(c.paused)} cycled ${JSON.stringify(c.cycled)} gate ${JSON.stringify(c.gate)} turn ${c.turn} calls ${JSON.stringify(c.calls.map((x) => x.slice(0, 2).join(' ')))}`
+const R18_LINE = `["- auto-cycle paused: /clear did not take: session ${OLD} still running"]`
 const tNormal = typerCase('normal')
 const iClear = tNormal.calls.findIndex((c) => c[1] === 'run' && c[3] === '/clear'), iResume = tNormal.calls.findIndex((c) => c[1] === 'run' && c[3] === CODEX_RESUME_LINE)
-clause('clause 1e — typer on Codex, normal: the pane read before /clear, /clear once, the pane read again, the $-resume line once, the cycle line, no pause (clear 1, resume 1)',
+clause('clause 1e — typer on Codex, a /clear that took: the pane read before /clear, /clear once, the pane read again, the $-resume line once, which the gate passes in the new session, a turn, the cycle line, no pause (clear 1, resume 1, S1b)',
   tNormal.sends === '1,1' && tNormal.otherSends.length === 0 && JSON.stringify(tNormal.cycled) === '["- auto-cycle: cycle 1 tree h0"]' && tNormal.paused.length === 0 &&
+  JSON.stringify(tNormal.gate) === '[{"session":"new-1","verdict":"pass","code":0}]' && tNormal.turn && tNormal.gated === null &&
   tNormal.calls.slice(0, iClear).some((c) => c[1] === 'read') && tNormal.calls.slice(iClear, iResume).some((c) => c[1] === 'read'), td(tNormal))
-const tNoTake = typerCase('notake', { after: F.NARROW_BEFORE })
-clause('clause 1e2 — typer on Codex, the /clear did not take (no continue line appears): no resume sent, no cycle line, paused naming the /clear not taking and the old session id (clear 1, resume 0, E8-D28 through the table)',
-  tNoTake.sends === '1,0' && tNoTake.cycled.length === 0 && JSON.stringify(tNoTake.paused) === `["- auto-cycle paused: /clear did not take: session ${OLD} still running"]`, td(tNoTake))
-// E10H-R5-B1: the old session's continue line is already on the pane before the /clear (a codex resume in the same
-// pane), and the /clear does not take. Only the before/after comparison (Q6) tells the stale line from a new one.
-const tSeen = typerCase('seen-before', { before: F.NARROW_AFTER, after: F.NARROW_AFTER })
-clause('clause 1e14 — typer on Codex, the old session\'s continue line already on the pane before the /clear and the /clear does not take: no resume sent, paused naming the /clear not taking (clear 1, resume 0; the pre-/clear pane is what clearTook compares against, Q6)',
-  tSeen.sends === '1,0' && tSeen.cycled.length === 0 && JSON.stringify(tSeen.paused) === `["- auto-cycle paused: /clear did not take: session ${OLD} still running"]`, td(tSeen))
+const tNoTake = typerCase('notake', { clearTakes: false })
+clause('clause 1e2 — typer on Codex, a /clear that did not take: the resume line is sent once and the gate blocks it in the old session, no turn, no cycle line, paused R18 naming the old session, nothing more sent (clear 1, resume 1 gated, S1b, E8-D28)',
+  tNoTake.sends === '1,1' && JSON.stringify(tNoTake.gate) === `[{"session":"${OLD}","verdict":"block","code":0}]` && !tNoTake.turn && tNoTake.gated?.session_id === OLD &&
+  tNoTake.cycled.length === 0 && JSON.stringify(tNoTake.paused) === R18_LINE && tNoTake.otherSends.length === 0, td(tNoTake))
 const tNoRestore = typerCase('norestore', { onResume: 'none' })
-clause('clause 1e3 — typer on Codex, the resume sent and no restore file follows: paused with the no-restore reason (clear 1, resume 1, E8-D15 through the table)',
-  tNoRestore.sends === '1,1' && JSON.stringify(tNoRestore.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]' && tNoRestore.cycled.length === 1, td(tNoRestore))
+clause('clause 1e3 — typer on Codex, the resume sent in the new chat and the restore hook writing no restore file: the gate blocks it there, paused with the no-restore reason, the cycle line once (herdr named the new chat) (clear 1, resume 1, E8-D15 through the table)',
+  tNoRestore.sends === '1,1' && JSON.stringify(tNoRestore.gate) === '[{"session":"new-1","verdict":"block","code":0}]' &&
+  JSON.stringify(tNoRestore.paused) === '["- auto-cycle paused: cleared, but the new session did not start doctrine"]' && tNoRestore.cycled.length === 1, td(tNoRestore))
 const tReadFail = typerCase('readfail', { readFails: true })
-clause('clause 1e4 — typer on Codex, the pane cannot be read before the /clear: nothing sent, paused with R17 (Q6: an unread pane never reads as a /clear that took)',
+clause('clause 1e4 — typer on Codex, the pane cannot be read before the /clear: nothing sent, paused with R17',
   tReadFail.sends === '0,0' && JSON.stringify(tReadFail.paused) === '["- auto-cycle paused: could not type into the pane: herdr could not read the pane"]', td(tReadFail))
 const tFocus = typerCase('focus', { focusedGets: 3 })
 clause('clause 1e5 — typer on Codex, the pane focused at first: it waits, then sends /clear and the resume line once each (E8-D15)',
   tFocus.sends === '1,1' && tFocus.calls.filter((c) => c[1] === 'get').length > 3 && tFocus.paused.length === 0, td(tFocus))
 const tContained = typerCase('contained', {}, { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') })
 clause('clause 1e6 — typer on Codex in a contained session: no herdr call at all (E8-D15)', tContained.calls.length === 0 && tContained.sends === '0,0', td(tContained))
+const tStale = typerCase('stale-gated', { staleGated: true })
+clause('clause 1e15 — typer on Codex, a gated marker left from an earlier cycle is removed before the /clear: the cycle confirms with no pause (S1)',
+  tStale.sends === '1,1' && tStale.paused.length === 0, td(tStale))
 
-// Gate round 1 repair. Derived pane texts: NARROW_AFTER with its empty composer replaced by a draft, and with a prompt
-// the user submitted and its answer above a fresh composer.
-const DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› my own draft')
-const SUBMITTED = F.NARROW_AFTER.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
-const tDraft = typerCase('draft', { after: DRAFT })
+const tDraft = typerCase('draft', { after: F.PANE_0160_DRAFT })
 clause('clause 1e7 — typer on Codex, a draft typed into the new chat\'s composer after the /clear: the resume line is never sent into it, paused R16 (clear 1, resume 0, E10H-B1)',
   tDraft.sends === '1,0' && JSON.stringify(tDraft.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]' && tDraft.otherSends.length === 0, td(tDraft))
+const SUBMITTED = F.PANE_0160_CLEARED.replace('› Ask Codex to do anything', '› hello there\n\n• Hi.\n\n› Ask Codex to do anything')
 const tStarted = typerCase('started', { after: SUBMITTED, userStarts: true })
-clause('clause 1e8 — typer on Codex, the user submitted a prompt in the new chat before the resume line (restore file and herdr on the new session): no resume sent, paused R16 (E10H-B1)',
+clause('clause 1e8 — typer on Codex, the user submitted a prompt in the new chat before the resume line (restore file, herdr and the rollout on the new chat): no resume sent, paused R16 (E10H-B1)',
   tStarted.sends === '1,0' && JSON.stringify(tStarted.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', td(tStarted))
+const tAtClear = typerCase('start-at-clear', { startAtClear: true })
+clause('clause 1e16 — typer on Codex under a host that fires SessionStart at the /clear, as Claude Code does: the restore file and herdr name the new chat before the resume line and nothing was typed, so the resume line is sent once, the gate passes it, the cycle confirms with no pause (S1)',
+  tAtClear.sends === '1,1' && tAtClear.paused.length === 0 && tAtClear.cycled.length === 1 && JSON.stringify(tAtClear.gate) === '[{"session":"new-1","verdict":"pass","code":0}]' && tAtClear.turn, td(tAtClear))
 // The new chat's rollout opening with the AGENTS.md block Codex injects (AGENTS_MD_TURN's real line, cut from a user's
 // session) before the resume line: that is not the user typing.
 const tAgents = typerCase('agents', { firstLines: [F.AGENTS_MD_TURN[1]] })
@@ -597,11 +680,11 @@ clause('clause 1e9 — typer on Codex, the new chat opens with the injected AGEN
   tAgents.sends === '1,1' && tAgents.paused.length === 0 && tAgents.cycled.length === 1, td(tAgents))
 
 // E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
-// NARROW_BEFORE with a draft in its composer; NARROW_AFTER after the resume line was submitted and interrupted
-// (INTERRUPTED_LINE, probe B6's pane) above a draft.
+// PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was submitted and
+// interrupted (INTERRUPTED_LINE, probe B6's pane) above a draft.
 const R16_LINE = '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]'
-const DRAFT_BEFORE = F.NARROW_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
-const RETRY_DRAFT = F.NARROW_AFTER.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› my own draft`)
+const DRAFT_BEFORE = F.PANE_0160_BEFORE.replace('› Ask Codex to do anything', '› my own draft')
+const RETRY_DRAFT = F.PANE_0160_CLEARED.replace('› Ask Codex to do anything', `› ${CODEX_RESUME_LINE}\n\n\n${F.INTERRUPTED_LINE}\n\n\n› my own draft`)
 const tInterrupted = typerCase('interrupted', { onResume: 'abort', abortLines: F.RESUME_ABORTED, afterResume: RETRY_DRAFT })
 clause('clause 1e10 — typer on Codex, the resume turn interrupted (Esc) before its first answer, a draft left in the composer, the pane unfocused: the resume line is not sent again, paused R16 (clear 1, resume 1, E10H-R4-B1)',
   tInterrupted.sends === '1,1' && JSON.stringify(tInterrupted.paused) === R16_LINE && tInterrupted.otherSends.length === 0 && tInterrupted.cycled.length === 1, td(tInterrupted))
@@ -614,6 +697,35 @@ clause('clause 1e13 — typer on Codex, the resume turn interrupted before its f
 const tClearDraft = typerCase('clear-draft', { before: DRAFT_BEFORE, after: DRAFT_BEFORE })
 clause('clause 1e12 — typer on Codex, a draft in the composer before the /clear: the /clear is not sent into it, paused R16 (clear 0, resume 0, E10H-R4-B1)',
   tClearDraft.sends === '0,0' && JSON.stringify(tClearDraft.paused) === R16_LINE && tClearDraft.otherSends.length === 0, td(tClearDraft))
+
+// S2, E8-D15 K3 through the table: two Stop entries, the second blocking the Stop of a turn ended on the ready line.
+// Both run on that Stop (stop_hook_active false), so the doctrine's launches the real typer; Codex runs on in the same
+// turn, writing the block reason and the continuation's answer (BLOCK_CONTINUATION, timestamps rewritten to now so they
+// fall after the Stop), while herdr reads the pane working past the typer's busy grace and until the next Stop's hooks
+// have returned (the live 0.160.0 run). That Stop carries stop_hook_active true and a message with no ready line.
+const bk = project('blocked', { lines: ['- auto-cycle: warned k1 10000'] })
+write(path.join(stateDir('k1'), 'gauge.json'), JSON.stringify({ session_id: 'k1', warned: true, warnedAt: Date.now() - 60000 }))
+shim(bk, { session: 'k1', status: 'working', before: F.NARROW_BEFORE })
+const bkT = rollout(bk, 'k1', F.TUI_TURN)
+// The typer's clock counts polls, never wall time, and each poll here takes several shim calls: an idle grace of five
+// polls is passed well inside the wait below.
+const bkEnv = { DCTR_TYPER_TIMES: JSON.stringify({ poll: 20, idle: 100, restore: 400, session: 400, firstTurn: 300 }) }
+const bkStop = (more) => hook('dctr-cycle.mjs', bk, as(F.STOP_MAIN, bk, 'k1', bkT, more), bkEnv)
+const bk1 = bkStop({ last_assistant_message: 'auto-cycle: ready', stop_hook_active: false })
+fs.appendFileSync(bkT, jl(F.BLOCK_CONTINUATION.map((l) => JSON.stringify({ ...JSON.parse(l), timestamp: new Date().toISOString() }))))
+await sleep(1200)
+const bkMid = recLines(bk, /^- auto-cycle paused: /)
+const bk2 = bkStop({ last_assistant_message: 'kit-blocker acknowledged.', stop_hook_active: true })
+shim(bk, { session: 'k1', status: 'done', before: F.NARROW_BEFORE })
+const bkHookLog = () => { try { return fs.readFileSync(path.join(stateDir('k1'), 'hook.log'), 'utf8') } catch { return '' } }
+// Until the typer logs how it ended (abort, pause, or a send), at most 10 s, so a loaded host only slows the case.
+for (let i = 0; i < 100 && !/auto-cycle typer: (abort|paused|pause not written|sent)/.test(bkHookLog()); i++) await sleep(100)
+const bkRuns = calls(bk).filter((c) => c[1] === 'run'), bkLog = bkHookLog()
+clause('clause 1e17 — two Stop entries, the second blocking: the typer the first Stop launched sends nothing while the continuation runs past the busy grace, the continuation\'s Stop pauses with R11, and the typer stops on that line (sends 0, 0; S2, E8-D15 K3 through the table)',
+  (bk1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && bkMid.length === 0 && bk2.code === 0 && bkRuns.length === 0 &&
+  JSON.stringify(recLines(bk, /^- auto-cycle paused: /)) === '["- auto-cycle paused: could not cycle: another Stop hook kept the session running"]' &&
+  /auto-cycle typer: abort: a paused line was written since the claim/.test(bkLog),
+  `launch ${bk1.out} mid ${JSON.stringify(bkMid)} runs ${JSON.stringify(bkRuns)} paused ${JSON.stringify(recLines(bk, /paused/))} log ${bkLog.split('\n').filter((l) => /Stop decided|typer/.test(l)).join(' | ')}`)
 
 // Standards R4-N1: processListing's reads of /proc/<pid>/stat, against this process's own stat and a real zombie: sh
 // execs into sleep and never reaps the `true` it started. proc(5): after "(comm) " come field 3, the state, and field
@@ -676,8 +788,16 @@ clause('clause 3a — without the hooks: the Codex payloads carry no agent_id wh
   'payload fixtures wrong')
 clause('clause 3b — without the hooks: the background rollout\'s turn ended while its terminal ran, the completion came after the task_complete, and the Stop payload of that turn lists no background task',
   F.BG_RUNNING.map(J).at(-1).payload.type === 'task_complete' && J(F.BG_DONE[0]).timestamp > F.BG_RUNNING.map(J).at(-1).timestamp && !('background_tasks' in F.STOP_BG), 'bg fixture wrong')
-clause('clause 3c — without the hooks: the typer\'s narrow pane text holds the old session id only after the /clear, and the gauge tier 10000 is below the rollout\'s 17503 while 100000 is above it',
-  !F.NARROW_BEFORE.includes(OLD) && F.NARROW_AFTER.includes(OLD) && F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+const lastPrompt = (t) => t.split('\n').findLast((l) => l.startsWith('›'))
+clause('clause 3c — without the hooks: the 0.160.0 pane before and after the /clear ends in the empty composer\'s placeholder and the draft pane in the draft, the stale gated fixture names the old session, and the gauge tier 10000 is below the rollout\'s 17503 while 100000 is above it',
+  lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything' &&
+  lastPrompt(F.PANE_0160_DRAFT) === '› draft text typed after clear, not' && tStale.stagedGated?.session_id === OLD && tNormal.stagedGated === null &&
+  F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+const bc = F.BLOCK_CONTINUATION.map(J)
+clause('clause 3h — without the hooks: the blocked Stop\'s continuation is a user message carrying the block reason and an assistant answer with no ready line, both in one turn',
+  bc.length === 2 && bc[0].payload.role === 'user' && /^<hook_prompt /.test(bc[0].payload.content[0].text) && bc[1].payload.role === 'assistant' &&
+  !/auto-cycle: ready\s*$/.test(bc[1].payload.content[0].text) && bc[0].payload.internal_chat_message_metadata_passthrough.turn_id === bc[1].payload.internal_chat_message_metadata_passthrough.turn_id,
+  'continuation fixture wrong')
 const b5Out = F.CELL_RUNNING.filter((l) => /Script running with cell ID 6/.test(l))
 const envWork = work()
 await sleep(200)
