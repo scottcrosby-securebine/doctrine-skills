@@ -204,7 +204,12 @@ dotted keys and the setting is unset, it leaves that line as it is and prints ho
 by hand.
 `doctrine-pane` needs the same install on Codex.
 
-<!-- S11: compaction setting pending Scott's ruling -->
+Codex has no setting that turns automatic compaction off. `model_auto_compact_token_limit` in
+`config.toml` can only make it come earlier, and by default Codex compacts at 90% of the model's
+context window. So for auto-cycle on Codex, set the tier on the record's `auto-cycle: on cap <n> tier
+<tokens or percent>` line low enough that the gauge warns, and the handoff that follows the warning
+finishes, before that point.
+
 Codex fires no hook for a session left idle, a turn ended by an API error, or the exit of a background
 terminal, so while auto-cycle is on each prompt starts a detached watcher, `hooks/dctr-watch.mjs`,
 that follows the turn and hands the auto-cycle hook the event Claude Code would have fired. Idle is a
