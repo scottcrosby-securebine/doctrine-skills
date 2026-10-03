@@ -204,6 +204,27 @@ dotted keys and the setting is unset, it leaves that line as it is and prints ho
 by hand.
 `doctrine-pane` needs the same install on Codex.
 
+<!-- S11: compaction setting pending Scott's ruling -->
+Codex fires no hook for a session left idle, a turn ended by an API error, or the exit of a background
+terminal, so while auto-cycle is on each prompt starts a detached watcher, `hooks/dctr-watch.mjs`,
+that follows the turn and hands the auto-cycle hook the event Claude Code would have fired. Idle is a
+turn whose end is in the session's rollout with no error, no background work and a last message that
+is not the ready line, and, where the session runs in a herdr pane, herdr reporting that pane idle or
+done, for 60 seconds. An API error is the error the turn's end carries in the rollout, and a turn whose
+rollout has not grown for 15 minutes while it is unfinished is handed on as one. A running background
+terminal is a live process under the session's Codex process whose environment carries
+`CODEX_SESSION_ID`, read from `/proc`. The Stop reads it too and waits while one runs, and the watcher
+hands the Stop back once the work holding it has finished. A process whose environment cannot be read
+counts as running, and when that holds a Stop back for 60 seconds the record gets a paused line saying
+the doctrine could not tell.
+
+After a Codex, Claude Code or herdr update, run `node <plugin-root>/hooks/dctr-doctor.mjs`, with
+`--host codex` or `--host claude` to check one. It drives each installed host in scratch homes under
+its own herdr server, never writes `~/.codex` or `~/.claude`, and prints a row for each host signal
+the hooks depend on, the areas its drive does not exercise, and a verdict. Exit 0 means every signal
+it reads holds, 1 means drift, with the row naming each drifted signal, and 2 means it could not run,
+with the message saying why. A run takes a minute or two and two cheap model turns per host.
+
 ## Try it on one file
 
 Do not start with a big audit. Point it at one file you suspect: `use doctrine-audit on
