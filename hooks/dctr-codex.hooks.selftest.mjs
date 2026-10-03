@@ -697,12 +697,18 @@ const tBlankStays = typerCase('blank-stays', { blankStays: F.PANE_0160_BLANK })
 clause('clause 1e20 — typer on Codex, the pane still blank past the session bound after the /clear: no resume line, paused R17 naming the composer, never R16 (clear 1, resume 0, E10-D28)',
   tBlankStays.sends === '1,0' && JSON.stringify(tBlankStays.paused) === R17_COMPOSER && tBlankStays.otherSends.length === 0 &&
   tBlankStays.calls.filter((c) => c[1] === 'read').length > 3, td(tBlankStays))
-// The absent clock restarts when a composer shows: with the pane focused, 12 blank reads, the empty composer once, then
-// blank reads past the moment focus leaves, at 25 polls. Counted from the first blank read that is past the session
-// bound (20 polls); counted from the restart it is not, so the typer waits and sends the /clear once the composer shows.
-const tBlankReset = typerCase('blank-reset', { focusedGets: 25, readSeq: [...Array(12).fill(F.PANE_0160_BLANK), F.PANE_0160_BEFORE, ...Array(15).fill(F.PANE_0160_BLANK)] })
-clause('clause 1e21 — typer on Codex, blank reads, the empty composer, then blank reads again that together outlast the session bound but not since the composer showed: no pause, /clear once and the resume line once (E10-D28)',
-  tBlankReset.sends === '1,1' && tBlankReset.paused.length === 0 && tBlankReset.otherSends.length === 0, td(tBlankReset))
+// The absent clock restarts when a composer shows: with the pane focused, RESET.before blank reads, the empty composer
+// once, then RESET.after blank reads past the moment focus leaves (after RESET.focus polls), then the pane as typerCase
+// stages it (PANE_0160_BEFORE). Counted from the first blank read that is past the session bound; counted from the
+// restart it is not, so the typer waits and sends the /clear once the composer shows. Clause 3j checks the arithmetic.
+const RESET = { focus: 25, before: 12, after: 15 }
+const RESET_SEQ = [...Array(RESET.before).fill(F.PANE_0160_BLANK), F.PANE_0160_BEFORE, ...Array(RESET.after).fill(F.PANE_0160_BLANK)]
+const tBlankReset = typerCase('blank-reset', { focusedGets: RESET.focus, readSeq: RESET_SEQ })
+// One read per poll: every staged read, then the one showing the composer that lets the /clear go.
+const resetReads = tBlankReset.calls.slice(0, tBlankReset.calls.findIndex((c) => c[1] === 'run' && c[3] === '/clear')).filter((c) => c[1] === 'read').length
+clause('clause 1e21 — typer on Codex, blank reads, the empty composer, then blank reads again that together outlast the session bound but not since the composer showed: no pause, /clear once and the resume line once, after the shim served every staged read (E10-D28)',
+  tBlankReset.sends === '1,1' && tBlankReset.paused.length === 0 && tBlankReset.otherSends.length === 0 && resetReads === RESET_SEQ.length + 1,
+  `reads before the /clear ${resetReads}, staged ${RESET_SEQ.length}; ${td(tBlankReset)}`)
 
 // E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
 // PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was submitted and
@@ -820,6 +826,16 @@ clause('clause 3c — without the hooks: the 0.160.0 pane before and after the /
   F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
 clause('clause 3i — without the typer: the blank read the shim plays after the /clear has no › line, and the cleared pane the composer reads after it ends in the empty composer\'s placeholder (E10-D28)',
   typeof F.PANE_0160_BLANK === 'string' && lastPrompt(F.PANE_0160_BLANK) === undefined && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything', 'blank fixture wrong')
+// Poll i (from 1) reads RESET_SEQ[i - 1] at TT.poll * (i - 1) ms; the pane is focused through poll RESET.focus.
+const TTv = JSON.parse(TT), boundPolls = TTv.session / TTv.poll, blank = (t) => lastPrompt(t) === undefined
+const firstUnfocused = RESET.focus + 1, restartPoll = RESET.before + 2
+clause('clause 3j — without the typer or the shim: the staged reads are RESET.before blank reads, one showing the empty composer, RESET.after blank reads, then the pane typerCase stages; the blank reads together exceed the session bound in polls and those after the composer do not; focus leaves while the second blank run lasts, past the bound from the first blank read and inside it from the restart (E10-D28)',
+  RESET_SEQ.length === RESET.before + 1 + RESET.after && RESET_SEQ.slice(0, RESET.before).every(blank) && lastPrompt(RESET_SEQ[RESET.before]) === '› Ask Codex to do anything' &&
+  RESET_SEQ.slice(RESET.before + 1).every(blank) && lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' &&
+  RESET.before + RESET.after > boundPolls && RESET.after <= boundPolls &&
+  firstUnfocused > RESET.before + 1 && firstUnfocused <= RESET_SEQ.length &&
+  (firstUnfocused - 1) * TTv.poll >= TTv.session && (RESET_SEQ.length - restartPoll) * TTv.poll < TTv.session,
+  JSON.stringify({ len: RESET_SEQ.length, boundPolls, firstUnfocused, restartPoll }))
 const bc = F.BLOCK_CONTINUATION.map(J)
 clause('clause 3h — without the hooks: the blocked Stop\'s continuation is a user message carrying the block reason and an assistant answer with no ready line, both in one turn',
   bc.length === 2 && bc[0].payload.role === 'user' && /^<hook_prompt /.test(bc[0].payload.content[0].text) && bc[1].payload.role === 'assistant' &&
