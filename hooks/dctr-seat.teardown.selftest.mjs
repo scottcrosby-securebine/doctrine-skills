@@ -165,6 +165,7 @@ const seat = (agent, paneId, agentId) => {
   fs.writeFileSync(path.join(seatsDir, `${agent}.json`), JSON.stringify({ agent, agent_id: agentId ?? `id-${agent}`, role: 'Explore', n: 1, tabId: null, paneId, file: '/t/x.jsonl' }))
 }
 const reset = () => { fs.rmSync(stateDir, { recursive: true, force: true }); fs.mkdirSync(seatsDir, { recursive: true }); fs.writeFileSync(calls, '') }
+const hookEnv = (env = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...env })
 const run = (payload, env = {}) => {
   try {
     return { code: 0, out: execFileSync('node', [hook], {
@@ -174,9 +175,26 @@ const run = (payload, env = {}) => {
       // A hang is a failure here, not a wait.
       timeout: 30000,
       input: JSON.stringify({ session_id: SESSION, ...payload }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_CONFIG_DIR: '', ...env },
+      env: hookEnv(env),
     }) }
   } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
+}
+// The hook timed from the moment its payload is handed over. It reads stdin only once its modules have loaded, so
+// waiting until it is blocked in that read (/proc/<pid>/syscall: read, 0 on x86_64 and 63 on arm64, on fd 0) leaves
+// node's start-up, which a loaded host stretches without bound, out of what is timed; what is left is the hook's own
+// lock waits, closes and hand-off. `atStart` runs at that moment, so a fixture timed against the hook starts there.
+const runTimed = async (payload, atStart = () => {}) => {
+  const child = spawn('node', [hook], { stdio: ['pipe', 'ignore', 'ignore'], env: hookEnv() })
+  const exit = new Promise((resolve) => child.on('exit', (code) => resolve(code)))
+  const reading = () => { try { return /^(0|63) 0x0 /.test(fs.readFileSync(`/proc/${child.pid}/syscall`, 'utf8')) } catch { return false } }
+  for (const end = Date.now() + 30000; !reading() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5))
+  const booted = reading(), t0 = Date.now()
+  atStart()
+  child.stdin.end(JSON.stringify({ session_id: SESSION, ...payload }))
+  const bound = setTimeout(() => child.kill('SIGKILL'), 30000)
+  const code = await exit
+  clearTimeout(bound)
+  return { code, booted, t0, took: Date.now() - t0 }
 }
 const called = (re) => { try { return re.test(fs.readFileSync(calls, 'utf8')) } catch { return false } }
 const callLines = (re) => { try { return fs.readFileSync(calls, 'utf8').split('\n').filter((l) => re.test(l)) } catch { return [] } }
@@ -437,7 +455,8 @@ console.log('clause 1: a seat pane is named for its status-line title and starts
   // within the same second. The second read has to happen for any parse failure, not only absence.
   const midWrite = path.join(proj, 'sess', 'subagents', 'agent-a9.meta.json')
   fs.writeFileSync(midWrite, '{"agentType":"Explore","descrip')
-  const finisher = spawn('node', ['-e', `setTimeout(() => require('fs').writeFileSync(process.argv[1], JSON.stringify({ description: 'Finished later' })), 100)`, midWrite], { stdio: 'ignore' })
+  // sh, not node: the write has to land inside readMeta's retry, and node's start-up on a loaded host could outlast it.
+  const finisher = spawn('sh', ['-c', 'sleep 0.1; printf %s "$1" > "$2"', 'sh', JSON.stringify({ description: 'Finished later' }), midWrite], { stdio: 'ignore' })
   const late = readMeta(midWrite, 600)
   check('a meta file that is invalid JSON at first read and valid shortly after yields the description', late && late.description === 'Finished later', JSON.stringify(late))
   finisher.kill()
@@ -938,8 +957,8 @@ console.log('clause 1 — SessionEnd exits inside its budget when the lock is bu
 {
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true })
   seat('dctr-explore-1', 'w1:s1'); holdLock(stateDir)
-  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
-  check('the hook exits 0 in under 1,500ms with the placement lock held by a live process', r.code === 0 && took < 1500, `took ${took}ms, code ${r.code}`)
+  const r = await runTimed({ hook_event_name: 'SessionEnd' })
+  check('the hook exits 0 in under 1,500ms from its payload with the placement lock held by a live process', r.booted && r.code === 0 && r.took < 1500, `took ${r.took}ms, code ${r.code}, booted ${r.booted}`)
   check('and closed nothing while it could not hold the lock', !called(/^pane close w1:s1$/m))
   fs.rmSync(path.join(stateDir, 'placement.lock'), { recursive: true, force: true })
   check('once the lock is free, the detached sweep closes the seat and removes the state directory',
@@ -950,10 +969,10 @@ console.log('clause 1 — a move into the unowned directory waits for THAT direc
 {
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
   gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(gatesDir)
-  const t0 = Date.now(); run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
+  const { took, booted } = await runTimed({ hook_event_name: 'SessionEnd' })
   check('with the gate directory locked, the gate is not moved and the hook still exits inside its budget',
-    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && took < 1500,
-    `took ${took}ms; moved ${fs.existsSync(movedFile(SESSION, 'dctr-gate-1'))}`)
+    fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')) && !fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && booted && took < 1500,
+    `took ${took}ms, booted ${booted}; moved ${fs.existsSync(movedFile(SESSION, 'dctr-gate-1'))}`)
   fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
   check('and once it is free, the detached sweep moves it',
     waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
@@ -966,11 +985,15 @@ console.log('clause 1 — the two lock waits share ONE deadline, so both busy in
   // wait that restarted the clock would run the hook past 1,500ms; one deadline holds it inside.
   reset(); fs.rmSync(gatesDir, { recursive: true, force: true }); fs.mkdirSync(gatesDir, { recursive: true })
   gate('dctr-gate-1', { paneId: 'w1:g1' }, false); holdLock(stateDir); holdLock(gatesDir)
-  const freer = spawn('bash', ['-c', `sleep 0.7; rm -rf ${JSON.stringify(path.join(stateDir, 'placement.lock'))}`], { stdio: 'ignore' })
-  const t0 = Date.now(); const r = run({ hook_event_name: 'SessionEnd' }); const took = Date.now() - t0
-  await new Promise((res) => (freer.exitCode !== null ? res() : freer.on('exit', res)))
+  // Freed 700ms after the payload is handed over, not after the spawn: timed from the spawn, a start-up past 700ms
+  // found the lock already free and the restarted wait could no longer show. A wait that restarts its clock at the
+  // second lock exits no sooner than 700 + 800ms after the payload; one deadline exits at 800ms. A free that lands
+  // past the 800ms wait shows neither, so it fails the clause rather than pass it.
+  let freed = null
+  const r = await runTimed({ hook_event_name: 'SessionEnd' }, () => setTimeout(() => { fs.rmSync(path.join(stateDir, 'placement.lock'), { recursive: true, force: true }); freed = Date.now() }, 700))
   check('with the placement lock freed at 700ms and the gate directory still held, the hook exits in under 1,500ms',
-    r.code === 0 && took < 1500 && fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')), `took ${took}ms`)
+    r.booted && freed !== null && freed - r.t0 < 800 && r.code === 0 && r.took < 1500 && fs.existsSync(path.join(seatsDir, 'dctr-gate-1.json')),
+    `took ${r.took}ms, booted ${r.booted}, freed at ${freed === null ? 'never' : `${freed - r.t0}ms`}`)
   fs.rmSync(path.join(gatesDir, 'placement.lock'), { recursive: true, force: true })
   check('and the detached sweep it handed off to still moves the gate', waitFor(() => fs.existsSync(movedFile(SESSION, 'dctr-gate-1')) && !fs.existsSync(stateDir)))
 }
