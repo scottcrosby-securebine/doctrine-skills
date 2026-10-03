@@ -19,7 +19,7 @@ let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 const caps = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'dctr-doctor.fixtures.json'), 'utf8'))
 const copy = (o) => JSON.parse(JSON.stringify(o))
-const drifted = (obs) => doctorVerdict(obs).filter((r) => !r.ok).map((r) => r.code).sort()
+const drifted = (obs) => doctorVerdict(obs).filter((r) => r.ok === false).map((r) => r.code).sort()
 const sessionOf = (obs, source) => obs.log.find((e) => e.event === 'SessionStart' && e.source === source)?.session_id
 const mark = (e) => String(e.prompt ?? '').includes('(typed by doctrine auto-cycle, not a ruling)')
 /** The transcript text with `edit` applied to each line that parses and passes `pick`. */
@@ -74,10 +74,9 @@ const TAMPERS = [
     (o) => !o.composer.cleared.includes('›')],
   ['a draft reads as an empty composer', 'codex', ['C2'], (o) => { o.composer.draft = o.composer.cleared },
     (o) => o.composer.draft === o.composer.cleared],
-  // C3 reads composer.afterClear, the first pane read after the /clear, which in the capture shows no composer line.
+  // C3 reads composer.afterClear, the first pane read after the /clear, which in the capture shows no composer line;
+  // one showing a composer line is unobserved, below.
   ['no pane read was taken right after /clear', 'codex', ['C3'], (o) => { delete o.composer.afterClear }, (o) => !('afterClear' in o.composer)],
-  ['the read right after /clear shows a composer holding text', 'codex', ['C3'], (o) => { o.composer.afterClear = o.composer.draft },
-    (o) => typeof o.composer.afterClear === 'string' && o.composer.afterClear.includes('› doctor draft')],
   ['herdr reports the pane working', 'claude', ['H1'], (o) => { o.pane.agent_status = 'working' }, (o) => o.pane.agent_status === 'working'],
   ['herdr keeps the old session for the pane', 'codex', ['H2'], (o) => { o.pane.agent_session = sessionOf(o, 'startup') },
     (o) => o.pane.agent_session === sessionOf(o, 'startup')],
@@ -189,6 +188,20 @@ clause('2 the green summary names every area the drive does not exercise, after 
 const drift1 = copy(caps.codex); drift1.pane.agent_status = 'working'
 clause('1 a drifted summary names the drift and still lists the areas not exercised', /drift in codex H1/.test(summary({ codex: doctorVerdict(drift1) })) && /does not exercise/.test(summary({ codex: doctorVerdict(drift1) })), summary({ codex: doctorVerdict(drift1) }))
 clause('3 the drifted capture differs from the capture in the fact named', drift1.pane.agent_status === 'working' && caps.codex.pane.agent_status !== 'working', 'tamper did nothing')
+// C3 on a host whose first read after /clear already shows a composer line: the absent path never ran, so the row is
+// unobserved (ok null), neither a pass nor a drift: the exit stays 0 when nothing drifts, and the summary marks the row
+// and names it in the verdict, so a green run never reads as covering it.
+const SHOWN = [['the empty composer', (o) => o.composer.cleared], ['a composer holding text', (o) => o.composer.draft]]
+for (const [name, pick] of SHOWN) {
+  const o = copy(caps.codex); o.composer.afterClear = pick(o)
+  const rows = doctorVerdict(o), c3 = rows.find((r) => r.code === 'C3'), text = summary({ codex: rows })
+  clause(`1 codex: the read right after /clear shows ${name}: C3 is unobserved, neither ok nor drift, the exit 0 and the summary names it`,
+    c3?.ok === null && drifted(o).length === 0 && doctorExit(rows) === 0 && /^ {2}unobs {2}C3 /m.test(text) && /not observed: codex C3/.test(text.split('\n').at(-1)),
+    JSON.stringify([c3, text.split('\n').filter((l) => /C3|signal|drift/.test(l))]))
+  clause(`3 codex: the read tampered to show ${name} has a › line and the capture's has none, read without the verdict`,
+    o.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')) && !caps.codex.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')), 'tamper did nothing')
+}
+clause('2 the summary of the capture marks no row unobserved and names none', !/^ {2}unobs /m.test(green) && !/not observed:/.test(green), green)
 
 // Account identifiers never ship: every file under hooks/ and skills/ is scanned. The planted identifiers are
 // built at run time, so this file carries none of them.

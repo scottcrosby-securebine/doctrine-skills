@@ -2143,7 +2143,7 @@ export const DOCTOR_SIGNALS = {
   R4: { what: 'codexTurnState and the watcher\'s watchedTurn read the turn\'s start, its end and its last message from the rollout', codexOnly: true },
   C1: { what: 'composerIdle reads the composer after /clear as empty', codexOnly: true },
   C2: { what: 'composerIdle reads a composer showing the typed draft as not empty', codexOnly: true },
-  C3: { what: 'composerIdle reads a pane with no composer line, read right after /clear, as absent, never as a draft', codexOnly: true },
+  C3: { what: 'composerIdle reads a pane with no composer line, read right after /clear, as absent, never as a draft; unobserved when that read already shows the composer', codexOnly: true },
   H1: { what: 'herdr reports the pane ready (agent_status idle or done) after the turn' },
   H2: { what: 'herdr reports the session /clear started as the pane\'s agent_session' },
 }
@@ -2174,7 +2174,7 @@ export function doctorVerdict(obs) {
   const rows = []
   const stopped = o.launched !== true || o.stuck ? ' (the drive stopped, see L1)' : ''
   const row = (code, ok, why) => {
-    if (host === 'codex' || !DOCTOR_SIGNALS[code].codexOnly) rows.push({ code, ok: Boolean(ok), what: DOCTOR_SIGNALS[code].what, why: ok ? '' : code === 'L1' ? why : why + stopped })
+    if (host === 'codex' || !DOCTOR_SIGNALS[code].codexOnly) rows.push({ code, ok: ok === null ? null : Boolean(ok), what: DOCTOR_SIGNALS[code].what, why: ok ? '' : code === 'L1' ? why : why + stopped })
   }
   const lacks = (name, e, keys) => (e ? `${name} lacks ${missing(e, keys).join(', ')}` : `no ${name} seen`)
   const keysOk = (e, keys) => Boolean(e) && missing(e, keys).length === 0
@@ -2226,8 +2226,9 @@ export function doctorVerdict(obs) {
   row('C2', composerIdle(o.composer?.draft) === false && composerLine(o.composer?.draft) === DOCTOR_DRAFT,
     composerLine(o.composer?.draft) === null ? 'no composer line on the screen with the draft' : `the composer read ${JSON.stringify(composerLine(o.composer?.draft))}, not the draft`)
   const ac = o.composer?.afterClear
-  row('C3', composerIdle(ac) === (composerLine(ac) === null ? 'absent' : true),
-    typeof ac !== 'string' ? 'no pane read was taken right after /clear' : composerLine(ac) === null ? `a pane with no composer line read ${JSON.stringify(composerIdle(ac))}, not absent` : `the first read after /clear read ${JSON.stringify(composerIdle(ac))}, not empty`)
+  // A first read that already shows the composer leaves the absent path unrun: unobserved (null), never a pass.
+  row('C3', typeof ac === 'string' && composerLine(ac) !== null ? null : composerIdle(ac) === 'absent',
+    typeof ac !== 'string' ? 'no pane read was taken right after /clear' : composerLine(ac) !== null ? 'every read right after /clear already showed the composer, so no pane without one was read' : `a pane with no composer line read ${JSON.stringify(composerIdle(ac))}, not absent`)
   row('H1', READY_STATUSES.includes(o.pane?.agent_status), `herdr agent_status is ${o.pane?.agent_status ?? 'unread'}`)
   row('H2', Boolean(s1) && o.pane?.agent_session === s1, `herdr agent_session is ${o.pane?.agent_session ?? 'unread'}, not ${s1 ?? 'the /clear session'}`)
   return rows
@@ -2245,8 +2246,8 @@ function usageFieldsOk(text, usage, host) {
   return false
 }
 
-/** 0 when every signal holds, 1 on any drift (2, cannot run, is the driver's). */
-export const doctorExit = (rows) => (rows.every((r) => r.ok) ? 0 : 1)
+/** 0 when no signal drifts, an unobserved one (ok null) included, 1 on any drift (2, cannot run, is the driver's). */
+export const doctorExit = (rows) => (rows.every((r) => r.ok !== false) ? 0 : 1)
 
 /** The hook areas the drive never exercises, which a green run says nothing about. */
 export const DOCTOR_UNEXERCISED = [
@@ -2259,18 +2260,21 @@ export const DOCTOR_UNEXERCISED = [
 ]
 
 /** What the doctor prints for `results`, { host: doctorVerdict rows }: each host's rows, the areas the drive does not
- *  exercise, and the verdict, which names the drifted signals or says every signal it reads holds. */
+ *  exercise, and the verdict, which names the drifted signals or says every signal it reads holds, and names any
+ *  signal the run could not observe. */
 export function doctorSummary(results) {
-  const out = [], drift = []
+  const out = [], drift = [], unobserved = []
   for (const [host, rows] of Object.entries(results)) {
     out.push(host)
     for (const r of rows) {
-      out.push(`  ${r.ok ? 'ok   ' : 'DRIFT'}  ${r.code}  ${r.what}${r.ok ? '' : `: ${r.why}`}`)
-      if (!r.ok) drift.push(`${host} ${r.code}`)
+      out.push(`  ${r.ok === null ? 'unobs' : r.ok ? 'ok   ' : 'DRIFT'}  ${r.code}  ${r.what}${r.ok ? '' : `: ${r.why}`}`)
+      if (r.ok === false) drift.push(`${host} ${r.code}`)
+      if (r.ok === null) unobserved.push(`${host} ${r.code}`)
     }
   }
   out.push('dctr-doctor: this run does not exercise:', ...DOCTOR_UNEXERCISED.map((a) => `  - ${a}`))
-  out.push(drift.length ? `dctr-doctor: drift in ${drift.join(', ')}` : 'dctr-doctor: every signal it reads holds (not the areas above)')
+  const notSeen = unobserved.length ? `; not observed: ${unobserved.join(', ')}` : ''
+  out.push((drift.length ? `dctr-doctor: drift in ${drift.join(', ')}` : 'dctr-doctor: every signal it reads holds (not the areas above)') + notSeen)
   return out.join('\n')
 }
 
