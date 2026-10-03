@@ -1327,9 +1327,7 @@ function typerReady(o, t, pause) {
     // New entries since the Stop: the session ran on (a prompt, or another Stop hook that blocked), and the turn
     // running ends in a Stop, which pauses with R11 for the second. herdr reads it ready only once that Stop's hooks
     // have returned, so the typer waits for it rather than pausing on the busy grace.
-    // Bounded by the first-turn wait (E10-D28). ponytail: measured on the not-idle clock, which can start up to one idle
-    // grace before the new entries appear, so the pause can come that much early; a clock of its own if that matters.
-    if (o.stage === 'clear' && o.grew === true) return o.notIdle < t.firstTurn ? { act: 'wait', reason: 'the session ran on after the Stop' } : pause('R17', R17_WHY.busy)
+    if (o.stage === 'clear' && o.grew === true) return { act: 'wait', reason: 'the session ran on after the Stop' }
     return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
   }
   return null
