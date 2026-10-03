@@ -4,7 +4,9 @@
 // the summary the doctor prints, the scan of hooks/ and skills/ for account identifiers with the redaction --save
 // applies, --save taking no path, and the doctor's cleanup when it is interrupted, which runs the doctor itself under
 // a stub herdr and reads /proc for what it left running (Linux).
-//   1. each tampered capture makes exactly the signals named for it drift, and the exit code 1;
+//   1. each tampered capture makes exactly the signals named for it drift, and the exit code 1; a capture tampered so
+//      a signal cannot be observed reads that row unobserved (ok null), with no drift, the exit code 0 and the summary
+//      naming it;
 //   2. the captures as taken drift nothing, every signal for the host is reported, and the exit code is 0;
 //   3. each tampered capture really differs from the capture in the fact named, checked without the verdict.
 
@@ -174,7 +176,7 @@ clause('3 codex: the capture\'s first read after /clear shows no › line, read 
 for (const host of ['codex', 'claude']) {
   const rows = doctorVerdict(caps[host])
   const want = Object.keys(DOCTOR_SIGNALS).filter((c) => host === 'codex' || !DOCTOR_SIGNALS[c].codexOnly)
-  clause(`2 ${host}: the capture drifts nothing and exits 0`, rows.every((r) => r.ok) && doctorExit(rows) === 0, JSON.stringify(rows.filter((r) => !r.ok)))
+  clause(`2 ${host}: the capture drifts nothing, leaves nothing unobserved and exits 0`, rows.every((r) => r.ok === true) && doctorExit(rows) === 0, JSON.stringify(rows.filter((r) => r.ok !== true)))
   clause(`2 ${host}: every signal for the host is reported once`, JSON.stringify(rows.map((r) => r.code).sort()) === JSON.stringify(want.sort()), JSON.stringify(rows.map((r) => r.code)))
 }
 // The summary the doctor prints: its rows, then the hook areas the drive does not exercise, then the verdict, so a
@@ -420,7 +422,7 @@ clause('1 a doctor interrupted while a host answers --version exits 130 and remo
 clause('3 the --version run was signalled with the scratch dir made and the stub server not yet started, read without the doctor',
   ints.version.window?.roots === 1 && ints.version.window?.server === false, JSON.stringify(ints.version.window))
 
-clause('2 an empty observation drifts every signal and never throws', (() => { try { return doctorVerdict({ host: 'codex' }).every((r) => !r.ok) } catch { return false } })(), 'it threw or passed a signal')
+clause('2 an empty observation drifts every signal and never throws', (() => { try { return doctorVerdict({ host: 'codex' }).every((r) => r.ok === false) } catch { return false } })(), 'it threw or passed a signal')
 
 fs.rmSync(SYS, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

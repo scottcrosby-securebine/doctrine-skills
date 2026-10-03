@@ -1,8 +1,9 @@
 // Codex CLI fixtures for the Codex selftests: 0.156.1 for E10 e10-hookport, 0.160.0 where a constant's comment names it
-// and in the e10-clear section at the end. Cut VERBATIM from the probes' real rollouts, hook payloads and pane reads by
-// a script (paths under doctrine-skills-project/.doctrine/records/): e10-hookport/build/III-evidence/genfix.py;
-// e10-hookport/build/R1-evidence/genfix-r1.mjs, R2-evidence/genfix-r2.mjs, R3-evidence/genfix-r3.mjs and
-// R3-evidence/genfix-r3-procs.mjs for the gate round repairs; genfix-s1.mjs for e10-clear, which was not archived;
+// and in the e10-clear and e10-fix sections at the end. Cut VERBATIM from the probes' real rollouts, hook payloads and
+// pane reads by a script (paths under doctrine-skills-project/.doctrine/records/): e10-hookport/build/III-evidence/
+// genfix.py; e10-hookport/build/R1-evidence/genfix-r1.mjs, R2-evidence/genfix-r2.mjs and R3-evidence/genfix-r3.mjs for
+// the rollouts cut from a user's ~/.codex/sessions and the probe captures whose notes name them, and
+// R3-evidence/genfix-r3-procs.mjs for the probe P-PROC process listings; e10-clear/tools/genfix-s1.mjs for e10-clear;
 // e10-clear/realenv-s4/tools/genfix-s4.mjs for API_ERROR, PRIOR_TURN_0160 and STALLED_TURN; and
 // e10-fix/captures/genfix-e10fix.mjs for PANE_0160_BLANK and PANE_0160_DRAFT_BLANKFIRST. Every constant names its
 // source and lines.

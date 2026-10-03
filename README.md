@@ -227,8 +227,9 @@ After a Codex, Claude Code or herdr update, run `node <plugin-root>/hooks/dctr-d
 `--host codex` or `--host claude` to check one. It drives each installed host in scratch homes under
 its own herdr server, never writes `~/.codex` or `~/.claude`, and prints a row for each host signal
 the hooks depend on, the areas its drive does not exercise, and a verdict. Exit 0 means every signal
-it reads holds, 1 means drift, with the row naming each drifted signal, and 2 means it could not run,
-with the message saying why. A run takes a minute or two and two cheap model turns per host.
+it observed holds; a signal the run could not observe prints `unobs` on its row and the verdict names
+it. Exit 1 means drift, with the row naming each drifted signal, and 2 means it could not run, with the
+message saying why. A run takes a minute or two and two cheap model turns per host.
 
 ## Try it on one file
 
