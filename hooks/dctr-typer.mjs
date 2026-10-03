@@ -108,7 +108,7 @@ try {
   const readGated = () => { try { return JSON.parse(fs.readFileSync(gatedFile(a.pane), 'utf8')).session_id || null } catch { return null } }
 
   // The typer's clock: poll intervals waited, not wall time (RB2-4).
-  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null, cycled = false
+  let now = 0, stage = 'clear', stageStart = 0, notIdleSince = null, restore = null, restoreSeen = null, resumes = 0, partialSince = null, cycled = false, absentSince = null
   for (;;) {
     const rec = parseRecord(fs.readFileSync(a.record, 'utf8'))
     const stopRepo = stopFileRepo(repos, fs.existsSync)
@@ -130,6 +130,8 @@ try {
     partialSince = old?.partial || fresh?.partial ? (partialSince ?? now) : null
     // Codex: the pane read each poll the typer may send on, for the composer before every send (E10H-R4-B1).
     const text = codex && pane ? paneText() : undefined
+    // Codex: how long the pane has read with no composer line, from the first such read (E10-D28).
+    absentSince = composerIdle(text) === 'absent' ? (absentSince ?? now) : null
     const step = typerStep({
       stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
       midWrite: partialSince === null ? null : now - partialSince,
@@ -138,6 +140,7 @@ try {
       host: a.host, composer: composerIdle(text), gated: codex && stage === 'confirm' ? readGated() : null,
       aborted: stage === 'confirm' && fresh ? fresh.aborted : null,
       firstTurn: stage === 'confirm' && Boolean(fresh?.entries.some((e) => e?.type === 'assistant')),
+      absentFor: absentSince === null ? 0 : now - absentSince,
       waited: now - stageStart, notIdle: notIdleSince === null ? 0 : now - notIdleSince, sessionWait: restoreSeen === null ? 0 : now - restoreSeen,
     })
     if (step.cycle) {

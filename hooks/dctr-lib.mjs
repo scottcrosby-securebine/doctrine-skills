@@ -924,6 +924,7 @@ export const R17_WHY = {
   send: 'herdr could not send to the pane',
   transcript: 'the transcript could not be read',
   session: 'herdr did not report the new session within 30 s',
+  composer: 'the pane showed no composer within 30 s',
   noPane: 'this session is not in a herdr pane',
   hash: 'the working tree could not be hashed',
   error: 'an unexpected error',
@@ -1326,7 +1327,9 @@ function typerReady(o, t, pause) {
     // New entries since the Stop: the session ran on (a prompt, or another Stop hook that blocked), and the turn
     // running ends in a Stop, which pauses with R11 for the second. herdr reads it ready only once that Stop's hooks
     // have returned, so the typer waits for it rather than pausing on the busy grace.
-    if (o.stage === 'clear' && o.grew === true) return { act: 'wait', reason: 'the session ran on after the Stop' }
+    // Bounded by the first-turn wait (E10-D28). ponytail: measured on the not-idle clock, which can start up to one idle
+    // grace before the new entries appear, so the pause can come that much early; a clock of its own if that matters.
+    if (o.stage === 'clear' && o.grew === true) return o.notIdle < t.firstTurn ? { act: 'wait', reason: 'the session ran on after the Stop' } : pause('R17', R17_WHY.busy)
     return o.notIdle < t.idle ? { act: 'wait', reason: 'the session is not ready for input' } : pause('R17', R17_WHY.busy)
   }
   return null
@@ -1543,12 +1546,17 @@ export const CODEX_RESUME_LINE = `$doctrine:doctrine-resume ${RESUME_ARGS}`
 const COMPOSER_PLACEHOLDERS = ['Ask Codex to do anything', 'Ask a follow-up question']
 
 /** Whether the pane's composer, its last `›` line, is empty (E10H-R4-B1, E10 S1): the check before every Codex send.
- *  A submitted prompt sits above the composer, so the last `›` line is the composer; a pane showing none is not empty.
- *  Null when the pane text was not read. */
+ *  A submitted prompt sits above the composer, so the last `›` line is the composer. `'absent'` when the pane shows
+ *  none, as a blank read or the new chat's splash right after a /clear does: not a draft, and not empty (E10-D28). A
+ *  draft whose first line is blank shows a bare `›` with its text on the line below, and reads as a draft; an empty
+ *  composer has a blank line under it. Null when the pane text was not read. */
 export function composerIdle(text) {
   if (typeof text !== 'string') return null
   const composer = composerLine(text)
-  return composer !== null && ['', ...COMPOSER_PLACEHOLDERS].includes(composer)
+  if (composer === null) return 'absent'
+  const lines = text.split('\n').map((l) => l.trim())
+  if (composer === '' && lines[lines.findLastIndex((l) => l.startsWith('›')) + 1]) return false
+  return ['', ...COMPOSER_PLACEHOLDERS].includes(composer)
 }
 
 /** The text in the pane's composer, its last `›` line, trimmed; null when the pane shows none or was not read. */
@@ -1788,12 +1796,15 @@ function codexTyperAct(o) {
 /**
  * The checks before every Codex send, the /clear, the first resume line and a second one alike (E10H-R4-B1): a
  * composer that is not empty (`o.composer`, composerIdle's) is typing,
- * R16 whether or not the pane is focused; then typerReady (a session named, unfocused, ready); then a composer nobody
- * read (null) pauses with R17, since only a read pane says it is empty. A step, or null when the typer may send. What
- * the new chat's rollout shows (typing, an interrupted resume turn) is checked before the retry reaches this.
+ * R16 whether or not the pane is focused; then typerReady (a session named, unfocused, ready); then a pane showing no
+ * composer line is not ready: it waits while the absent reads have lasted (`o.absentFor`, ms since the first of them)
+ * under the session wait, then pauses with R17 naming the composer (E10-D28); then a composer nobody read (null)
+ * pauses with R17, since only a read pane says it is empty. A step, or null when the typer may send. What the new
+ * chat's rollout shows (typing, an interrupted resume turn) is checked before the retry reaches this.
  */
 function codexSendGuard(o, t, pause) {
   if (o.composer === false) return pause('R16')
+  if (o.composer === 'absent') return typerReady(o, t, pause) || (o.absentFor < t.session ? { act: 'wait', reason: 'the pane shows no composer yet' } : pause('R17', R17_WHY.composer))
   return typerReady(o, t, pause) || (o.composer === true ? null : pause('R17', R17_WHY.lookup))
 }
 
@@ -2107,8 +2118,9 @@ export function codexInstallPlan({ hooksJson, configToml, hookDir, hooksJsonPath
 // `log` the probe logger's lines in order, each a hook payload's event, the fields below, its keys and `restored`,
 // the session this pane's restore file named when the hook ran; `blocked` and `passed` the pane's gated marker after
 // each marked line; `transcript` the plain turn's transcript path and text read at its Stop; `composer` the pane text
-// after /clear and with the draft (Codex); `pane` herdr's agent_status and agent_session after the last turn;
-// `hookLogs` every doctrine hook.log of the run.
+// read first after the /clear (`afterClear`: the first read with no composer line where the TUI showed one, else the
+// first read), a few seconds after it (`cleared`) and with the draft (Codex); `pane` herdr's agent_status and
+// agent_session after the last turn; `hookLogs` every doctrine hook.log of the run.
 
 /** The line the doctor types for a plain turn, and the marked line the gate decides on. */
 export const DOCTOR_PLAIN = 'Reply with the single word ok. Use no tools.'
@@ -2133,6 +2145,7 @@ export const DOCTOR_SIGNALS = {
   R4: { what: 'codexTurnState and the watcher\'s watchedTurn read the turn\'s start, its end and its last message from the rollout', codexOnly: true },
   C1: { what: 'composerIdle reads the composer after /clear as empty', codexOnly: true },
   C2: { what: 'composerIdle reads a composer showing the typed draft as not empty', codexOnly: true },
+  C3: { what: 'composerIdle reads a pane with no composer line, read right after /clear, as absent, never as a draft', codexOnly: true },
   H1: { what: 'herdr reports the pane ready (agent_status idle or done) after the turn' },
   H2: { what: 'herdr reports the session /clear started as the pane\'s agent_session' },
 }
@@ -2214,6 +2227,9 @@ export function doctorVerdict(obs) {
   row('C1', composerIdle(o.composer?.cleared) === true, 'the composer after /clear did not read empty')
   row('C2', composerIdle(o.composer?.draft) === false && composerLine(o.composer?.draft) === DOCTOR_DRAFT,
     composerLine(o.composer?.draft) === null ? 'no composer line on the screen with the draft' : `the composer read ${JSON.stringify(composerLine(o.composer?.draft))}, not the draft`)
+  const ac = o.composer?.afterClear
+  row('C3', composerIdle(ac) === (composerLine(ac) === null ? 'absent' : true),
+    typeof ac !== 'string' ? 'no pane read was taken right after /clear' : composerLine(ac) === null ? `a pane with no composer line read ${JSON.stringify(composerIdle(ac))}, not absent` : `the first read after /clear read ${JSON.stringify(composerIdle(ac))}, not empty`)
   row('H1', READY_STATUSES.includes(o.pane?.agent_status), `herdr agent_status is ${o.pane?.agent_status ?? 'unread'}`)
   row('H2', Boolean(s1) && o.pane?.agent_session === s1, `herdr agent_session is ${o.pane?.agent_session ?? 'unread'}, not ${s1 ?? 'the /clear session'}`)
   return rows

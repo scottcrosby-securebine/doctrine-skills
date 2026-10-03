@@ -74,6 +74,10 @@ const TAMPERS = [
     (o) => !o.composer.cleared.includes('›')],
   ['a draft reads as an empty composer', 'codex', ['C2'], (o) => { o.composer.draft = o.composer.cleared },
     (o) => o.composer.draft === o.composer.cleared],
+  // C3 reads composer.afterClear, the first pane read after the /clear, which in the capture shows no composer line.
+  ['no pane read was taken right after /clear', 'codex', ['C3'], (o) => { delete o.composer.afterClear }, (o) => !('afterClear' in o.composer)],
+  ['the read right after /clear shows a composer holding text', 'codex', ['C3'], (o) => { o.composer.afterClear = o.composer.draft },
+    (o) => typeof o.composer.afterClear === 'string' && o.composer.afterClear.includes('› doctor draft')],
   ['herdr reports the pane working', 'claude', ['H1'], (o) => { o.pane.agent_status = 'working' }, (o) => o.pane.agent_status === 'working'],
   ['herdr keeps the old session for the pane', 'codex', ['H2'], (o) => { o.pane.agent_session = sessionOf(o, 'startup') },
     (o) => o.pane.agent_session === sessionOf(o, 'startup')],
@@ -162,6 +166,11 @@ for (const [name, host, want, tamper, proof] of TAMPERS) {
   clause(`1 ${host}: ${name} drifts ${want.join(', ')} and exits 1`, JSON.stringify(got) === JSON.stringify(want) && doctorExit(doctorVerdict(o)) === 1, `drifted ${JSON.stringify(got)}`)
   clause(`3 ${host}: the capture tampered for "${name}" carries the defect`, proof(o) && !proof(copy(caps[host])), 'the tamper did not change the fact it names')
 }
+
+// The codex capture's composer.afterClear is codex-cli 0.160.0's first pane read after a /clear, taken under herdr
+// 0.9.3 outside the doctor (the doctor's own capture predates C3): it shows no composer line.
+clause('3 codex: the capture\'s first read after /clear shows no › line, read without the verdict',
+  typeof caps.codex.composer.afterClear === 'string' && !caps.codex.composer.afterClear.split('\n').some((l) => l.trim().startsWith('›')), JSON.stringify(caps.codex.composer.afterClear))
 
 for (const host of ['codex', 'claude']) {
   const rows = doctorVerdict(caps[host])

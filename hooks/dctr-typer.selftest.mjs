@@ -52,6 +52,25 @@ clause('clause 1e8 — typerStep before /clear: a busy or focused pane after new
   ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: 200 }).act === 'wait' &&
   ts({ grew: false, pane: BUSY, notIdle: 200 }).code === 'R17' && ts({ grew: true }).code === 'R16',
   JSON.stringify([ts({ grew: true, pane: BUSY, notIdle: 200 }), ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: 200 })]))
+// E10-D28 (Q2): that wait is bounded, measured on the typer's not-idle clock, by the first-turn wait, and past it the
+// busy pause stands, on both hosts.
+clause('clause 1e9 — typerStep before /clear: the wait on a session that ran on after the Stop ends at the first-turn bound, then pauses R17 busy, on both hosts (E10-D28)',
+  ts({ grew: true, pane: BUSY, notIdle: T.firstTurn - 1 }).act === 'wait' && ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: T.firstTurn - 1 }).act === 'wait' &&
+  ts({ grew: true, pane: BUSY, notIdle: T.firstTurn }).reason === 'could not type into the pane: the session stayed busy' &&
+  ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: T.firstTurn }).reason === 'could not type into the pane: the session stayed busy',
+  JSON.stringify([ts({ grew: true, pane: BUSY, notIdle: T.firstTurn }), ts({ host: 'codex', composer: true, grew: true, pane: BUSY, notIdle: T.firstTurn })]))
+// E10-D28 (Q1): on Codex a pane read with no composer line (composerIdle's absent) is not ready: every send, the
+// /clear, the first resume line and the retry, waits while the absent reads have lasted under the session bound, then
+// pauses R17 naming the composer; it is never R16, which a draft on the composer line still is.
+const NOCOMP = 'could not type into the pane: the pane showed no composer within 30 s'
+const SENDS = [['the /clear', { host: 'codex' }], ['the first resume', { host: 'codex', stage: 'resume', waited: T.poll }],
+  ['the retry', { host: 'codex', stage: 'confirm', restore: NEW, pane: NEWP, waited: T.firstTurn, resumes: 1, typedNew: false, sessionWait: T.poll }]]
+const absentBad = SENDS.filter(([, o]) => ts({ ...o, composer: true }).act === 'wait' || ts({ ...o, composer: 'absent', absentFor: 0 }).act !== 'wait' ||
+  ts({ ...o, composer: 'absent', absentFor: T.session - 1 }).act !== 'wait' || ts({ ...o, composer: 'absent', absentFor: T.session }).reason !== NOCOMP ||
+  ts({ ...o, composer: false }).code !== 'R16')
+clause('clause 1e10 — Codex typerStep: a pane with no composer line waits on the /clear, the first resume and the retry while under the session bound from the first absent read, then pauses R17 naming the composer, never R16; a draft is still R16 (E10-D28)',
+  absentBad.length === 0 && R17_WHY.composer === 'the pane showed no composer within 30 s',
+  JSON.stringify(SENDS.map(([n, o]) => [n, ts({ ...o, composer: true }).act, ts({ ...o, composer: 'absent', absentFor: 0 }), ts({ ...o, composer: 'absent', absentFor: T.session })])))
 // RB1: one observation per agent_status value herdr 0.9.1 reports, plus a missing one.
 const STATUS = [['idle', 'clear'], ['done', 'clear'], ['working', 'pause'], ['blocked', 'pause'], ['unknown', 'pause'], [undefined, 'pause']]
 const statusBad = STATUS.filter(([st, act]) => ts({ pane: { ...idle, status: st }, notIdle: 200 }).act !== act ||

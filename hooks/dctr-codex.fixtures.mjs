@@ -374,3 +374,15 @@ export const PANE_0160_CLEARED = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/clau
 
 /** The pane after /clear with a draft typed and not submitted; the draft wraps onto a second line. Source: doctrine-skills-project/.doctrine/records/e10-clear/probe-0160/case-w45/caps/w45-c-draft.txt. */
 export const PANE_0160_DRAFT = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/claude-1000/…/fx/d1-open/widget-api\n  permissions: YOLO mode\n\n  Hello, you. Got an idea?\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n› draft text typed after clear, not\n  submitted\n\n  GPT-6.1-Sol low · /tmp/claude-1000/e10c-pr…\n                                    ⚠ 1 · f2\n"
+
+// ---------------------------------------------------------------- e10-fix (E10-D28)
+// codex-cli 0.160.0 pane reads from the e10-fix live capture: a scratch CODEX_HOME, a private herdr 0.9.3 server,
+// `herdr pane read <pane> --source recent --lines 80` polled every 100 ms right after `herdr pane run <pane> /clear`,
+// each distinct read saved verbatim to its own file (named in each note).
+
+/** The pane read right after a /clear that took, before the new chat is drawn: empty, 0 bytes, at host load 52.7, the
+ *  first read after the /clear and every read of the 3 s after it (capture try06-0000ms.txt). */
+export const PANE_0160_BLANK = ""
+/** A draft whose first line is blank: ctrl+j, then text, sent into the empty composer after a finished turn: a bare `›`
+ *  with the text on the indented line below it, then the blank line above the footer (capture dry/draft-blankfirst-ctrlj.txt, host load 17). */
+export const PANE_0160_DRAFT_BLANKFIRST = "\n  >_ OpenAI Codex (v0.160.0)\n     /tmp/claude-1000/e10cap-wDYPH2/work\n  permissions: YOLO mode\n\n  Speak, friend, and enter a prompt.\n\n\n› Reply with the single word ok. Use no tools.\n\n\n■ '/clear' is disabled while a task is in progress.\n\n• ok\n\n  Worked for 5s • 14:11\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n›\n  second line draft, never sent\n\n  GPT-6.1-Sol low · /tmp/claude-1000/e10cap-wDYPH2/work · Reply ok\n                                                                                              ⚠ 1 warning · f2 to view\n"

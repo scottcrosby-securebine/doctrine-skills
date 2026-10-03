@@ -39,7 +39,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
-import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle } from './dctr-lib.mjs'
+import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle, composerLine } from './dctr-lib.mjs'
 
 const USAGE = 'usage: node dctr-doctor.mjs [--host codex|claude] [--control] [--keep] [--save]\n'
 const argv = process.argv.slice(2), opt = { hosts: ['codex', 'claude'], control: false, keep: false, save: false }
@@ -239,7 +239,7 @@ async function drive(host) {
   // that covers the composer (a hook review, a dialog) is kept for L1 and dismissed once with esc, which trusts
   // nothing, so the drive can show which hooks then run; one that stays stops the drive there.
   const stopped = new Error('stopped')
-  const idle = () => until(() => composerIdle(read()), 15000)
+  const idle = () => until(() => composerIdle(read()) === true, 15000)
   const type = async (text) => {
     if (host === 'codex' && !(await idle())) {
       const screen = read()
@@ -257,7 +257,7 @@ async function drive(host) {
   try {
     herdr(['pane', 'run', P, launch])
     // Codex fires no hook until the first prompt, so its composer is the ready sign; Claude Code fires SessionStart.
-    obs.launched = Boolean(await until(() => (host === 'codex' ? composerIdle(read()) : log().some((e) => e.event === 'SessionStart')), 90000))
+    obs.launched = Boolean(await until(() => (host === 'codex' ? composerIdle(read()) === true : log().some((e) => e.event === 'SessionStart')), 90000))
     if (!obs.launched) { obs.stuck = { before: DOCTOR_MARKED, screen: read() }; return obs }
     await sleep(3000)
     const ups = (marked) => (i) => after(i, (e) => e.event === 'UserPromptSubmit' && String(e.prompt).includes(marked ? DOCTOR_MARKED : DOCTOR_PLAIN))
@@ -277,6 +277,14 @@ async function drive(host) {
     snapHookLogs()
 
     await type('/clear')
+    if (host === 'codex') {
+      // C3: the reads of the 3 s right after the /clear, kept as the first with no composer line, else the first.
+      for (const end = Date.now() + 3000; Date.now() < end; await sleep(100)) {
+        const t = read()
+        if (obs.composer.afterClear === undefined) obs.composer.afterClear = t
+        if (typeof t === 'string' && composerLine(t) === null) { obs.composer.afterClear = t; break }
+      }
+    }
     await sleep(5000)
     if (host === 'codex') {
       obs.composer.cleared = read()

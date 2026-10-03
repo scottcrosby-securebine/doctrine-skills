@@ -71,7 +71,12 @@ if (args[0] === 'pane' && args[1] === 'get') {
   console.log(JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: st.status || 'done', focused: st.gets <= (st.focusedGets || 0), ...(session ? { agent_session: { value: session } } : {}) } } }))
 } else if (args[0] === 'pane' && args[1] === 'read') {
   if (st.readFails) { process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
-  process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
+  // blankReads: what the first reads after a /clear that took return, one each, before the new chat's composer is drawn;
+  // blankStays: what every read after it returns until the resume line.
+  if (st.cleared && !st.resumed && (st.blankStays !== undefined || st.blankReads?.length)) {
+    const t = st.blankReads?.length ? st.blankReads.shift() : st.blankStays
+    save(); process.stdout.write(t)
+  } else process.stdout.write(st.resumed && st.afterResume ? st.afterResume : st.clearedAt && st.cleared ? (st.after ?? st.before) : st.before)
 } else if (args[0] === 'pane' && args[1] === 'run') {
   const restore = () => fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.newSession, transcript_path: st.newTranscript }))
   const at = new Date().toISOString(), msg = (role, text) => JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } })
@@ -679,6 +684,18 @@ const tAgents = typerCase('agents', { firstLines: [F.AGENTS_MD_TURN[1]] })
 clause('clause 1e9 — typer on Codex, the new chat opens with the injected AGENTS.md block: the cycle confirms with no pause (clear 1, resume 1, E10H-B7)',
   tAgents.sends === '1,1' && tAgents.paused.length === 0 && tAgents.cycled.length === 1, td(tAgents))
 
+// E10-D28: after a /clear that took, codex-cli 0.160.0's pane reads blank (PANE_0160_BLANK) before the new chat is drawn.
+// The typer waits on a pane with no composer line and sends the resume line once the empty composer shows; a pane that
+// stays blank past the session bound pauses R17 naming the composer, and never R16.
+const R17_COMPOSER = '["- auto-cycle paused: could not type into the pane: the pane showed no composer within 30 s"]'
+const tBlank = typerCase('blank-then-composer', { blankReads: Array(5).fill(F.PANE_0160_BLANK) })
+clause('clause 1e19 — typer on Codex, the pane blank for several polls after a /clear that took, then the new chat\'s empty composer: /clear once, the resume line once, the cycle line, no pause (clear 1, resume 1, E10-D28)',
+  tBlank.sends === '1,1' && tBlank.paused.length === 0 && tBlank.cycled.length === 1 && tBlank.turn && tBlank.otherSends.length === 0, td(tBlank))
+const tBlankStays = typerCase('blank-stays', { blankStays: F.PANE_0160_BLANK })
+clause('clause 1e20 — typer on Codex, the pane still blank past the session bound after the /clear: no resume line, paused R17 naming the composer, never R16 (clear 1, resume 0, E10-D28)',
+  tBlankStays.sends === '1,0' && JSON.stringify(tBlankStays.paused) === R17_COMPOSER && tBlankStays.otherSends.length === 0 &&
+  tBlankStays.calls.filter((c) => c[1] === 'read').length > 3, td(tBlankStays))
+
 // E10H-R4-B1: every Codex send checks the composer, and the retry an interrupted resume. Derived pane texts:
 // PANE_0160_BEFORE with a draft in its composer; PANE_0160_CLEARED after the resume line was submitted and
 // interrupted (INTERRUPTED_LINE, probe B6's pane) above a draft.
@@ -793,6 +810,8 @@ clause('clause 3c — without the hooks: the 0.160.0 pane before and after the /
   lastPrompt(F.PANE_0160_BEFORE) === '› Ask Codex to do anything' && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything' &&
   lastPrompt(F.PANE_0160_DRAFT) === '› draft text typed after clear, not' && tStale.stagedGated?.session_id === OLD && tNormal.stagedGated === null &&
   F.TUI_TURN.some((l) => l.includes('"input_tokens":17503')) && 10000 < 17503 && 100000 > 17503, 'typer or gauge fixture wrong')
+clause('clause 3i — without the typer: the blank read the shim plays after the /clear has no › line, and the cleared pane the composer reads after it ends in the empty composer\'s placeholder (E10-D28)',
+  typeof F.PANE_0160_BLANK === 'string' && lastPrompt(F.PANE_0160_BLANK) === undefined && lastPrompt(F.PANE_0160_CLEARED) === '› Ask Codex to do anything', 'blank fixture wrong')
 const bc = F.BLOCK_CONTINUATION.map(J)
 clause('clause 3h — without the hooks: the blocked Stop\'s continuation is a user message carrying the block reason and an assistant answer with no ready line, both in one turn',
   bc.length === 2 && bc[0].payload.role === 'user' && /^<hook_prompt /.test(bc[0].payload.content[0].text) && bc[1].payload.role === 'assistant' &&
