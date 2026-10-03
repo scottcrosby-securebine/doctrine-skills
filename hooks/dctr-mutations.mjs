@@ -1508,7 +1508,7 @@ const MUTATIONS = [
     to: "" },
   { name: "the typer pauses on the busy grace after the session ran on past the Stop (S2)", file: "dctr-lib.mjs",
     clause: "clause 1e8 (typer), clause 1e17 (codex hooks)",
-    from: "    if (o.stage === 'clear' && o.grew === true) return o.notIdle < t.firstTurn ? { act: 'wait', reason: 'the session ran on after the Stop' } : pause('R17', R17_WHY.busy)\n",
+    from: "    if (o.stage === 'clear' && o.grew === true) return { act: 'wait', reason: 'the session ran on after the Stop' }\n",
     to: "" },
   { name: "the Stop decision drops its guard: R12 another session in the pane (E8-D7)", file: "dctr-lib.mjs",
     clause: "clause 1e",
@@ -2956,7 +2956,7 @@ const MUTATIONS = [
     clause: "clause 2 an empty observation drifts every signal and never throws",
     from: "const log = Array.isArray(o.log) ? o.log.filter((e) => e && typeof e === 'object') : []", to: "const log = o.log.filter((e) => e && typeof e === 'object')" },
   // E10-D28: a pane read with no composer line is absent and waits, bounded; a blank-first-line draft is a draft; the
-  // wait on a session that ran on after the Stop is bounded; the doctor's C3 reads the pane right after /clear.
+  // doctor's C3 reads the pane right after /clear.
   { name: "E10-D28: composerIdle reads a pane with no composer line as a draft", file: "dctr-lib.mjs",
     clause: "clause 1n4 — composerIdle on a pane with no composer line is absent; clause 1e19",
     from: "  if (composer === null) return 'absent'\n", to: "  if (composer === null) return false\n" },
@@ -2969,9 +2969,6 @@ const MUTATIONS = [
   { name: "E10-D28: a draft whose first line is blank reads as an empty composer", file: "dctr-lib.mjs",
     clause: "clause 1n5 — composerIdle on a draft whose first line is blank is a draft",
     from: "  if (composer === '' && lines[lines.findLastIndex((l) => l.startsWith('›')) + 1]) return false\n", to: "" },
-  { name: "E10-D28: the wait on a session that ran on after the Stop has no bound", file: "dctr-lib.mjs",
-    clause: "clause 1e9 — the wait on a session that ran on after the Stop ends at the first-turn bound",
-    from: "return o.notIdle < t.firstTurn ? { act: 'wait', reason: 'the session ran on after the Stop' }", to: "return true ? { act: 'wait', reason: 'the session ran on after the Stop' }" },
   { name: "E10-D28: C3 passes whatever the read after /clear shows", file: "dctr-lib.mjs",
     clause: "clause 1 codex: the read right after /clear shows a composer holding text drifts C3",
     from: "row('C3', composerIdle(ac) === (composerLine(ac) === null ? 'absent' : true),", to: "row('C3', true," },
