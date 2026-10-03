@@ -32,8 +32,8 @@
 // its path; dctr-doctor.selftest.mjs reads such a file as its captures.
 //
 // Host-internal details it depends on, beside documented hook contracts: Codex's trust-line key and hash
-// (trustedHash), the Codex composer's text (composerIdle), the rollout and transcript layouts the readers parse, and
-// the credentials files' layout.
+// (trustedHash), the Codex composer's text (composerIdle), the rollout and transcript layouts the readers parse, the
+// credentials files' layout, and Claude Code's 103-byte limit on the socket path it binds in XDG_RUNTIME_DIR.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -83,19 +83,63 @@ if (opt.hosts.includes('claude')) {
   creds.claude = JSON.stringify({ claudeAiOauth: oauth })
 }
 
-// ---- the scratch dir and an allowlisted environment
+// ---- the cleanup, then the scratch dir and an allowlisted environment
+const SAVED = 'observations.json'
+let cleaned = false, serverPid = null
+/** The pids under `top` in `ps`'s process table, `top` included: the herdr server and whatever it spawned, read
+ *  without /proc so a host that has none (macOS) still stops them. */
+function processTree(top) {
+  const kids = new Map()
+  for (const l of execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 10000 }).split('\n')) {
+    const [pid, ppid] = l.trim().split(/\s+/).map(Number)
+    if (pid) kids.set(ppid, [...(kids.get(ppid) || []), pid])
+  }
+  const out = [top]
+  for (let i = 0; i < out.length; i++) out.push(...(kids.get(out[i]) || []))
+  return out
+}
+/** Stops what the run started and removes the scratch dir, each step guarded on its own so a failure in one (no
+ *  /proc on macOS) never leaves the dir and its credential copies behind. */
+function cleanup() {
+  if (cleaned) return
+  cleaned = true
+  try { herdr(['server', 'stop']) } catch { /* killed below */ }
+  const pids = new Set()
+  try { if (serverPid) processTree(serverPid).forEach((p) => pids.add(p)) } catch { /* no ps: /proc below */ }
+  try {
+    for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
+      try { if (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`DCTR_DOCTOR_RUN=${root}`)) pids.add(Number(pid)) } catch { /* gone, or not ours */ }
+    }
+  } catch { /* no /proc (macOS): the server's tree above stands for it */ }
+  pids.delete(process.pid)
+  for (const pid of pids) try { process.kill(pid, 'SIGKILL') } catch { /* gone */ }
+  if (opt.keep) return
+  const keep = opt.save && fs.existsSync(path.join(root, SAVED))
+  for (const f of keep ? fs.readdirSync(root).filter((f) => f !== SAVED) : ['.']) fs.rmSync(path.join(root, f), { recursive: true, force: true })
+}
+// An interrupt runs the same cleanup, so neither the scratch dir, the detached herdr server nor a TUI holding the
+// scratch credentials outlives the doctor. The handlers are in place before the scratch dir is made, and a handler
+// runs only when the event loop next turns, which is after that, so an interrupt at any point leaves nothing behind.
+for (const [sig, n] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+  process.on(sig, () => { process.stderr.write(`dctr-doctor: ${sig}, cleaning up\n`); cleanup(); process.exit(n) })
+}
+
 // The scratch dir sits under the caller's TMPDIR, so it is made before that variable goes.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-'))
 const dir = (...p) => { const d = path.join(root, ...p); fs.mkdirSync(d, { recursive: true }); return d }
 const sock = path.join(root, 'x', 'herdr', 'herdr.sock')
 if (Buffer.byteLength(sock) > 100) { fs.rmSync(root, { recursive: true, force: true }); cannot(`the herdr socket path ${sock} is too long; set TMPDIR to a short dir such as /tmp`) }
+// Claude Code binds <XDG_RUNTIME_DIR>/cc-socks/<pid>.sock while that path is at most 103 bytes, and past that
+// /tmp/cc-socks-<uid>/<pid>.sock, outside the scratch dir. The path is measured at a 7-digit pid, the widest Linux has.
+const ccSock = path.join(root, 'r', 'cc-socks', '9999999.sock')
+if (Buffer.byteLength(ccSock) > 103) { fs.rmSync(root, { recursive: true, force: true }); cannot(`Claude Code's socket path ${ccSock} is too long; set TMPDIR to a short dir such as /tmp`) }
 // An allowlist, so no variable the caller carries steers where a host writes: what a host needs to start (PATH, the
 // locale, TERM, the user and shell names, the time zone) and to reach its API through a proxy, and nothing else. It
 // replaces the doctor's own environment, which the herdr calls in dctr-state.mjs and every child below inherit.
 const KEEP = /^(PATH|LANG|LC_\w+|TERM|USER|LOGNAME|SHELL|TZ|(HTTPS?|ALL|NO)_PROXY|(https?|all|no)_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_(FILE|DIR))$/
 for (const k of Object.keys(process.env)) if (!KEEP.test(k)) delete process.env[k]
-// The runtime dir is where a host puts its sockets (Claude Code: cc-socks/<pid>.sock), so its name is one letter:
-// the path of such a socket is a few bytes longer than herdr's, whose length is checked above.
+// The runtime dir is where a host puts its sockets (Claude Code: cc-socks/<pid>.sock, whose length is checked above),
+// so its name is one letter.
 const runtime = dir('r')
 fs.chmodSync(runtime, 0o700)
 Object.assign(process.env, { HOME: dir('home'), TMPDIR: dir('tmp'), XDG_CONFIG_HOME: dir('x'), XDG_STATE_HOME: dir('xs'), XDG_DATA_HOME: dir('xd'), XDG_CACHE_HOME: dir('xc'), XDG_RUNTIME_DIR: runtime, DCTR_DOCTOR_RUN: root, HERDR_SOCKET_PATH: sock })
@@ -266,45 +310,6 @@ async function drive(host) {
     obs.hookLogs = [...seenHookLog].join('\n')
   }
   return obs
-}
-
-const SAVED = 'observations.json'
-let cleaned = false, serverPid = null
-/** The pids under `top` in `ps`'s process table, `top` included: the herdr server and whatever it spawned, read
- *  without /proc so a host that has none (macOS) still stops them. */
-function processTree(top) {
-  const kids = new Map()
-  for (const l of execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 10000 }).split('\n')) {
-    const [pid, ppid] = l.trim().split(/\s+/).map(Number)
-    if (pid) kids.set(ppid, [...(kids.get(ppid) || []), pid])
-  }
-  const out = [top]
-  for (let i = 0; i < out.length; i++) out.push(...(kids.get(out[i]) || []))
-  return out
-}
-/** Stops what the run started and removes the scratch dir, each step guarded on its own so a failure in one (no
- *  /proc on macOS) never leaves the dir and its credential copies behind. */
-function cleanup() {
-  if (cleaned) return
-  cleaned = true
-  try { herdr(['server', 'stop']) } catch { /* killed below */ }
-  const pids = new Set()
-  try { if (serverPid) processTree(serverPid).forEach((p) => pids.add(p)) } catch { /* no ps: /proc below */ }
-  try {
-    for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
-      try { if (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`DCTR_DOCTOR_RUN=${root}`)) pids.add(Number(pid)) } catch { /* gone, or not ours */ }
-    }
-  } catch { /* no /proc (macOS): the server's tree above stands for it */ }
-  pids.delete(process.pid)
-  for (const pid of pids) try { process.kill(pid, 'SIGKILL') } catch { /* gone */ }
-  if (opt.keep) return
-  const keep = opt.save && fs.existsSync(path.join(root, SAVED))
-  for (const f of keep ? fs.readdirSync(root).filter((f) => f !== SAVED) : ['.']) fs.rmSync(path.join(root, f), { recursive: true, force: true })
-}
-// An interrupt runs the same cleanup, so neither the detached herdr server nor a TUI holding the scratch credentials
-// outlives the doctor.
-for (const [sig, n] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
-  process.on(sig, () => { process.stderr.write(`dctr-doctor: ${sig}, cleaning up\n`); cleanup(); process.exit(n) })
 }
 
 let code = 2

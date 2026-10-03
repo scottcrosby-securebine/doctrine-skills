@@ -299,11 +299,15 @@ const envOf = (text) => Object.fromEntries(String(text ?? '').split('\n').filter
  *  procs (processes still carrying the run's marker), started (the stub server ran), stderr, decoys (the decoy
  *  variables the doctor was started with), parent (the environment the stub reads when run with the doctor's own),
  *  seen (the environment the stub server was started with), runtime (ls -ld of its XDG_RUNTIME_DIR) }. */
-async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true }) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-int-')), stub = path.join(base, 'stub'), bin = path.join(base, 'bin'), tmp = path.join(base, 't')
+async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true, tmpLen = 0, versionSleep = 0 }) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-int-')), stub = path.join(base, 'stub'), bin = path.join(base, 'bin')
+  // tmpLen: the doctor's TMPDIR made exactly that many bytes long, under /tmp where the caller's TMPDIR leaves no room.
+  const outer = tmpLen && base.length + 2 > tmpLen ? fs.mkdtempSync('/tmp/dctr-doctor-len-') : null
+  const tmp = tmpLen ? path.join(outer ?? base, 't'.repeat(tmpLen - (outer ?? base).length - 1)) : path.join(base, 't')
   for (const d of [stub, bin, tmp, path.join(base, 'home', '.claude')]) fs.mkdirSync(d, { recursive: true })
   fs.writeFileSync(path.join(bin, 'herdr'), herdrScript.replace('\n', `\nSTUB_DIR='${stub}' STUB_SAVE=${save ? 1 : ''} STUB_ORPHAN=${orphan ? 1 : ''}\n`), { mode: 0o755 })
-  fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\necho "0.0.0-stub (Claude Code)"\n', { mode: 0o755 })
+  // versionSleep: the stub claude marks that --version started, then sleeps that many seconds before it answers.
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\n${versionSleep ? `[ "$1" = --version ] && { : > '${stub}/versioning'; sleep ${versionSleep}; }\n` : ''}echo "0.0.0-stub (Claude Code)"\n`, { mode: 0o755 })
   fs.writeFileSync(path.join(base, 'home', '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'stub', expiresAt: Date.now() + 864e5 } }))
   // Decoys in the doctor's own environment: two XDG dirs outside its scratch dir, and four names its hosts need none of.
   const decoys = Object.fromEntries(DECOYS.map((k) => [k, path.join(base, 'decoy', k)]))
@@ -314,7 +318,10 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   child.stderr.on('data', (d) => { stderr += d })
   child.stdout.resume()
   const exited = new Promise((r) => child.on('exit', (code, signal) => r(code ?? signal)))
-  const started = signal && Boolean(await waitFor(() => fs.existsSync(path.join(stub, 'server.pid')) && /pane run/.test(fs.readFileSync(path.join(stub, 'calls'), 'utf8')), 60000))
+  // A versionSleep run is signalled while --version sleeps; window records what was there at that moment.
+  const started = signal && Boolean(await waitFor(() => (versionSleep ? fs.existsSync(path.join(stub, 'versioning')) :
+    fs.existsSync(path.join(stub, 'server.pid')) && /pane run/.test(fs.readFileSync(path.join(stub, 'calls'), 'utf8'))), 60000))
+  const window = versionSleep && started ? { roots: fs.readdirSync(tmp).filter((d) => d.startsWith('dctr-doctor-')).length, server: fs.existsSync(path.join(stub, 'server.pid')) } : null
   // The orphan, seen before the signal: a sleep 301 carrying the run's marker.
   let orphans = 0
   if (started && orphan) await waitFor(() => { const r = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim(); orphans = markerProcs(r).filter((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('301') } catch { return false } }).length; return orphans }, 20000)
@@ -333,13 +340,19 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   for (const pid of procs) try { process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
   try { for (const pid of fs.readFileSync(path.join(stub, 'server.pid'), 'utf8').trim().split(' ')) process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
   fs.rmSync(base, { recursive: true, force: true })
-  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime }
+  if (outer) fs.rmSync(outer, { recursive: true, force: true })
+  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime, tmp, window }
 }
 const RUNS = {
   // The plain run's server also leaves an orphan outside its tree, which only the /proc scan finds.
   plain: { orphan: true }, noProc: { noProc: true }, term: { sig: 'SIGTERM', noProc: true }, keep: { args: ['--keep'] }, save: { args: ['--save'], save: true },
   // A herdr whose interpreter is missing: found on PATH, so the prerequisites pass, and its spawn fails.
   spawnFail: { herdrScript: '#!/nonexistent/sh\n', signal: false },
+  // TMPDIRs of 62 and 60 bytes: at 62 herdr's socket path is 100 bytes and Claude Code's, at a 7-digit pid, 105; at 60
+  // Claude Code's is 103, the most it binds inside XDG_RUNTIME_DIR.
+  long62: { tmpLen: 62, signal: false }, long60: { tmpLen: 60 },
+  // Interrupted while the stub claude answers --version, after the scratch dir exists and before the server starts.
+  version: { versionSleep: 3 },
 }
 // A known umask, under which a runtime dir left at the mode mkdir gives it is not 0700.
 process.umask(0o022)
@@ -368,6 +381,22 @@ clause('1 a herdr server that cannot be spawned is cannot-run: exit 2, the scrat
 }
 clause('3 the interrupted runs reached the stub server before the signal, and the --keep run shows the scratch dir held more than one file',
   ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && ints.plain.orphans > 0, JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
+
+// Claude Code binds its socket in XDG_RUNTIME_DIR only while the path is at most 103 bytes, so a TMPDIR that pushes it
+// past that is cannot-run, while one that brings it to 103 runs.
+const atRoot = (tmp, ...p) => Buffer.byteLength(path.join(tmp, 'dctr-doctor-XXXXXX', ...p))
+clause('1 a 62-byte TMPDIR is cannot-run, naming Claude Code\'s socket path: exit 2, the scratch dir removed, no server started',
+  ints.long62.code === 2 && /cannot run: Claude Code's socket path .* is too long/.test(ints.long62.stderr) && ints.long62.roots.length === 0 && !ints.long62.runRoot, show(ints.long62))
+clause('2 a 60-byte TMPDIR runs: the doctor reaches the stub server, and an interrupt exits 130 with the cleanup',
+  ints.long60.started && ints.long60.code === 130 && ints.long60.roots.length === 0 && ints.long60.procs.length === 0, show(ints.long60))
+clause('3 the 62-byte TMPDIR puts herdr\'s socket at 100 bytes and Claude Code\'s at 105, the 60-byte one Claude Code\'s at 103, read without the doctor',
+  Buffer.byteLength(ints.long62.tmp) === 62 && Buffer.byteLength(ints.long60.tmp) === 60 && atRoot(ints.long62.tmp, 'x', 'herdr', 'herdr.sock') === 100 &&
+  atRoot(ints.long62.tmp, 'r', 'cc-socks', '9999999.sock') === 105 && atRoot(ints.long60.tmp, 'r', 'cc-socks', '9999999.sock') === 103, JSON.stringify([ints.long62.tmp, ints.long60.tmp]))
+// An interrupt between the scratch dir and the herdr server, here while a host answers --version, still cleans up.
+clause('1 a doctor interrupted while a host answers --version exits 130 and removes its scratch dir', ints.version.started && ints.version.code === 130 &&
+  ints.version.roots.length === 0 && ints.version.procs.length === 0, show(ints.version))
+clause('3 the --version run was signalled with the scratch dir made and the stub server not yet started, read without the doctor',
+  ints.version.window?.roots === 1 && ints.version.window?.server === false, JSON.stringify(ints.version.window))
 
 clause('2 an empty observation drifts every signal and never throws', (() => { try { return doctorVerdict({ host: 'codex' }).every((r) => !r.ok) } catch { return false } })(), 'it threw or passed a signal')
 
