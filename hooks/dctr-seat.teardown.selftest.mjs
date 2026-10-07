@@ -758,16 +758,21 @@ console.log('clause 1: a codex seat keeps its pane on the job, not on the wrappe
   const q = spawn('node', [hook, '--codex-tail', queuedJob, 'w1:s1', LABEL], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...watcherEnv } })
   const qExit = new Promise((resolve) => q.on('exit', (code) => resolve(code)))
   const rewrite = (status) => { fs.writeFileSync(`${queuedJob}.tmp`, JSON.stringify({ ...R(queuedJob), status })); fs.renameSync(`${queuedJob}.tmp`, queuedJob) }
-  // A CONDITION, not a duration — the same repair the poll-interval clause below carries, which this block
-  // did not get. The watcher drains the log only inside a poll, so its output proves a poll ran and
-  // therefore that the record was READ while it still said `queued`. A fixed sleep proved nothing:
-  // a watcher that started after the flip never saw `queued` at all and the clause passed green
-  // having tested none of what it names, which 8-way spawn contention is exactly what makes reachable.
+  // A CONDITION, not a duration. The first output alone proves nothing about the record: poll() writes
+  // the log BEFORE it reads the record, so a flip landing between the two leaves the watcher reading
+  // `running` first, and this clause passes with the queued guard removed. So a marker is appended once
+  // the first output arrives, and the flip waits for the marker. The first poll's pump has already read
+  // past the end of the log, so the marker comes from a later pump: after the first poll's read of
+  // `queued` returned, or from the second pump of a watcher that read `queued` as the end, whose rename
+  // then says `· queued` and fails the rename check below.
   let qOut = ''
   q.stdout.on('data', (d) => { qOut += d })
   const qSeen = Date.now() + 8000
-  while (!qOut.includes('codex output for task-queued') && Date.now() < qSeen) await new Promise((r) => setTimeout(r, 5))
-  const qReady = qOut.includes('codex output for task-queued')
+  const qWait = async (text) => { while (!qOut.includes(text) && Date.now() < qSeen) await new Promise((r) => setTimeout(r, 5)) }
+  await qWait('codex output for task-queued')
+  fs.appendFileSync(R(queuedJob).logFile, 'queued read marker\n')
+  await qWait('queued read marker')
+  const qReady = qOut.includes('queued read marker')
   rewrite('running')
   await new Promise((r) => setTimeout(r, SURVIVES_MS))
   check('the watcher outlives a record that was queued before it ran, having been SHOWN to read it as queued',
