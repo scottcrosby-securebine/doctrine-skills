@@ -42,7 +42,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { herdr, codexStateDir } from './dctr-state.mjs'
 import { codexTerminal, ID_RE } from './dctr-lib.mjs'
-import { STATE_LINE } from './dctr-record.mjs'
+import { parseRecord, restoreState } from './dctr-record.mjs'
 
 export const PROJECT_PATH = 'docs/PROJECT.md'
 const PROJECT_STATES = ['Proposed', 'Ruled', 'Done']
@@ -502,9 +502,8 @@ export function statusLines(model, readers) {
 // ---------------------------------------------------------------- readers (the only I/O)
 
 /** Each `.md` under Records whose last state line is Open or Blocked, named by its first heading (its
- *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. A
- *  state line starts with `state:` after an optional `- ` and an optional `**`, the two forms run
- *  records use. */
+ *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. The
+ *  state line is read by parseRecord in dctr-record.mjs, the plugin's one record parser. */
 /** Throws, printed unknown, when Records is absent or unreadable or a result file that exists cannot
  *  be read. A transcript with no result file is a pending gate, never a failed read. */
 export function readRecords(root, records) {
@@ -516,9 +515,9 @@ export function readRecords(root, records) {
     const rel = path.join(records, n), abs = path.join(dir, n)
     if (n.endsWith('.md')) {
       const raw = fs.readFileSync(abs, 'utf8').split('\n')
-      const last = raw.map((l) => l.trim()).filter((l) => STATE_LINE.test(l)).at(-1)
-      if (last && /^(Open|Blocked)\b/i.test(last.replace(STATE_LINE, ''))) {
-        open.push({ name: raw.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: last })
+      const { state } = parseRecord(raw.join('\n'))
+      if (state && restoreState(state.value)) {
+        open.push({ name: raw.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: state.raw })
       }
     }
     if (n.endsWith('.out')) {

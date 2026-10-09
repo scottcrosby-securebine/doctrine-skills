@@ -264,6 +264,13 @@ clause('clause 2j — the command names sandbox_workspace_write.network_access =
   first.stdout.includes('sandbox_workspace_write.network_access = true') && second.stdout.includes('sandbox_workspace_write.network_access = true'), first.stdout + second.stdout)
 clause('clause 2k — a second run exits 0 and leaves hooks.json and config.toml byte-identical (E10-D4)',
   second.status === 0 && after2.hooks === after1.hooks && after2.config === after1.config, `status ${second.status} ${second.stderr}`)
+const bandCopy = path.join(hd, 'band', 'band.ts')
+fs.appendFileSync(bandCopy, '\n// changed after the copy\n')
+const third = run(['install', '--codex-home', home])
+clause('clause 2k2 — a second run reports the copied hooks directory current, and a run after a file inside its band folder changed copies it again: the current check reads every file at any depth',
+  second.stdout.includes(' is current') && !second.stdout.includes('copied the doctrine hooks') && third.status === 0 && third.stdout.includes('copied the doctrine hooks') &&
+    Buffer.compare(fs.readFileSync(bandCopy), fs.readFileSync(path.join(import.meta.dirname, 'band', 'band.ts'))) === 0,
+  `second ${second.stdout} third ${third.stdout}`)
 
 // CODEX_HOME resolved as Codex resolves it: $CODEX_HOME when no flag, canonicalized, and ~/.codex otherwise.
 const realHome = fs.mkdtempSync(path.join(tmp, 'real-')), link = path.join(tmp, 'link-home')

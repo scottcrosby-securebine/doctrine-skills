@@ -893,6 +893,7 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     'recs/done.md': '# Phase done\n\n- **State: Open.**\n- **State: Exited.** certified\n',
     'recs/bare.md': 'state: Open\n',
     'recs/blocked.md': '# Phase blocked\n\nState: Open\nState: Blocked\n',
+    'recs/boldkey.md': '# Phase boldkey\n\n**State:** Blocked. Q1 is unanswered.\n',
     'recs/g-empty.out': 'z', 'recs/g-empty.out.result': '\nexit=4\n',
     'recs/g-pending.out': 'x', 'recs/g-red.out': 'y', 'recs/g-red.out.result': 'exit=3\ncapture=incomplete\n',
   })
@@ -902,6 +903,8 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     open.includes('Phase alpha: State: Open') && open.includes('Phase beta: - **State: Open.** waiting on a ruling'), JSON.stringify(open))
   clause('records [2: a record whose LAST state line is Exited is not open, in the bold form too, one ending Blocked is, and one with no heading keeps its path]',
     !open.some((l) => l.includes('Phase done')) && open.includes('Phase blocked: State: Blocked') && open.includes(`${path.join(rel, 'bare.md')}: state: Open`), JSON.stringify(open))
+  clause('records [2: a state line with only its key in bold is read as the record parser reads it, so a Blocked record in that form is open]',
+    open.includes('Phase boldkey: **State:** Blocked. Q1 is unanswered.'), JSON.stringify(open))
   clause('records [1: every gate prints, pending or with the first line of its result file, an empty first line included]',
     JSON.stringify(rec.gates) === JSON.stringify([`${path.join(rel, 'g-empty.out')}: `, `${path.join(rel, 'g-pending.out')}: pending`, `${path.join(rel, 'g-red.out')}: exit=3`]), JSON.stringify(rec.gates))
   clause('records [3: the fixture carries both state-line forms, a closed record and both kinds of gate on disk]',

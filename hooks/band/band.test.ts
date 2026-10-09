@@ -50,6 +50,16 @@ describe('bandParts', () => {
     expect(show(bandParts('p', record, 0))).toEqual(['Open:ok', 'round 0:quiet', 'alarm 0:quiet'])
   })
 
+  test('a question answered and then opened again under the same id is owed, as an answer only clears what came before it', async () => {
+    const record = [
+      '- question: Q1 opened 2026-10-05T05:00:00Z which',
+      '- question: Q1 answered 2026-10-05T06:00:00Z stay',
+      '- question: Q1 opened 2026-10-05T07:00:00Z which again',
+      '- State: Open',
+    ].join('\n')
+    expect(show(bandParts('p', record, 0))).toEqual(['Open:plain', 'round 0:quiet', 'alarm 0:quiet', 'ruling owed Q1:owed'])
+  })
+
   test('a record whose last state line is not Open or Blocked, or that has none, draws nothing', async () => {
     for (const s of ['Exited. One clean pass.', 'Stopped', 'Shipped at an escalation', 'Unable: credentials gone']) {
       expect(bandParts('p', `- State: Open\n- question: Q1 opened 2026-10-05T05:03:32Z which\n- State: ${s}\n`, 1)).toBe(null)

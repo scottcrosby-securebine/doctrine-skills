@@ -8,6 +8,9 @@ export type Tone = 'ok' | 'owed' | 'flight' | 'quiet' | 'plain'
 export type Part = { text: string; tone: Tone }
 export type Summary = { phase: string; parts: Part[] }
 
+/** A POSIX root or a Windows drive or UNC root. */
+const absolute = (p: string) => /^(?:[a-zA-Z]:)?[\\/]/.test(p)
+
 /** `read(path)` resolves a file's text, or null when it cannot be read. */
 export type Read = (path: string) => Promise<string | null>
 
@@ -15,14 +18,14 @@ export type Read = (path: string) => Promise<string | null>
  *  handoff, that handoff's `record:` line resolved absolute, else under `root`, else under its parent. Null where it
  *  stops. */
 export async function followChain(root: string, read: Read): Promise<{ phase: string; recordText: string } | null> {
-  const at = (ref: string, dir: string) => (ref.startsWith('/') ? ref : dir + '/' + ref)
+  const at = (ref: string, dir: string) => (absolute(ref) ? ref : dir + '/' + ref)
   const memory = await read(root + '/SESSION_MEMORY.md')
   const ref = memory === null ? null : kickoffHandoff(memory)
   const handoff = ref === null ? null : await read(at(ref, root))
   const header = handoff === null ? null : handoffHeader(handoff)
   if (!header?.record) return null
-  const parent = root.slice(0, root.lastIndexOf('/')) || '/'
-  const tries = header.record.startsWith('/') ? [header.record] : [at(header.record, root), at(header.record, parent)]
+  const parent = root.slice(0, Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\'))) || '/'
+  const tries = absolute(header.record) ? [header.record] : [at(header.record, root), at(header.record, parent)]
   for (const file of tries) {
     const recordText = await read(file)
     if (recordText !== null) return { phase: header.phase ?? '(unnamed)', recordText }
@@ -41,8 +44,9 @@ export function bandParts(phase: string, recordText: string, seatsOut: number): 
   const round = last('round')
   const alarm = last('alarm')
   const ruling = last('ruling')
-  const answered = new Set(entries.filter(e => e.kind === 'question-answered').map(e => e.id))
-  const open = [...new Set(entries.filter(e => e.kind === 'question-opened' && !answered.has(e.id)).map(e => e.id))]
+  // A question is owed while it has an opened line with no answered line for its id after it, as pausingStates reads.
+  const owes = (id: string, line: number) => !entries.some(a => a.kind === 'question-answered' && a.id === id && a.line > line)
+  const open = [...new Set(entries.filter(e => e.kind === 'question-opened' && owes(e.id, e.line)).map(e => e.id))]
 
   const owed: Part[] = []
   if (alarm && (!ruling || ruling.line < alarm.line)) owed.push({ text: alarm.which + ' alarm fired: ruling owed', tone: 'owed' })

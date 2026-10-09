@@ -12,7 +12,7 @@
 // can read whole.
 
 /** A state line starts with `state:` after an optional `- ` and an optional `**`, the two forms run records
- *  use. hooks/dctr-project.mjs reads records with this same test. */
+ *  use. */
 export const STATE_LINE = /^(?:-\s+)?(?:\*\*)?state:\s*/i
 
 /** A line as an agent may write it, with its list marker and the inline code, bold or italic markers that wrap all

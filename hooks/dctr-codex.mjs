@@ -50,8 +50,10 @@ const writeAtomic = (file, data) => {
 }
 const src = import.meta.dirname
 const same = (a, b) => { try { return Buffer.compare(fs.readFileSync(a), fs.readFileSync(b)) === 0 } catch { return false } }
+// Every file at any depth: hooks/ holds the band's folder, and a directory compared as a file never reads current.
+const files = (d) => fs.readdirSync(d, { recursive: true }).map(String).filter((f) => fs.statSync(path.join(d, f)).isFile()).sort()
 const current = (() => {
-  try { const want = fs.readdirSync(src).sort(), have = fs.readdirSync(hookDir).sort()
+  try { const want = files(src), have = files(hookDir)
     return JSON.stringify(want) === JSON.stringify(have) && want.every((f) => same(path.join(src, f), path.join(hookDir, f))) } catch { return false }
 })()
 try {
