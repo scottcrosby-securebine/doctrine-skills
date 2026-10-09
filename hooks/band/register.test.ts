@@ -10,16 +10,22 @@ const PROPS = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 12
 
 const seat = (status: AgentInfo['status']): AgentInfo => ({ id: 'a' + status, description: 'd', type: 'general-purpose', status } as AgentInfo)
 
-/** Files under /w/repo and the seat list, answered beneath the plugin; both change while the test runs. */
+/** Files under /w/repo, the seat list and the clock, answered beneath the plugin; files and seats change while the
+ *  test runs. `delay` makes the seat list answer that late on the mocked clock; `most` is the most seat lists ever
+ *  out at once. */
 function world(on: On, record: string) {
+  const clock = mock.clock(on)
   const files: Record<string, string> = { '/w/repo/SESSION_MEMORY.md': MEMORY, '/w/repo/docs/h.md': HANDOFF, '/w/repo/r.md': record }
-  const agents: { list: AgentInfo[]; deny?: string; late?: (ms: number) => Promise<void>; delay?: number } = { list: [] }
+  const agents: { list: AgentInfo[]; deny?: string; delay?: number; out: number; most: number } = { list: [], out: 0, most: 0 }
   on('fs.read', async ($, e) => {
     const text = files[e.path]
     return text === undefined ? { deny: 'ENOENT: ' + e.path } : { value: text }
   })
   on('agent.list', async () => {
-    if (agents.delay && agents.late) await agents.late(agents.delay)
+    agents.out += 1
+    agents.most = Math.max(agents.most, agents.out)
+    if (agents.delay) await clock.sleep(agents.delay)
+    agents.out -= 1
     return agents.deny ? { deny: agents.deny } : { value: agents.list }
   })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -28,10 +34,15 @@ function world(on: On, record: string) {
     const { Text } = $.ui.resolve(e)
     return h(Text, {}, 'beneath') as any
   })
-  return { files, agents }
+  return { files, agents, clock }
 }
 
-const start = ($: any) => $.session.start({ cwd: '/w/repo', surface: 'terminal', isInteractive: true })
+const begin = ($: any) => $.session.start({ cwd: '/w/repo', surface: 'terminal', isInteractive: true })
+/** Starts the session and lets the band's first refresh, which session.start does not wait for, settle. */
+const start = async ($: any, clock: { settle: () => Promise<void> }) => {
+  await begin($)
+  await clock.settle()
+}
 const band = async ($: any) => {
   const ui = await $.ui.mount({ plugin: 'doctrine', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   const line = await ui.find({ type: 'Text', text: 'doctrine ' })
@@ -41,9 +52,8 @@ const part = async (ui: any, text: string) => (await ui.find({ type: 'Text', tex
 
 describe('register', () => {
   test('an Open record draws the phase, Open in green, and grey counts', async ($, on) => {
-    mock.clock(on)
-    world(on, OPEN)
-    await start($)
+    const { clock } = world(on, OPEN)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeDefined()
     expect((await ui.find({ type: 'Text', text: 'p1' }))?.props).toMatchObject({ bold: true })
@@ -54,19 +64,17 @@ describe('register', () => {
   })
 
   test('a Blocked record draws Blocked and the owed question in bold magenta', async ($, on) => {
-    mock.clock(on)
-    world(on, BLOCKED)
-    await start($)
+    const { clock } = world(on, BLOCKED)
+    await start($, clock)
     const { ui } = await band($)
     expect(await part(ui, 'Blocked')).toMatchObject({ color: 'magenta', bold: true })
     expect(await part(ui, 'ruling owed Q7')).toMatchObject({ color: 'magenta', bold: true })
   })
 
   test('seats pending, running or waiting count as out, in cyan, and the count follows the list at the next poll', async ($, on) => {
-    const clock = mock.clock(on)
-    const { agents } = world(on, OPEN)
+    const { agents, clock } = world(on, OPEN)
     agents.list = [seat('running'), seat('waiting'), seat('pending'), seat('completed'), seat('idle'), seat('failed'), seat('killed')]
-    await start($)
+    await start($, clock)
     const { ui } = await band($)
     expect(await part(ui, '3 seats out')).toMatchObject({ color: 'cyan' })
     agents.list = []
@@ -75,9 +83,8 @@ describe('register', () => {
   })
 
   test('a record that turns Exited stops the band at the next poll', async ($, on) => {
-    const clock = mock.clock(on)
-    const { files } = world(on, OPEN)
-    await start($)
+    const { files, clock } = world(on, OPEN)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeDefined()
     files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
@@ -87,10 +94,9 @@ describe('register', () => {
   })
 
   test('a refused seat list draws the band with no seats, and does not keep it once the record turns Exited', async ($, on) => {
-    const clock = mock.clock(on)
-    const { files, agents } = world(on, OPEN)
+    const { files, agents, clock } = world(on, OPEN)
     agents.deny = 'refused'
-    await start($)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /seats? out/ })).toBeUndefined()
@@ -101,57 +107,65 @@ describe('register', () => {
   })
 
   test('a record that turns Exited clears at the next poll while a seat list answers late', async ($, on) => {
-    const clock = mock.clock(on)
-    const { files, agents } = world(on, OPEN)
-    await start($)
+    const { files, agents, clock } = world(on, OPEN)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeDefined()
-    agents.late = clock.sleep
     agents.delay = 60000
     files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
     await clock.advance(5000)
     expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
   })
 
-  test('an older poll whose seat list answers late never puts back a band a newer poll cleared', async ($, on) => {
-    const clock = mock.clock(on)
-    const { files, agents } = world(on, OPEN)
-    await start($)
-    const { ui } = await band($)
-    agents.late = clock.sleep
-    agents.delay = 17000
-    await clock.advance(5000)
+  test('with a seat list slower than the poll, refreshes never overlap and the band still follows the record', async ($, on) => {
+    const { files, agents, clock } = world(on, OPEN)
+    await start($, clock)
+    const { ui, line } = await band($)
+    expect(line).toBeDefined()
+    agents.delay = 6000
+    files['/w/repo/r.md'] = OPEN.replace('round: 5', 'round: 6')
+    await clock.advance(30000)
+    expect(await ui.find({ type: 'Text', text: 'round 6' })).toBeDefined()
     files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
-    await clock.advance(5000)
+    await clock.advance(15000)
     expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
-    await clock.advance(12000)
-    expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()
+    expect(agents.most).toBe(1)
+  })
+
+  test('a seat list that never answers does not hold the session start, and polls do not pile up behind it', async ($, on) => {
+    const { agents, clock } = world(on, OPEN)
+    agents.delay = 1e12
+    let started = false
+    void begin($).then(() => {
+      started = true
+    })
+    await clock.settle()
+    expect(started).toBe(true)
+    expect(agents.most).toBe(1)
+    await clock.advance(20000)
+    expect(agents.most).toBe(1)
   })
 
   test('no memory file draws nothing', async ($, on) => {
-    mock.clock(on)
-    const { files } = world(on, OPEN)
+    const { files, clock } = world(on, OPEN)
     delete files['/w/repo/SESSION_MEMORY.md']
-    await start($)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()
   })
 
   test('the band yields to a survey', async ($, on) => {
-    mock.clock(on)
-    world(on, OPEN)
-    await start($)
+    const { clock } = world(on, OPEN)
+    await start($, clock)
     const ui = await $.ui.mount({ plugin: 'doctrine', surface: 'terminal', component: 'AbovePrompt', props: { ...PROPS, hasSurvey: true } })
     expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()
   })
 
   test('the band config row off registers nothing, so an Open record draws nothing', { options: { band: false } }, async ($, on) => {
-    mock.clock(on)
-    world(on, OPEN)
-    await start($)
+    const { clock } = world(on, OPEN)
+    await start($, clock)
     const { ui, line } = await band($)
     expect(line).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()

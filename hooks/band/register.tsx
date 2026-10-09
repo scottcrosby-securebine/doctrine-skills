@@ -15,7 +15,7 @@ const POLL_MS = 5000
 let root: string | null = null
 let shown: Summary | null = null
 let fingerprint = 'null'
-let generation = 0
+let busy = false
 
 async function readOrNull($: EngineInterface, file: string): Promise<string | null> {
   try {
@@ -25,10 +25,8 @@ async function readOrNull($: EngineInterface, file: string): Promise<string | nu
   }
 }
 
-/** Re-reads the chain and the seat list; true when what the band shows has changed. Only the newest refresh
- *  assigns, so an older one whose reads settle late never puts back what a newer one cleared. */
+/** Re-reads the chain and the seat list; true when what the band shows has changed. */
 async function refresh($: EngineInterface): Promise<boolean> {
-  const mine = ++generation
   const chain = root === null ? null : await followChain(root, file => readOrNull($, file))
   let next = chain === null ? null : bandParts(chain.phase, chain.recordText, 0)
   if (chain !== null && next !== null) {
@@ -36,12 +34,26 @@ async function refresh($: EngineInterface): Promise<boolean> {
     const agents = await $.agent.list().catch(() => [])
     next = bandParts(chain.phase, chain.recordText, agents.filter(a => OUT.has(a.status)).length)
   }
-  if (mine !== generation) return false
   const print = JSON.stringify(next)
   const changed = print !== fingerprint
   fingerprint = print
   shown = next
   return changed
+}
+
+/** One refresh at a time: a poll that comes due while one is still out is skipped, so refreshes never overlap and
+ *  each one that settles draws what it read. Nothing awaits it, so an engine call that answers late or never holds
+ *  only the band, never the session. */
+function poll($: EngineInterface): void {
+  if (busy) return
+  busy = true
+  refresh($)
+    .then(changed => {
+      if (changed) $.ui.invalidate('ui.render')
+    }, () => {})
+    .finally(() => {
+      busy = false
+    })
 }
 
 export const register: Register = (on, options) => {
@@ -50,14 +62,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     root = e.cwd
-    // The first draw can land before this read finishes, so ask for one more.
-    await refresh($)
-    $.ui.invalidate('ui.render')
-    $.clock.every(POLL_MS, () => {
-      void refresh($).then(changed => {
-        if (changed) $.ui.invalidate('ui.render')
-      })
-    })
+    poll($)
+    $.clock.every(POLL_MS, () => poll($))
     return started
   })
 
