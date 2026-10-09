@@ -13,12 +13,15 @@ const seat = (status: AgentInfo['status']): AgentInfo => ({ id: 'a' + status, de
 /** Files under /w/repo and the seat list, answered beneath the plugin; both change while the test runs. */
 function world(on: On, record: string) {
   const files: Record<string, string> = { '/w/repo/SESSION_MEMORY.md': MEMORY, '/w/repo/docs/h.md': HANDOFF, '/w/repo/r.md': record }
-  const agents: { list: AgentInfo[]; deny?: string } = { list: [] }
+  const agents: { list: AgentInfo[]; deny?: string; late?: (ms: number) => Promise<void>; delay?: number } = { list: [] }
   on('fs.read', async ($, e) => {
     const text = files[e.path]
     return text === undefined ? { deny: 'ENOENT: ' + e.path } : { value: text }
   })
-  on('agent.list', async () => (agents.deny ? { deny: agents.deny } : { value: agents.list }))
+  on('agent.list', async () => {
+    if (agents.delay && agents.late) await agents.late(agents.delay)
+    return agents.deny ? { deny: agents.deny } : { value: agents.list }
+  })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   // What draws beneath the band (another plugin's band, or the engine's): it must survive the band drawing.
   on('ui.render', async ($, e) => {
@@ -93,6 +96,35 @@ describe('register', () => {
     expect(await ui.find({ type: 'Text', text: /seats? out/ })).toBeUndefined()
     files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
     await clock.advance(5000)
+    expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()
+  })
+
+  test('a record that turns Exited clears at the next poll while a seat list answers late', async ($, on) => {
+    const clock = mock.clock(on)
+    const { files, agents } = world(on, OPEN)
+    await start($)
+    const { ui, line } = await band($)
+    expect(line).toBeDefined()
+    agents.late = clock.sleep
+    agents.delay = 60000
+    files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
+    await clock.advance(5000)
+    expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
+  })
+
+  test('an older poll whose seat list answers late never puts back a band a newer poll cleared', async ($, on) => {
+    const clock = mock.clock(on)
+    const { files, agents } = world(on, OPEN)
+    await start($)
+    const { ui } = await band($)
+    agents.late = clock.sleep
+    agents.delay = 17000
+    await clock.advance(5000)
+    files['/w/repo/r.md'] = OPEN + '- State: Exited. One clean pass.\n'
+    await clock.advance(5000)
+    expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
+    await clock.advance(12000)
     expect(await ui.find({ type: 'Text', text: 'doctrine ' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'beneath' })).toBeDefined()
   })

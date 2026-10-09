@@ -15,6 +15,7 @@ const POLL_MS = 5000
 let root: string | null = null
 let shown: Summary | null = null
 let fingerprint = 'null'
+let generation = 0
 
 async function readOrNull($: EngineInterface, file: string): Promise<string | null> {
   try {
@@ -24,15 +25,18 @@ async function readOrNull($: EngineInterface, file: string): Promise<string | nu
   }
 }
 
-/** Re-reads the chain and the seat list; true when what the band shows has changed. */
+/** Re-reads the chain and the seat list; true when what the band shows has changed. Only the newest refresh
+ *  assigns, so an older one whose reads settle late never puts back what a newer one cleared. */
 async function refresh($: EngineInterface): Promise<boolean> {
+  const mine = ++generation
   const chain = root === null ? null : await followChain(root, file => readOrNull($, file))
-  let next: Summary | null = null
-  if (chain !== null) {
-    // A refused seat list must not keep a record that turned terminal on screen: it reads as no seats out.
+  let next = chain === null ? null : bandParts(chain.phase, chain.recordText, 0)
+  if (chain !== null && next !== null) {
+    // Asked only for a live record, so a terminal one clears without waiting on it; a refused list reads as none.
     const agents = await $.agent.list().catch(() => [])
     next = bandParts(chain.phase, chain.recordText, agents.filter(a => OUT.has(a.status)).length)
   }
+  if (mine !== generation) return false
   const print = JSON.stringify(next)
   const changed = print !== fingerprint
   fingerprint = print
