@@ -38,7 +38,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.selftest.mjs',
   'dctr-seat.mjs', 'dctr-seat.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-gate.mjs', 'dctr-gate.selftest.mjs',
   'dctr-project.mjs', 'dctr-project.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-token.mjs', 'hooks.json',
-  // dctr-record.mjs is read by dctr-project.mjs too (STATE_LINE), so without it every project suite dies on load.
+  // dctr-record.mjs is read by dctr-project.mjs too (parseRecord), so without it every project suite dies on load.
   'dctr-record.mjs', 'dctr-record.selftest.mjs', 'dctr-restore.mjs', 'dctr-restore.selftest.mjs',
   'dctr-gauge.mjs', 'dctr-gauge.selftest.mjs', 'dctr-bridge.mjs', 'dctr-bridge.selftest.mjs',
   'dctr-cycle.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.mjs', 'dctr-typer.selftest.mjs',
@@ -52,7 +52,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The prompt gate: dctr-lib.mjs imports its marker, so without it every suite dies on load.
   'dctr-promptgate.mjs',
   // The doctor's suite and the live captures it reads.
-  'dctr-doctor.selftest.mjs', 'dctr-doctor.fixtures.json', 'dctr-doctor.mjs']
+  'dctr-doctor.selftest.mjs', 'dctr-doctor.fixtures.json', 'dctr-doctor.mjs',
+  // The band's folder: the codex (install) suite changes a file inside it to prove the install reads every depth.
+  'band/band.ts']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -3106,7 +3108,7 @@ let failures = 0
 let errors = 0
 const baseline = path.join(work, 'baseline')
 fs.mkdirSync(baseline)
-for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(baseline, f))
+for (const f of FILES) { fs.mkdirSync(path.dirname(path.join(baseline, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(baseline, f)) }
 // The baseline pool is the FIRST silence, not the mutation loop: it runs every suite once, including
 // the ~19s one, and printed nothing at all until it was done.
 console.log(`running ${SUITES.length} suites against the baseline, then ${MUTATIONS.length} mutations ${JOBS} at a time`)
@@ -3161,7 +3163,7 @@ const stopTicker = ticking(() => MUTATIONS.length - poolShortfall(results, MUTAT
 await mapPool(MUTATIONS, JOBS, async (m, idx) => track(idx, String(idx).padStart(3, '0'), async () => {
   const dir = path.join(work, String(idx).padStart(3, '0') + '-' + m.name.replace(/[^a-z]+/gi, '-'))
   fs.mkdirSync(dir)
-  for (const f of FILES) fs.copyFileSync(path.join(HERE, f), path.join(dir, f))
+  for (const f of FILES) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(dir, f)) }
   const target = path.join(dir, m.file)
   const before = fs.readFileSync(target, 'utf8')
   const hits = anchorCount(before, m.from)

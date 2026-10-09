@@ -29,7 +29,8 @@ async function refresh($: EngineInterface): Promise<boolean> {
   const chain = root === null ? null : await followChain(root, file => readOrNull($, file))
   let next: Summary | null = null
   if (chain !== null) {
-    const agents = await $.agent.list()
+    // A refused seat list must not keep a record that turned terminal on screen: it reads as no seats out.
+    const agents = await $.agent.list().catch(() => [])
     next = bandParts(chain.phase, chain.recordText, agents.filter(a => OUT.has(a.status)).length)
   }
   const print = JSON.stringify(next)

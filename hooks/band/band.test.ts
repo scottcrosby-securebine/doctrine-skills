@@ -94,6 +94,17 @@ describe('followChain', () => {
     expect((await followChain('/w/repo', abs))?.recordText).toBe('abs')
   })
 
+  test('a Windows session dir: the record found under its parent, and a drive-letter record path read as written', async () => {
+    const read = files({
+      'C:\\w\\repo/SESSION_MEMORY.md': memory('docs/h.md'),
+      'C:\\w\\repo/docs/h.md': handoff('track/r.md'),
+      'C:\\w/track/r.md': 'sibling',
+    })
+    expect((await followChain('C:\\w\\repo', read))?.recordText).toBe('sibling')
+    const abs = files({ 'C:\\w\\repo/SESSION_MEMORY.md': memory('h.md'), 'C:\\w\\repo/h.md': handoff('D:\\x\\r.md'), 'D:\\x\\r.md': 'drive' })
+    expect((await followChain('C:\\w\\repo', abs))?.recordText).toBe('drive')
+  })
+
   test('the chain stops at no memory file, a missing handoff, a kickoff of none, and a record that resolves nowhere', async () => {
     expect(await followChain('/w/repo', files({}))).toBe(null)
     expect(await followChain('/w/repo', files({ '/w/repo/SESSION_MEMORY.md': memory('h.md') }))).toBe(null)
