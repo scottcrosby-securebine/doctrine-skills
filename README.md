@@ -321,6 +321,13 @@ quiet and an answer appears some minutes later. Run it inside [herdr](https://he
 subagent gets a live pane you can read while it works. Optional, and nothing here needs it:
 [docs/watching-a-run.md](docs/watching-a-run.md).
 
+On Claude Code the plugin also draws the doctrine band, one line above the prompt, while the record your
+session's kickoff reaches is Open or Blocked: the phase, its state, the last round, the round alarm
+count, how many subagents are out, and what is waiting on you. Green is a live phase with nothing owed,
+bold magenta is owed to you, cyan is subagents out, and grey is labels and counts. It reads the record
+every five seconds and draws nothing in a session with no live phase. The `Doctrine band` row in
+`/config` turns it off. Codex has no band.
+
 ## Limits
 
 These rules came out of real work, and the failures behind them are ones this author hit. There is no
