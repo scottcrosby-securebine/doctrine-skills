@@ -8,6 +8,15 @@
   "homepage": "https://github.com/scottcrosby-securebine/doctrine-skills",
   "repository": "https://github.com/scottcrosby-securebine/doctrine-skills",
   "license": "MIT",
+  "userConfig": {
+    "band": {
+      "type": "boolean",
+      "title": "Doctrine band",
+      "description": "One line above the prompt showing a live doctrine phase's state, round, alarm count, seats out and what is owed. Off draws nothing.",
+      "required": false,
+      "default": true
+    }
+  },
   "keywords": [
     "skills",
     "workflow",

@@ -102,3 +102,51 @@ export function parseRecord(text) {
   })
   return { entries, state, wrapper }
 }
+
+// The kickoff chain's readers (doctrine-backup's kickoff line, a handoff's header lines, the state a live phase
+// reads), here rather than in dctr-lib.mjs so the band, a hooks module that cannot import node:*, reads with them too.
+
+/** The `handoff:` path from the first line of `## Next Session Kickoff` that has the machine shape
+ *  `handoff: <path> | state: <word>` (doctrine-backup), backticks stripped, or null for `none`, for no
+ *  kickoff section, and for a kickoff with no such line: a `handoff:` line without its `| state:` half is not
+ *  the machine line and selects nothing. */
+export function kickoffHandoff(memoryText) {
+  const lines = String(memoryText ?? '').split('\n')
+  const at = lines.findIndex((l) => /^##\s+Next Session Kickoff\s*$/i.test(l.trim()))
+  if (at < 0) return null
+  for (const l of lines.slice(at + 1)) {
+    if (/^##\s/.test(l)) return null
+    const m = /^handoff:\s*`?([^`|\s]+)`?\s*\|\s*state:/i.exec(l.trim())
+    if (m) return m[1].toLowerCase() === 'none' ? null : m[1]
+  }
+  return null
+}
+
+/** The header lines of a handoff, above its first `##` section (doctrine step 5, doctrine-handoff step 3),
+ *  whether they sit above or below the file's `#` title. Each value is the first word after the key, as the hub
+ *  states the forms: backticks, quotes, `*` and a trailing comma, semicolon or period stripped; for `record:` a
+ *  trailing `:<line>` cut off too; `wrapper:` read as a record's wrapper line is. The first line for each key wins.
+ *  A key may be bold or a list item. Each null when absent. */
+export function handoffHeader(text) {
+  const out = { phase: null, record: null, wrapper: null }
+  for (const raw of String(text ?? '').split('\n')) {
+    if (/^##\s/.test(raw.trim())) break
+    const m = /^(?:-\s+)?(?:\*\*)?(phase|record|wrapper)(?:\*\*)?:(?:\*\*)?\s*(.*)$/i.exec(raw.trim())
+    if (!m) continue
+    const key = m[1].toLowerCase(), v = m[2].trim()
+    if (out[key] !== null) continue
+    const tok = v.split(/\s+/)[0].replace(/[`'"*]/g, '').replace(/[.,;]+$/, '')
+    if (key === 'phase') {
+      out.phase = tok || null
+    } else if (key === 'record') {
+      out.record = tok.replace(/:\d+$/, '') || null
+    } else {
+      out.wrapper = wrapperValue(tok)
+    }
+  }
+  return out
+}
+
+/** The state the restore hook acts on: `Open` or `Blocked` as the first word of a state entry's value, else
+ *  null (scope choice SC1: any other state injects nothing). */
+export const restoreState = (value) => /^(Open|Blocked)\b/i.exec(value || '')?.[1] || null
