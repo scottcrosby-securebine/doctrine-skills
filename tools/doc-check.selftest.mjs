@@ -748,18 +748,22 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     split.length === 1 && split[0].startsWith('exemption: x.md:3 '), JSON.stringify(split))
 
   // A sentence directly under a fence, and one directly under a comment that spans two lines: no
-  // blank line and no bullet between, so the stripped lines are the start of the unit the splitter
-  // returns. Both numbers in the message are asserted, the finding's own and the exempt line it cites.
+  // blank line and no bullet between. Both numbers in the message are asserted, the finding's own
+  // and the exempt line it cites.
   const shiftedText = ['```', 'code', '```', exempt, '<!-- struck', 'out -->', bare].join('\n')
   const shifted = run(clone(), [{ name: 'x.md', text: shiftedText }])
   clause('clause 1eb — both named lines are the lines on disk, each sentence directly under a fence or a two-line comment',
     shifted.length === 1 && shifted[0].startsWith('exemption: x.md:7 ') && shifted[0].includes('that line 4 carries'), JSON.stringify(shifted))
 
-  // Frontmatter has no blank line inside it, so the splitter hands back `---` and the lines under it as one unit.
-  const frontText = ['---', 'name: x', 'description: Use when a rewrite must keep its claims.', '---', '', exempt].join('\n')
+  // The line above a sentence is never part of it, whatever stem that line carries: a frontmatter
+  // name carrying `rewrit` must not take the finding, and a heading carrying `refut` must not exempt.
+  const frontText = ['---', 'name: rewrite', 'description: Use when a rewrite must keep its claims.', '---', '', exempt].join('\n')
   const front = run(clone(), [{ name: 'x.md', text: frontText }])
-  clause('clause 1ec — a site in a frontmatter description is named at its own line, not at the delimiter above it',
-    front.length === 1 && front[0].startsWith('exemption: x.md:3 ') && front[0].includes('that line 6 carries'), JSON.stringify(front))
+  const headText = ['## Refute exemption', bare, '', exempt].join('\n')
+  const head = run(clone(), [{ name: 'x.md', text: headText }])
+  clause('clause 1ec — a frontmatter line or a heading directly above a site neither takes its finding nor lends it an exemption',
+    front.length === 1 && front[0].startsWith('exemption: x.md:3 ') && front[0].includes('that line 6 carries') &&
+    head.length === 1 && head[0].startsWith('exemption: x.md:2 ') && head[0].includes('that line 4 carries'), JSON.stringify([front, head]))
 
   // Every unexempted site is reported, and two on one line are one finding.
   const bare2 = bare.replace('never change', 'do not alter')
@@ -768,6 +772,21 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   const many = run(clone(), [{ name: 'x.md', text: manyText }])
   clause('clause 1ed — two sites on one line are one finding, and a site further down is still reported',
     many.length === 2 && many[0].startsWith('exemption: x.md:3 ') && many[1].startsWith('exemption: x.md:5 '), JSON.stringify(many))
+
+  // Stems, not words, in any case: no fixture line here holds `rewrite`, `refute` or a lowercase stem.
+  const formsText = ['REWRITING keeps the CLAIMS, REFUTING none of them.', '', 'A REWRITTEN draft keeps every CLAIM.'].join('\n')
+  const forms = run(clone(), [{ name: 'x.md', text: formsText }])
+  clause('clause 1ee — the three stems are read as stems and in any case',
+    forms.length === 1 && forms[0].startsWith('exemption: x.md:3 ') && forms[0].includes('that line 1 carries'), JSON.stringify(forms))
+
+  // A comment closing a sentence must not glue the next one to it, on the next line or on the same one.
+  const gluedText = [bare + '<!-- hidden -->', exempt].join('\n')
+  const glued = run(clone(), [{ name: 'x.md', text: gluedText }])
+  const sameLineText = bare + '<!-- hidden -->' + exempt
+  const sameLine = run(clone(), [{ name: 'x.md', text: sameLineText }])
+  clause('clause 1ef — a sentence that ends at a comment is still its own sentence and takes no exemption from the one after',
+    glued.length === 1 && glued[0].startsWith('exemption: x.md:1 ') && glued[0].includes('that line 2 carries') &&
+    sameLine.length === 1 && sameLine[0].startsWith('exemption: x.md:1 ') && sameLine[0].includes('that line 1 carries'), JSON.stringify([glued, sameLine]))
 
   // Known-good: no sentence carries the exemption, every sentence does, the two halves sit in two
   // documents, the unexempted sentence is inside a fence, and a sentence carries one stem of the two.
@@ -784,18 +803,26 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     quiet.every((f) => f.length === 0), JSON.stringify(quiet))
 
   const about = (t) => /rewrit/i.test(t) && /claim/i.test(t)
+  const refutes = (t) => /refut/i.test(t)
   const lines = (t) => t.split('\n')
-  clause('clause 3ea — the broken inputs really carry one exempted and one unexempted rewrite claim, at the lines asserted',
-    about(exempt) && /refut/i.test(exempt) && about(bare) && !/refut/i.test(bare) && about(bare2) && !/refut/i.test(bare2) &&
+  clause('clause 3ea — the broken inputs really carry an exempted and an unexempted rewrite claim at the lines asserted',
+    about(exempt) && refutes(exempt) && [bare, bare2, bare3].every((t) => about(t) && !refutes(t)) &&
     lines(splitText)[2] === bare &&
     lines(shiftedText)[2] === '```' && lines(shiftedText)[3] === exempt && lines(shiftedText)[5] === 'out -->' && lines(shiftedText)[6] === bare &&
-    about(lines(frontText)[2]) && !/refut/i.test(lines(frontText)[2]) && lines(frontText)[0] === '---' && lines(frontText)[5] === exempt &&
-    about(bare3) && !/refut/i.test(bare3) && lines(manyText)[2] === bare + ' ' + bare2 && lines(manyText)[4] === bare3,
+    /rewrit/i.test(lines(frontText)[1]) && !/claim/i.test(lines(frontText)[1]) && about(lines(frontText)[2]) && !refutes(lines(frontText)[2]) && lines(frontText)[5] === exempt &&
+    refutes(lines(headText)[0]) && !about(lines(headText)[0]) && lines(headText)[1] === bare && lines(headText)[3] === exempt &&
+    lines(manyText)[2] === bare + ' ' + bare2 && lines(manyText)[4] === bare3 &&
+    lines(gluedText)[0].startsWith(bare + '<!--') && lines(gluedText)[1] === exempt && lines(sameLineText).length === 1 && sameLineText.includes('.<!-- hidden -->In '),
     'each broken fixture must hold its defect at the asserted line without the checker being asked')
-  clause('clause 3eb — the quiet inputs really are quiet by construction: every line exempt, or one stem only',
-    lines(quietDocs[1][0].text).every((l) => !l || /refut/i.test(l)) &&
-    /claim/i.test(oneStem[0]) && !/rewrit/i.test(oneStem[0]) && /rewrit/i.test(oneStem[1]) && !/claim/i.test(oneStem[1]) &&
-    quietDocs[0][0].text.split('\n').every((l) => !/refut/i.test(l)),
+  clause('clause 3eb — the stem fixture really holds no whole word and no lowercase stem',
+    !/rewrite|refute|rewrit|claim|refut/.test(formsText) && about(lines(formsText)[0]) && refutes(lines(formsText)[0]) && about(lines(formsText)[2]) && !refutes(lines(formsText)[2]),
+    formsText)
+  clause('clause 3ec — each quiet input really holds what its place in clause 2ea says: no exemption, every line exempt, two documents, a fence around the bare sentence, one stem only',
+    lines(quietDocs[0][0].text).every((l) => !refutes(l)) &&
+    lines(quietDocs[1][0].text).every((l) => !l || refutes(l)) &&
+    quietDocs[2].length === 2 && quietDocs[2][0].name !== quietDocs[2][1].name && !about(quietDocs[2][0].text.replace(exempt, '')) && !refutes(quietDocs[2][1].text) &&
+    lines(quietDocs[3][0].text)[2] === '```' && lines(quietDocs[3][0].text)[3] === bare && lines(quietDocs[3][0].text)[4] === '```' &&
+    /claim/i.test(oneStem[0]) && !/rewrit/i.test(oneStem[0]) && /rewrit/i.test(oneStem[1]) && !/claim/i.test(oneStem[1]),
     'a quiet fixture that carried a defect would make clause 2ea a pass for the wrong reason')
 
   return bad ? 1 : 0

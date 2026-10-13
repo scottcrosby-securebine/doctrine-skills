@@ -157,17 +157,21 @@
 //
 // **The exemption rule reads three word stems and nothing else.** A sentence is about claims in a
 // rewrite when it carries `rewrit` and `claim`, and it carries the exemption when it also carries
-// `refut`. So a sentence that preserves claims in other words ("keep the author's meaning") is never
-// read. An exemption in the sentence after it does not exempt a sentence: where some other sentence
-// in the document carries all three stems, the first is reported although its paragraph is right,
-// and the repair is to put the exemption in the sentence that states the rule, and where none does
-// the document is quiet, since a sentence carrying `refut` without the other two is not read either.
-// `refut` anywhere in a sentence that carries the other two exempts it, whatever the sentence says
-// about refuting. The rule compares sentences inside one document only, and is quiet
-// in a document where no such sentence carries the exemption, so a document that states preservation
-// bare everywhere passes. It names the line the first of `rewrit` and `claim` sits on, which is the
-// sentence's own line wherever a sentence is one line, and inside a wrapped sentence can be a later
-// line than the one it starts on. Two such sentences on one line are one finding.
+// `refut`, each in any case and inside any longer word. So a sentence that preserves claims in other
+// words ("keep the author's meaning") is never read. An exemption in the sentence after it does not
+// exempt a sentence: where some other sentence in the document carries all three stems, the first is
+// reported although its paragraph is right, and the repair is to put the exemption in the sentence
+// that states the rule, and where none does the document is quiet, since a sentence carrying `refut`
+// without the other two is not read either. `refut` anywhere in a sentence that carries the other
+// two exempts it, whatever the sentence says about refuting. The rule compares sentences inside one
+// document only, and is quiet in a document where no such sentence carries the exemption, so a
+// document that states preservation bare everywhere passes.
+//
+// Its sentence never crosses a line break, which the other rules' sentences do. That is what keeps a
+// heading, a frontmatter field or a comment on the line above out of the sentence under it, and it
+// is why the line it names is exact. The cost: a sentence wrapped over two lines is read as two, so
+// one with `rewrit` on its first line and `claim` on its second is not a site, and an exemption
+// wrapped onto the next line exempts nothing. Two sites on one line are one finding.
 //
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
 // description. And these rules catch reference, roster, echo, derivation, citation and exemption defects only:
@@ -270,8 +274,9 @@ const comparable = (t) => {
 // parser on every run, where a constructed pattern is checked by nothing here.
 const SENTENCE_BOUNDARY = /(?<=[.!?][*_"')\]]*)\s+|\n\n+|\n(?=\s*[-*+]\s)|\n(?=\s*\d+[.)]\s)|\n(?=(?:[ \t]*(?:>|[-*+][ \t]|\d+[.)][ \t]))*[ \t]*\|)/
 
-/** Splits prose into sentence-like units. Two checks count against these, the roster/dangling pass
-    and the echo pass; derivation reads fixture objects and the anchor pass scans whole prose. */
+/** Splits prose into sentence-like units. Three checks count against these: the roster/dangling
+    pass, the echo pass, and the exemption pass, which hands it one line at a time. Derivation reads
+    fixture objects and the anchor pass scans whole prose. */
 const sentences = (text) => text.split(SENTENCE_BOUNDARY).map((s) => s.trim()).filter(Boolean)
 /** Every backticked span in a text, contents only, in source order. */
 const ticked = (text) => [...text.matchAll(/`([^`\n]+)`/g)].map((m) => m[1])
@@ -426,28 +431,22 @@ function checkEchoes(sources) {
 
 /** A document that limits claim preservation to unrefuted claims in one sentence and states it bare
     in another tells a rewriter two things, and the bare one wins wherever it is the one read. The
-    unit is the sentence: one about claims in a rewrite either carries the exemption or does not.
-    Quiet where no sentence in the document carries it, since there is then nothing to disagree with.
+    unit is a sentence inside one line: one about claims in a rewrite either carries the exemption or
+    does not. Quiet where no sentence in the document carries it, since there is then nothing to
+    disagree with.
 
-    Lines are the document's own. `prose()` drops a comment's line breaks with the comment, so they
-    are put back first, and a sentence is found by offset rather than by `sentences()`, which keeps
-    no position. The line named is where the first of the two stems sits, never where the sentence
-    starts: the splitter joins a stripped fence or comment, a frontmatter delimiter and a heading to
-    the sentence under them, and none of those is the line a reader would go to. */
+    One line at a time, because the splitter does not end a sentence at a single line break: it hands
+    back a heading, a frontmatter field or a stripped fence together with the line under it, and that
+    line above then takes the finding or lends its words to the test. `prose()` drops a comment's
+    line breaks with the comment, so they are put back first, and the space put in front of the mark
+    keeps a sentence that ends at a comment from running into the next one. */
 function checkRefuteExemption(sources) {
   const findings = []
   for (const src of sources) {
-    const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => CUT + m.replace(/[^\n]/g, '')))
-    const sites = []
-    let from = 0
-    for (const cut of [...text.matchAll(new RegExp(SENTENCE_BOUNDARY, 'g')), { index: text.length }]) {
-      const s = text.slice(from, cut.index)
-      if (/rewrit/i.test(s) && /claim/i.test(s)) {
-        const line = text.slice(0, from + s.search(/rewrit|claim/i)).split('\n').length
-        sites.push({ line, exempt: /refut/i.test(s) })
-      }
-      from = cut.index + (cut[0] || '').length
-    }
+    const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => ' ' + CUT + m.replace(/[^\n]/g, '')))
+    const sites = text.split('\n').flatMap((l, i) => sentences(l)
+      .filter((s) => /rewrit/i.test(s) && /claim/i.test(s))
+      .map((s) => ({ line: i + 1, exempt: /refut/i.test(s) })))
     const exempt = sites.find((s) => s.exempt)
     if (!exempt) continue
     for (const line of new Set(sites.filter((s) => !s.exempt).map((s) => s.line))) {
@@ -461,8 +460,8 @@ function checkRefuteExemption(sources) {
 
 /** Runs every check over one corpus and returns the findings as printable strings, in the order
     they are reported. Pure: it reads nothing and writes nothing. The order below is the output
-    contract. Nothing standing verifies it: every selftest clause asserts a single finding, so none
-    of them can observe an ordering at all. */
+    contract. Nothing standing verifies it across checks: one selftest clause asserts two findings
+    of one check in order, and none asserts findings of two checks together. */
 function check({ tamper, docs }) {
   const keys = fixtureKeys(tamper)
   // Derivation first, which is the order the reads happened in before this was split up.
