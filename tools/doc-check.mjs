@@ -155,8 +155,18 @@
 // which silently exempts a short dead citation. A citation carrying an ellipsis is skipped whole
 // rather than checked fragment by fragment, so a deliberate elision is never read at all.
 //
+// **The exemption rule reads three word stems and nothing else.** A sentence is about claims in a
+// rewrite when it carries `rewrit` and `claim`, and it carries the exemption when it also carries
+// `refut`. So a sentence that preserves claims in other words ("keep the author's meaning") is never
+// read, and neither is one whose exemption sits in the sentence after it: that second case is
+// reported as a finding although the paragraph is right, and the repair is to put the exemption in
+// the sentence that states the rule. `refut` anywhere in the sentence exempts it, whatever the
+// sentence says about refuting. The rule compares sentences inside one document only, and is quiet
+// in a document where no such sentence carries the exemption, so a document that states preservation
+// bare everywhere passes. It names the line the sentence starts on.
+//
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
-// description. And these rules catch reference, roster, echo, derivation and citation defects only:
+// description. And these rules catch reference, roster, echo, derivation, citation and exemption defects only:
 // a stale *number*,
 // or a claim paraphrased rather than copied, passes untouched. Both the echo rule and the citation
 // rule read text through one normalisation: emphasis, case and spacing fall away, and a code span
@@ -292,7 +302,7 @@ function documentsAboutFixtures(sources, keySet) {
     .map((s) => s.name))
 }
 
-// The five checks. Each returns its own findings rather than pushing into a shared array, so
+// The six checks. Each returns its own findings rather than pushing into a shared array, so
 // none of them can silently depend on what another one did first.
 
 /** The rule the documents tell readers to use, asserted against the fixture file itself. If this
@@ -410,6 +420,37 @@ function checkEchoes(sources) {
   return findings
 }
 
+/** A document that limits claim preservation to unrefuted claims in one sentence and states it bare
+    in another tells a rewriter two things, and the bare one wins wherever it is the one read. The
+    unit is the sentence: one about claims in a rewrite either carries the exemption or does not.
+    Quiet where no sentence in the document carries it, since there is then nothing to disagree with.
+
+    Lines are the document's own. `prose()` drops a comment's line breaks with the comment, so they
+    are put back first, and a sentence is found by offset rather than by `sentences()`, which keeps
+    no position. */
+function checkRefuteExemption(sources) {
+  const findings = []
+  for (const src of sources) {
+    const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => CUT + m.replace(/[^\n]/g, '')))
+    const sites = []
+    let from = 0
+    for (const cut of [...text.matchAll(new RegExp(SENTENCE_BOUNDARY, 'g')), { index: text.length }]) {
+      const s = text.slice(from, cut.index)
+      if (/rewrit/i.test(s) && /claim/i.test(s)) {
+        const line = text.slice(0, from + s.search(/\S/)).split('\n').length
+        sites.push({ line, exempt: /refut/i.test(s) })
+      }
+      from = cut.index + (cut[0] || '').length
+    }
+    const exempt = sites.find((s) => s.exempt)
+    if (!exempt) continue
+    for (const s of sites.filter((s) => !s.exempt)) {
+      findings.push(`exemption: ${src.name}:${s.line} speaks of claims in a rewrite without the refute exemption that line ${exempt.line} carries — a claim the sources refute is corrected, and a sentence that does not say so reads as keeping it`)
+    }
+  }
+  return findings
+}
+
 // The gate itself.
 
 /** Runs every check over one corpus and returns the findings as printable strings, in the order
@@ -426,6 +467,7 @@ function check({ tamper, docs }) {
     ...checkFixtureReferences(sources, new Set(keys)),
     ...checkAnchors(sources),
     ...checkEchoes(sources),
+    ...checkRefuteExemption(sources),
   ]
 }
 

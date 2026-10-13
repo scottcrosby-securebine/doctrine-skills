@@ -738,5 +738,38 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     bolded.endsWith(line) && bolded !== line && line.split(' ').length >= ECHO_MIN_WORDS,
     `words=${line.split(' ').length}`)
 
+  // The refute-exemption rule. One document, read sentence by sentence: where one sentence about
+  // claims in a rewrite carries the exemption and another does not, the second is the finding.
+  const exempt = 'In rewrite mode, keep the claims the sources do not refute; a claim the sources refute is corrected.'
+  const bare = 'In rewrite mode the existing text enters as draft 1, so tighten the words and never change the claims.'
+  const splitText = [exempt, '', bare].join('\n')
+  const split = run(clone(), [{ name: 'x.md', text: splitText }])
+  clause('clause 1ea — a rewrite claim without the refute exemption trips beside one that carries it, naming its line',
+    split.length === 1 && split[0].startsWith('exemption: x.md:3 '), JSON.stringify(split))
+
+  // A fence and a comment spanning lines both come out before the rule reads, and neither may move the line it names.
+  const shiftedText = ['<!-- struck', 'out -->', '```', 'code', '```', exempt, '', '- ' + bare].join('\n')
+  const shifted = run(clone(), [{ name: 'x.md', text: shiftedText }])
+  clause('clause 1eb — the named line is the line on disk, past a fenced block and a comment that spans two lines',
+    shifted.length === 1 && shifted[0].startsWith('exemption: x.md:8 '), JSON.stringify(shifted))
+
+  // Known-good, three ways: no sentence carries the exemption, every sentence does, and the two halves sit in two documents.
+  const quietDocs = [
+    [{ name: 'x.md', text: [bare, '', bare.replace('never', 'do not')].join('\n') }],
+    [{ name: 'x.md', text: [exempt, '', bare.replace('claims.', 'claims the sources do not refute.')].join('\n') }],
+    [{ name: 'x.md', text: exempt }, { name: 'y.md', text: bare }],
+    [{ name: 'x.md', text: [exempt, '', '```', bare, '```'].join('\n') }],
+  ]
+  const quiet = quietDocs.map((d) => run(clone(), d))
+  clause('clause 2ea — no exemption anywhere, the exemption everywhere, the halves in two documents, and an unexempted sentence inside a fence are all silent',
+    quiet.every((f) => f.length === 0), JSON.stringify(quiet))
+
+  const about = (t) => /rewrit/i.test(t) && /claim/i.test(t)
+  clause('clause 3ea — the broken inputs really carry one exempted and one unexempted rewrite claim, at the lines asserted',
+    about(exempt) && /refut/i.test(exempt) && about(bare) && !/refut/i.test(bare) &&
+    splitText.split('\n')[2] === bare && shiftedText.split('\n')[7] === '- ' + bare &&
+    quietDocs[1][0].text.split('\n').every((l) => !l || /refut/i.test(l)),
+    'each fixture must hold the defect, or its absence, without the checker being asked')
+
   return bad ? 1 : 0
 }
