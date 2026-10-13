@@ -747,29 +747,56 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   clause('clause 1ea — a rewrite claim without the refute exemption trips beside one that carries it, naming its line',
     split.length === 1 && split[0].startsWith('exemption: x.md:3 '), JSON.stringify(split))
 
-  // A fence and a comment spanning lines both come out before the rule reads, and neither may move the line it names.
-  const shiftedText = ['<!-- struck', 'out -->', '```', 'code', '```', exempt, '', '- ' + bare].join('\n')
+  // A sentence directly under a fence, and one directly under a comment that spans two lines: no
+  // blank line and no bullet between, so the stripped lines are the start of the unit the splitter
+  // returns. Both numbers in the message are asserted, the finding's own and the exempt line it cites.
+  const shiftedText = ['```', 'code', '```', exempt, '<!-- struck', 'out -->', bare].join('\n')
   const shifted = run(clone(), [{ name: 'x.md', text: shiftedText }])
-  clause('clause 1eb — the named line is the line on disk, past a fenced block and a comment that spans two lines',
-    shifted.length === 1 && shifted[0].startsWith('exemption: x.md:8 '), JSON.stringify(shifted))
+  clause('clause 1eb — both named lines are the lines on disk, each sentence directly under a fence or a two-line comment',
+    shifted.length === 1 && shifted[0].startsWith('exemption: x.md:7 ') && shifted[0].includes('that line 4 carries'), JSON.stringify(shifted))
 
-  // Known-good, three ways: no sentence carries the exemption, every sentence does, and the two halves sit in two documents.
+  // Frontmatter has no blank line inside it, so the splitter hands back `---` and the lines under it as one unit.
+  const frontText = ['---', 'name: x', 'description: Use when a rewrite must keep its claims.', '---', '', exempt].join('\n')
+  const front = run(clone(), [{ name: 'x.md', text: frontText }])
+  clause('clause 1ec — a site in a frontmatter description is named at its own line, not at the delimiter above it',
+    front.length === 1 && front[0].startsWith('exemption: x.md:3 ') && front[0].includes('that line 6 carries'), JSON.stringify(front))
+
+  // Every unexempted site is reported, and two on one line are one finding.
+  const bare2 = bare.replace('never change', 'do not alter')
+  const bare3 = 'A rewrite that improved a claim instead of the words carrying it is a defect.'
+  const manyText = [exempt, '', bare + ' ' + bare2, '', bare3].join('\n')
+  const many = run(clone(), [{ name: 'x.md', text: manyText }])
+  clause('clause 1ed — two sites on one line are one finding, and a site further down is still reported',
+    many.length === 2 && many[0].startsWith('exemption: x.md:3 ') && many[1].startsWith('exemption: x.md:5 '), JSON.stringify(many))
+
+  // Known-good: no sentence carries the exemption, every sentence does, the two halves sit in two
+  // documents, the unexempted sentence is inside a fence, and a sentence carries one stem of the two.
+  const oneStem = ['Never change the claims.', 'A rewrite tightens the words.']
   const quietDocs = [
-    [{ name: 'x.md', text: [bare, '', bare.replace('never', 'do not')].join('\n') }],
+    [{ name: 'x.md', text: [bare, '', bare2].join('\n') }],
     [{ name: 'x.md', text: [exempt, '', bare.replace('claims.', 'claims the sources do not refute.')].join('\n') }],
     [{ name: 'x.md', text: exempt }, { name: 'y.md', text: bare }],
     [{ name: 'x.md', text: [exempt, '', '```', bare, '```'].join('\n') }],
+    [{ name: 'x.md', text: [exempt, '', oneStem[0], '', oneStem[1]].join('\n') }],
   ]
   const quiet = quietDocs.map((d) => run(clone(), d))
-  clause('clause 2ea — no exemption anywhere, the exemption everywhere, the halves in two documents, and an unexempted sentence inside a fence are all silent',
+  clause('clause 2ea — no exemption anywhere, the exemption everywhere, the halves in two documents, an unexempted sentence inside a fence, and a sentence with one stem of the two are all silent',
     quiet.every((f) => f.length === 0), JSON.stringify(quiet))
 
   const about = (t) => /rewrit/i.test(t) && /claim/i.test(t)
+  const lines = (t) => t.split('\n')
   clause('clause 3ea — the broken inputs really carry one exempted and one unexempted rewrite claim, at the lines asserted',
-    about(exempt) && /refut/i.test(exempt) && about(bare) && !/refut/i.test(bare) &&
-    splitText.split('\n')[2] === bare && shiftedText.split('\n')[7] === '- ' + bare &&
-    quietDocs[1][0].text.split('\n').every((l) => !l || /refut/i.test(l)),
-    'each fixture must hold the defect, or its absence, without the checker being asked')
+    about(exempt) && /refut/i.test(exempt) && about(bare) && !/refut/i.test(bare) && about(bare2) && !/refut/i.test(bare2) &&
+    lines(splitText)[2] === bare &&
+    lines(shiftedText)[2] === '```' && lines(shiftedText)[3] === exempt && lines(shiftedText)[5] === 'out -->' && lines(shiftedText)[6] === bare &&
+    about(lines(frontText)[2]) && !/refut/i.test(lines(frontText)[2]) && lines(frontText)[0] === '---' && lines(frontText)[5] === exempt &&
+    about(bare3) && !/refut/i.test(bare3) && lines(manyText)[2] === bare + ' ' + bare2 && lines(manyText)[4] === bare3,
+    'each broken fixture must hold its defect at the asserted line without the checker being asked')
+  clause('clause 3eb — the quiet inputs really are quiet by construction: every line exempt, or one stem only',
+    lines(quietDocs[1][0].text).every((l) => !l || /refut/i.test(l)) &&
+    /claim/i.test(oneStem[0]) && !/rewrit/i.test(oneStem[0]) && /rewrit/i.test(oneStem[1]) && !/claim/i.test(oneStem[1]) &&
+    quietDocs[0][0].text.split('\n').every((l) => !/refut/i.test(l)),
+    'a quiet fixture that carried a defect would make clause 2ea a pass for the wrong reason')
 
   return bad ? 1 : 0
 }

@@ -158,12 +158,16 @@
 // **The exemption rule reads three word stems and nothing else.** A sentence is about claims in a
 // rewrite when it carries `rewrit` and `claim`, and it carries the exemption when it also carries
 // `refut`. So a sentence that preserves claims in other words ("keep the author's meaning") is never
-// read, and neither is one whose exemption sits in the sentence after it: that second case is
-// reported as a finding although the paragraph is right, and the repair is to put the exemption in
-// the sentence that states the rule. `refut` anywhere in the sentence exempts it, whatever the
-// sentence says about refuting. The rule compares sentences inside one document only, and is quiet
+// read. An exemption in the sentence after it does not exempt a sentence: where some other sentence
+// in the document carries all three stems, the first is reported although its paragraph is right,
+// and the repair is to put the exemption in the sentence that states the rule, and where none does
+// the document is quiet, since a sentence carrying `refut` without the other two is not read either.
+// `refut` anywhere in a sentence that carries the other two exempts it, whatever the sentence says
+// about refuting. The rule compares sentences inside one document only, and is quiet
 // in a document where no such sentence carries the exemption, so a document that states preservation
-// bare everywhere passes. It names the line the sentence starts on.
+// bare everywhere passes. It names the line the first of `rewrit` and `claim` sits on, which is the
+// sentence's own line wherever a sentence is one line, and inside a wrapped sentence can be a later
+// line than the one it starts on. Two such sentences on one line are one finding.
 //
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
 // description. And these rules catch reference, roster, echo, derivation, citation and exemption defects only:
@@ -427,7 +431,9 @@ function checkEchoes(sources) {
 
     Lines are the document's own. `prose()` drops a comment's line breaks with the comment, so they
     are put back first, and a sentence is found by offset rather than by `sentences()`, which keeps
-    no position. */
+    no position. The line named is where the first of the two stems sits, never where the sentence
+    starts: the splitter joins a stripped fence or comment, a frontmatter delimiter and a heading to
+    the sentence under them, and none of those is the line a reader would go to. */
 function checkRefuteExemption(sources) {
   const findings = []
   for (const src of sources) {
@@ -437,15 +443,15 @@ function checkRefuteExemption(sources) {
     for (const cut of [...text.matchAll(new RegExp(SENTENCE_BOUNDARY, 'g')), { index: text.length }]) {
       const s = text.slice(from, cut.index)
       if (/rewrit/i.test(s) && /claim/i.test(s)) {
-        const line = text.slice(0, from + s.search(/\S/)).split('\n').length
+        const line = text.slice(0, from + s.search(/rewrit|claim/i)).split('\n').length
         sites.push({ line, exempt: /refut/i.test(s) })
       }
       from = cut.index + (cut[0] || '').length
     }
     const exempt = sites.find((s) => s.exempt)
     if (!exempt) continue
-    for (const s of sites.filter((s) => !s.exempt)) {
-      findings.push(`exemption: ${src.name}:${s.line} speaks of claims in a rewrite without the refute exemption that line ${exempt.line} carries — a claim the sources refute is corrected, and a sentence that does not say so reads as keeping it`)
+    for (const line of new Set(sites.filter((s) => !s.exempt).map((s) => s.line))) {
+      findings.push(`exemption: ${src.name}:${line} speaks of claims in a rewrite without the refute exemption that line ${exempt.line} carries — a claim the sources refute is corrected, and a sentence that does not say so reads as keeping it`)
     }
   }
   return findings
