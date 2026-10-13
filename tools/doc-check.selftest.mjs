@@ -346,7 +346,7 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   const commentSource = run(clone(), commentSourceDocs)
   clause('clause 1w — a rule inside an HTML comment does not source a citation', commentSource.length === 1 && commentSource[0].startsWith('anchor:'), JSON.stringify(commentSource))
 
-  // The dangling scan reads the same reduced text as everything else, so a fixture name written
+  // The dangling scan reads its text with fences and comments already out, so a fixture name written
   // inside a code sample is not a reference to that fixture.
   const fencedNameDocs = [{ name: 'a.md', text: 'A document naming `alpha-one`.\n\n```\nsee `delta-four` here\n```\n' }]
   const fencedName = run(clone(), fencedNameDocs)

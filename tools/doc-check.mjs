@@ -60,10 +60,13 @@
 // list and block-quote markers in either order, and close only on a bare run at least as long as the
 // opener — an info string after the markers opens, it never closes.
 //
-// **Comments come out before fences, and that order has a hole.** A `<!--` written inside a fenced
-// code sample is read as opening a comment, and everything up to the next `-->` goes with it, the
-// fence's closing line included where no `-->` comes first. The rest of the document can then read
-// as fenced, and no check sees it. Every check here has this, the exemption check with them.
+// **Comments come out before fences, and a comment is only what closes.** A `<!--` with no `-->`
+// after it is not a comment here: the text under it stays in view of every check, though a reader
+// of the rendered page sees none of it. And a `<!--` that does have a `-->` after it is taken as a
+// comment wherever it is written, inside a fenced code sample or an inline code span as much as in
+// prose: everything up to that `-->` goes with it, a fence's closing line included, and the rest of
+// the document can then read as fenced, where no check sees it. Every check here has both, the
+// exemption check with them.
 //
 // The asymmetry that stood here briefly, keeping fences in the source so a rule written inside one
 // could still be quoted, was wrong in the more expensive direction: it let a JSON blob and a diff
