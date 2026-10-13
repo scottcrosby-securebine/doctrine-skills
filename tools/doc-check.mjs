@@ -60,6 +60,11 @@
 // list and block-quote markers in either order, and close only on a bare run at least as long as the
 // opener — an info string after the markers opens, it never closes.
 //
+// **Comments come out before fences, and that order has a hole.** A `<!--` written inside a fenced
+// code sample is read as opening a comment, and everything up to the next `-->` goes with it, the
+// fence's closing line included where no `-->` comes first. The rest of the document can then read
+// as fenced, and no check sees it. Every check here has this, the exemption check with them.
+//
 // The asymmetry that stood here briefly, keeping fences in the source so a rule written inside one
 // could still be quoted, was wrong in the more expensive direction: it let a JSON blob and a diff
 // hunk certify a rule that no document states. A citation resolvable only from inside a code fence
@@ -171,7 +176,10 @@
 // heading, a frontmatter field or a comment on the line above out of the sentence under it, and it
 // is why the line it names is exact. The cost: a sentence wrapped over two lines is read as two, so
 // one with `rewrit` on its first line and `claim` on its second is not a site, and an exemption
-// wrapped onto the next line exempts nothing. Two sites on one line are one finding.
+// wrapped onto the next line exempts nothing. Two sites on one line are one finding. Inside a line
+// its sentences are the shared splitter's, which ends one at any full stop, `!` or `?` followed by
+// a space: an abbreviation or an ellipsis between the two stems splits the site in two and neither
+// half is read.
 //
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
 // description. And these rules catch reference, roster, echo, derivation, citation and exemption defects only:
@@ -209,8 +217,10 @@ const ATTRIBUTED = /(?:`([^`\n]+)`|(item \d+))'s?\s+"([^"]*?)"/g
 // A fenced block is an illustration, and a citation-shaped line inside one is an example of a
 // citation, not a citation. Discovery has to see the text with fences already gone, or it reports
 // the example as a dead anchor.
-// Everything a reader would not read as prose comes out here, once, so every check sees the same
-// text. An HTML comment is prose the author struck out: a citation inside one is not made, and a
+// Everything a reader would not read as prose comes out here, so every check reads prose alone. One
+// check does not take the text exactly as this leaves it: the exemption check takes comments out
+// itself first, to keep their line breaks, and only then calls this for the fences, so a change to
+// how a comment is recognised is a change in both places. An HTML comment is prose the author struck out: a citation inside one is not made, and a
 // rule inside one is not stated. A fenced block is a code sample the same way.
 /** Strips everything a reader would not read as prose: HTML comments and fenced blocks, each
     replaced by a CUT so the text on either side never becomes adjacent. */
