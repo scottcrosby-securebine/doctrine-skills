@@ -145,6 +145,60 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
     refuses(both, 'does not run dctr-token.mjs', '/tmp/x/gate.out') && both.reasons.length === 2 && refuses(inText, '/tmp/g.output', 'record the gate transcript at a durable path (doctrine step 3)') && !inText.reasons.some((r) => r.includes('correction')), `${show(both)} ${show(inText)}`)
 }
 
+// Round 2 (F-A to F-D): the forms seen in real seat captures and records, each beside its twin. G1 to G7 are those
+// forms as written; the escapes are literal backslash-n and backslash-t in the command, as printf and echo -e read them.
+const RT = '.doctrine/records/truncate.md'
+const G = {
+  heredocDollarT: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\n- gate: npm test exit=0\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\n`),
+  heredocDollarTToken: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF && node "/p/hooks/dctr-token.mjs" 1 0 0\n- gate: npm test exit=0\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\n`),
+  heredocDollarTAfter: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\nnode "/p/hooks/dctr-token.mjs" 1 0 0`),
+  printfToken: bash(`printf -- '- gate npm test exit=0\\n${LINE(1)}\\n' >> rec.md && ${TOKEN(1)}`),
+  printfNoToken: bash(`printf -- '- gate npm test exit=0\\n${LINE(1)}\\n' >> rec.md`),
+  printfTmpGate: bash(`printf -- '- gate /tmp/x/r2.out\\n${LINE(2)}\\n' >> rec.md && ${TOKEN(2)}`),
+  printfHomeGate: bash(`printf -- '- gate /home/u/r/r2.out\\n${LINE(2)}\\n' >> rec.md && ${TOKEN(2)}`),
+  echoTabTmpGate: bash(`echo -e "- gate\\t/tmp/x/r2.out\\n${LINE(2)}" >> rec.md && ${TOKEN(2)}`),
+  delimDash: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\n${TOKEN(4)}\nEND-RECORD`),
+  delimDashToken: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\nEND-RECORD\n${TOKEN(4)}`),
+  delimDouble: bash(`cat >> ${REC} <<"EOF"\n${LINE(4)}\n${TOKEN(4)}\nEOF`),
+  delimDoubleToken: bash(`cat >> ${REC} <<"EOF"\n${LINE(4)}\nEOF\n${TOKEN(4)}`),
+  delimTab: bash(`cat >> ${REC} <<-EOF\n\t${LINE(4)}\n\t${TOKEN(4)}\n\tEOF`),
+  delimTabToken: bash(`cat >> ${REC} <<-EOF\n\t${LINE(4)}\n\tEOF\n${TOKEN(4)}`),
+}
+const GR = {
+  relResult: '# r\n- gate `.doctrine/records/gate-r1-npm-test.out.result` reads `exit=0`\n',
+  logPair: '# r\n- gate `.doctrine/records/gate-r1-npm-test.log` with its `.doctrine/records/gate-r1-npm-test.log.result`\n',
+  launch: '# r\n- gate `node /c/hooks/dctr-gate.mjs npm-test-r1 .doctrine/records/gate-r1-npm-test.log -- npm test`, result `.doctrine/records/gate-r1-npm-test.log.result`\n',
+  durableResult: '# r\n- result /home/u/r/x.result\n- seat /tmp/agent.jsonl\n',
+}
+{
+  const ds = [G.printfTmpGate, G.echoTabTmpGate].map((f) => decide(f)), home = decide(G.printfHomeGate)
+  clause('clause 1o — a gate path glued to a printf \\n or an echo -e \\t is read once the escape is decoded (F-A): /tmp/x/r2.out refused, /home/u/r/r2.out allowed',
+    ds.every((d) => refuses(d, '/tmp/x/r2.out lies under /tmp', 'record the gate transcript at a durable path') && d.round === 2 && d.reasons.length === 1) && allows(home) && home.round === 2,
+    [...ds, home].map(show).join(' '))
+}
+{
+  const d = decide(G.heredocDollarT), t = decide(G.heredocDollarTToken), a = decide(G.heredocDollarTAfter), p = decide(G.printfNoToken), pt = decide(G.printfToken)
+  clause('clause 1p — the captured forms: T=$(date) && cat >> record <<EOF with $T in the line, refused without the token and allowed with it on the heredoc line or after EOF; printf -- \'...\\n- round: ...\\n\' >> rec.md likewise',
+    refuses(d, 'does not run dctr-token.mjs') && d.round === 1 && d.target === `/home/u/r/${RT}` && allows(t) && t.round === 1 && allows(a) && a.round === 1 &&
+    refuses(p, 'does not run dctr-token.mjs') && p.round === 1 && p.target === '/home/u/r/rec.md' && allows(pt) && pt.round === 1, [d, t, a, p, pt].map(show).join(' '))
+}
+{
+  const ds = [G.delimDash, G.delimDouble, G.delimTab].map((f) => decide(f)), ts = [G.delimDashToken, G.delimDoubleToken, G.delimTabToken].map((f) => decide(f))
+  clause('clause 1q — every heredoc delimiter form (<<\'END-RECORD\', <<"EOF", <<-EOF with a tab-indented terminator) ends its body where the shell does: a publish inside the body is refused, one after the terminator is allowed',
+    ds.every((d) => refuses(d, 'does not run dctr-token.mjs') && d.round === 4) && ts.every((t) => allows(t) && t.round === 4), [...ds, ...ts].map(show).join(' '))
+}
+{
+  const tmpCwd = { ...ENV, cwd: '/tmp/w' }
+  const rel = decide(F.bashToken, GR.relResult, tmpCwd), relHome = decide(F.bashToken, GR.relResult)
+  const stem = decide(F.bashToken, GR.logPair, { ...ENV, resolve: (p) => (p.endsWith('/gate-r1-npm-test.log') ? '/tmp/s/gate-r1-npm-test.log' : p) })
+  const launch = decide(F.bashToken, GR.launch, tmpCwd), launchHome = decide(F.bashToken, GR.launch), dur = decide(F.bashToken, GR.durableResult)
+  clause('clause 1r — any path ending .result is gate-shaped and so is its stem (PATHEXT): a relative .out.result and a .log.result under a tmp cwd are refused, a .log whose .result names it is judged as the transcript, a durable x.result and a .jsonl under /tmp are not',
+    refuses(rel, '.doctrine/records/gate-r1-npm-test.out.result', 'lies under /tmp') && allows(relHome) &&
+    refuses(stem, '.doctrine/records/gate-r1-npm-test.log (resolves to /tmp/s/gate-r1-npm-test.log)') && stem.reasons.length === 1 &&
+    refuses(launch, '.doctrine/records/gate-r1-npm-test.log.result', '.doctrine/records/gate-r1-npm-test.log (resolves to /tmp/w/') && allows(launchHome) && allows(dur),
+    [rel, relHome, stem, launch, launchHome, dur].map(show).join(' '))
+}
+
 // ---------------------------------------------------------------- clause 2: the hook end to end
 
 const hook = path.join(import.meta.dirname, 'dctr-roundguard.mjs')
@@ -235,6 +289,47 @@ const allowed = (r) => r.code === 0 && r.out === ''
   clause('clause 2i — a relative gate path in the record that is a symlink into TMPDIR is resolved through it and denied; a real file at the same kind of path, and a .jsonl under TMPDIR, go through',
     denied(link, '.doctrine/records/gates/r1.out.result', 'lies under') && allowed(plain), `${JSON.stringify(link)} ${JSON.stringify(plain)}`)
 }
+// F-B: TMPDIR is a link (as /tmp and $TMPDIR are on macOS) from one durable-looking dir to another, so `$TMPDIR/g.out`
+// resolves to a path under the link's target and under no tmp dir written as such.
+const linkTmp = path.join(durable, 'linktmp'), realTmp = path.join(durable, 'realtmp')
+fs.mkdirSync(realTmp); fs.symlinkSync(realTmp, linkTmp); fs.writeFileSync(path.join(realTmp, 'g.out'), 'ok\n')
+const recEnv = path.join(durable, 're.md'), recEnvDur = path.join(durable, 'red.md')
+fs.writeFileSync(recEnv, '# r\n- gate: $TMPDIR/g.out exit=0\n'); fs.writeFileSync(recEnvDur, `# r\n- gate: ${durable}/kept/g.out exit=0\n`)
+// F-C: gates/r1.out -> r1-hop.out (relative, same dir) -> <TMPDIR>/gone/r1.out, a scratchpad since wiped; its twin
+// gates/r2.out -> <durable>/gone/r2.out, also dangling, under no tmp dir.
+const gatesC = path.join(durable, 'c', 'gates'); fs.mkdirSync(gatesC, { recursive: true })
+const goneTmp = path.join(scratchTmp, 'gone'); fs.mkdirSync(goneTmp)
+fs.symlinkSync(path.join(goneTmp, 'r1.out'), path.join(gatesC, 'r1-hop.out')); fs.symlinkSync('r1-hop.out', path.join(gatesC, 'r1.out'))
+fs.symlinkSync(path.join(durable, 'gone', 'r2.out'), path.join(gatesC, 'r2.out'))
+fs.rmSync(goneTmp, { recursive: true })
+const recDangle = path.join(durable, 'c', 'rd.md'), recDangleDur = path.join(durable, 'c', 'rdd.md')
+fs.writeFileSync(recDangle, '# r\n- gate: gates/r1.out exit=0\n'); fs.writeFileSync(recDangleDur, '# r\n- gate: gates/r2.out exit=0\n')
+// F-D: a .log.result linked into TMPDIR, and a durable x.result beside a .jsonl under TMPDIR.
+const recordsD = path.join(durable, 'd', '.doctrine', 'records'); fs.mkdirSync(recordsD, { recursive: true })
+fs.writeFileSync(path.join(scratchTmp, 'gate-r1-npm-test.log.result'), 'exit=0\n')
+fs.symlinkSync(path.join(scratchTmp, 'gate-r1-npm-test.log.result'), path.join(recordsD, 'gate-r1-npm-test.log.result'))
+fs.writeFileSync(path.join(recordsD, 'x.result'), 'exit=0\n')
+const recLog = path.join(durable, 'd', 'rl.md'), recResult = path.join(durable, 'd', 'rx.md')
+fs.writeFileSync(recLog, '# r\n- gate `.doctrine/records/gate-r1-npm-test.log.result` reads `exit=0`\n')
+fs.writeFileSync(recResult, `# r\n- gate \`.doctrine/records/x.result\` reads \`exit=0\`\n- seat ${scratchTmp}/agent.jsonl\n`)
+{
+  const viaLink = run(pay('s10', `echo '${LINE(3)}' >> ${recEnv} && ${TOKEN(3)}`), { TMPDIR: linkTmp })
+  const plain = run(pay('s10', `echo '${LINE(3)}' >> ${recEnvDur} && ${TOKEN(3)}`), { TMPDIR: linkTmp })
+  clause('clause 2j — with TMPDIR a symlink, $TMPDIR/g.out resolves under the link\'s real target and is denied there (F-B); a gate path beside that target, under no tmp dir, goes through',
+    denied(viaLink, `$TMPDIR/g.out (resolves to ${realTmp}/g.out) lies under ${realTmp}`) && allowed(plain), `${JSON.stringify(viaLink)} ${JSON.stringify(plain)}`)
+}
+{
+  const cwd = path.join(durable, 'c')
+  const gone = run(pay('s11', `echo '${LINE(3)}' >> ${recDangle} && ${TOKEN(3)}`, { cwd })), dur = run(pay('s11', `echo '${LINE(3)}' >> ${recDangleDur} && ${TOKEN(3)}`, { cwd }))
+  clause('clause 2k — a gate path that is a chain of symlinks ending in a wiped tmp dir is followed to its missing target and denied (F-C); a dangling link into a durable dir goes through',
+    denied(gone, `gates/r1.out (resolves to ${goneTmp}/r1.out) lies under`) && allowed(dur), `${JSON.stringify(gone)} ${JSON.stringify(dur)}`)
+}
+{
+  const cwd = path.join(durable, 'd')
+  const log = run(pay('s12', `echo '${LINE(3)}' >> ${recLog} && ${TOKEN(3)}`, { cwd })), x = run(pay('s12', `echo '${LINE(3)}' >> ${recResult} && ${TOKEN(3)}`, { cwd }))
+  clause('clause 2l — a .log.result linked into TMPDIR is denied (PATHEXT); a durable x.result and a .jsonl under TMPDIR go through',
+    denied(log, '.doctrine/records/gate-r1-npm-test.log.result', 'lies under') && allowed(x), `${JSON.stringify(log)} ${JSON.stringify(x)}`)
+}
 clause('clause 2h — herdr was called zero times across every run (tripwire on PATH)', !fs.existsSync(tripwire), 'the tripwire herdr ran')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
@@ -267,6 +362,24 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
   clause('clause 3e — without the guard: each H3 fixture holds the literal text `node /p/hooks/dctr-token.mjs`, so a text match would read it as a publish',
     [F.commentToken, F.commentSepToken, F.printfToken, F.printfSepToken, F.echoToken, F.echoSepToken, F.heredocBodyToken].every(([, i]) => /node \/p\/hooks\/dctr-token\.mjs/.test(i.command)) &&
     [F.commentSepToken, F.echoSepToken, F.printfSepToken].every(([, i]) => /(?:;|&&) node \/p\/hooks\/dctr-token\.mjs/.test(i.command)), 'an H3 fixture does not carry the decoy')
+}
+{
+  const T = '2026-10-14T10:00:00Z'
+  const decoded = (f) => f[1].command.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+  clause('clause 3f — without the guard: each F-A fixture carries /tmp/x/r2.out glued to a literal \\n or \\t, and once those are decoded by hand that path stands alone on its line and the round line parses',
+    [G.printfTmpGate, G.echoTabTmpGate].every((f) => /\\[nt]\/tmp\/x\/r2\.out\\n|\/tmp\/x\/r2\.out\\n/.test(f[1].command) && decoded(f).split(/\s/).includes('/tmp/x/r2.out') && decoded(f).split('\n').some((l) => isRound(l.replace(/["'].*$/, '')))) &&
+    !G.printfHomeGate[1].command.includes('/tmp/'),
+    'an F-A fixture does not carry its glued path')
+  clause('clause 3g — without the guard: each captured form carries its round line once $T is replaced by hand, and each delimiter fixture holds the decoy publish between its opening and its terminator as the shell reads it',
+    [G.heredocDollarT, G.heredocDollarTToken, G.heredocDollarTAfter].every(([, i]) => isRound(i.command.replace('$T', T))) && isRound(G.printfNoToken[1].command.split('\\n')[1]) &&
+    [[G.delimDash, 'END-RECORD'], [G.delimDouble, 'EOF'], [G.delimTab, '\tEOF']].every(([f, end]) => { const l = f[1].command.split('\n'); return l.indexOf(end) > l.findIndex((x) => x.includes('dctr-token.mjs')) && l.findIndex((x) => x.includes('dctr-token.mjs')) > 0 }),
+    'a captured-form fixture does not carry what its clause rests on')
+  clause('clause 3h — without the guard: TMPDIR\'s link (F-B) points at a dir outside every tmp dir that holds g.out, the F-C chain is two links ending at a missing path under TMPDIR, and the F-D .log.result is a link into TMPDIR',
+    fs.realpathSync(linkTmp) === realTmp && !realTmp.startsWith('/tmp/') && !realTmp.startsWith(linkTmp + '/') && fs.existsSync(path.join(realTmp, 'g.out')) &&
+    fs.lstatSync(path.join(gatesC, 'r1.out')).isSymbolicLink() && fs.readlinkSync(path.join(gatesC, 'r1.out')) === 'r1-hop.out' &&
+    fs.readlinkSync(path.join(gatesC, 'r1-hop.out')) === path.join(goneTmp, 'r1.out') && !fs.existsSync(goneTmp) && goneTmp.startsWith(scratchTmp + '/') &&
+    fs.realpathSync(path.join(recordsD, 'gate-r1-npm-test.log.result')).startsWith(scratchTmp + '/') && !fs.lstatSync(path.join(recordsD, 'x.result')).isSymbolicLink(),
+    'a link fixture does not carry what its clause rests on')
 }
 fs.rmSync(tmp, { recursive: true, force: true })
 fs.rmSync(durable, { recursive: true, force: true })

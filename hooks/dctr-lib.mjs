@@ -2277,7 +2277,7 @@ export function privateFindings(text) {
 
 const ISO_PLACEHOLDER = '2000-01-01T00:00:00Z'
 
-/** What a Bash command reads as once the shell has expanded it: every `$(...)` replaced innermost first until none is
+/** What a text reads as once the shell has expanded it: every `$(...)` replaced innermost first until none is
  *  left (so a quoted date format inside one, or `$(basename "$(pwd)")`, goes whole), then every backtick, `${...}` and
  *  `$VAR`, each by an ISO time, which reads as a round line's time and as its revision: the hub tells an orchestrator
  *  to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape. */
@@ -2286,78 +2286,174 @@ function expandShell(t) {
   return t.replace(/`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, ISO_PLACEHOLDER)
 }
 
-/** The candidate round lines in a text: from each `round:` to the end of its line (a real newline or a literal `\n`),
- *  with trailing quote, paren and backslash characters stripped, and the same cut at the first quote after it, so
- *  `echo "- round: ..." >> r.md` and `Path("r.md").write_text("round: ...\n")` both yield the line. A Bash command is
- *  expanded first (expandShell); Write and Edit text and the record on disk are read as they stand. The parser in
- *  dctr-record.mjs judges each one.
- *  ponytail: an expansion in a numeric field (round, blockers, alarm) does not parse, so that write is not seen; a
- *  line the shell assembles from pieces (`printf '%s closed %s' round: ...`) is not seen either. */
-function roundCandidates(tool, text) {
-  const t = tool === 'Bash' ? expandShell(String(text ?? '')) : String(text ?? '')
+/** `\n` and `\t` as printf and echo -e write them. */
+const decodeEscapes = (t) => t.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+
+/**
+ * The one pass that reads a Bash command's shell syntax for the round guard. It returns
+ *   segments   the shell code split on ; & | newlines and subshell parens, each an array of words with quotes and
+ *              backslashes removed and `#` comments dropped; a `$(...)` or backtick run stays whole inside its word,
+ *   payloads   every heredoc body (`<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`, WORD any run such as END-RECORD) and
+ *              every quoted string's text, with `\n` and `\t` decoded as printf and echo -e write them,
+ *   redirects  every `>`, `>>` or `>|` target and every `tee` file argument, in the order written.
+ * ponytail: a heredoc or a quoted string inside `$(...)` or backticks is not read (the run is copied whole into its
+ * word), and a here-document's body after `\` line continuations is read as written.
+ */
+export function lexShell(command) {
+  const s = String(command ?? ''), segments = [], payloads = [], redirects = []
+  let words = [], word = null, pending = [], redirectNext = false, i = 0
+  const add = (t) => { word = (word ?? '') + t }
+  const end = () => {
+    if (word === null) return
+    if (redirectNext) redirects.push(word)
+    words.push(word); word = null; redirectNext = false
+  }
+  const cut = () => {
+    end()
+    const a = commandWords(words)
+    if (a[0] === 'tee') redirects.push(...a.slice(1).filter((w) => !w.startsWith('-')))
+    if (words.length) segments.push(words)
+    words = []; redirectNext = false
+  }
+  // The end of a `$(...)` or backtick run starting at j, its quotes and parens its own.
+  const sub = (j) => {
+    if (s[j] === '`') { const k = s.indexOf('`', j + 1); return k < 0 ? s.length : k + 1 }
+    let k = j + 2
+    for (let depth = 1; k < s.length && depth; k++) {
+      const c = s[k]
+      if (c === '\\') k++
+      else if (c === "'") { const e = s.indexOf("'", k + 1); k = e < 0 ? s.length : e }
+      else if (c === '"') { for (k++; k < s.length && s[k] !== '"'; k++) if (s[k] === '\\') k++ }
+      else if (c === '(') depth++
+      else if (c === ')') depth--
+    }
+    return k
+  }
+  while (i < s.length) {
+    const c = s[i]
+    if (c === '\\') { if (s[i + 1] !== '\n') add(s[i + 1] ?? ''); i += 2; continue }
+    if (c === "'" || (c === '$' && s[i + 1] === "'")) {
+      let j = i + (c === '$' ? 2 : 1), text = ''
+      for (; j < s.length && s[j] !== "'"; j++) { if (c === '$' && s[j] === '\\') text += s[j++]; text += s[j] ?? '' }
+      add(text); payloads.push(decodeEscapes(text)); i = j + 1; continue
+    }
+    if (c === '"') {
+      let j = i + 1, text = ''
+      while (j < s.length && s[j] !== '"') {
+        if (s[j] === '\\') { if (!'"\\$`\n'.includes(s[j + 1])) text += '\\'; if (s[j + 1] !== '\n') text += s[j + 1] ?? ''; j += 2 }
+        else if (s[j] === '`' || (s[j] === '$' && s[j + 1] === '(')) { const k = sub(j); text += s.slice(j, k); j = k }
+        else text += s[j++]
+      }
+      add(text); payloads.push(decodeEscapes(text)); i = j + 1; continue
+    }
+    if (c === '`' || (c === '$' && s[i + 1] === '(')) { const k = sub(i); add(s.slice(i, k)); i = k; continue }
+    if (c === '#' && word === null) { while (i < s.length && s[i] !== '\n') i++; continue }
+    if (c === '\n') {
+      cut(); i++
+      for (const h of pending) {
+        const body = []
+        while (i < s.length) {
+          const nl = s.indexOf('\n', i), line = s.slice(i, nl < 0 ? s.length : nl)
+          i = nl < 0 ? s.length : nl + 1
+          if ((h.dash ? line.replace(/^\t+/, '') : line) === h.delim) break
+          body.push(line)
+        }
+        payloads.push(decodeEscapes(body.join('\n')))
+      }
+      pending = []
+      continue
+    }
+    if (c === '>' || (c === '&' && s[i + 1] === '>')) {
+      const fd = /^\d+$/.test(word ?? '') ? word : ''
+      if (fd) word = null
+      end()
+      const op = /^&?>>?[&|]?/.exec(s.slice(i))[0]
+      words.push(fd + op); i += op.length
+      redirectNext = !fd && /^>>?\|?$/.test(op)
+      continue
+    }
+    if (c === '<' && s[i + 1] === '<' && s[i + 2] !== '<') {
+      end(); i += 2
+      const dash = s[i] === '-'
+      if (dash) i++
+      while (s[i] === ' ' || s[i] === '\t') i++
+      let delim = '', q = null
+      for (; i < s.length; i++) {
+        const d = s[i]
+        if (!q && (/\s/.test(d) || ';&|()<>'.includes(d))) break
+        if (q ? d === q : d === "'" || d === '"') { q = q ? null : d; continue }
+        if (d === '\\' && !q) { delim += s[++i] ?? ''; continue }
+        delim += d
+      }
+      words.push(dash ? '<<-' : '<<', delim)
+      pending.push({ delim, dash })
+      continue
+    }
+    if (';&|()'.includes(c)) { cut(); i++; continue }
+    if (/\s/.test(c)) { end(); i++; continue }
+    add(c); i++
+  }
+  cut()
+  return { segments, payloads, redirects }
+}
+
+/** A segment's words from its command's own name on, past the assignments and keywords before it. */
+const commandWords = (w) => w.slice(w.findIndex((x) => !/^(?:[A-Za-z_]\w*=.*|then|do|else|elif|if|while|until|!|\{|time)$/.test(x)) >>> 0)
+
+/** The candidate round lines in some texts: from each `round:` to the end of its line, with trailing quote, paren and
+ *  backslash characters stripped, and the same cut at the first quote after it, so `Path("r.md").write_text("round:
+ *  ...\n")` yields the line. The parser in dctr-record.mjs judges each one. */
+function roundCandidates(texts) {
   const out = []
-  for (const m of t.matchAll(/round:/gi)) {
-    const line = t.slice(m.index).split(/\n|\\n/)[0]
+  for (const t of texts.map((x) => String(x ?? ''))) for (const m of t.matchAll(/round:/gi)) {
+    const line = t.slice(m.index).split('\n')[0]
     for (const c of [line, line.split(/["']/)[0]]) out.push(c.replace(/["'()\\\s]+$/, ''))
   }
   return out
 }
 
+/** The texts a Bash command writes or runs, as lexShell reads it: every payload, then each code segment's words
+ *  joined by a space. */
+const bashTexts = (lex) => [...lex.payloads, ...lex.segments.map((w) => w.join(' '))]
+
 /** The record a tool call writes into: Write and Edit name it; a Bash command names it as the first `>>`, `>` or
- *  `tee` target ending `.md`, `~/` expanded and a relative one resolved against the session's cwd. Null when the
- *  command names none it can read (a target built from a shell variable included). */
-export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}) {
+ *  `tee` target ending `.md` (lexShell), `~/` expanded and a relative one resolved against the session's cwd. Null
+ *  when the command names none it can read (a target built from a shell expansion included). */
+export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, lex = tool === 'Bash' ? lexShell(input?.command) : null) {
   if (tool === 'Write' || tool === 'Edit') return typeof input?.file_path === 'string' ? input.file_path : null
   if (tool !== 'Bash') return null
-  for (const m of String(input?.command ?? '').matchAll(/(?:(?<![\d&])>>?|\btee(?:\s+-a)?)\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|<>()'"]+))/g)) {
-    const p = m[1] ?? m[2] ?? m[3]
-    if (!p.endsWith('.md') || p.includes('$') || p.includes('`')) continue
-    return path.resolve(cwd, p.startsWith('~/') ? path.join(home, p.slice(2)) : p)
-  }
-  return null
+  const p = lex.redirects.find((r) => r.endsWith('.md') && !/[$`]/.test(r))
+  return p ? path.resolve(cwd, p.startsWith('~/') ? path.join(home, p.slice(2)) : p) : null
 }
 
-/** The gate-shaped paths in a text (R8, ruling V3BMECH): every path-like token ending `.out`, `.out.result` or
- *  `.output` (the gate transcript and its result file), `~/` expanded to `home`, a leading `$TMPDIR` or `${TMPDIR}` to
- *  `tmpdir`, and a relative one resolved against `cwd`. Each is `{ written, abs }`. */
+/** The gate-shaped paths in a text (R8, rulings V3BMECH and PATHEXT): every path-like token ending `.out`, `.output`
+ *  or `.result` (the gate transcript and its result file), and for one ending `.result` the stem it belongs to too, so
+ *  `gate.log.result` also names `gate.log`. `~/` is expanded to `home`, a leading `$TMPDIR` or `${TMPDIR}` to
+ *  `tmpdir`, and a relative one resolved against `cwd`. Each is `{ written, abs }`.
+ *  ponytail: a transcript named only without one of those suffixes (a launch command's `gate.log` with no `.result`
+ *  beside it) is not seen. */
 export function gatePaths(text, { home = '/', cwd = '/', tmpdir = os.tmpdir() } = {}) {
   const out = []
   for (const m of String(text ?? '').matchAll(/[^\s'"`<>()|;,*[\]=]+/g)) {
     const written = m[0].replace(/[.:]+$/, '')
-    if (!/\.(?:out|out\.result|output)$/.test(written) || written.includes('://')) continue
-    const p = written.startsWith('~/') ? path.join(home, written.slice(2)) : written.replace(/^\$(?:TMPDIR|\{TMPDIR\})(?=\/)/, tmpdir)
-    if (p.includes('$')) continue
-    out.push({ written, abs: path.resolve(cwd, p) })
+    if (!/\.(?:out|output|result)$/.test(written) || written.includes('://')) continue
+    for (const w of written.endsWith('.result') ? [written, written.slice(0, -'.result'.length)] : [written]) {
+      const p = w.startsWith('~/') ? path.join(home, w.slice(2)) : w.replace(/^\$(?:TMPDIR|\{TMPDIR\})(?=\/)/, tmpdir)
+      if (p.includes('$')) continue
+      out.push({ written: w, abs: path.resolve(cwd, p) })
+    }
   }
   return out
 }
 
-/** Whether a Bash command runs dctr-token.mjs: the shell code with every heredoc body and `#` comment removed and
- *  every quoted string that holds whitespace replaced by a placeholder (a quoted path argument holds none and stays),
- *  then `node` as a command word, any node flags, and an argument ending `dctr-token.mjs`.
- *  ponytail: `false && node .../dctr-token.mjs` counts; reading which branch runs needs a shell, not a matcher. */
-export function runsToken(command) {
-  const lines = String(command ?? '').split('\n'), kept = []
-  for (let i = 0, ends = []; i < lines.length; i++) {
-    if (ends.length) { if (lines[i].replace(/^\t+/, '') === ends[0]) ends.shift(); continue }
-    kept.push(lines[i])
-    for (const h of lines[i].matchAll(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1/g)) ends.push(h[2])
-  }
-  let code = '', q = null, buf = ''
-  const src = kept.join('\n')
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i]
-    if (q) {
-      buf += c
-      if (c === '\\' && q === '"') { buf += src[++i] ?? ''; continue }
-      if (c === q) { code += /\s/.test(buf.slice(1, -1)) ? '_Q_' : buf; q = null }
-      continue
-    }
-    if (c === "'" || c === '"') { q = c; buf = c; continue }
-    if (c === '#' && (i === 0 || /\s/.test(src[i - 1]))) { while (i < src.length && src[i] !== '\n') i++; code += '\n'; continue }
-    code += c
-  }
-  return /(?:^|[;&|(\n]|\b(?:then|do|else)\s)\s*node\s+(?:-\S+\s+)*["']?[^\s;&|'"]*dctr-token\.mjs["']?(?=[\s;&|)]|$)/.test(code)
+/** Whether a lexed Bash command runs dctr-token.mjs: a code segment whose command word (past assignments and
+ *  keywords) is `node` and a later word ends `dctr-token.mjs`. A comment, a heredoc body or a quoted argument to
+ *  another command is not code, so naming the script there is not a publish. */
+export function runsToken(lex) {
+  return lex.segments.some((w) => {
+    const a = commandWords(w)
+    return /(?:^|\/)node$/.test(a[0] ?? '') && a.slice(1).some((x) => x.endsWith('dctr-token.mjs'))
+  })
 }
 
 /**
@@ -2365,36 +2461,41 @@ export function runsToken(command) {
  * when it is missing or unreadable (judged on the incoming text alone). `env` carries what a pure function cannot
  * read: `tmpDirs` (the directories that die with the session: `/tmp` and `os.tmpdir()`), `tmpdir` (what `$TMPDIR`
  * expands to), `home`, `cwd`, `pluginRoot`, and `resolve`, applied to each gate path's absolute form before it is judged
- * (default path.resolve; the hook passes realpath for a path that exists, so a symlink into /tmp is seen).
+ * (default path.resolve; the hook passes one that follows every symlink, so a link into /tmp is seen).
  *
  * A call writes a round line when it is Bash, or Write or Edit on a path ending `.md`, and a line it writes parses as a
- * round line (dctr-record.mjs, read from each `round:` once the shell's expansions are replaced) that the record on
- * disk does not already carry: a Write that rewrites the whole record,
- * or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. Where it writes one it is
- * refused when the call does not run dctr-token.mjs (a Write or Edit never can), and for each gate-shaped path in the
- * record or the incoming text (absolute, `~/`, `$TMPDIR` or relative to `cwd`) that resolves under a tmp dir: one in
- * the incoming text is told to use a durable path, one only in the record to append a correction, never an edit.
- * `round` is the highest new round's n.
+ * round line (dctr-record.mjs; a Bash command is read through lexShell, every payload and code segment once the
+ * shell's expansions are replaced) that the record on disk does not already carry: a Write that rewrites the whole
+ * record, or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. Where it writes
+ * one it is refused when the call does not run dctr-token.mjs (a Write or Edit never can), and for each gate-shaped
+ * path (gatePaths) in the record or the incoming text that resolves under a tmp dir: one in the incoming text is told
+ * to use a durable path, one only in the record to append a correction, never an edit. `round` is the highest new
+ * round's n.
+ * ponytail: what the shell decides at run time is not read. A round line the shell assembles from pieces (`printf '%s
+ * closed %s' round: ...`), an expansion inside the round, blockers or alarm number, and a write inside `$(...)` or
+ * `bash -c '...'` are not seen as a round write; `false && node .../dctr-token.mjs` and `node --version
+ * .../dctr-token.mjs` count as a publish, and one inside `$(...)` does not.
  */
 export function roundGuardDecision(tool, input, recordText, env = {}) {
   const none = { refuse: false, reasons: [], round: null, target: null }
   if (!input || !['Bash', 'Write', 'Edit'].includes(tool)) return none
-  const target = roundGuardTarget(tool, input, env)
+  const lex = tool === 'Bash' ? lexShell(input.command) : null
+  const target = roundGuardTarget(tool, input, env, lex)
   if (tool !== 'Bash' && !String(target ?? '').endsWith('.md')) return none
-  const text = tool === 'Bash' ? input.command : tool === 'Write' ? input.content : input.new_string
-  const known = new Set(roundCandidates('Write', recordText))
-  const rounds = roundCandidates(tool, text).filter((l) => !known.has(l))
+  const texts = lex ? bashTexts(lex) : [tool === 'Write' ? input.content : input.new_string]
+  const known = new Set(roundCandidates([recordText]))
+  const rounds = roundCandidates(lex ? texts.map(expandShell) : texts).filter((l) => !known.has(l))
     .flatMap((l) => parseRecord(l).entries).filter((e) => e.kind === 'round')
   if (!rounds.length) return none
   const round = Math.max(...rounds.map((e) => e.n))
   const reasons = []
   const publish = `write the round line and run \`node ${env.pluginRoot || '<plugin-root>'}/hooks/dctr-token.mjs <round> <exit-count> <valve>\` in ONE Bash call (doctrine step 5)`
   if (tool !== 'Bash') reasons.push(`round ${round}'s line is written with the ${tool} tool, which cannot run dctr-token.mjs, so the counters are never published: ${publish}`)
-  else if (!runsToken(text)) reasons.push(`round ${round}'s line is written in a call that does not run dctr-token.mjs, so the counters are never published: ${publish}`)
+  else if (!runsToken(lex)) reasons.push(`round ${round}'s line is written in a call that does not run dctr-token.mjs, so the counters are never published: ${publish}`)
   const dirs = [...new Set((env.tmpDirs || ['/tmp']).map((d) => path.resolve(d)))]
   const resolve = env.resolve || path.resolve
   const opts = { home: env.home || '/', cwd: env.cwd || '/', tmpdir: env.tmpdir || dirs[dirs.length - 1] }
-  const incoming = gatePaths(text, opts), inText = new Set(incoming.map((g) => g.abs)), seen = new Set()
+  const incoming = gatePaths(texts.join('\n'), opts), inText = new Set(incoming.map((g) => g.abs)), seen = new Set()
   for (const g of [...incoming, ...gatePaths(recordText, opts)]) {
     if (seen.has(g.abs)) continue
     seen.add(g.abs)
