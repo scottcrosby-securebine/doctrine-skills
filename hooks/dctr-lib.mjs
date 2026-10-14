@@ -2275,18 +2275,32 @@ export function privateFindings(text) {
 // The round guard (issue #62, phase visibility-62, R1 and R7-R9): a PreToolUse decision over one tool call that may
 // write a round line into a run record. Pure; dctr-roundguard.mjs reads the record and holds the latch.
 
-/** The candidate lines a tool call writes. Write and Edit write their text as it stands. A Bash command writes lines
- *  the shell builds, so its candidates are its own lines plus the body of each quoted string split on real and on
- *  `\n` newlines (`echo "- round: ..." >> r.md`, `printf '...\n'`), each with every `$(...)`, backtick and `$VAR`
- *  expansion replaced by an ISO time, which reads as the round line's time and as its revision: the hub tells an
- *  orchestrator to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape.
- *  ponytail: an expansion in a numeric field (round, blockers, alarm) does not parse and that write is not seen. */
+const ISO_PLACEHOLDER = '2000-01-01T00:00:00Z'
+
+/** What a Bash command reads as once the shell has expanded it: every `$(...)` replaced innermost first until none is
+ *  left (so a quoted date format inside one, or `$(basename "$(pwd)")`, goes whole), then every backtick, `${...}` and
+ *  `$VAR`, each by an ISO time, which reads as a round line's time and as its revision: the hub tells an orchestrator
+ *  to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape. */
+function expandShell(t) {
+  for (let prev; prev !== t;) { prev = t; t = t.replace(/\$\([^()]*\)/g, ISO_PLACEHOLDER) }
+  return t.replace(/`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, ISO_PLACEHOLDER)
+}
+
+/** The candidate round lines in a text: from each `round:` to the end of its line (a real newline or a literal `\n`),
+ *  with trailing quote, paren and backslash characters stripped, and the same cut at the first quote after it, so
+ *  `echo "- round: ..." >> r.md` and `Path("r.md").write_text("round: ...\n")` both yield the line. A Bash command is
+ *  expanded first (expandShell); Write and Edit text and the record on disk are read as they stand. The parser in
+ *  dctr-record.mjs judges each one.
+ *  ponytail: an expansion in a numeric field (round, blockers, alarm) does not parse, so that write is not seen; a
+ *  line the shell assembles from pieces (`printf '%s closed %s' round: ...`) is not seen either. */
 function roundCandidates(tool, text) {
-  if (tool !== 'Bash') return String(text ?? '').split('\n')
-  const t = String(text ?? '')
-  const bodies = [t, ...[...t.matchAll(/'([^']*)'|"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1] ?? m[2])]
-  const ISO = '2000-01-01T00:00:00Z'
-  return bodies.flatMap((b) => b.replace(/\$\([^()]*\)|`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, ISO).split(/\n|\\n/))
+  const t = tool === 'Bash' ? expandShell(String(text ?? '')) : String(text ?? '')
+  const out = []
+  for (const m of t.matchAll(/round:/gi)) {
+    const line = t.slice(m.index).split(/\n|\\n/)[0]
+    for (const c of [line, line.split(/["']/)[0]]) out.push(c.replace(/["'()\\\s]+$/, ''))
+  }
+  return out
 }
 
 /** The record a tool call writes into: Write and Edit name it; a Bash command names it as the first `>>`, `>` or
@@ -2303,42 +2317,74 @@ export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}) {
   return null
 }
 
-/** Absolute and `~/` paths in a text that end `.out`, `.out.result` or `.output` (R8, the gate transcript and its
- *  result file); a relative one never counts, since it resolves wherever the session runs. */
-export function gatePaths(text, home = '/') {
+/** The gate-shaped paths in a text (R8, ruling V3BMECH): every path-like token ending `.out`, `.out.result` or
+ *  `.output` (the gate transcript and its result file), `~/` expanded to `home`, a leading `$TMPDIR` or `${TMPDIR}` to
+ *  `tmpdir`, and a relative one resolved against `cwd`. Each is `{ written, abs }`. */
+export function gatePaths(text, { home = '/', cwd = '/', tmpdir = os.tmpdir() } = {}) {
   const out = []
-  for (const m of String(text ?? '').matchAll(/(?<![\w.~/-])~?\/[^\s'"`<>()|;,*\]]+/g)) {
-    const p = m[0].replace(/[.:]+$/, '')
-    if (/\.(?:out|out\.result|output)$/.test(p)) out.push(p.startsWith('~/') ? path.join(home, p.slice(2)) : p)
+  for (const m of String(text ?? '').matchAll(/[^\s'"`<>()|;,*[\]=]+/g)) {
+    const written = m[0].replace(/[.:]+$/, '')
+    if (!/\.(?:out|out\.result|output)$/.test(written) || written.includes('://')) continue
+    const p = written.startsWith('~/') ? path.join(home, written.slice(2)) : written.replace(/^\$(?:TMPDIR|\{TMPDIR\})(?=\/)/, tmpdir)
+    if (p.includes('$')) continue
+    out.push({ written, abs: path.resolve(cwd, p) })
   }
   return out
 }
 
-/** Whether a Bash command runs dctr-token.mjs: `node`, any node flags, then a script path ending in it, bare or quoted. */
-export const runsToken = (command) =>
-  /\bnode\s+(?:-\S+\s+)*(?:"[^"]*dctr-token\.mjs"|'[^']*dctr-token\.mjs'|[^\s;&|'"]*dctr-token\.mjs)(?=[\s;&|)]|$)/.test(String(command ?? ''))
+/** Whether a Bash command runs dctr-token.mjs: the shell code with every heredoc body and `#` comment removed and
+ *  every quoted string that holds whitespace replaced by a placeholder (a quoted path argument holds none and stays),
+ *  then `node` as a command word, any node flags, and an argument ending `dctr-token.mjs`.
+ *  ponytail: `false && node .../dctr-token.mjs` counts; reading which branch runs needs a shell, not a matcher. */
+export function runsToken(command) {
+  const lines = String(command ?? '').split('\n'), kept = []
+  for (let i = 0, ends = []; i < lines.length; i++) {
+    if (ends.length) { if (lines[i].replace(/^\t+/, '') === ends[0]) ends.shift(); continue }
+    kept.push(lines[i])
+    for (const h of lines[i].matchAll(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1/g)) ends.push(h[2])
+  }
+  let code = '', q = null, buf = ''
+  const src = kept.join('\n')
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (q) {
+      buf += c
+      if (c === '\\' && q === '"') { buf += src[++i] ?? ''; continue }
+      if (c === q) { code += /\s/.test(buf.slice(1, -1)) ? '_Q_' : buf; q = null }
+      continue
+    }
+    if (c === "'" || c === '"') { q = c; buf = c; continue }
+    if (c === '#' && (i === 0 || /\s/.test(src[i - 1]))) { while (i < src.length && src[i] !== '\n') i++; code += '\n'; continue }
+    code += c
+  }
+  return /(?:^|[;&|(\n]|\b(?:then|do|else)\s)\s*node\s+(?:-\S+\s+)*["']?[^\s;&|'"]*dctr-token\.mjs["']?(?=[\s;&|)]|$)/.test(code)
+}
 
 /**
  * The round guard's decision for one PreToolUse call. `recordText` is the target record as it stands on disk, or null
  * when it is missing or unreadable (judged on the incoming text alone). `env` carries what a pure function cannot
- * read: `tmpDirs` (the directories that die with the session: `/tmp` and `os.tmpdir()`), `home`, `cwd` and `pluginRoot`.
+ * read: `tmpDirs` (the directories that die with the session: `/tmp` and `os.tmpdir()`), `tmpdir` (what `$TMPDIR`
+ * expands to), `home`, `cwd`, `pluginRoot`, and `resolve`, applied to each gate path's absolute form before it is judged
+ * (default path.resolve; the hook passes realpath for a path that exists, so a symlink into /tmp is seen).
  *
  * A call writes a round line when it is Bash, or Write or Edit on a path ending `.md`, and a line it writes parses as a
- * round line (dctr-record.mjs) that the record on disk does not already carry: a Write that rewrites the whole record,
+ * round line (dctr-record.mjs, read from each `round:` once the shell's expansions are replaced) that the record on
+ * disk does not already carry: a Write that rewrites the whole record,
  * or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. Where it writes one it is
  * refused when the call does not run dctr-token.mjs (a Write or Edit never can), and for each gate-shaped path in the
- * record or the incoming text that resolves under a tmp dir. `round` is the highest new round's n.
+ * record or the incoming text (absolute, `~/`, `$TMPDIR` or relative to `cwd`) that resolves under a tmp dir: one in
+ * the incoming text is told to use a durable path, one only in the record to append a correction, never an edit.
+ * `round` is the highest new round's n.
  */
 export function roundGuardDecision(tool, input, recordText, env = {}) {
   const none = { refuse: false, reasons: [], round: null, target: null }
   if (!input || !['Bash', 'Write', 'Edit'].includes(tool)) return none
-  const home = env.home || '/'
   const target = roundGuardTarget(tool, input, env)
   if (tool !== 'Bash' && !String(target ?? '').endsWith('.md')) return none
   const text = tool === 'Bash' ? input.command : tool === 'Write' ? input.content : input.new_string
-  const known = new Set(String(recordText ?? '').split('\n').map((l) => l.trim()))
-  const rounds = roundCandidates(tool, text).filter((l) => !known.has(l.trim()))
-    .flatMap((l) => parseRecord(l.trim()).entries).filter((e) => e.kind === 'round')
+  const known = new Set(roundCandidates('Write', recordText))
+  const rounds = roundCandidates(tool, text).filter((l) => !known.has(l))
+    .flatMap((l) => parseRecord(l).entries).filter((e) => e.kind === 'round')
   if (!rounds.length) return none
   const round = Math.max(...rounds.map((e) => e.n))
   const reasons = []
@@ -2346,10 +2392,19 @@ export function roundGuardDecision(tool, input, recordText, env = {}) {
   if (tool !== 'Bash') reasons.push(`round ${round}'s line is written with the ${tool} tool, which cannot run dctr-token.mjs, so the counters are never published: ${publish}`)
   else if (!runsToken(text)) reasons.push(`round ${round}'s line is written in a call that does not run dctr-token.mjs, so the counters are never published: ${publish}`)
   const dirs = [...new Set((env.tmpDirs || ['/tmp']).map((d) => path.resolve(d)))]
-  for (const p of new Set(gatePaths(`${recordText ?? ''}\n${text ?? ''}`, home))) {
-    const abs = path.resolve(p)
-    const dir = dirs.find((d) => abs === d || abs.startsWith(d.endsWith('/') ? d : `${d}/`))
-    if (dir) reasons.push(`${p} lies under ${dir}, which dies with the session; record the gate transcript at a durable path (doctrine step 3)`)
+  const resolve = env.resolve || path.resolve
+  const opts = { home: env.home || '/', cwd: env.cwd || '/', tmpdir: env.tmpdir || dirs[dirs.length - 1] }
+  const incoming = gatePaths(text, opts), inText = new Set(incoming.map((g) => g.abs)), seen = new Set()
+  for (const g of [...incoming, ...gatePaths(recordText, opts)]) {
+    if (seen.has(g.abs)) continue
+    seen.add(g.abs)
+    const real = resolve(g.abs)
+    const dir = dirs.find((d) => real === d || real.startsWith(d.endsWith('/') ? d : `${d}/`))
+    if (!dir) continue
+    const where = `${g.written}${real === g.written ? '' : ` (resolves to ${real})`} lies under ${dir}, which dies with the session; `
+    reasons.push(where + (inText.has(g.abs)
+      ? 'record the gate transcript at a durable path (doctrine step 3)'
+      : 'append a correction line to the record naming a durable path for that gate transcript, and never edit the earlier line (the record is append-only, doctrine step 5)'))
   }
   return { refuse: reasons.length > 0, reasons, round, target }
 }

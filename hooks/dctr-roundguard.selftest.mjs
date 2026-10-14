@@ -38,10 +38,21 @@ const F = {
   teeNoToken: bash(`printf '%s\\n' '${LINE(5)}' | tee -a ~/r/rec.md`),
   mentionToken: bash(`echo '${LINE(3)} via dctr-token.mjs' >> ${REC}`),
   writeMd: ['Write', { file_path: REC, content: `# r\n${LINE(2)}\n` }],
-  writeMjs: ['Write', { file_path: '/home/u/r/x.mjs', content: `// ${LINE(2)}\n` }],
+  writeMjs: ['Write', { file_path: '/home/u/r/x.mjs', content: `${LINE(2)}\n` }],
   editMd: ['Edit', { file_path: REC, old_string: LINE(1), new_string: `${LINE(1)}\n${LINE(2)}` }],
   editTs: ['Edit', { file_path: '/home/u/r/x.ts', old_string: 'a', new_string: LINE(2) }],
   template: ['Write', { file_path: REC, content: 'round: <n> closed <time> at <rev> blockers <n> alarm <n>\n' }],
+  dateQuoted: bash(`echo "- round: 3 closed $(date -u +"%Y-%m-%dT%H:%M:%SZ") at abc1234 blockers 0 alarm 0" >> ${REC}`),
+  dateQuotedToken: bash(`echo "- round: 3 closed $(date -u +"%Y-%m-%dT%H:%M:%SZ") at abc1234 blockers 0 alarm 0" >> ${REC} && ${TOKEN(3)}`),
+  nested: bash(`echo "- round: 3 closed $(date -u +%FT%TZ) at $(basename "$(pwd)") blockers 0 alarm 0" >> ${REC}`),
+  python: bash(`python3 -c 'from pathlib import Path; Path("r.md").write_text("round: 1 closed 2026-10-14T00:00:00Z at abc1234 blockers 0 alarm 0\\n")'`),
+  commentToken: bash(`echo '${LINE(3)}' >> ${REC} # ${TOKEN(3)}`),
+  printfToken: bash(`echo '${LINE(3)}' >> ${REC}; printf '${TOKEN(3)}'`),
+  echoToken: bash(`echo '${LINE(3)}' >> ${REC}; echo "${TOKEN(3)}"`),
+  commentSepToken: bash(`echo '${LINE(3)}' >> ${REC} # publish later; ${TOKEN(3)}`),
+  echoSepToken: bash(`echo '${LINE(3)}' >> ${REC}; echo "publish next; ${TOKEN(3)}"`),
+  printfSepToken: bash(`echo '${LINE(3)}' >> ${REC}; printf '%s\\n' 'then && ${TOKEN(3)}'`),
+  heredocBodyToken: bash(`cat >> ${REC} <<'EOF'\n${LINE(4)}\n${TOKEN(4)}\nEOF`),
   rewrite: ['Write', { file_path: REC, content: `# r\n${LINE(1)}\n${LINE(2)}\nmore prose\n` }],
 }
 const R = {
@@ -53,6 +64,8 @@ const R = {
   homeResult: '# r\n- gate result `/home/u/r/gate.out.result` and /home/u/r/m.output\n',
   homeTmp: '# r\n- gate: ~/gate.out\n',
   relOut: '# r\n- gate: tmp/gate.out\n',
+  relGates: '# r\n- gate: gates/r1.out.result\n',
+  envTmp: '# r\n- gate: $TMPDIR/g.out and ${TMPDIR}/h.output\n',
   old12: `# r\n${LINE(1)}\n${LINE(2)}\n`,
 }
 
@@ -92,8 +105,8 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
 }
 {
   const d = decide(F.bashToken, R.tmpOut), t = decide(F.bashToken, R.homeOut), j = decide(F.bashToken, R.tmpJsonl)
-  clause('clause 1h — a record naming /tmp/x/gate.out is refused, naming the path and step 3; /home/u/r/gate.out and /tmp/agent.jsonl are not',
-    refuses(d, '/tmp/x/gate.out lies under /tmp, which dies with the session', 'doctrine step 3') && d.reasons.length === 1 && allows(t) && allows(j),
+  clause('clause 1h — a record naming /tmp/x/gate.out is refused, naming the path and telling the orchestrator to append a correction, never edit (step 5); /home/u/r/gate.out and /tmp/agent.jsonl are not',
+    refuses(d, '/tmp/x/gate.out lies under /tmp, which dies with the session', 'append a correction line', 'never edit the earlier line', 'doctrine step 5') && d.reasons.length === 1 && allows(t) && allows(j),
     [d, t, j].map(show).join(' '))
 }
 {
@@ -103,13 +116,33 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
 }
 {
   const tilde = decide(F.bashToken, R.homeTmp, { ...ENV, home: '/tmp/h' }), rel = decide(F.bashToken, R.relOut)
-  clause('clause 1j — a ~/ path is expanded before it is judged; a relative path never counts',
-    refuses(tilde, '/tmp/h/gate.out lies under /tmp') && allows(rel), `${show(tilde)} ${show(rel)}`)
+  clause('clause 1j — a ~/ path is expanded before it is judged; a relative path under a durable cwd is durable',
+    refuses(tilde, '~/gate.out (resolves to /tmp/h/gate.out) lies under /tmp') && allows(rel), `${show(tilde)} ${show(rel)}`)
+}
+{
+  const tmpCwd = decide(F.bashToken, R.relGates, { ...ENV, cwd: '/tmp/w' }), homeCwd = decide(F.bashToken, R.relGates)
+  const env = decide(F.bashToken, R.envTmp)
+  const linked = decide(F.bashToken, R.relGates, { ...ENV, resolve: (p) => (p === '/home/u/r/gates/r1.out.result' ? '/tmp/s/r1.out.result' : p) })
+  clause('clause 1l — a relative gate path resolves against the call\'s cwd (refused under /tmp/w, allowed under /home/u/r), $TMPDIR and ${TMPDIR} expand to the temp directory, and the resolver env passes is applied (a symlink into /tmp)',
+    refuses(tmpCwd, 'gates/r1.out.result', 'lies under /tmp') && allows(homeCwd) &&
+    refuses(env, '/var/tmpx/g.out', '/var/tmpx/h.output') && env.reasons.length === 2 &&
+    refuses(linked, '/tmp/s/r1.out.result', 'lies under /tmp'), [tmpCwd, homeCwd, env, linked].map(show).join(' '))
+}
+{
+  const q = decide(F.dateQuoted), qt = decide(F.dateQuotedToken), n = decide(F.nested), py = decide(F.python)
+  clause('clause 1m — a round line is found wherever round: sits once every expansion is replaced: a quoted date format inside $(...), a nested $(... "$(pwd)"), a python3 -c write_text with a literal \\n',
+    refuses(q, 'does not run dctr-token.mjs') && q.round === 3 && allows(qt) && qt.round === 3 && refuses(n) && n.round === 3 && refuses(py) && py.round === 1,
+    [q, qt, n, py].map(show).join(' '))
+}
+{
+  const ds = [F.commentToken, F.commentSepToken, F.printfToken, F.printfSepToken, F.echoToken, F.echoSepToken, F.heredocBodyToken].map((f) => decide(f))
+  clause('clause 1n — dctr-token.mjs in a # comment, inside a quoted printf or echo argument, or inside a heredoc body is not a publish, even after a ; or && in that text',
+    ds.every((d) => refuses(d, 'does not run dctr-token.mjs')), ds.map(show).join(' '))
 }
 {
   const both = decide(F.bashNoToken, R.tmpOut), inText = decide(bash(`echo '${LINE(3)} gate /tmp/g.output' >> ${REC} && ${TOKEN(3)}`))
   clause('clause 1k — both defects are named in one refusal; a gate path in the incoming text alone is judged too',
-    refuses(both, 'does not run dctr-token.mjs', '/tmp/x/gate.out') && both.reasons.length === 2 && refuses(inText, '/tmp/g.output'), `${show(both)} ${show(inText)}`)
+    refuses(both, 'does not run dctr-token.mjs', '/tmp/x/gate.out') && both.reasons.length === 2 && refuses(inText, '/tmp/g.output', 'record the gate transcript at a durable path (doctrine step 3)') && !inText.reasons.some((r) => r.includes('correction')), `${show(both)} ${show(inText)}`)
 }
 
 // ---------------------------------------------------------------- clause 2: the hook end to end
@@ -155,7 +188,7 @@ const allowed = (r) => r.code === 0 && r.out === ''
   const ok = run(pay('s3', `echo '${LINE(3)}' >> ${rec} && ${TOKEN(3)}`))
   const tmpRec = run(pay('s3', `echo '${LINE(3)}' >> ${recTmp} && ${TOKEN(3)}`))
   clause('clause 2d — the record on disk is read: a durable gate path with the token goes through; a TMPDIR gate path in the record is denied',
-    allowed(ok) && denied(tmpRec, 'scratchpad/gate.out lies under', 'durable path'), `${JSON.stringify(ok)} ${JSON.stringify(tmpRec)}`)
+    allowed(ok) && denied(tmpRec, 'scratchpad/gate.out lies under', 'append a correction line'), `${JSON.stringify(ok)} ${JSON.stringify(tmpRec)}`)
 }
 {
   const cmd = `echo '${LINE(3)}' >> ${rec}`
@@ -179,8 +212,28 @@ const allowed = (r) => r.code === 0 && r.out === ''
 {
   const notDir = path.join(tmp, 'a-file'); fs.writeFileSync(notDir, 'x')
   const cmd = `echo '${LINE(3)}' >> ${rec}`
-  const a = run(pay('s6', cmd), { TMPDIR: notDir }), b = run(pay('s6', cmd), { TMPDIR: notDir })
-  clause('clause 2g — a latch that cannot be written still refuses, every time', denied(a) && denied(b), `${JSON.stringify(a)} ${JSON.stringify(b)}`)
+  const a = run(pay('s6', cmd), { TMPDIR: notDir })
+  fs.mkdirSync(path.join(scratchTmp, 'dctr-s7'), { recursive: true }); fs.writeFileSync(path.join(scratchTmp, 'dctr-s7', 'roundguard.json'), '{not json')
+  const b = run(pay('s7', cmd))
+  // No latch yet (the read finds nothing) and a state directory the hook cannot write into: the write half fails alone.
+  // As root a mode does not stop the write, so there the case is not run (it would refuse and read as a regression).
+  const ro = path.join(scratchTmp, 'dctr-s9'); fs.mkdirSync(ro); fs.chmodSync(ro, 0o500)
+  const c = process.getuid?.() === 0 ? { code: 0, out: '' } : run(pay('s9', cmd))
+  fs.chmodSync(ro, 0o700)
+  clause('clause 2g — a latch that cannot be read (state dir path is a file, or the latch is not JSON), or cannot be written (read-only state dir), allows the call (fail open); no latch yet refuses (2a)',
+    allowed(a) && allowed(b) && allowed(c), `${JSON.stringify(a)} ${JSON.stringify(b)} ${JSON.stringify(c)}`)
+}
+{
+  const gates = path.join(durable, '.doctrine', 'records', 'gates'); fs.mkdirSync(gates, { recursive: true })
+  const real = path.join(scratchTmp, 'scratchpad'); fs.mkdirSync(real, { recursive: true }); fs.writeFileSync(path.join(real, 'r1.out.result'), 'exit=0\n')
+  fs.symlinkSync(path.join(real, 'r1.out.result'), path.join(gates, 'r1.out.result'))
+  fs.writeFileSync(path.join(gates, 'r2.out.result'), 'exit=0\n')
+  const recLink = path.join(durable, 'rl.md'), recReal = path.join(durable, 'rr.md')
+  fs.writeFileSync(recLink, '# r\n- gate: .doctrine/records/gates/r1.out.result\n')
+  fs.writeFileSync(recReal, '# r\n- gate: .doctrine/records/gates/r2.out.result\n- seat ' + scratchTmp + '/agent.jsonl\n')
+  const link = run(pay('s8', `echo '${LINE(3)}' >> ${recLink} && ${TOKEN(3)}`)), plain = run(pay('s8', `echo '${LINE(3)}' >> ${recReal} && ${TOKEN(3)}`))
+  clause('clause 2i — a relative gate path in the record that is a symlink into TMPDIR is resolved through it and denied; a real file at the same kind of path, and a .jsonl under TMPDIR, go through',
+    denied(link, '.doctrine/records/gates/r1.out.result', 'lies under') && allowed(plain), `${JSON.stringify(link)} ${JSON.stringify(plain)}`)
 }
 clause('clause 2h — herdr was called zero times across every run (tripwire on PATH)', !fs.existsSync(tripwire), 'the tripwire herdr ran')
 
@@ -191,7 +244,7 @@ const unquoted = (cmd) => cmd.replace(/'/g, '').replace(/"/g, '').replace(/\$\(d
 const lines = (cmd) => unquoted(cmd).split(/\n|\\n/).map((l) => l.replace(/^\s*echo /, '').replace(/\s*(>>|\|).*$/, ''))
 clause('clause 3a — every refused fixture carries a round line the parser reads, the Bash ones once the shell has run, and the template fixture carries none',
   [F.bashNoToken, F.bashDateNoToken, F.heredocNoToken, F.teeNoToken, F.mentionToken].every(([, i]) => lines(i.command).some(isRound)) &&
-  isRound(F.writeMd[1].content) && isRound(F.editMd[1].new_string) && !isRound(F.template[1].content),
+  isRound(F.writeMd[1].content) && isRound(F.writeMjs[1].content) && isRound(F.editMd[1].new_string) && !isRound(F.template[1].content),
   'a defective fixture carries no round line, or the template does')
 clause('clause 3b — no refused-for-publish Bash fixture runs node on dctr-token.mjs, and every allowed twin does',
   [F.bashNoToken, F.bashDateNoToken, F.heredocNoToken, F.teeNoToken, F.mentionToken].every(([, i]) => !/node\s+\S*dctr-token/.test(i.command)) &&
@@ -199,9 +252,22 @@ clause('clause 3b — no refused-for-publish Bash fixture runs node on dctr-toke
 clause('clause 3c — each tmp-path record names a gate-shaped path that starts with a tmp dir, and each durable twin does not',
   ['/tmp/x/gate.out', '/tmp/claude-1000/s/scratchpad/gate.out.result', '/var/tmpx/m.output'].every((p, i) => [R.tmpOut, R.tmpResult, R.tmpOutput][i].includes(p)) &&
   fs.readFileSync(recTmp, 'utf8').includes(`${scratchTmp}/scratchpad/gate.out`) &&
-  ![R.homeOut, R.homeResult, R.tmpJsonl, fs.readFileSync(rec, 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !R.relOut.includes(' /'),
+  ![R.homeOut, R.homeResult, R.tmpJsonl, fs.readFileSync(rec, 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !R.relOut.includes(' /') && R.relGates.includes(' gates/r1.out.result') && R.envTmp.includes('$TMPDIR/g.out'),
   'a record fixture does not carry what its clause rests on')
 
+{
+  const T = '2026-10-14T10:00:00Z', body = (n) => `- round: ${n} closed ${T} at abc1234 blockers 0 alarm 0`
+  const ran = [
+    [F.dateQuoted[1].command.replace('$(date -u +"%Y-%m-%dT%H:%M:%SZ")', T), body(3)],
+    [F.nested[1].command.replace('$(date -u +%FT%TZ)', T).replace('$(basename "$(pwd)")', 'abc1234'), body(3)],
+    [F.python[1].command, 'round: 1 closed 2026-10-14T00:00:00Z at abc1234 blockers 0 alarm 0'],
+  ]
+  clause('clause 3d — without the guard: each H2 fixture, its expansions replaced by hand, holds a line the parser reads as a round line',
+    ran.every(([c, l]) => c.includes(l) && isRound(l)), 'an H2 fixture does not carry its round line')
+  clause('clause 3e — without the guard: each H3 fixture holds the literal text `node /p/hooks/dctr-token.mjs`, so a text match would read it as a publish',
+    [F.commentToken, F.commentSepToken, F.printfToken, F.printfSepToken, F.echoToken, F.echoSepToken, F.heredocBodyToken].every(([, i]) => /node \/p\/hooks\/dctr-token\.mjs/.test(i.command)) &&
+    [F.commentSepToken, F.echoSepToken, F.printfSepToken].every(([, i]) => /(?:;|&&) node \/p\/hooks\/dctr-token\.mjs/.test(i.command)), 'an H3 fixture does not carry the decoy')
+}
 fs.rmSync(tmp, { recursive: true, force: true })
 fs.rmSync(durable, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')
