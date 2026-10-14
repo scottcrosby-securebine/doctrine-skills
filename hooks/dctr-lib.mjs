@@ -2295,12 +2295,14 @@ const decodeEscapes = (t) => t.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
  *              backslashes removed and `#` comments dropped; a `$(...)` or backtick run stays whole inside its word,
  *   payloads   every heredoc body (`<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`, WORD any run such as END-RECORD) and
  *              every quoted string's text, with `\n` and `\t` decoded as printf and echo -e write them,
- *   redirects  `{ path, seg }` for each `>`, `>>` or `>|` target with no fd number (so not `1>>` or `&>>`) as each is
- *              read, and for each `tee` file argument when its segment ends, so a tee target comes before a `>` target
- *              later in the same segment; `seg` is the index of the segment it sits in.
+ *   redirects  `{ path, seg }`, `seg` the index of the segment it sits in: each `>`, `>>` or `>|` target with no fd
+ *              number (so not `1>>` or `&>>`), pushed as it is read, then, when a segment whose command is `tee`
+ *              ends, every later word of it not starting with `-`, which takes in a redirect operator and its target
+ *              too. So a `>` target comes before the tee arguments of its own segment.
  * A here-string (`<<<`) opens no heredoc, and neither does a `<<` inside an arithmetic `(( ))`.
  * ponytail: a heredoc or a quoted string inside `$(...)` or backticks is not read (the run is copied whole into its
- * word), and a here-document's body after `\` line continuations is read as written.
+ * word), a here-document's body after `\` line continuations is read as written, and `tee a.md > b.md` names b.md as
+ * the record, since its `>` target is pushed first (no capture writes that form).
  */
 export function lexShell(command) {
   const s = String(command ?? ''), segments = [], payloads = [], redirects = []

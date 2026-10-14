@@ -215,7 +215,8 @@ const H = {
   const o = decide(H.orch, '# r\n- gate: gates/r1.out exit=0\n', linked), ok = decide(H.orch, '# r\n- gate: gates/r1.out exit=0\n')
   const k = decide(H.kit('/home/u/fixture', '.doctrine/records/gate-r1.out.result'), null, { ...ENV, cwd: '/tmp/w' })
   const kt = decide(H.kit('/tmp/k', '.doctrine/records/gate-r1.out.result'))
-  const u = H.unknown.map((f) => decide(f, null, { ...ENV, cwd: '/tmp/w' }))
+  // A decision that throws (a guard reverted so a bare cd reaches path.resolve) is this clause's FAIL, not a crash.
+  const u = H.unknown.map((f) => { try { return decide(f, null, { ...ENV, cwd: '/tmp/w' }) } catch (e) { return { threw: String(e) } } })
   clause('clause 1s — one literal cd before the redirect moves the base for the record and every relative gate path (R3-A): the orchestrator\'s cd && cat >> rel <<EOF names the record under the cd target and judges its gates there; the kit seat\'s cd-newline form judges its incoming gate under the cd target, not the call\'s cwd; a cd it cannot read names no record and judges the incoming text against the call\'s cwd',
     o.target === '/home/u/proj/.doctrine/records/e1.md' && refuses(o, 'gates/r1.out (resolves to /tmp/s/r1.out) lies under /tmp', 'append a correction line') && o.reasons.length === 1 && allows(ok) &&
     k.target === '/home/u/fixture/.doctrine/records/truncate.md' && allows(k) && k.round === 1 &&
@@ -232,10 +233,19 @@ const H = {
   const up = followLinks('/durable/gates/r1.out', fakeFs({ '/durable/gates/r1.out': 'hop/../r1.out', '/durable/gates/hop': '/tmp/s/nest' }, ['/tmp/s/nest', '/tmp/s/r1.out']))
   const back = followLinks('/tmp/s/r1.out', fakeFs({ '/tmp/s/r1.out': '/tmp/s/hop/../r1.out', '/tmp/s/hop': '/durable/d/x' }, ['/durable/d/x', '/durable/d/r1.out']))
   const chain = followLinks('/a/x', fakeFs({ '/a/x': 'y', '/a/y': '/b/z' }, ['/b/z']))
-  const cycle = followLinks('/c/p/f.out', fakeFs({ '/c/p': 'q', '/c/q': 'p' }, []))
   const gone = followLinks('/d/g.out', fakeFs({ '/d/g.out': 'h.out', '/d/h.out': '/tmp/gone/r1.out' }, ['/d']))
-  clause('clause 1t — followLinks walks component by component (R3-B): a target\'s .. is taken after the link before it (/durable/gates/r1.out -> hop/../r1.out with hop -> /tmp/s/nest is /tmp/s/r1.out, and /tmp/s/r1.out -> /tmp/s/hop/../r1.out with hop -> /durable/d/x is /durable/d/r1.out), a plain chain ends at its target, a cycle ends, and a chain into a wiped dir is still followed',
-    up === '/tmp/s/r1.out' && back === '/durable/d/r1.out' && chain === '/b/z' && typeof cycle === 'string' && gone === '/tmp/gone/r1.out', JSON.stringify({ up, back, chain, cycle, gone }))
+  clause('clause 1t — followLinks walks component by component (R3-B): a target\'s .. is taken after the link before it (/durable/gates/r1.out -> hop/../r1.out with hop -> /tmp/s/nest is /tmp/s/r1.out, and /tmp/s/r1.out -> /tmp/s/hop/../r1.out with hop -> /durable/d/x is /durable/d/r1.out), a plain chain ends at its target, and a chain into a wiped dir is still followed (a cycle is 1v)',
+    up === '/tmp/s/r1.out' && back === '/durable/d/r1.out' && chain === '/b/z' && gone === '/tmp/gone/r1.out', JSON.stringify({ up, back, chain, gone }))
+  // A cycle, counted: the fake fs reads each link it follows, and past a budget of 200 lstat calls it answers
+  // as if the path were missing, which ends any walk, so a walk with no hop cap stops here and shows its count.
+  let reads = 0, lstats = 0
+  const counted = fakeFs({ '/c/p': 'q', '/c/q': 'p' }, [])
+  const bounded = followLinks('/c/p/f.out', {
+    lstat: (p) => { if (++lstats > 200) throw new Error('budget'); return counted.lstat(p) },
+    readlink: (p) => { reads++; return counted.readlink(p) },
+  })
+  clause('clause 1v — a link cycle is followed for at most 40 links and then kept as written (N1)',
+    reads === 40 && lstats <= 200 && typeof bounded === 'string', JSON.stringify({ reads, lstats, bounded }))
 }
 {
   const hs = decide(H.hereString), hsNo = decide(H.hereStringNoToken), ar = decide(H.arith)

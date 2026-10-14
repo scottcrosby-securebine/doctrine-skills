@@ -3114,6 +3114,16 @@ const MUTATIONS = [
   { name: 'the round guard tells a gate path found only in the record to use a durable path, not to append a correction', file: 'dctr-lib.mjs',
     clause: 'clause 1h — telling the orchestrator to append a correction, never edit (step 5)',
     from: '    reasons.push(where + (inText.has(g.abs)', to: '    reasons.push(where + (true' },
+  // Round 4 (MR4-B2, N1): the two cd guards and the hop cap, each with a clause that reports red rather than dying.
+  { name: 'the round guard reads more than one cd before the redirect as a known base', file: 'dctr-lib.mjs',
+    clause: 'clause 1s — a cd it cannot read (more than one cd) names no record',
+    from: '(cds.length === 1 && cds[0].length === 2', to: '(cds[0].length === 2' },
+  { name: 'the round guard reads a bare cd or a cd with an option as a known base', file: 'dctr-lib.mjs',
+    clause: 'clause 1s — a cd it cannot read (a bare cd) names no record',
+    from: ' && cds[0].length === 2 && ', to: ' && ' },
+  { name: 'the round guard follows a link cycle without a hop cap', file: 'dctr-lib.mjs',
+    clause: 'clause 1v — a link cycle is followed for at most 40 links and then kept as written',
+    from: '    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) }', to: '    try { if (lstat(next).isSymbolicLink()) target = readlink(next) }' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
