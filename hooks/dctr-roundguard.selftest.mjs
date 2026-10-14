@@ -5,8 +5,12 @@
 // Clause 1 pins roundGuardDecision in dctr-lib.mjs: each refusal case beside its known-good twin. Clause 2 drives
 // hooks/dctr-roundguard.mjs end to end with a tripwire `herdr` first on PATH and a scratch TMPDIR and HOME: the deny
 // JSON, the latch, every stand-down, the crash path, the record read from disk, and zero herdr calls. Clause 3 proves
-// each defective fixture carries its defect (a round line the parser reads, a gate path under a tmp dir) without
-// calling the decision.
+// each fixture carries what its clause rests on without calling the decision: a refused one its round line (as the
+// dctr-record.mjs parser reads it), its gate path under a tmp dir, or the cd form it names; an allowed twin the one
+// difference its clause says decides it; and every twin whose verdict rests on how the shell reads it (a here-string,
+// (( )), each heredoc delimiter form, a quoted $(date), a cd before a relative record) run under real bash with a stub
+// `node` first on PATH that prints its argv. Clause 3n fails when a fixture key is named by no clause-3 line, and 3o
+// proves that check trips on a synthetic source.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -470,6 +474,78 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
   fs.realpathSync.native(path.join(bGates, 'r1.out')) === path.join(scratchTmp, 'r1.out') && fs.readlinkSync(path.join(bGates, 'r1.out')) === 'hop/../r1.out' &&
   fs.realpathSync.native(path.join(fh, 'r1.out')) === path.join(durable, 'b2', 'r1.out') && fs.readlinkSync(path.join(fh, 'r1.out')) === `${fh}/hop/../r1.out`,
   'an R3 fixture does not carry what its clause rests on')
+{
+  // Without the decision, the remaining fixtures as text: each refused one carries the round line or gate path its
+  // refusal rests on, and each allowed twin differs from it only in what its clause says decides it.
+  const under = (p, cwd) => ['/tmp/', '/var/tmpx/'].some((d) => path.resolve(cwd, p).startsWith(d))
+  clause('clause 3j — without the guard: the record fixtures name what their clauses rest on: homeTmp a ~/gate.out that lies under /tmp once home is /tmp/h, relResult a relative .out.result and logPair and launch a .log.result (and its .log stem) that lie under a tmp cwd, and durableResult only a durable x.result and a .jsonl',
+    R.homeTmp.includes('~/gate.out') && path.join('/tmp/h', 'gate.out').startsWith('/tmp/') &&
+    GR.relResult.includes('`.doctrine/records/gate-r1-npm-test.out.result`') && under('.doctrine/records/gate-r1-npm-test.out.result', '/tmp/w') &&
+    [GR.logPair, GR.launch].every((t) => t.includes('.doctrine/records/gate-r1-npm-test.log.result') && /\.doctrine\/records\/gate-r1-npm-test\.log[\s`]/.test(t)) && under('.doctrine/records/gate-r1-npm-test.log', '/tmp/w') &&
+    GR.durableResult.includes('/home/u/r/x.result') && !under('/home/u/r/x.result', '/') && !/\.(out|output|result)\b/.test(GR.durableResult.replace('/home/u/r/x.result', '')),
+    'a record fixture does not carry what its clause rests on')
+  clause('clause 3k — without the guard: editTs carries a round line and differs from a record write only in its .ts path; rewrite carries rounds 1 and 2, every one of them already in old12, so only the fresh record makes them new',
+    isRound(F.editTs[1].new_string) && F.editTs[1].file_path.endsWith('.ts') &&
+    isRound(F.rewrite[1].content) && F.rewrite[1].content.split('\n').filter(isRound).every((l) => R.old12.split('\n').includes(l)) && !isRound('# r\n'),
+    'editTs or rewrite does not carry what its clause rests on')
+  const unknownCd = /^(?:cd "\$D"|cd -|cd ~\/proj|cd|cd \/home\/u\/a && cd \/home\/u\/b|cd -P \/home\/u\/proj) && cat >> rec\.md <<EOF\n/
+  clause('clause 3l — without the guard: each unknown fixture opens with the cd form it names (an expansion, cd -, cd ~/..., a bare cd, two cds, an option) and carries a round line and the relative gates/r.out, which lies under the tmp cwd /tmp/w',
+    H.unknown.length === 6 && H.unknown.every(([, i]) => unknownCd.test(i.command) && isRound(i.command.split('\n')[2]) && i.command.includes('- gate gates/r.out')) && under('gates/r.out', '/tmp/w') &&
+    isRound(H.orch[1].command.split('\n')[2]) && H.orch[1].command.startsWith('cd /home/u/proj && cat >> .doctrine/records/e1.md <<EOF\n') &&
+    H.kit('/x', 'g.out.result')[1].command.startsWith('cd /x\n'),
+    'an unknown, orch or kit fixture does not carry the form its clause names')
+
+  // The shell's own reading, without the guard: each command run by real bash with a stub `node` first on PATH that
+  // prints its argv, the record paths moved into a scratch dir. RAN is a publish the shell really runs.
+  const stub = path.join(tmp, 'stub'); fs.mkdirSync(stub)
+  fs.writeFileSync(path.join(stub, 'node'), '#!/bin/sh\necho "RAN $*"\n'); fs.chmodSync(path.join(stub, 'node'), 0o755)
+  const sh = (cmd, cwd) => {
+    fs.mkdirSync(cwd, { recursive: true })
+    const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...process.env, PATH: `${stub}:${process.env.PATH}` } })
+    return { out: r.stdout, code: r.status }
+  }
+  const box = path.join(durable, 'bash'), recB = path.join(box, 'r.md')
+  const moved = (f) => f[1].command.split(REC).join(recB)
+  const ranRound = (n, f, cwd = box, rec = recB) => {
+    fs.rmSync(rec, { force: true })
+    const r = sh(f, cwd), text = fs.existsSync(rec) ? fs.readFileSync(rec, 'utf8') : ''
+    return { ran: r.out.includes(`RAN /p/hooks/dctr-token.mjs ${n} 0 0`), round: isRound(text), out: r.out }
+  }
+  const twins = [
+    ['hereString', ranRound(3, H.hereString[1].command, box, path.join(box, 'r.md')), true],
+    ['hereStringNoToken', ranRound(3, H.hereStringNoToken[1].command, box, path.join(box, 'r.md')), false],
+    ['arith', ranRound(3, H.arith[1].command, box, path.join(box, 'r.md')), true],
+    ['dateQuotedToken', ranRound(3, moved(F.dateQuotedToken)), true],
+    ['delimDashToken', ranRound(4, moved(G.delimDashToken)), true],
+    ['delimDoubleToken', ranRound(4, moved(G.delimDoubleToken)), true],
+    ['delimTabToken', ranRound(4, moved(G.delimTabToken)), true],
+    ['delimDash', ranRound(4, moved(G.delimDash)), false],
+    ['delimDouble', ranRound(4, moved(G.delimDouble)), false],
+    ['delimTab', ranRound(4, moved(G.delimTab)), false],
+  ]
+  const projX = path.join(box, 'proj'), kitX = path.join(box, 'fixture'), away = path.join(box, 'away')
+  fs.mkdirSync(path.join(projX, '.doctrine', 'records'), { recursive: true }); fs.mkdirSync(path.join(kitX, '.doctrine', 'records'), { recursive: true })
+  const orchRun = ranRound(3, H.orch[1].command.replace('/home/u/proj', projX), away, path.join(projX, '.doctrine', 'records', 'e1.md'))
+  const kitRun = ranRound(1, H.kit(kitX, 'g.out.result')[1].command, away, path.join(kitX, '.doctrine', 'records', 'truncate.md'))
+  const wrong = [...twins, ['orch', orchRun, true], ['kit', kitRun, true]].filter(([, r, ran]) => r.ran !== ran || !r.round)
+  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab) writes it and runs none, and orch and kit, run from another cwd, write the record under their cd target',
+    wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
+}
+{
+  // The meta-check: every fixture key defined before clause 3 (a two-space-indented `name:`) is named by a clause-3
+  // line, so a fixture added without its proof turns the suite red.
+  const MARK = '// ---------------------------------------------------------------- clause 3: the fixtures carry their defects'
+  const unproved = (src) => {
+    const at = src.indexOf(MARK), head = src.slice(0, at), tail = src.slice(at)
+    return [...new Set([...head.matchAll(/^ {2}([a-zA-Z]+):/gm)].map((m) => m[1]))].sort().filter((k) => !new RegExp(`\\b${k}\\b`).test(tail))
+  }
+  const self = unproved(fs.readFileSync(import.meta.filename, 'utf8'))
+  clause('clause 3n — every fixture key defined before clause 3 is named by a clause-3 line', self.length === 0, `unproved: ${self.join(' ')}`)
+  const synthetic = `const F = {\n  ghost: 1,\n  seen: 2,\n}\n${MARK}\nclause('seen', F.seen)\n`
+  clause('clause 3o — the meta-check trips: a synthetic source whose key ghost no clause-3 line names is reported, and only ghost; the synthetic really defines ghost before the marker and never names it after',
+    JSON.stringify(unproved(synthetic)) === '["ghost"]' && synthetic.indexOf('  ghost:') < synthetic.indexOf(MARK) && !synthetic.slice(synthetic.indexOf(MARK)).includes('ghost'),
+    JSON.stringify(unproved(synthetic)))
+}
 fs.rmSync(tmp, { recursive: true, force: true })
 fs.rmSync(durable, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

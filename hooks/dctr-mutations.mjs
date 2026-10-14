@@ -3118,7 +3118,7 @@ const MUTATIONS = [
   { name: 'the round guard reads more than one cd before the redirect as a known base', file: 'dctr-lib.mjs',
     clause: 'clause 1s — a cd it cannot read (more than one cd) names no record',
     from: '(cds.length === 1 && cds[0].length === 2', to: '(cds[0].length === 2' },
-  { name: 'the round guard reads a bare cd or a cd with an option as a known base', file: 'dctr-lib.mjs',
+  { name: 'the round guard reads a bare cd, or a cd with two arguments, as a known base', file: 'dctr-lib.mjs',
     clause: 'clause 1s — a cd it cannot read (a bare cd) names no record',
     from: ' && cds[0].length === 2 && ', to: ' && ' },
   { name: 'the round guard follows a link cycle without a hop cap', file: 'dctr-lib.mjs',

@@ -2473,9 +2473,10 @@ export function followLinks(p, { lstat, readlink }) {
 /** The gate-shaped paths in a text (R8, rulings V3BMECH and PATHEXT): every path-like token ending `.out`, `.output`
  *  or `.result` (the gate transcript and its result file), and for one ending `.result` the stem it belongs to too, so
  *  `gate.log.result` also names `gate.log`. `~/` is expanded to `home`, a leading `$TMPDIR` or `${TMPDIR}` to
- *  `tmpdir`, and a relative one resolved against `cwd`. Each is `{ written, abs }`.
+ *  `tmpdir`, and a relative one resolved against `cwd`; a token still holding a `$` after that is dropped. Each is
+ *  `{ written, abs }`.
  *  ponytail: a transcript named only without one of those suffixes (a launch command's `gate.log` with no `.result`
- *  beside it) is not seen. */
+ *  beside it) is not seen, and neither is one behind any other expansion (`$HOME/r/g.out`, `${RUN}/g2.out`). */
 export function gatePaths(text, { home = '/', cwd = '/', tmpdir = os.tmpdir() } = {}) {
   const out = []
   for (const m of String(text ?? '').matchAll(/[^\s'"`<>()|;,*[\]=]+/g)) {
