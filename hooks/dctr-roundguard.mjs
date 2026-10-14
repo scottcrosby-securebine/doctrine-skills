@@ -4,8 +4,9 @@
 // into a run record, it refuses the call when the same call does not run dctr-token.mjs, or when the record or the
 // incoming text names a gate transcript (a path ending .out, .out.result or .output) under /tmp or the temp
 // directory, which dies with the session. The refusal is a PreToolUse deny whose reason reaches the orchestrator
-// before the line exists, and it fires once per round per record per session: the latch file under
-// `os.tmpdir()/dctr-roundguard/` holds the refusal, so an identical retry goes through. Every decision is
+// before the line exists, and it fires once per round per record per session: the latch file `roundguard.json` in the
+// session's own state directory (dctr-state.mjs stateDir, the seat hook's) holds the refusal, so an identical retry
+// goes through. A fixed directory shared under /tmp would let another local user pre-create it or plant a symlink. Every decision is
 // roundGuardDecision in dctr-lib.mjs; this file reads the payload, the record and the latch.
 //
 // It stands down exactly where dctr-token.mjs does (a contained session, outside herdr, no HERDR_PANE_ID), because a
@@ -16,6 +17,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { skipReason, paneToken, roundGuardDecision, roundGuardReason } from './dctr-lib.mjs'
+import { stateDir } from './dctr-state.mjs'
 
 try {
   const env = process.env
@@ -37,7 +39,7 @@ try {
   if (!d.refuse) process.exit(0)
 
   const key = `${payload.session_id || '-'}|${d.target || '-'}|${d.round}`
-  const latch = path.join(os.tmpdir(), 'dctr-roundguard', `${paneToken(payload.session_id || 'nosession')}.json`)
+  const latch = path.join(stateDir(paneToken(payload.session_id || 'nosession')), 'roundguard.json')
   let seen = []
   let latchOk = true
   try { seen = JSON.parse(fs.readFileSync(latch, 'utf8')) } catch (e) { latchOk = e.code === 'ENOENT' }

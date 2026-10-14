@@ -148,8 +148,8 @@ const allowed = (r) => r.code === 0 && r.out === ''
     denied(first, 'does not run dctr-token.mjs', 'ONE Bash call', 'Fix it and repeat the write; this guard refuses round 3 once.'), JSON.stringify(first))
   clause('clause 2b — the identical retry goes through; round 4 of the same record is refused again; another session is refused on its own latch',
     allowed(again) && denied(r4, 'round 4') && denied(other), [again, r4, other].map((x) => JSON.stringify(x)).join(' '))
-  clause('clause 2c — the latch file lives under TMPDIR/dctr-roundguard and names the session',
-    fs.existsSync(path.join(scratchTmp, 'dctr-roundguard', 's1.json')), fs.readdirSync(scratchTmp).join(','))
+  clause('clause 2c — the latch file lives in the session state directory under TMPDIR',
+    fs.existsSync(path.join(scratchTmp, 'dctr-s1', 'roundguard.json')), fs.readdirSync(scratchTmp).join(','))
 }
 {
   const ok = run(pay('s3', `echo '${LINE(3)}' >> ${rec} && ${TOKEN(3)}`))
@@ -168,7 +168,7 @@ const allowed = (r) => r.code === 0 && r.out === ''
     ['tool is Read', run({ ...pay('s4', cmd), tool_name: 'Read', tool_input: { file_path: rec } })],
   ]
   clause('clause 2e — it stands down (no output, exit 0) outside herdr, in a contained session, for a subagent and for another tool',
-    cases.every(([, r]) => allowed(r)) && !fs.existsSync(path.join(scratchTmp, 'dctr-roundguard', 's4.json')),
+    cases.every(([, r]) => allowed(r)) && !fs.existsSync(path.join(scratchTmp, 'dctr-s4', 'roundguard.json')),
     cases.filter(([, r]) => !allowed(r)).map(([n, r]) => `${n}: ${JSON.stringify(r)}`).join('; '))
 }
 {
