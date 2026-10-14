@@ -54,7 +54,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The doctor's suite and the live captures it reads.
   'dctr-doctor.selftest.mjs', 'dctr-doctor.fixtures.json', 'dctr-doctor.mjs',
   // The band's folder: the codex (install) suite changes a file inside it to prove the install reads every depth.
-  'band/band.ts']
+  'band/band.ts',
+  // The round guard (visibility-62) and its suite.
+  'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -84,8 +86,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  gained its interrupted runs and the typer suite its gate combinations: seams 0.1s, record 0.0s, history 0.1s,
  *  project 0.7s, notify 0.9s, restore 0.9s, bridge 1.3s, doctor 1.6s, seat 1.9s, gauge 2.6s, codex 2.9s, seat.codex
  *  6.8s, gate 7.4s, pane 16.6s, typer 22.2s, teardown 27.8s, codex.hooks 30.4s, cycle 50.1s. Doctor moved behind
- *  bridge, codex behind gauge, codex.hooks behind teardown, record ahead of seams and project ahead of notify. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
+ *  bridge, codex behind gauge, codex.hooks behind teardown, record ahead of seams and project ahead of notify.
+ *  The round guard suite placed 2026-10-14, measured standalone on one host, three runs each: notify 0.61-0.71s,
+ *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -2993,6 +2997,22 @@ const MUTATIONS = [
   { name: "E10-D28: the doctor's verdict does not name a signal it could not observe", file: "dctr-lib.mjs",
     clause: "clause 1 codex: the read right after /clear shows the empty composer: ... the summary names it (doctor)",
     from: "  const notSeen = unobserved.length ? `; not observed: ${unobserved.join(', ')}` : ''\n", to: "  const notSeen = ''\n" },
+  // The round guard (visibility-62, S3): one entry per guard, each pinned by dctr-roundguard.selftest.mjs.
+  { name: 'the round guard no longer refuses a round line written without running dctr-token.mjs', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — a Bash append of a round line without dctr-token.mjs is refused',
+    from: '  else if (!runsToken(text)) reasons.push(', to: '  else if (false) reasons.push(' },
+  { name: 'the round guard no longer refuses a gate transcript under a tmp dir', file: 'dctr-lib.mjs',
+    clause: 'clause 1h — a record naming /tmp/x/gate.out is refused',
+    from: '    if (dir) reasons.push(', to: '    if (false) reasons.push(' },
+  { name: 'the round guard latch never lets the identical retry through', file: 'dctr-roundguard.mjs',
+    clause: 'clause 2b — the identical retry goes through',
+    from: '  if (latchOk && Array.isArray(seen) && seen.includes(key)) process.exit(0)', to: '  if (false) process.exit(0)' },
+  { name: "the round guard judges a subagent's call", file: 'dctr-roundguard.mjs',
+    clause: 'clause 2e — it stands down (no output, exit 0) outside herdr, in a contained session, for a subagent and for another tool',
+    from: '  if (payload.agent_id) process.exit(0)\n', to: '' },
+  { name: 'the round guard reads a Write or Edit to any file as a record write, not only a .md', file: 'dctr-lib.mjs',
+    clause: 'clause 1e — to .mjs or .ts it is not a round-line write',
+    from: "  if (tool !== 'Bash' && !String(target ?? '').endsWith('.md')) return none\n", to: '' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

@@ -2271,3 +2271,89 @@ export function privateFindings(text) {
   for (const m of t.matchAll(/\\?"([A-Za-z_]+)\\?"\s*:\s*\\?"(?!\[redacted\])([^"\\]*)/g)) if (PRIVATE_KEY.test(m[1])) out.push(`${m[1]} ${m[2]}`)
   return out
 }
+
+// The round guard (issue #62, phase visibility-62, R1 and R7-R9): a PreToolUse decision over one tool call that may
+// write a round line into a run record. Pure; dctr-roundguard.mjs reads the record and holds the latch.
+
+/** The candidate lines a tool call writes. Write and Edit write their text as it stands. A Bash command writes lines
+ *  the shell builds, so its candidates are its own lines plus the body of each quoted string split on real and on
+ *  `\n` newlines (`echo "- round: ..." >> r.md`, `printf '...\n'`), each with every `$(...)`, backtick and `$VAR`
+ *  expansion replaced by an ISO time, which reads as the round line's time and as its revision: the hub tells an
+ *  orchestrator to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape.
+ *  ponytail: an expansion in a numeric field (round, blockers, alarm) does not parse and that write is not seen. */
+function roundCandidates(tool, text) {
+  if (tool !== 'Bash') return String(text ?? '').split('\n')
+  const t = String(text ?? '')
+  const bodies = [t, ...[...t.matchAll(/'([^']*)'|"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1] ?? m[2])]
+  const ISO = '2000-01-01T00:00:00Z'
+  return bodies.flatMap((b) => b.replace(/\$\([^()]*\)|`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, ISO).split(/\n|\\n/))
+}
+
+/** The record a tool call writes into: Write and Edit name it; a Bash command names it as the first `>>`, `>` or
+ *  `tee` target ending `.md`, `~/` expanded and a relative one resolved against the session's cwd. Null when the
+ *  command names none it can read (a target built from a shell variable included). */
+export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}) {
+  if (tool === 'Write' || tool === 'Edit') return typeof input?.file_path === 'string' ? input.file_path : null
+  if (tool !== 'Bash') return null
+  for (const m of String(input?.command ?? '').matchAll(/(?:(?<![\d&])>>?|\btee(?:\s+-a)?)\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|<>()'"]+))/g)) {
+    const p = m[1] ?? m[2] ?? m[3]
+    if (!p.endsWith('.md') || p.includes('$') || p.includes('`')) continue
+    return path.resolve(cwd, p.startsWith('~/') ? path.join(home, p.slice(2)) : p)
+  }
+  return null
+}
+
+/** Absolute and `~/` paths in a text that end `.out`, `.out.result` or `.output` (R8, the gate transcript and its
+ *  result file); a relative one never counts, since it resolves wherever the session runs. */
+export function gatePaths(text, home = '/') {
+  const out = []
+  for (const m of String(text ?? '').matchAll(/(?<![\w.~/-])~?\/[^\s'"`<>()|;,*\]]+/g)) {
+    const p = m[0].replace(/[.:]+$/, '')
+    if (/\.(?:out|out\.result|output)$/.test(p)) out.push(p.startsWith('~/') ? path.join(home, p.slice(2)) : p)
+  }
+  return out
+}
+
+/** Whether a Bash command runs dctr-token.mjs: `node`, any node flags, then a script path ending in it, bare or quoted. */
+export const runsToken = (command) =>
+  /\bnode\s+(?:-\S+\s+)*(?:"[^"]*dctr-token\.mjs"|'[^']*dctr-token\.mjs'|[^\s;&|'"]*dctr-token\.mjs)(?=[\s;&|)]|$)/.test(String(command ?? ''))
+
+/**
+ * The round guard's decision for one PreToolUse call. `recordText` is the target record as it stands on disk, or null
+ * when it is missing or unreadable (judged on the incoming text alone). `env` carries what a pure function cannot
+ * read: `tmpDirs` (the directories that die with the session: `/tmp` and `os.tmpdir()`), `home`, `cwd` and `pluginRoot`.
+ *
+ * A call writes a round line when it is Bash, or Write or Edit on a path ending `.md`, and a line it writes parses as a
+ * round line (dctr-record.mjs) that the record on disk does not already carry: a Write that rewrites the whole record,
+ * or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. Where it writes one it is
+ * refused when the call does not run dctr-token.mjs (a Write or Edit never can), and for each gate-shaped path in the
+ * record or the incoming text that resolves under a tmp dir. `round` is the highest new round's n.
+ */
+export function roundGuardDecision(tool, input, recordText, env = {}) {
+  const none = { refuse: false, reasons: [], round: null, target: null }
+  if (!input || !['Bash', 'Write', 'Edit'].includes(tool)) return none
+  const home = env.home || '/'
+  const target = roundGuardTarget(tool, input, env)
+  if (tool !== 'Bash' && !String(target ?? '').endsWith('.md')) return none
+  const text = tool === 'Bash' ? input.command : tool === 'Write' ? input.content : input.new_string
+  const known = new Set(String(recordText ?? '').split('\n').map((l) => l.trim()))
+  const rounds = roundCandidates(tool, text).filter((l) => !known.has(l.trim()))
+    .flatMap((l) => parseRecord(l.trim()).entries).filter((e) => e.kind === 'round')
+  if (!rounds.length) return none
+  const round = Math.max(...rounds.map((e) => e.n))
+  const reasons = []
+  const publish = `write the round line and run \`node ${env.pluginRoot || '<plugin-root>'}/hooks/dctr-token.mjs <round> <exit-count> <valve>\` in ONE Bash call (doctrine step 5)`
+  if (tool !== 'Bash') reasons.push(`round ${round}'s line is written with the ${tool} tool, which cannot run dctr-token.mjs, so the counters are never published: ${publish}`)
+  else if (!runsToken(text)) reasons.push(`round ${round}'s line is written in a call that does not run dctr-token.mjs, so the counters are never published: ${publish}`)
+  const dirs = [...new Set((env.tmpDirs || ['/tmp']).map((d) => path.resolve(d)))]
+  for (const p of new Set(gatePaths(`${recordText ?? ''}\n${text ?? ''}`, home))) {
+    const abs = path.resolve(p)
+    const dir = dirs.find((d) => abs === d || abs.startsWith(d.endsWith('/') ? d : `${d}/`))
+    if (dir) reasons.push(`${p} lies under ${dir}, which dies with the session; record the gate transcript at a durable path (doctrine step 3)`)
+  }
+  return { refuse: reasons.length > 0, reasons, round, target }
+}
+
+/** The deny reason the hook prints for a refusing decision. */
+export const roundGuardReason = (d) =>
+  `doctrine round guard: ${d.reasons.join('; ')}. Fix it and repeat the write; this guard refuses round ${d.round} once.`

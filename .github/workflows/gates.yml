@@ -116,6 +116,12 @@ jobs:
         # settings shape. Pure node.
         run: node hooks/dctr-bridge.selftest.mjs
 
+      - name: round guard tamper test
+        # Drives hooks/dctr-roundguard.mjs end to end with a tripwire herdr on PATH: a round line without the token
+        # publish, or beside a gate transcript under a tmp dir, is denied once per round, an identical retry goes
+        # through, every stand-down prints nothing, and herdr is called zero times. Pure node.
+        run: node hooks/dctr-roundguard.selftest.mjs
+
       - name: auto-cycle hook tamper test
         # Drives hooks/dctr-cycle.mjs end to end over git fixture repos with a logging herdr shim on PATH: one
         # fixture per Stop precondition, every pause reason verbatim, each paused line alerted once, the
