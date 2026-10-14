@@ -2295,7 +2295,10 @@ const decodeEscapes = (t) => t.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
  *              backslashes removed and `#` comments dropped; a `$(...)` or backtick run stays whole inside its word,
  *   payloads   every heredoc body (`<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`, WORD any run such as END-RECORD) and
  *              every quoted string's text, with `\n` and `\t` decoded as printf and echo -e write them,
- *   redirects  every `>`, `>>` or `>|` target and every `tee` file argument, in the order written.
+ *   redirects  `{ path, seg }` for each `>`, `>>` or `>|` target with no fd number (so not `1>>` or `&>>`) as each is
+ *              read, and for each `tee` file argument when its segment ends, so a tee target comes before a `>` target
+ *              later in the same segment; `seg` is the index of the segment it sits in.
+ * A here-string (`<<<`) opens no heredoc, and neither does a `<<` inside an arithmetic `(( ))`.
  * ponytail: a heredoc or a quoted string inside `$(...)` or backticks is not read (the run is copied whole into its
  * word), and a here-document's body after `\` line continuations is read as written.
  */
@@ -2305,13 +2308,13 @@ export function lexShell(command) {
   const add = (t) => { word = (word ?? '') + t }
   const end = () => {
     if (word === null) return
-    if (redirectNext) redirects.push(word)
+    if (redirectNext) redirects.push({ path: word, seg: segments.length })
     words.push(word); word = null; redirectNext = false
   }
   const cut = () => {
     end()
     const a = commandWords(words)
-    if (a[0] === 'tee') redirects.push(...a.slice(1).filter((w) => !w.startsWith('-')))
+    if (a[0] === 'tee') redirects.push(...a.slice(1).filter((w) => !w.startsWith('-')).map((w) => ({ path: w, seg: segments.length })))
     if (words.length) segments.push(words)
     words = []; redirectNext = false
   }
@@ -2372,7 +2375,9 @@ export function lexShell(command) {
       redirectNext = !fd && /^>>?\|?$/.test(op)
       continue
     }
-    if (c === '<' && s[i + 1] === '<' && s[i + 2] !== '<') {
+    if (s.startsWith('<<<', i)) { end(); words.push('<<<'); i += 3; continue }
+    if (c === '(' && s[i + 1] === '(' && word === null) { cut(); const k = sub(i); words.push(s.slice(i, k)); i = k; continue }
+    if (c === '<' && s[i + 1] === '<') {
       end(); i += 2
       const dash = s[i] === '-'
       if (dash) i++
@@ -2416,14 +2421,51 @@ function roundCandidates(texts) {
  *  joined by a space. */
 const bashTexts = (lex) => [...lex.payloads, ...lex.segments.map((w) => w.join(' '))]
 
-/** The record a tool call writes into: Write and Edit name it; a Bash command names it as the first `>>`, `>` or
- *  `tee` target ending `.md` (lexShell), `~/` expanded and a relative one resolved against the session's cwd. Null
- *  when the command names none it can read (a target built from a shell expansion included). */
+/** Where a lexed Bash command writes its record and what its relative paths resolve against: `record`, the first
+ *  `>>`, `>` or `tee` target ending `.md` with no `$` or backtick in it, and `cwd`, the call's cwd moved by the one
+ *  literal `cd <dir>` (absolute, or relative to the call's cwd) in a segment before that target, or anywhere in the
+ *  command when it names none. `cwd` is null when the base cannot be known: a cd there whose argument holds `$` or a
+ *  backtick, `cd -`, `cd ~...`, a bare `cd`, a cd with an option, or more than one cd. */
+function bashWrite(lex, cwd) {
+  const r = lex.redirects.find((x) => x.path.endsWith('.md') && !/[$`]/.test(x.path))
+  const cds = lex.segments.slice(0, r ? r.seg : lex.segments.length).map(commandWords).filter((a) => a[0] === 'cd')
+  const known = cds.length === 0 || (cds.length === 1 && cds[0].length === 2 && !/^[-~]|[$`]/.test(cds[0][1]))
+  return { record: r?.path ?? null, cwd: !known ? null : cds.length ? path.resolve(cwd, cds[0][1]) : cwd }
+}
+
+/** The record a tool call writes into: Write and Edit name it; a Bash command names it as bashWrite reads it, `~/`
+ *  expanded and a relative one resolved against the command's own base. Null when the command names none it can
+ *  read (a target built from a shell expansion included) or its base cannot be known. */
 export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, lex) {
   if (tool === 'Write' || tool === 'Edit') return typeof input?.file_path === 'string' ? input.file_path : null
   if (tool !== 'Bash') return null
-  const p = lex.redirects.find((r) => r.endsWith('.md') && !/[$`]/.test(r))
-  return p ? path.resolve(cwd, p.startsWith('~/') ? path.join(home, p.slice(2)) : p) : null
+  const w = bashWrite(lex, cwd), p = w.record
+  if (!p || w.cwd === null) return null
+  return path.resolve(w.cwd, p.startsWith('~/') ? path.join(home, p.slice(2)) : p)
+}
+
+/** The real path of an absolute path, every symlink followed component by component the way the kernel walks it:
+ *  the prefix walked so far is always real, `.` is skipped, `..` drops the real prefix's last component, a link's
+ *  target is put back on the front of the queue (an absolute target restarts at `/`), and a component that does not
+ *  exist is kept as written and the walk goes on, so a link whose target is gone (a wiped scratchpad) is still
+ *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after 40
+ *  links a link is kept as written, so a cycle ends. */
+export function followLinks(p, { lstat, readlink }) {
+  const queue = String(p).split('/')
+  let real = '/'
+  for (let hops = 0; queue.length;) {
+    const c = queue.shift()
+    if (c === '' || c === '.') continue
+    if (c === '..') { real = path.dirname(real); continue }
+    const next = path.join(real, c)
+    let target = null
+    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) } catch { /* missing: kept as written */ }
+    if (target === null) { real = next; continue }
+    hops++
+    if (target.startsWith('/')) real = '/'
+    queue.unshift(...target.split('/'))
+  }
+  return real
 }
 
 /** The gate-shaped paths in a text (R8, rulings V3BMECH and PATHEXT): every path-like token ending `.out`, `.output`
@@ -2461,7 +2503,10 @@ export function runsToken(lex) {
  * when it is missing or unreadable (judged on the incoming text alone). `env` carries what a pure function cannot
  * read: `tmpDirs` (the directories that die with the session: `/tmp` and `os.tmpdir()`), `tmpdir` (what `$TMPDIR`
  * expands to), `home`, `cwd`, `pluginRoot`, and `resolve`, applied to each gate path's absolute form before it is judged
- * (default path.resolve; the hook passes one that follows every symlink, so a link into /tmp is seen).
+ * (default path.resolve; the hook passes followLinks over the filesystem, so a link into /tmp is seen). A Bash
+ * command's relative paths, its record's and every gate path's in it and in the record, resolve against the base
+ * bashWrite reads (the cwd moved by one literal `cd`); where that base cannot be known the record is not named and
+ * the incoming text's paths resolve against `cwd`.
  *
  * A call writes a round line when it is Bash, or Write or Edit on a path ending `.md`, and a line it writes parses as a
  * round line (dctr-record.mjs; a Bash command is read through lexShell, every payload and code segment once the
@@ -2473,8 +2518,10 @@ export function runsToken(lex) {
  * round's n.
  * ponytail: what the shell decides at run time is not read. A round line the shell assembles from pieces (`printf '%s
  * closed %s' round: ...`), an expansion inside the round, blockers or alarm number, and a write inside `$(...)` or
- * `bash -c '...'` are not seen as a round write; `false && node .../dctr-token.mjs` and `node --version
- * .../dctr-token.mjs` count as a publish, and one inside `$(...)` does not.
+ * `bash -c '...'` are not seen as a round write; `false && node .../dctr-token.mjs`, `node --version
+ * .../dctr-token.mjs` and a quoted checkout path holding whitespace count as a publish, and one inside `$(...)` does
+ * not. A `..` in a gate path as written is collapsed before its links are followed (path.resolve); a cd inside a
+ * subshell is read as moving the base, and a `pushd` as not moving it.
  */
 export function roundGuardDecision(tool, input, recordText, env = {}) {
   const none = { refuse: false, reasons: [], round: null, target: null }
@@ -2494,7 +2541,8 @@ export function roundGuardDecision(tool, input, recordText, env = {}) {
   else if (!runsToken(lex)) reasons.push(`round ${round}'s line is written in a call that does not run dctr-token.mjs, so the counters are never published: ${publish}`)
   const dirs = [...new Set((env.tmpDirs || ['/tmp']).map((d) => path.resolve(d)))]
   const resolve = env.resolve || path.resolve
-  const opts = { home: env.home || '/', cwd: env.cwd || '/', tmpdir: env.tmpdir || dirs[dirs.length - 1] }
+  const cwd = (lex && bashWrite(lex, env.cwd || '/').cwd) ?? (env.cwd || '/')
+  const opts = { home: env.home || '/', cwd, tmpdir: env.tmpdir || dirs[dirs.length - 1] }
   const incoming = gatePaths(texts.join('\n'), opts), inText = new Set(incoming.map((g) => g.abs)), seen = new Set()
   for (const g of [...incoming, ...gatePaths(recordText, opts)]) {
     if (seen.has(g.abs)) continue
