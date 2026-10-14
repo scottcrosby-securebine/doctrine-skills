@@ -2419,7 +2419,7 @@ const bashTexts = (lex) => [...lex.payloads, ...lex.segments.map((w) => w.join('
 /** The record a tool call writes into: Write and Edit name it; a Bash command names it as the first `>>`, `>` or
  *  `tee` target ending `.md` (lexShell), `~/` expanded and a relative one resolved against the session's cwd. Null
  *  when the command names none it can read (a target built from a shell expansion included). */
-export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, lex = tool === 'Bash' ? lexShell(input?.command) : null) {
+export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, lex) {
   if (tool === 'Write' || tool === 'Edit') return typeof input?.file_path === 'string' ? input.file_path : null
   if (tool !== 'Bash') return null
   const p = lex.redirects.find((r) => r.endsWith('.md') && !/[$`]/.test(r))
