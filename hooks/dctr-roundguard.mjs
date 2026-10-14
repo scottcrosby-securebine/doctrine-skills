@@ -40,12 +40,12 @@ try {
 
   const key = `${payload.session_id || '-'}|${d.target || '-'}|${d.round}`
   const latch = path.join(stateDir(paneToken(payload.session_id || 'nosession')), 'roundguard.json')
-  let seen = []
-  let latchOk = true
-  try { seen = JSON.parse(fs.readFileSync(latch, 'utf8')) } catch (e) { latchOk = e.code === 'ENOENT' }
-  if (latchOk && Array.isArray(seen) && seen.includes(key)) process.exit(0)
   // A latch that cannot be read or written still refuses: the report matters more than the retry.
-  try { fs.mkdirSync(path.dirname(latch), { recursive: true }); fs.writeFileSync(latch, JSON.stringify([...(Array.isArray(seen) ? seen : []), key])) } catch { /* refuse anyway */ }
+  let seen = []
+  try { seen = JSON.parse(fs.readFileSync(latch, 'utf8')) } catch { /* no latch yet, or unreadable: refuse */ }
+  if (!Array.isArray(seen)) seen = []
+  if (seen.includes(key)) process.exit(0)
+  try { fs.mkdirSync(path.dirname(latch), { recursive: true }); fs.writeFileSync(latch, JSON.stringify([...seen, key])) } catch { /* refuse anyway */ }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: roundGuardReason(d) } }))
   process.exit(0)
 } catch {

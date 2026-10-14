@@ -3006,7 +3006,7 @@ const MUTATIONS = [
     from: '    if (dir) reasons.push(', to: '    if (false) reasons.push(' },
   { name: 'the round guard latch never lets the identical retry through', file: 'dctr-roundguard.mjs',
     clause: 'clause 2b — the identical retry goes through',
-    from: '  if (latchOk && Array.isArray(seen) && seen.includes(key)) process.exit(0)', to: '  if (false) process.exit(0)' },
+    from: '  if (seen.includes(key)) process.exit(0)', to: '  if (false) process.exit(0)' },
   { name: "the round guard judges a subagent's call", file: 'dctr-roundguard.mjs',
     clause: 'clause 2e — it stands down (no output, exit 0) outside herdr, in a contained session, for a subagent and for another tool',
     from: '  if (payload.agent_id) process.exit(0)\n', to: '' },
