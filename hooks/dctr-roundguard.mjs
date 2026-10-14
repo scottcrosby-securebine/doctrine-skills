@@ -32,7 +32,7 @@ try {
   const real = (p) => (fs.existsSync(p) ? fs.realpathSync(p) : path.resolve(p))
   const ctx = {
     cwd: payload.cwd || process.cwd(), home: os.homedir(), tmpdir: os.tmpdir(), resolve: real,
-    tmpDirs: [...new Set(['/tmp', os.tmpdir()].flatMap((d) => [d, real(d)]))],
+    tmpDirs: ['/tmp', os.tmpdir()].flatMap((d) => [d, real(d)]),
     pluginRoot: env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dirname, '..'),
   }
   const pre = roundGuardDecision(payload.tool_name, payload.tool_input, null, ctx)
