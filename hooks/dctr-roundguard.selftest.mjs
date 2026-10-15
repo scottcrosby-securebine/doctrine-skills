@@ -3,20 +3,12 @@
 //   node hooks/dctr-roundguard.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
 // Clause 1 pins roundGuardDecision in dctr-lib.mjs: each refusal case beside its known-good twin. Clause 2 drives
-// hooks/dctr-roundguard.mjs end to end with a tripwire `herdr` first on PATH and a scratch TMPDIR and HOME: the deny
-// JSON, the latch, every stand-down, the crash path, the record read from disk, and zero herdr calls. Clause 3 proves
-// each fixture carries what its clause rests on without calling the decision: a refused one its round line (as the
-// dctr-record.mjs parser reads it), its gate path under a tmp dir, or the cd form it names; an allowed twin the one
-// difference its clause says decides it; each fake link and fake filesystem the structure its clause names; each
-// file, link and dir clause 2 builds what it holds on disk (lstat, readlink, the kernel's realpath); and every fixture
-// whose verdict rests on how the shell reads it (a here-string, (( )), each heredoc delimiter form, a quoted $(date),
-// the printf, echo -e and T=$(date) heredoc forms, a cd before a relative record, clause 2's append builders) run
-// under real bash with a stub `node` first on PATH that prints its argv. 3f also decodes the F-A escapes by hand.
-// Every fixture a clause decides on lives in a table in TABLES (F, R, G, GR, H, LK, FS, C, D), and every clause-3
-// proof obtains its fixture through prove(), which records `<table>.<key>` as it runs; clause 3n enumerates the keys
-// of every table at run time and fails naming each one no proof obtained, and 3o proves that check trips on a
-// synthetic table. It guarantees each table key reached a clause-3 proof, not that the proof is strong. Its ceiling:
-// a fixture written inline in a clause instead of in a table, or a table left out of TABLES, is not enumerated.
+// hooks/dctr-roundguard.mjs end to end with a tripwire `herdr` first on PATH and a scratch TMPDIR. Clause 3 proves
+// fixtures without calling the decision or the hook; each clause's label says what it proves. The one coverage
+// guarantee: TABLES lists the fixture tables, every clause-3 proof obtains its fixture through prove(), and
+// clause 3n fails naming each key of a listed table that no proof obtained (3o proves it can fail). That shows each
+// listed key reached a clause-3 proof, not that the proof is strong; a fixture written inline in a clause, or a table
+// left out of TABLES, is not checked. Clause 3m runs fixtures under real bash, so the suite needs bash.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -448,7 +440,7 @@ fs.writeFileSync(path.join(scratchTmp, 'r1-a.out'), 'ok\n'); fs.symlinkSync(path
 fs.writeFileSync(path.join(projB, 'gates', 'r1.out'), 'ok\n')
 for (const d of [projA, projB]) fs.writeFileSync(path.join(d, '.doctrine', 'records', 'e1.md'), R.relGate)
 fs.writeFileSync(path.join(elsewhere, '.doctrine', 'records', 'e1.md'), R.fresh)
-Object.assign(D, { projA, projB, elsewhere })
+Object.assign(D, { projA, projB, elsewhere, recA: path.join(projA, '.doctrine', 'records', 'e1.md'), recB: path.join(projB, '.doctrine', 'records', 'e1.md') })
 // H.orch with its cd moved to a scratch repo.
 const orch = (dir) => H.orch[1].command.replace('/home/u/proj', dir)
 {
@@ -553,6 +545,7 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
     inside(link('durableDangle'), durable) && !fs.existsSync(link('durableDangle')) && text('recDangle').includes('gates/r1.out') && text('recDangleDur').includes('gates/r2.out') &&
     inside(link('logResultLink'), scratchTmp) && plainFile('durableResult') && text('recLog').includes('.doctrine/records/gate-r1-npm-test.log.result') &&
     text('recResult').includes('.doctrine/records/x.result') && text('recResult').includes(`${scratchTmp}/agent.jsonl`) &&
+    text('recA').includes('gates/r1.out') && text('recB').includes('gates/r1.out') &&
     inside(fs.realpathSync.native(path.join(prove('D', 'projA'), 'gates', 'r1.out')), scratchTmp) && !fs.lstatSync(path.join(prove('D', 'projB'), 'gates', 'r1.out')).isSymbolicLink() &&
     !/gate/.test(fs.readFileSync(path.join(prove('D', 'elsewhere'), '.doctrine', 'records', 'e1.md'), 'utf8')) &&
     link('upLink') === 'hop/../r1.out' && fs.realpathSync.native(prove('D', 'upLink')) === path.join(scratchTmp, 'r1.out') && text('recUp').includes('gates/r1.out') &&
