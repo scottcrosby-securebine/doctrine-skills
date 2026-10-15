@@ -7,13 +7,16 @@
 // JSON, the latch, every stand-down, the crash path, the record read from disk, and zero herdr calls. Clause 3 proves
 // each fixture carries what its clause rests on without calling the decision: a refused one its round line (as the
 // dctr-record.mjs parser reads it), its gate path under a tmp dir, or the cd form it names; an allowed twin the one
-// difference its clause says decides it; and every twin whose verdict rests on how the shell reads it (a here-string,
-// (( )), each heredoc delimiter form, a quoted $(date), the printf and T=$(date) heredoc forms, a cd before a relative
-// record) run under real bash with a stub `node` first on PATH that prints its argv. Every clause-3 proof obtains its
-// fixture through prove(), which records `<table>.<key>` as it runs; clause 3n enumerates the keys of every table in
-// TABLES (F, R, G, GR, H) at run time and fails naming each one no proof obtained, and 3o proves that check trips on a
-// synthetic table. It guarantees each listed key reached a clause-3 proof, not that the proof is strong, and a fixture
-// table left out of TABLES is not enumerated.
+// difference its clause says decides it; each fake link and fake filesystem the structure its clause names; each
+// file, link and dir clause 2 builds what it holds on disk (lstat, readlink, the kernel's realpath); and every fixture
+// whose verdict rests on how the shell reads it (a here-string, (( )), each heredoc delimiter form, a quoted $(date),
+// the printf, echo -e and T=$(date) heredoc forms, a cd before a relative record, clause 2's append builders) run
+// under real bash with a stub `node` first on PATH that prints its argv. 3f also decodes the F-A escapes by hand.
+// Every fixture a clause decides on lives in a table in TABLES (F, R, G, GR, H, LK, FS, C, D), and every clause-3
+// proof obtains its fixture through prove(), which records `<table>.<key>` as it runs; clause 3n enumerates the keys
+// of every table at run time and fails naming each one no proof obtained, and 3o proves that check trips on a
+// synthetic table. It guarantees each table key reached a clause-3 proof, not that the proof is strong. Its ceiling:
+// a fixture written inline in a clause instead of in a table, or a table left out of TABLES, is not enumerated.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -61,6 +64,7 @@ const F = {
   printfSepToken: bash(`echo '${LINE(3)}' >> ${REC}; printf '%s\\n' 'then && ${TOKEN(3)}'`),
   heredocBodyToken: bash(`cat >> ${REC} <<'EOF'\n${LINE(4)}\n${TOKEN(4)}\nEOF`),
   rewrite: ['Write', { file_path: REC, content: `# r\n${LINE(1)}\n${LINE(2)}\nmore prose\n` }],
+  inTextGate: bash(`echo '${LINE(3)} gate /tmp/g.output' >> ${REC} && ${TOKEN(3)}`),
 }
 const R = {
   tmpOut: '# r\n- gate: /tmp/x/gate.out exit=0\n',
@@ -74,7 +78,18 @@ const R = {
   relGates: '# r\n- gate: gates/r1.out.result\n',
   envTmp: '# r\n- gate: $TMPDIR/g.out and ${TMPDIR}/h.output\n',
   old12: `# r\n${LINE(1)}\n${LINE(2)}\n`,
+  fresh: '# r\n',
+  relGate: '# r\n- gate: gates/r1.out exit=0\n',
 }
+// Fake links for the pure decision's resolver: `from` is a durable-looking path the decision is handed, `to` where a
+// symlink would put it. viaLink(l) is ENV with a resolver that maps exactly that one path.
+const LK = {
+  relGatesLink: { from: '/home/u/r/gates/r1.out.result', to: '/tmp/s/r1.out.result' },
+  logStem: { from: '/home/u/r/.doctrine/records/gate-r1-npm-test.log', to: '/tmp/s/gate-r1-npm-test.log' },
+  orchLink: { from: '/home/u/proj/gates/r1.out', to: '/tmp/s/r1.out' },
+}
+const viaLink = (l) => ({ ...ENV, resolve: (p) => (p === l.from ? l.to : p) })
+// Environment overrides below (a cwd of /tmp/w, a home of /tmp/h) are where a fixture is judged, not fixtures.
 
 // ---------------------------------------------------------------- clause 1: the pure decision
 
@@ -106,7 +121,7 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
     allows(wj) && wj.round === null && allows(et) && et.round === null, [w, wj, e, et].map(show).join(' '))
 }
 {
-  const d = decide(F.template), rw = decide(F.rewrite, R.old12), rwFresh = decide(F.rewrite, '# r\n')
+  const d = decide(F.template), rw = decide(F.rewrite, R.old12), rwFresh = decide(F.rewrite, R.fresh)
   clause('clause 1f — template text does not parse as a round line; a Write that re-writes rounds already on disk writes no new round, and the same Write over a record without them does',
     allows(d) && d.round === null && allows(rw) && rw.round === null && refuses(rwFresh) && rwFresh.round === 2, [d, rw, rwFresh].map(show).join(' '))
 }
@@ -129,7 +144,7 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
 {
   const tmpCwd = decide(F.bashToken, R.relGates, { ...ENV, cwd: '/tmp/w' }), homeCwd = decide(F.bashToken, R.relGates)
   const env = decide(F.bashToken, R.envTmp)
-  const linked = decide(F.bashToken, R.relGates, { ...ENV, resolve: (p) => (p === '/home/u/r/gates/r1.out.result' ? '/tmp/s/r1.out.result' : p) })
+  const linked = decide(F.bashToken, R.relGates, viaLink(LK.relGatesLink))
   clause('clause 1l — a relative gate path resolves against the call\'s cwd (refused under /tmp/w, allowed under /home/u/r), $TMPDIR and ${TMPDIR} expand to the temp directory, and the resolver env passes is applied (a symlink into /tmp)',
     refuses(tmpCwd, 'gates/r1.out.result', 'lies under /tmp') && allows(homeCwd) &&
     refuses(env, '/var/tmpx/g.out', '/var/tmpx/h.output') && env.reasons.length === 2 &&
@@ -147,7 +162,7 @@ const allows = (d) => !d.refuse && d.reasons.length === 0
     ds.every((d) => refuses(d, 'does not run dctr-token.mjs')), ds.map(show).join(' '))
 }
 {
-  const both = decide(F.bashNoToken, R.tmpOut), inText = decide(bash(`echo '${LINE(3)} gate /tmp/g.output' >> ${REC} && ${TOKEN(3)}`))
+  const both = decide(F.bashNoToken, R.tmpOut), inText = decide(F.inTextGate)
   clause('clause 1k — both defects are named in one refusal; a gate path in the incoming text alone is judged too',
     refuses(both, 'does not run dctr-token.mjs', '/tmp/x/gate.out') && both.reasons.length === 2 && refuses(inText, '/tmp/g.output', 'record the gate transcript at a durable path (doctrine step 3)') && !inText.reasons.some((r) => r.includes('correction')), `${show(both)} ${show(inText)}`)
 }
@@ -197,7 +212,7 @@ const GR = {
 {
   const tmpCwd = { ...ENV, cwd: '/tmp/w' }
   const rel = decide(F.bashToken, GR.relResult, tmpCwd), relHome = decide(F.bashToken, GR.relResult)
-  const stem = decide(F.bashToken, GR.logPair, { ...ENV, resolve: (p) => (p.endsWith('/gate-r1-npm-test.log') ? '/tmp/s/gate-r1-npm-test.log' : p) })
+  const stem = decide(F.bashToken, GR.logPair, viaLink(LK.logStem))
   const launch = decide(F.bashToken, GR.launch, tmpCwd), launchHome = decide(F.bashToken, GR.launch), dur = decide(F.bashToken, GR.durableResult)
   clause('clause 1r — any path ending .result is gate-shaped and so is its stem (PATHEXT): a relative .out.result and a .log.result under a tmp cwd are refused, a .log whose .result names it is judged as the transcript, a durable x.result and a .jsonl under /tmp are not',
     refuses(rel, '.doctrine/records/gate-r1-npm-test.out.result', 'lies under /tmp') && allows(relHome) &&
@@ -206,11 +221,24 @@ const GR = {
     [rel, relHome, stem, launch, launchHome, dur].map(show).join(' '))
 }
 
+// The fake filesystems followLinks walks in 1t and 1v: `start` the path walked, `links` each link and its target as
+// readlink returns it, `exists` the paths that exist.
+const FS = {
+  up: { start: '/durable/gates/r1.out', links: { '/durable/gates/r1.out': 'hop/../r1.out', '/durable/gates/hop': '/tmp/s/nest' }, exists: ['/tmp/s/nest', '/tmp/s/r1.out'] },
+  back: { start: '/tmp/s/r1.out', links: { '/tmp/s/r1.out': '/tmp/s/hop/../r1.out', '/tmp/s/hop': '/durable/d/x' }, exists: ['/durable/d/x', '/durable/d/r1.out'] },
+  chain: { start: '/a/x', links: { '/a/x': 'y', '/a/y': '/b/z' }, exists: ['/b/z'] },
+  gone: { start: '/d/g.out', links: { '/d/g.out': 'h.out', '/d/h.out': '/tmp/gone/r1.out' }, exists: ['/d'] },
+  cycle: { start: '/c/p/f.out', links: { '/c/p': 'q', '/c/q': 'p' }, exists: [] },
+}
+
 // Round 3 (R3-A to R3-C). R3-A: the base a literal cd sets, in the orchestrator's form (cd && cat >> rel <<EOF) and the
 // kit seats' (cd, newline, T=$(date), newline, cat >> rel <<EOF), and every form whose base cannot be known.
+// The kit seat's form, cd then a newline: a generator, used only to build the two H fixtures below.
+const kitCmd = (dir, gate) => bash(`cd ${dir}\nT=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ncat >> .doctrine/records/truncate.md <<EOF\n- gate ${gate}\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\n${TOKEN(1)}`)
 const H = {
   orch: bash(`cd /home/u/proj && cat >> .doctrine/records/e1.md <<EOF\n- gate: npm test exit=0\n${LINE(3)}\nEOF\n${TOKEN(3)}`),
-  kit: (dir, gate) => bash(`cd ${dir}\nT=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ncat >> .doctrine/records/truncate.md <<EOF\n- gate ${gate}\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\n${TOKEN(1)}`),
+  kitDurable: kitCmd('/home/u/fixture', '.doctrine/records/gate-r1.out.result'),
+  kitTmp: kitCmd('/tmp/k', '.doctrine/records/gate-r1.out.result'),
   unknown: ['cd "$D"', 'cd -', 'cd ~/proj', 'cd', 'cd /home/u/a && cd /home/u/b', 'cd -P /home/u/proj']
     .map((cd) => bash(`${cd} && cat >> rec.md <<EOF\n- gate gates/r.out\n${LINE(3)}\nEOF\n${TOKEN(3)}`)),
   hereString: bash(`cat >> r.md <<< "- round: 3 closed 2026-10-15T00:00:00Z at abc blockers 0 alarm 0"\n${TOKEN(3)}`),
@@ -218,10 +246,9 @@ const H = {
   arith: bash(`(( x = 1<<2 )); echo "- round: 3 closed 2026-10-15T00:00:00Z at abc blockers 0 alarm 0" >> r.md\n${TOKEN(3)}`),
 }
 {
-  const linked = { ...ENV, resolve: (p) => (p === '/home/u/proj/gates/r1.out' ? '/tmp/s/r1.out' : p) }
-  const o = decide(H.orch, '# r\n- gate: gates/r1.out exit=0\n', linked), ok = decide(H.orch, '# r\n- gate: gates/r1.out exit=0\n')
-  const k = decide(H.kit('/home/u/fixture', '.doctrine/records/gate-r1.out.result'), null, { ...ENV, cwd: '/tmp/w' })
-  const kt = decide(H.kit('/tmp/k', '.doctrine/records/gate-r1.out.result'))
+  const o = decide(H.orch, R.relGate, viaLink(LK.orchLink)), ok = decide(H.orch, R.relGate)
+  const k = decide(H.kitDurable, null, { ...ENV, cwd: '/tmp/w' })
+  const kt = decide(H.kitTmp)
   // A decision that throws (a guard reverted so a bare cd reaches path.resolve) is this clause's FAIL, not a crash.
   const u = H.unknown.map((f) => { try { return decide(f, null, { ...ENV, cwd: '/tmp/w' }) } catch (e) { return { threw: String(e) } } })
   clause('clause 1s — one literal cd before the redirect moves the base for the record and every relative gate path (R3-A): the orchestrator\'s cd && cat >> rel <<EOF names the record under the cd target and judges its gates there; the kit seat\'s cd-newline form judges its incoming gate under the cd target, not the call\'s cwd; a cd it cannot read names no record and judges the incoming text against the call\'s cwd',
@@ -232,22 +259,21 @@ const H = {
     [o, ok, k, kt, ...u].map(show).join(' '))
 }
 {
-  // A fake filesystem: `links` maps a path to its target, `dirs` and `files` exist, anything else is missing.
+  // A fake filesystem: `links` maps a path to its target, `exists` lists paths that exist (and so their parents),
+  // anything else is missing. The filesystems themselves are the FS table above.
   const fakeFs = (links, exists) => ({
     lstat: (p) => { if (p in links) return { isSymbolicLink: () => true }; if (exists.some((e) => e === p || e.startsWith(p + '/'))) return { isSymbolicLink: () => false }; throw new Error('ENOENT') },
     readlink: (p) => links[p],
   })
-  const up = followLinks('/durable/gates/r1.out', fakeFs({ '/durable/gates/r1.out': 'hop/../r1.out', '/durable/gates/hop': '/tmp/s/nest' }, ['/tmp/s/nest', '/tmp/s/r1.out']))
-  const back = followLinks('/tmp/s/r1.out', fakeFs({ '/tmp/s/r1.out': '/tmp/s/hop/../r1.out', '/tmp/s/hop': '/durable/d/x' }, ['/durable/d/x', '/durable/d/r1.out']))
-  const chain = followLinks('/a/x', fakeFs({ '/a/x': 'y', '/a/y': '/b/z' }, ['/b/z']))
-  const gone = followLinks('/d/g.out', fakeFs({ '/d/g.out': 'h.out', '/d/h.out': '/tmp/gone/r1.out' }, ['/d']))
+  const walk = (f) => followLinks(f.start, fakeFs(f.links, f.exists))
+  const up = walk(FS.up), back = walk(FS.back), chain = walk(FS.chain), gone = walk(FS.gone)
   clause('clause 1t — followLinks walks component by component (R3-B): a target\'s .. is taken after the link before it (/durable/gates/r1.out -> hop/../r1.out with hop -> /tmp/s/nest is /tmp/s/r1.out, and /tmp/s/r1.out -> /tmp/s/hop/../r1.out with hop -> /durable/d/x is /durable/d/r1.out), a plain chain ends at its target, and a chain into a wiped dir is still followed (a cycle is 1v)',
     up === '/tmp/s/r1.out' && back === '/durable/d/r1.out' && chain === '/b/z' && gone === '/tmp/gone/r1.out', JSON.stringify({ up, back, chain, gone }))
   // A cycle, counted: the fake fs reads each link it follows, and past a budget of 200 lstat calls it answers
   // as if the path were missing, which ends any walk, so a walk with no hop cap stops here and shows its count.
   let reads = 0, lstats = 0
-  const counted = fakeFs({ '/c/p': 'q', '/c/q': 'p' }, [])
-  const bounded = followLinks('/c/p/f.out', {
+  const counted = fakeFs(FS.cycle.links, FS.cycle.exists)
+  const bounded = followLinks(FS.cycle.start, {
     lstat: (p) => { if (++lstats > 200) throw new Error('budget'); return counted.lstat(p) },
     readlink: (p) => { reads++; return counted.readlink(p) },
   })
@@ -270,7 +296,23 @@ fs.writeFileSync(path.join(bin, 'herdr'), `#!/bin/sh\ntouch ${JSON.stringify(tri
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 const scratchTmp = path.join(tmp, 't'); fs.mkdirSync(scratchTmp)
 const durable = fs.mkdtempSync(path.join(os.homedir(), '.dctr-roundguard-'))   // a record dir outside every tmp dir
-const rec = path.join(durable, 'r.md'), recTmp = path.join(durable, 'rt.md')
+// Clause 2's fixtures, in two tables listed in TABLES so clause 3 must prove each one. C holds what the hook is handed:
+// append(record, n) writes round n's line into a record and appendToken also runs the publish; garbage, empty and
+// nullInput are payloads it cannot read; latchGarbage a latch it cannot parse. D holds each file, link and dir the
+// hook reads, by path, assigned where it is built below.
+const C = {
+  append: (record, n) => `echo '${LINE(n)}' >> ${record}`,
+  appendToken: (record, n) => `echo '${LINE(n)}' >> ${record} && ${TOKEN(n)}`,
+  garbage: '{not json',
+  empty: '',
+  nullInput: { session_id: 's5', tool_name: 'Bash', tool_input: null },
+  latchGarbage: '{not json',
+}
+// Every file, link and dir the clauses below hand the hook is registered in D as it is built, and clause 3h and 3i
+// prove each one by reading the disk. The other literals in clause 2 are where a fixture is judged, not fixtures: the
+// environment (TMPDIR, the herdr variables, a cwd), a session id, and the payload envelope (agent_id, tool_name).
+const D = { rec: path.join(durable, 'r.md'), recTmp: path.join(durable, 'rt.md') }
+const { rec, recTmp } = D
 fs.writeFileSync(rec, '# r\n- gate: ~/gates/g.out exit=0\n')
 fs.writeFileSync(recTmp, `# r\n- gate: ${scratchTmp}/scratchpad/gate.out exit=0\n`)
 const IN = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: scratchTmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'p1' }
@@ -290,8 +332,8 @@ const denied = (r, ...has) => {
 const allowed = (r) => r.code === 0 && r.out === ''
 
 {
-  const cmd = `echo '${LINE(3)}' >> ${rec}`
-  const first = run(pay('s1', cmd)), again = run(pay('s1', cmd)), r4 = run(pay('s1', `echo '${LINE(4)}' >> ${rec}`)), other = run(pay('s2', cmd))
+  const cmd = C.append(rec, 3)
+  const first = run(pay('s1', cmd)), again = run(pay('s1', cmd)), r4 = run(pay('s1', C.append(rec, 4))), other = run(pay('s2', cmd))
   clause('clause 2a — a round line without the token is denied with the exact PreToolUse shape, naming the publish and "refuses round 3 once"',
     denied(first, 'does not run dctr-token.mjs', 'ONE Bash call', 'Fix it and repeat the write; this guard refuses round 3 once.'), JSON.stringify(first))
   clause('clause 2b — the identical retry goes through; round 4 of the same record is refused again; another session is refused on its own latch',
@@ -300,13 +342,13 @@ const allowed = (r) => r.code === 0 && r.out === ''
     fs.existsSync(path.join(scratchTmp, 'dctr-s1', 'roundguard.json')), fs.readdirSync(scratchTmp).join(','))
 }
 {
-  const ok = run(pay('s3', `echo '${LINE(3)}' >> ${rec} && ${TOKEN(3)}`))
-  const tmpRec = run(pay('s3', `echo '${LINE(3)}' >> ${recTmp} && ${TOKEN(3)}`))
+  const ok = run(pay('s3', C.appendToken(rec, 3)))
+  const tmpRec = run(pay('s3', C.appendToken(recTmp, 3)))
   clause('clause 2d — the record on disk is read: a durable gate path with the token goes through; a TMPDIR gate path in the record is denied',
     allowed(ok) && denied(tmpRec, 'scratchpad/gate.out lies under', 'append a correction line'), `${JSON.stringify(ok)} ${JSON.stringify(tmpRec)}`)
 }
 {
-  const cmd = `echo '${LINE(3)}' >> ${rec}`
+  const cmd = C.append(rec, 3)
   const cases = [
     ['HERDR_ENV unset', run(pay('s4', cmd), { HERDR_ENV: '' })],
     ['no HERDR_WORKSPACE_ID', run(pay('s4', cmd), { HERDR_WORKSPACE_ID: '' })],
@@ -320,33 +362,35 @@ const allowed = (r) => r.code === 0 && r.out === ''
     cases.filter(([, r]) => !allowed(r)).map(([n, r]) => `${n}: ${JSON.stringify(r)}`).join('; '))
 }
 {
-  const garbage = run('{not json'), nullInput = run({ session_id: 's5', tool_name: 'Bash', tool_input: null }), empty = run('')
+  const garbage = run(C.garbage), nullInput = run(C.nullInput), empty = run(C.empty)
   clause('clause 2f — a payload that cannot be read allows the call (a crash never blocks a run)',
     allowed(garbage) && allowed(nullInput) && allowed(empty), [garbage, nullInput, empty].map((x) => JSON.stringify(x)).join(' '))
 }
 {
-  const notDir = path.join(tmp, 'a-file'); fs.writeFileSync(notDir, 'x')
-  const cmd = `echo '${LINE(3)}' >> ${rec}`
+  const notDir = D.notDir = path.join(tmp, 'a-file'); fs.writeFileSync(notDir, 'x')
+  const cmd = C.append(rec, 3)
   const a = run(pay('s6', cmd), { TMPDIR: notDir })
-  fs.mkdirSync(path.join(scratchTmp, 'dctr-s7'), { recursive: true }); fs.writeFileSync(path.join(scratchTmp, 'dctr-s7', 'roundguard.json'), '{not json')
+  D.badLatch = path.join(scratchTmp, 'dctr-s7', 'roundguard.json')
+  fs.mkdirSync(path.dirname(D.badLatch), { recursive: true }); fs.writeFileSync(D.badLatch, C.latchGarbage)
   const b = run(pay('s7', cmd))
   // No latch yet (the read finds nothing) and a state directory the hook cannot write into: the write half fails alone.
   // As root a mode does not stop the write, so there the case is not run (it would refuse and read as a regression).
-  const ro = path.join(scratchTmp, 'dctr-s9'); fs.mkdirSync(ro); fs.chmodSync(ro, 0o500)
+  const ro = D.roDir = path.join(scratchTmp, 'dctr-s9'); fs.mkdirSync(ro); fs.chmodSync(ro, 0o500)
   const c = process.getuid?.() === 0 ? { code: 0, out: '' } : run(pay('s9', cmd))
-  fs.chmodSync(ro, 0o700)
+  // Left at 0500: clause 3h reads the mode, and removing an empty dir needs only its parent writable.
   clause('clause 2g — a latch that cannot be read (state dir path is a file, or the latch is not JSON), or cannot be written (read-only state dir), allows the call (fail open); no latch yet refuses (2a)',
     allowed(a) && allowed(b) && allowed(c), `${JSON.stringify(a)} ${JSON.stringify(b)} ${JSON.stringify(c)}`)
 }
 {
   const gates = path.join(durable, '.doctrine', 'records', 'gates'); fs.mkdirSync(gates, { recursive: true })
   const real = path.join(scratchTmp, 'scratchpad'); fs.mkdirSync(real, { recursive: true }); fs.writeFileSync(path.join(real, 'r1.out.result'), 'exit=0\n')
-  fs.symlinkSync(path.join(real, 'r1.out.result'), path.join(gates, 'r1.out.result'))
-  fs.writeFileSync(path.join(gates, 'r2.out.result'), 'exit=0\n')
-  const recLink = path.join(durable, 'rl.md'), recReal = path.join(durable, 'rr.md')
+  D.gateLink = path.join(gates, 'r1.out.result'); D.gateReal = path.join(gates, 'r2.out.result')
+  fs.symlinkSync(path.join(real, 'r1.out.result'), D.gateLink)
+  fs.writeFileSync(D.gateReal, 'exit=0\n')
+  const recLink = D.recLink = path.join(durable, 'rl.md'), recReal = D.recReal = path.join(durable, 'rr.md')
   fs.writeFileSync(recLink, '# r\n- gate: .doctrine/records/gates/r1.out.result\n')
   fs.writeFileSync(recReal, '# r\n- gate: .doctrine/records/gates/r2.out.result\n- seat ' + scratchTmp + '/agent.jsonl\n')
-  const link = run(pay('s8', `echo '${LINE(3)}' >> ${recLink} && ${TOKEN(3)}`)), plain = run(pay('s8', `echo '${LINE(3)}' >> ${recReal} && ${TOKEN(3)}`))
+  const link = run(pay('s8', C.appendToken(recLink, 3))), plain = run(pay('s8', C.appendToken(recReal, 3)))
   clause('clause 2i — a relative gate path in the record that is a symlink into TMPDIR is resolved through it and denied; a real file at the same kind of path, and a .jsonl under TMPDIR, go through',
     denied(link, '.doctrine/records/gates/r1.out.result', 'lies under') && allowed(plain), `${JSON.stringify(link)} ${JSON.stringify(plain)}`)
 }
@@ -354,7 +398,8 @@ const allowed = (r) => r.code === 0 && r.out === ''
 // resolves to a path under the link's target and under no tmp dir written as such.
 const linkTmp = path.join(durable, 'linktmp'), realTmp = path.join(durable, 'realtmp')
 fs.mkdirSync(realTmp); fs.symlinkSync(realTmp, linkTmp); fs.writeFileSync(path.join(realTmp, 'g.out'), 'ok\n')
-const recEnv = path.join(durable, 're.md'), recEnvDur = path.join(durable, 'red.md')
+Object.assign(D, { linkTmp, realTmp })
+const recEnv = D.recEnv = path.join(durable, 're.md'), recEnvDur = D.recEnvDur = path.join(durable, 'red.md')
 fs.writeFileSync(recEnv, '# r\n- gate: $TMPDIR/g.out exit=0\n'); fs.writeFileSync(recEnvDur, `# r\n- gate: ${durable}/kept/g.out exit=0\n`)
 // F-C: gates/r1.out -> r1-hop.out (relative, same dir) -> <TMPDIR>/gone/r1.out, a scratchpad since wiped; its twin
 // gates/r2.out -> <durable>/gone/r2.out, also dangling, under no tmp dir.
@@ -363,31 +408,33 @@ const goneTmp = path.join(scratchTmp, 'gone'); fs.mkdirSync(goneTmp)
 fs.symlinkSync(path.join(goneTmp, 'r1.out'), path.join(gatesC, 'r1-hop.out')); fs.symlinkSync('r1-hop.out', path.join(gatesC, 'r1.out'))
 fs.symlinkSync(path.join(durable, 'gone', 'r2.out'), path.join(gatesC, 'r2.out'))
 fs.rmSync(goneTmp, { recursive: true })
-const recDangle = path.join(durable, 'c', 'rd.md'), recDangleDur = path.join(durable, 'c', 'rdd.md')
-fs.writeFileSync(recDangle, '# r\n- gate: gates/r1.out exit=0\n'); fs.writeFileSync(recDangleDur, '# r\n- gate: gates/r2.out exit=0\n')
+Object.assign(D, { chainLink: path.join(gatesC, 'r1.out'), durableDangle: path.join(gatesC, 'r2.out') })
+const recDangle = D.recDangle = path.join(durable, 'c', 'rd.md'), recDangleDur = D.recDangleDur = path.join(durable, 'c', 'rdd.md')
+fs.writeFileSync(recDangle, R.relGate); fs.writeFileSync(recDangleDur, '# r\n- gate: gates/r2.out exit=0\n')
 // F-D: a .log.result linked into TMPDIR, and a durable x.result beside a .jsonl under TMPDIR.
 const recordsD = path.join(durable, 'd', '.doctrine', 'records'); fs.mkdirSync(recordsD, { recursive: true })
 fs.writeFileSync(path.join(scratchTmp, 'gate-r1-npm-test.log.result'), 'exit=0\n')
 fs.symlinkSync(path.join(scratchTmp, 'gate-r1-npm-test.log.result'), path.join(recordsD, 'gate-r1-npm-test.log.result'))
 fs.writeFileSync(path.join(recordsD, 'x.result'), 'exit=0\n')
-const recLog = path.join(durable, 'd', 'rl.md'), recResult = path.join(durable, 'd', 'rx.md')
+Object.assign(D, { logResultLink: path.join(recordsD, 'gate-r1-npm-test.log.result'), durableResult: path.join(recordsD, 'x.result') })
+const recLog = D.recLog = path.join(durable, 'd', 'rl.md'), recResult = D.recResult = path.join(durable, 'd', 'rx.md')
 fs.writeFileSync(recLog, '# r\n- gate `.doctrine/records/gate-r1-npm-test.log.result` reads `exit=0`\n')
 fs.writeFileSync(recResult, `# r\n- gate \`.doctrine/records/x.result\` reads \`exit=0\`\n- seat ${scratchTmp}/agent.jsonl\n`)
 {
-  const viaLink = run(pay('s10', `echo '${LINE(3)}' >> ${recEnv} && ${TOKEN(3)}`), { TMPDIR: linkTmp })
-  const plain = run(pay('s10', `echo '${LINE(3)}' >> ${recEnvDur} && ${TOKEN(3)}`), { TMPDIR: linkTmp })
+  const throughLink = run(pay('s10', C.appendToken(recEnv, 3)), { TMPDIR: linkTmp })
+  const plain = run(pay('s10', C.appendToken(recEnvDur, 3)), { TMPDIR: linkTmp })
   clause('clause 2j — with TMPDIR a symlink, $TMPDIR/g.out resolves under the link\'s real target and is denied there (F-B); a gate path beside that target, under no tmp dir, goes through',
-    denied(viaLink, `$TMPDIR/g.out (resolves to ${realTmp}/g.out) lies under ${realTmp}`) && allowed(plain), `${JSON.stringify(viaLink)} ${JSON.stringify(plain)}`)
+    denied(throughLink, `$TMPDIR/g.out (resolves to ${realTmp}/g.out) lies under ${realTmp}`) && allowed(plain), `${JSON.stringify(throughLink)} ${JSON.stringify(plain)}`)
 }
 {
   const cwd = path.join(durable, 'c')
-  const gone = run(pay('s11', `echo '${LINE(3)}' >> ${recDangle} && ${TOKEN(3)}`, { cwd })), dur = run(pay('s11', `echo '${LINE(3)}' >> ${recDangleDur} && ${TOKEN(3)}`, { cwd }))
+  const gone = run(pay('s11', C.appendToken(recDangle, 3), { cwd })), dur = run(pay('s11', C.appendToken(recDangleDur, 3), { cwd }))
   clause('clause 2k — a gate path that is a chain of symlinks ending in a wiped tmp dir is followed to its missing target and denied (F-C); a dangling link into a durable dir goes through',
     denied(gone, `gates/r1.out (resolves to ${goneTmp}/r1.out) lies under`) && allowed(dur), `${JSON.stringify(gone)} ${JSON.stringify(dur)}`)
 }
 {
   const cwd = path.join(durable, 'd')
-  const log = run(pay('s12', `echo '${LINE(3)}' >> ${recLog} && ${TOKEN(3)}`, { cwd })), x = run(pay('s12', `echo '${LINE(3)}' >> ${recResult} && ${TOKEN(3)}`, { cwd }))
+  const log = run(pay('s12', C.appendToken(recLog, 3), { cwd })), x = run(pay('s12', C.appendToken(recResult, 3), { cwd }))
   clause('clause 2l — a .log.result linked into TMPDIR is denied (PATHEXT); a durable x.result and a .jsonl under TMPDIR go through',
     denied(log, '.doctrine/records/gate-r1-npm-test.log.result', 'lies under') && allowed(x), `${JSON.stringify(log)} ${JSON.stringify(x)}`)
 }
@@ -399,9 +446,11 @@ for (const d of [projA, projB, elsewhere]) fs.mkdirSync(path.join(d, '.doctrine'
 for (const d of [projA, projB]) fs.mkdirSync(path.join(d, 'gates'))
 fs.writeFileSync(path.join(scratchTmp, 'r1-a.out'), 'ok\n'); fs.symlinkSync(path.join(scratchTmp, 'r1-a.out'), path.join(projA, 'gates', 'r1.out'))
 fs.writeFileSync(path.join(projB, 'gates', 'r1.out'), 'ok\n')
-for (const d of [projA, projB]) fs.writeFileSync(path.join(d, '.doctrine', 'records', 'e1.md'), '# r\n- gate: gates/r1.out exit=0\n')
-fs.writeFileSync(path.join(elsewhere, '.doctrine', 'records', 'e1.md'), '# r\n')
-const orch = (dir) => `cd ${dir} && cat >> .doctrine/records/e1.md <<EOF\n${LINE(3)}\nEOF\n${TOKEN(3)}`
+for (const d of [projA, projB]) fs.writeFileSync(path.join(d, '.doctrine', 'records', 'e1.md'), R.relGate)
+fs.writeFileSync(path.join(elsewhere, '.doctrine', 'records', 'e1.md'), R.fresh)
+Object.assign(D, { projA, projB, elsewhere })
+// H.orch with its cd moved to a scratch repo.
+const orch = (dir) => H.orch[1].command.replace('/home/u/proj', dir)
 {
   const a = run(pay('s13', orch(projA), { cwd: elsewhere })), b = run(pay('s13', orch(projB), { cwd: elsewhere }))
   clause('clause 2m — cd <repo> && cat >> rel.md <<EOF from another cwd reads the record under the cd target (R3-A): its gate linked into TMPDIR is denied with the append-a-correction reason; the same record with a real file there goes through',
@@ -414,9 +463,10 @@ for (const d of [bGates, nest, fh, b2x]) fs.mkdirSync(d, { recursive: true })
 fs.symlinkSync(nest, path.join(bGates, 'hop')); fs.symlinkSync('hop/../r1.out', path.join(bGates, 'r1.out')); fs.writeFileSync(path.join(scratchTmp, 'r1.out'), 'ok\n')
 fs.symlinkSync(b2x, path.join(fh, 'hop')); fs.symlinkSync(`${fh}/hop/../r1.out`, path.join(fh, 'r1.out')); fs.writeFileSync(path.join(durable, 'b2', 'r1.out'), 'ok\n')
 const recUp = path.join(bDir, 'ru.md'), recBack = path.join(bDir, 'rb.md')
-fs.writeFileSync(recUp, '# r\n- gate: gates/r1.out exit=0\n'); fs.writeFileSync(recBack, `# r\n- gate: ${fh}/r1.out exit=0\n`)
+fs.writeFileSync(recUp, R.relGate); fs.writeFileSync(recBack, `# r\n- gate: ${fh}/r1.out exit=0\n`)
+Object.assign(D, { recUp, recBack, upLink: path.join(bGates, 'r1.out'), backLink: path.join(fh, 'r1.out') })
 {
-  const up = run(pay('s14', `echo '${LINE(3)}' >> ${recUp} && ${TOKEN(3)}`, { cwd: bDir })), back = run(pay('s14', `echo '${LINE(3)}' >> ${recBack} && ${TOKEN(3)}`, { cwd: bDir }))
+  const up = run(pay('s14', C.appendToken(recUp, 3), { cwd: bDir })), back = run(pay('s14', C.appendToken(recBack, 3), { cwd: bDir }))
   clause('clause 2n — a link target\'s .. is taken after the link before it (R3-B): gates/r1.out -> hop/../r1.out with hop into TMPDIR is denied; a TMPDIR path whose target climbs out through a link to a durable dir goes through',
     denied(up, `gates/r1.out (resolves to ${scratchTmp}/r1.out) lies under`) && allowed(back), `${JSON.stringify(up)} ${JSON.stringify(back)}`)
 }
@@ -427,7 +477,7 @@ clause('clause 2h — herdr was called zero times across every run (tripwire on 
 // The registry (RT6): every fixture table a clause decides on, and each clause-3 proof obtains its fixture through
 // prove(), which records `<table>.<key>` as the proof runs. Clause 3n enumerates every table's keys at run time and
 // names each one no proof obtained. A table left out of TABLES is not enumerated.
-const TABLES = { F, R, G, GR, H }
+const TABLES = { F, R, G, GR, H, LK, FS, C, D }
 const proved = new Set()
 const prove = (table, key) => {
   if (!Object.hasOwn(TABLES[table] ?? {}, key)) throw new Error(`no fixture ${table}.${key}`)
@@ -449,8 +499,7 @@ clause('clause 3b — no refused-for-publish Bash fixture runs node on dctr-toke
   [prove('F', 'bashToken'), prove('F', 'bashDateToken'), prove('F', 'heredocToken')].every(([, i]) => /node\s+"?\S*dctr-token\.mjs/.test(i.command)), 'a fixture does not carry what its clause rests on')
 clause('clause 3c — each tmp-path record names a gate-shaped path that starts with a tmp dir, and each durable twin does not',
   ['/tmp/x/gate.out', '/tmp/claude-1000/s/scratchpad/gate.out.result', '/var/tmpx/m.output'].every((p, i) => [prove('R', 'tmpOut'), prove('R', 'tmpResult'), prove('R', 'tmpOutput')][i].includes(p)) &&
-  fs.readFileSync(recTmp, 'utf8').includes(`${scratchTmp}/scratchpad/gate.out`) &&
-  ![prove('R', 'homeOut'), prove('R', 'homeResult'), prove('R', 'tmpJsonl'), fs.readFileSync(rec, 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !prove('R', 'relOut').includes(' /') && prove('R', 'relGates').includes(' gates/r1.out.result') && prove('R', 'envTmp').includes('$TMPDIR/g.out'),
+  ![prove('R', 'homeOut'), prove('R', 'homeResult'), prove('R', 'tmpJsonl'), fs.readFileSync(prove('D', 'rec'), 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !prove('R', 'relOut').includes(' /') && prove('R', 'relGates').includes(' gates/r1.out.result') && prove('R', 'envTmp').includes('$TMPDIR/g.out'),
   'a record fixture does not carry what its clause rests on')
 
 {
@@ -477,19 +526,58 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
     [prove('G', 'heredocDollarT'), prove('G', 'heredocDollarTToken'), prove('G', 'heredocDollarTAfter')].every(([, i]) => isRound(i.command.replace('$T', T))) && isRound(prove('G', 'printfNoToken')[1].command.split('\\n')[1]) &&
     [[prove('G', 'delimDash'), 'END-RECORD'], [prove('G', 'delimDouble'), 'EOF'], [prove('G', 'delimTab'), '\tEOF']].every(([f, end]) => { const l = f[1].command.split('\n'); return l.indexOf(end) > l.findIndex((x) => x.includes('dctr-token.mjs')) && l.findIndex((x) => x.includes('dctr-token.mjs')) > 0 }),
     'a captured-form fixture does not carry what its clause rests on')
-  clause('clause 3h — without the guard: TMPDIR\'s link (F-B) points at a dir outside every tmp dir that holds g.out, the F-C chain is two links ending at a missing path under TMPDIR, and the F-D .log.result is a link into TMPDIR',
-    fs.realpathSync(linkTmp) === realTmp && !realTmp.startsWith('/tmp/') && !realTmp.startsWith(linkTmp + '/') && fs.existsSync(path.join(realTmp, 'g.out')) &&
-    fs.lstatSync(path.join(gatesC, 'r1.out')).isSymbolicLink() && fs.readlinkSync(path.join(gatesC, 'r1.out')) === 'r1-hop.out' &&
-    fs.readlinkSync(path.join(gatesC, 'r1-hop.out')) === path.join(goneTmp, 'r1.out') && !fs.existsSync(goneTmp) && goneTmp.startsWith(scratchTmp + '/') &&
-    fs.realpathSync(path.join(recordsD, 'gate-r1-npm-test.log.result')).startsWith(scratchTmp + '/') && !fs.lstatSync(path.join(recordsD, 'x.result')).isSymbolicLink(),
+}
+{
+  // Clause 2's disk fixtures (D), read here with lstat, readlink, readFileSync and the kernel's realpath, never through
+  // the hook. `inside` is whether a path lies under a dir.
+  const inside = (p, d) => p === d || p.startsWith(d + '/')
+  const text = (k) => fs.readFileSync(prove('D', k), 'utf8')
+  const link = (k) => { const p = prove('D', k); return fs.lstatSync(p).isSymbolicLink() ? fs.readlinkSync(p) : null }
+  const plainFile = (k) => { const p = prove('D', k); return !fs.lstatSync(p).isSymbolicLink() && fs.statSync(p).isFile() }
+  const tmpRoots = ['/tmp', os.tmpdir()].map((d) => fs.realpathSync.native(d))
+  const durableOk = !tmpRoots.some((d) => inside(fs.realpathSync.native(durable), d)) && !tmpRoots.some((d) => inside(os.homedir(), d))
+  clause('clause 3h — without the guard: the latch and payload fixtures of 2a to 2g: rec names a ~/ gate under a home outside every tmp dir, recTmp a gate under TMPDIR, notDir is a file, badLatch is not JSON, roDir has mode 0500, the garbage payloads do not parse, empty is empty and nullInput has a null tool_input',
+    durableOk && text('rec').includes('~/gates/g.out') && text('recTmp').includes(`${scratchTmp}/scratchpad/gate.out`) && inside(scratchTmp, tmp) &&
+    fs.lstatSync(prove('D', 'notDir')).isFile() && (() => { try { JSON.parse(text('badLatch')); return false } catch { return true } })() &&
+    (fs.statSync(prove('D', 'roDir')).mode & 0o777) === 0o500 &&
+    [prove('C', 'garbage'), prove('C', 'latchGarbage')].every((t) => { try { JSON.parse(t); return false } catch { return true } }) &&
+    text('badLatch') === C.latchGarbage && prove('C', 'empty') === '' && prove('C', 'nullInput').tool_input === null,
+    'a latch, payload or record fixture of 2a to 2g does not carry what its clause rests on')
+  clause('clause 3i — without the guard: each link fixture of 2i to 2n is what its clause names: gateLink and logResultLink and projA\'s gate link into TMPDIR, gateReal and durableResult and projB\'s gate are plain files, linkTmp links to realTmp outside every tmp dir, chainLink is r1-hop.out then a missing path under TMPDIR, durableDangle a missing durable path, upLink hop/../r1.out with hop into TMPDIR, backLink climbs out of TMPDIR through a link to a durable dir; each record names the path its clause judges',
+    inside(link('gateLink'), scratchTmp) && plainFile('gateReal') &&
+    text('recLink').includes('.doctrine/records/gates/r1.out.result') && path.join(durable, '.doctrine/records/gates/r1.out.result') === prove('D', 'gateLink') &&
+    text('recReal').includes('.doctrine/records/gates/r2.out.result') && text('recReal').includes(`${scratchTmp}/agent.jsonl`) &&
+    link('linkTmp') === prove('D', 'realTmp') && !tmpRoots.some((d) => inside(prove('D', 'realTmp'), d)) && fs.existsSync(path.join(realTmp, 'g.out')) &&
+    text('recEnv').includes('$TMPDIR/g.out') && text('recEnvDur').includes(`${durable}/kept/g.out`) &&
+    link('chainLink') === 'r1-hop.out' && inside(fs.readlinkSync(path.join(gatesC, 'r1-hop.out')), scratchTmp) && !fs.existsSync(fs.readlinkSync(path.join(gatesC, 'r1-hop.out'))) &&
+    inside(link('durableDangle'), durable) && !fs.existsSync(link('durableDangle')) && text('recDangle').includes('gates/r1.out') && text('recDangleDur').includes('gates/r2.out') &&
+    inside(link('logResultLink'), scratchTmp) && plainFile('durableResult') && text('recLog').includes('.doctrine/records/gate-r1-npm-test.log.result') &&
+    text('recResult').includes('.doctrine/records/x.result') && text('recResult').includes(`${scratchTmp}/agent.jsonl`) &&
+    inside(fs.realpathSync.native(path.join(prove('D', 'projA'), 'gates', 'r1.out')), scratchTmp) && !fs.lstatSync(path.join(prove('D', 'projB'), 'gates', 'r1.out')).isSymbolicLink() &&
+    !/gate/.test(fs.readFileSync(path.join(prove('D', 'elsewhere'), '.doctrine', 'records', 'e1.md'), 'utf8')) &&
+    link('upLink') === 'hop/../r1.out' && fs.realpathSync.native(prove('D', 'upLink')) === path.join(scratchTmp, 'r1.out') && text('recUp').includes('gates/r1.out') &&
+    link('backLink') === `${fh}/hop/../r1.out` && fs.realpathSync.native(prove('D', 'backLink')) === path.join(durable, 'b2', 'r1.out') && text('recBack').includes(`${fh}/r1.out`),
     'a link fixture does not carry what its clause rests on')
 }
-clause('clause 3i — without the guard: the kernel (realpath(3), not the lexical JS fs.realpathSync) puts each R3 fixture where its clause says: proj\'s gates/r1.out in TMPDIR and proj2\'s not, the call\'s own cwd holding a record of the same name with no gate, gates/r1.out -> hop/../r1.out in TMPDIR, and the TMPDIR fh/r1.out outside it',
-  fs.realpathSync.native(path.join(projA, 'gates', 'r1.out')).startsWith(scratchTmp + '/') && !fs.realpathSync.native(path.join(projB, 'gates', 'r1.out')).startsWith(scratchTmp + '/') &&
-  !/gate/.test(fs.readFileSync(path.join(elsewhere, '.doctrine', 'records', 'e1.md'), 'utf8')) &&
-  fs.realpathSync.native(path.join(bGates, 'r1.out')) === path.join(scratchTmp, 'r1.out') && fs.readlinkSync(path.join(bGates, 'r1.out')) === 'hop/../r1.out' &&
-  fs.realpathSync.native(path.join(fh, 'r1.out')) === path.join(durable, 'b2', 'r1.out') && fs.readlinkSync(path.join(fh, 'r1.out')) === `${fh}/hop/../r1.out`,
-  'an R3 fixture does not carry what its clause rests on')
+{
+  // The pure clauses' fake links (LK) and filesystems (FS), and the records they are paired with.
+  const tmpish = (p) => p.startsWith('/tmp/') || p.startsWith('/var/tmpx/')
+  clause('clause 3p — without the guard: each LK link maps the absolute path its record names (relative to the cwd its clause uses) out of no tmp dir into /tmp; fresh carries no round line and no gate, relGate names gates/r1.out',
+    prove('LK', 'relGatesLink').from === path.resolve('/home/u/r', 'gates/r1.out.result') && R.relGates.includes('gates/r1.out.result') &&
+    prove('LK', 'logStem').from === path.resolve('/home/u/r', '.doctrine/records/gate-r1-npm-test.log') && GR.logPair.includes('.doctrine/records/gate-r1-npm-test.log') &&
+    prove('LK', 'orchLink').from === path.resolve('/home/u/proj', 'gates/r1.out') && prove('R', 'relGate').includes('gates/r1.out') &&
+    Object.values(LK).every((l) => !tmpish(l.from) && l.to.startsWith('/tmp/')) && !isRound(prove('R', 'fresh')) && !/\.(out|output|result)\b/.test(R.fresh),
+    'an LK link or an R record does not carry what its clause rests on')
+  const fsx = (k) => prove('FS', k)
+  const reach = (f, p) => f.exists.some((e) => e === p || e.startsWith(p + '/'))
+  clause('clause 3q — without the guard: each FS filesystem encodes the structure its clause names: up a relative hop/../ target whose hop links into /tmp/s, back an absolute hop/../ target whose hop links to a durable dir, chain two links ending at an existing /b/z, gone two links ending under a /tmp/gone that does not exist, cycle two links that point at each other on the start path',
+    fsx('up').links[FS.up.start] === 'hop/../r1.out' && FS.up.links['/durable/gates/hop'].startsWith('/tmp/s/') && reach(FS.up, '/tmp/s/r1.out') &&
+    fsx('back').links[FS.back.start] === '/tmp/s/hop/../r1.out' && FS.back.links['/tmp/s/hop'].startsWith('/durable/') && reach(FS.back, '/durable/d/r1.out') &&
+    fsx('chain').links[FS.chain.start] === 'y' && FS.chain.links['/a/y'] === '/b/z' && reach(FS.chain, '/b/z') &&
+    fsx('gone').links[FS.gone.start] === 'h.out' && FS.gone.links['/d/h.out'] === '/tmp/gone/r1.out' && !reach(FS.gone, '/tmp/gone') &&
+    fsx('cycle').links['/c/p'] === 'q' && FS.cycle.links['/c/q'] === 'p' && FS.cycle.start.startsWith('/c/p/'),
+    'an FS filesystem does not encode the structure its clause names')
+}
 {
   // Without the decision, the remaining fixtures as text: each refused one carries the round line or gate path its
   // refusal rests on, and each allowed twin differs from it only in what its clause says decides it.
@@ -508,7 +596,9 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
   clause('clause 3l — without the guard: each unknown fixture opens with the cd form it names (an expansion, cd -, cd ~/..., a bare cd, two cds, an option) and carries a round line and the relative gates/r.out, which lies under the tmp cwd /tmp/w',
     prove('H', 'unknown').length === 6 && prove('H', 'unknown').every(([, i]) => unknownCd.test(i.command) && isRound(i.command.split('\n')[2]) && i.command.includes('- gate gates/r.out')) && under('gates/r.out', '/tmp/w') &&
     isRound(prove('H', 'orch')[1].command.split('\n')[2]) && prove('H', 'orch')[1].command.startsWith('cd /home/u/proj && cat >> .doctrine/records/e1.md <<EOF\n') &&
-    prove('H', 'kit')('/x', 'g.out.result')[1].command.startsWith('cd /x\n'),
+    [['kitDurable', '/home/u/fixture'], ['kitTmp', '/tmp/k']].every(([k, dir]) => { const c = prove('H', k)[1].command; return c.startsWith(`cd ${dir}\n`) && c.includes('- gate .doctrine/records/gate-r1.out.result') && isRound(c.split('\n')[4].replace('$T', '2026-10-14T10:00:00Z')) }) &&
+    path.resolve('/tmp/k', '.doctrine/records/gate-r1.out.result').startsWith('/tmp/') && !path.resolve('/home/u/fixture', '.doctrine/records/gate-r1.out.result').startsWith('/tmp/') &&
+    isRound(prove('F', 'inTextGate')[1].command.split("'")[1]) && F.inTextGate[1].command.split("'")[1].split(' ').includes('/tmp/g.output'),
     'an unknown, orch or kit fixture does not carry the form its clause names')
 
   // The shell's own reading, without the guard: each command run by real bash with a stub `node` first on PATH that
@@ -546,13 +636,21 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
     ['heredocDollarTToken', ranRound(1, prove('G', 'heredocDollarTToken')[1].command, box, path.join(box, RT)), true],
     ['heredocDollarTAfter', ranRound(1, prove('G', 'heredocDollarTAfter')[1].command, box, path.join(box, RT)), true],
     ['heredocDollarT', ranRound(1, prove('G', 'heredocDollarT')[1].command, box, path.join(box, RT)), false],
+    ['inTextGate', ranRound(3, moved(prove('F', 'inTextGate'))), true],
+    // C's two builders, as every clause-2 call uses them.
+    ['C.appendToken', ranRound(3, prove('C', 'appendToken')(recB, 3)), true],
+    ['C.append', ranRound(3, prove('C', 'append')(recB, 3)), false],
   ]
   const projX = path.join(box, 'proj'), kitX = path.join(box, 'fixture'), away = path.join(box, 'away')
   fs.mkdirSync(path.join(projX, '.doctrine', 'records'), { recursive: true }); fs.mkdirSync(path.join(kitX, '.doctrine', 'records'), { recursive: true })
   const orchRun = ranRound(3, prove('H', 'orch')[1].command.replace('/home/u/proj', projX), away, path.join(projX, '.doctrine', 'records', 'e1.md'))
-  const kitRun = ranRound(1, prove('H', 'kit')(kitX, 'g.out.result')[1].command, away, path.join(kitX, '.doctrine', 'records', 'truncate.md'))
+  const kitRun = ranRound(1, prove('H', 'kitDurable')[1].command.replace('/home/u/fixture', kitX), away, path.join(kitX, '.doctrine', 'records', 'truncate.md'))
+  // F-A under the shell: printf and echo -e decode the escape, so the gate path lands on a line of its own.
+  const decodedLine = (f, want) => { fs.rmSync(path.join(box, 'rec.md'), { force: true }); sh(f[1].command, box); return fs.readFileSync(path.join(box, 'rec.md'), 'utf8').split('\n').includes(want) }
+  const glued = [['printfTmpGate', '- gate /tmp/x/r2.out'], ['echoTabTmpGate', '- gate\t/tmp/x/r2.out']].filter(([k, want]) => !decodedLine(prove('G', k), want))
   const wrong = [...twins, ['orch', orchRun, true], ['kit', kitRun, true]].filter(([, r, ran]) => r.ran !== ran || !r.round)
-  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, and orch and kit, run from another cwd, write the record under their cd target',
+    .concat(glued.map(([k]) => [k, { decoded: false }]))
+  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, and printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own',
     wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
 }
 {
