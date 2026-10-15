@@ -8,9 +8,12 @@
 // each fixture carries what its clause rests on without calling the decision: a refused one its round line (as the
 // dctr-record.mjs parser reads it), its gate path under a tmp dir, or the cd form it names; an allowed twin the one
 // difference its clause says decides it; and every twin whose verdict rests on how the shell reads it (a here-string,
-// (( )), each heredoc delimiter form, a quoted $(date), a cd before a relative record) run under real bash with a stub
-// `node` first on PATH that prints its argv. Clause 3n fails when a fixture key is named by no clause-3 line, and 3o
-// proves that check trips on a synthetic source.
+// (( )), each heredoc delimiter form, a quoted $(date), the printf and T=$(date) heredoc forms, a cd before a relative
+// record) run under real bash with a stub `node` first on PATH that prints its argv. Every clause-3 proof obtains its
+// fixture through prove(), which records `<table>.<key>` as it runs; clause 3n enumerates the keys of every table in
+// TABLES (F, R, G, GR, H) at run time and fails naming each one no proof obtained, and 3o proves that check trips on a
+// synthetic table. It guarantees each listed key reached a clause-3 proof, not that the proof is strong, and a fixture
+// table left out of TABLES is not enumerated.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -421,45 +424,58 @@ clause('clause 2h — herdr was called zero times across every run (tripwire on 
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
 
+// The registry (RT6): every fixture table a clause decides on, and each clause-3 proof obtains its fixture through
+// prove(), which records `<table>.<key>` as the proof runs. Clause 3n enumerates every table's keys at run time and
+// names each one no proof obtained. A table left out of TABLES is not enumerated.
+const TABLES = { F, R, G, GR, H }
+const proved = new Set()
+const prove = (table, key) => {
+  if (!Object.hasOwn(TABLES[table] ?? {}, key)) throw new Error(`no fixture ${table}.${key}`)
+  proved.add(`${table}.${key}`)
+  return TABLES[table][key]
+}
+const unproved = (tables, done) => Object.entries(tables).flatMap(([t, tab]) => Object.keys(tab).map((k) => `${t}.${k}`)).filter((x) => !done.has(x))
+
+
 const isRound = (t) => String(t).split('\n').some((l) => parseRecord(l.trim()).entries.some((e) => e.kind === 'round'))
 const unquoted = (cmd) => cmd.replace(/'/g, '').replace(/"/g, '').replace(/\$\(date[^)]*\)/, '2026-10-14T10:00:00Z').replace(/\$\(git[^)]*\)/, 'abc1234')
 const lines = (cmd) => unquoted(cmd).split(/\n|\\n/).map((l) => l.replace(/^\s*echo /, '').replace(/\s*(>>|\|).*$/, ''))
 clause('clause 3a — every refused fixture carries a round line the parser reads, the Bash ones once the shell has run, and the template fixture carries none',
-  [F.bashNoToken, F.bashDateNoToken, F.heredocNoToken, F.teeNoToken, F.mentionToken].every(([, i]) => lines(i.command).some(isRound)) &&
-  isRound(F.writeMd[1].content) && isRound(F.writeMjs[1].content) && isRound(F.editMd[1].new_string) && !isRound(F.template[1].content),
+  [prove('F', 'bashNoToken'), prove('F', 'bashDateNoToken'), prove('F', 'heredocNoToken'), prove('F', 'teeNoToken'), prove('F', 'mentionToken')].every(([, i]) => lines(i.command).some(isRound)) &&
+  isRound(prove('F', 'writeMd')[1].content) && isRound(prove('F', 'writeMjs')[1].content) && isRound(prove('F', 'editMd')[1].new_string) && !isRound(prove('F', 'template')[1].content),
   'a defective fixture carries no round line, or the template does')
 clause('clause 3b — no refused-for-publish Bash fixture runs node on dctr-token.mjs, and every allowed twin does',
-  [F.bashNoToken, F.bashDateNoToken, F.heredocNoToken, F.teeNoToken, F.mentionToken].every(([, i]) => !/node\s+\S*dctr-token/.test(i.command)) &&
-  [F.bashToken, F.bashDateToken, F.heredocToken].every(([, i]) => /node\s+"?\S*dctr-token\.mjs/.test(i.command)), 'a fixture does not carry what its clause rests on')
+  [prove('F', 'bashNoToken'), prove('F', 'bashDateNoToken'), prove('F', 'heredocNoToken'), prove('F', 'teeNoToken'), prove('F', 'mentionToken')].every(([, i]) => !/node\s+\S*dctr-token/.test(i.command)) &&
+  [prove('F', 'bashToken'), prove('F', 'bashDateToken'), prove('F', 'heredocToken')].every(([, i]) => /node\s+"?\S*dctr-token\.mjs/.test(i.command)), 'a fixture does not carry what its clause rests on')
 clause('clause 3c — each tmp-path record names a gate-shaped path that starts with a tmp dir, and each durable twin does not',
-  ['/tmp/x/gate.out', '/tmp/claude-1000/s/scratchpad/gate.out.result', '/var/tmpx/m.output'].every((p, i) => [R.tmpOut, R.tmpResult, R.tmpOutput][i].includes(p)) &&
+  ['/tmp/x/gate.out', '/tmp/claude-1000/s/scratchpad/gate.out.result', '/var/tmpx/m.output'].every((p, i) => [prove('R', 'tmpOut'), prove('R', 'tmpResult'), prove('R', 'tmpOutput')][i].includes(p)) &&
   fs.readFileSync(recTmp, 'utf8').includes(`${scratchTmp}/scratchpad/gate.out`) &&
-  ![R.homeOut, R.homeResult, R.tmpJsonl, fs.readFileSync(rec, 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !R.relOut.includes(' /') && R.relGates.includes(' gates/r1.out.result') && R.envTmp.includes('$TMPDIR/g.out'),
+  ![prove('R', 'homeOut'), prove('R', 'homeResult'), prove('R', 'tmpJsonl'), fs.readFileSync(rec, 'utf8')].some((t) => /(\/tmp|\/var\/tmpx)\/\S*\.(out|output)\b/.test(t)) && !prove('R', 'relOut').includes(' /') && prove('R', 'relGates').includes(' gates/r1.out.result') && prove('R', 'envTmp').includes('$TMPDIR/g.out'),
   'a record fixture does not carry what its clause rests on')
 
 {
   const T = '2026-10-14T10:00:00Z', body = (n) => `- round: ${n} closed ${T} at abc1234 blockers 0 alarm 0`
   const ran = [
-    [F.dateQuoted[1].command.replace('$(date -u +"%Y-%m-%dT%H:%M:%SZ")', T), body(3)],
-    [F.nested[1].command.replace('$(date -u +%FT%TZ)', T).replace('$(basename "$(pwd)")', 'abc1234'), body(3)],
-    [F.python[1].command, 'round: 1 closed 2026-10-14T00:00:00Z at abc1234 blockers 0 alarm 0'],
+    [prove('F', 'dateQuoted')[1].command.replace('$(date -u +"%Y-%m-%dT%H:%M:%SZ")', T), body(3)],
+    [prove('F', 'nested')[1].command.replace('$(date -u +%FT%TZ)', T).replace('$(basename "$(pwd)")', 'abc1234'), body(3)],
+    [prove('F', 'python')[1].command, 'round: 1 closed 2026-10-14T00:00:00Z at abc1234 blockers 0 alarm 0'],
   ]
   clause('clause 3d — without the guard: each H2 fixture, its expansions replaced by hand, holds a line the parser reads as a round line',
     ran.every(([c, l]) => c.includes(l) && isRound(l)), 'an H2 fixture does not carry its round line')
   clause('clause 3e — without the guard: each H3 fixture holds the literal text `node /p/hooks/dctr-token.mjs`, so a text match would read it as a publish',
-    [F.commentToken, F.commentSepToken, F.printfToken, F.printfSepToken, F.echoToken, F.echoSepToken, F.heredocBodyToken].every(([, i]) => /node \/p\/hooks\/dctr-token\.mjs/.test(i.command)) &&
-    [F.commentSepToken, F.echoSepToken, F.printfSepToken].every(([, i]) => /(?:;|&&) node \/p\/hooks\/dctr-token\.mjs/.test(i.command)), 'an H3 fixture does not carry the decoy')
+    [prove('F', 'commentToken'), prove('F', 'commentSepToken'), prove('F', 'printfToken'), prove('F', 'printfSepToken'), prove('F', 'echoToken'), prove('F', 'echoSepToken'), prove('F', 'heredocBodyToken')].every(([, i]) => /node \/p\/hooks\/dctr-token\.mjs/.test(i.command)) &&
+    [prove('F', 'commentSepToken'), prove('F', 'echoSepToken'), prove('F', 'printfSepToken')].every(([, i]) => /(?:;|&&) node \/p\/hooks\/dctr-token\.mjs/.test(i.command)), 'an H3 fixture does not carry the decoy')
 }
 {
   const T = '2026-10-14T10:00:00Z'
   const decoded = (f) => f[1].command.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
   clause('clause 3f — without the guard: each F-A fixture carries /tmp/x/r2.out glued to a literal \\n or \\t, and once those are decoded by hand that path stands alone on its line and the round line parses',
-    [G.printfTmpGate, G.echoTabTmpGate].every((f) => /\\[nt]\/tmp\/x\/r2\.out\\n|\/tmp\/x\/r2\.out\\n/.test(f[1].command) && decoded(f).split(/\s/).includes('/tmp/x/r2.out') && decoded(f).split('\n').some((l) => isRound(l.replace(/["'].*$/, '')))) &&
-    !G.printfHomeGate[1].command.includes('/tmp/'),
+    [prove('G', 'printfTmpGate'), prove('G', 'echoTabTmpGate')].every((f) => /\\[nt]\/tmp\/x\/r2\.out\\n|\/tmp\/x\/r2\.out\\n/.test(f[1].command) && decoded(f).split(/\s/).includes('/tmp/x/r2.out') && decoded(f).split('\n').some((l) => isRound(l.replace(/["'].*$/, '')))) &&
+    !prove('G', 'printfHomeGate')[1].command.includes('/tmp/'),
     'an F-A fixture does not carry its glued path')
   clause('clause 3g — without the guard: each captured form carries its round line once $T is replaced by hand, and each delimiter fixture holds the decoy publish between its opening and its terminator as the shell reads it',
-    [G.heredocDollarT, G.heredocDollarTToken, G.heredocDollarTAfter].every(([, i]) => isRound(i.command.replace('$T', T))) && isRound(G.printfNoToken[1].command.split('\\n')[1]) &&
-    [[G.delimDash, 'END-RECORD'], [G.delimDouble, 'EOF'], [G.delimTab, '\tEOF']].every(([f, end]) => { const l = f[1].command.split('\n'); return l.indexOf(end) > l.findIndex((x) => x.includes('dctr-token.mjs')) && l.findIndex((x) => x.includes('dctr-token.mjs')) > 0 }),
+    [prove('G', 'heredocDollarT'), prove('G', 'heredocDollarTToken'), prove('G', 'heredocDollarTAfter')].every(([, i]) => isRound(i.command.replace('$T', T))) && isRound(prove('G', 'printfNoToken')[1].command.split('\\n')[1]) &&
+    [[prove('G', 'delimDash'), 'END-RECORD'], [prove('G', 'delimDouble'), 'EOF'], [prove('G', 'delimTab'), '\tEOF']].every(([f, end]) => { const l = f[1].command.split('\n'); return l.indexOf(end) > l.findIndex((x) => x.includes('dctr-token.mjs')) && l.findIndex((x) => x.includes('dctr-token.mjs')) > 0 }),
     'a captured-form fixture does not carry what its clause rests on')
   clause('clause 3h — without the guard: TMPDIR\'s link (F-B) points at a dir outside every tmp dir that holds g.out, the F-C chain is two links ending at a missing path under TMPDIR, and the F-D .log.result is a link into TMPDIR',
     fs.realpathSync(linkTmp) === realTmp && !realTmp.startsWith('/tmp/') && !realTmp.startsWith(linkTmp + '/') && fs.existsSync(path.join(realTmp, 'g.out')) &&
@@ -479,20 +495,20 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
   // refusal rests on, and each allowed twin differs from it only in what its clause says decides it.
   const under = (p, cwd) => ['/tmp/', '/var/tmpx/'].some((d) => path.resolve(cwd, p).startsWith(d))
   clause('clause 3j — without the guard: the record fixtures name what their clauses rest on: homeTmp a ~/gate.out that lies under /tmp once home is /tmp/h, relResult a relative .out.result and logPair and launch a .log.result (and its .log stem) that lie under a tmp cwd, and durableResult only a durable x.result and a .jsonl',
-    R.homeTmp.includes('~/gate.out') && path.join('/tmp/h', 'gate.out').startsWith('/tmp/') &&
-    GR.relResult.includes('`.doctrine/records/gate-r1-npm-test.out.result`') && under('.doctrine/records/gate-r1-npm-test.out.result', '/tmp/w') &&
-    [GR.logPair, GR.launch].every((t) => t.includes('.doctrine/records/gate-r1-npm-test.log.result') && /\.doctrine\/records\/gate-r1-npm-test\.log[\s`]/.test(t)) && under('.doctrine/records/gate-r1-npm-test.log', '/tmp/w') &&
-    GR.durableResult.includes('/home/u/r/x.result') && !under('/home/u/r/x.result', '/') && !/\.(out|output|result)\b/.test(GR.durableResult.replace('/home/u/r/x.result', '')),
+    prove('R', 'homeTmp').includes('~/gate.out') && path.join('/tmp/h', 'gate.out').startsWith('/tmp/') &&
+    prove('GR', 'relResult').includes('`.doctrine/records/gate-r1-npm-test.out.result`') && under('.doctrine/records/gate-r1-npm-test.out.result', '/tmp/w') &&
+    [prove('GR', 'logPair'), prove('GR', 'launch')].every((t) => t.includes('.doctrine/records/gate-r1-npm-test.log.result') && /\.doctrine\/records\/gate-r1-npm-test\.log[\s`]/.test(t)) && under('.doctrine/records/gate-r1-npm-test.log', '/tmp/w') &&
+    prove('GR', 'durableResult').includes('/home/u/r/x.result') && !under('/home/u/r/x.result', '/') && !/\.(out|output|result)\b/.test(prove('GR', 'durableResult').replace('/home/u/r/x.result', '')),
     'a record fixture does not carry what its clause rests on')
   clause('clause 3k — without the guard: editTs carries a round line and differs from a record write only in its .ts path; rewrite carries rounds 1 and 2, every one of them already in old12, so only the fresh record makes them new',
-    isRound(F.editTs[1].new_string) && F.editTs[1].file_path.endsWith('.ts') &&
-    isRound(F.rewrite[1].content) && F.rewrite[1].content.split('\n').filter(isRound).every((l) => R.old12.split('\n').includes(l)) && !isRound('# r\n'),
+    isRound(prove('F', 'editTs')[1].new_string) && prove('F', 'editTs')[1].file_path.endsWith('.ts') &&
+    isRound(prove('F', 'rewrite')[1].content) && prove('F', 'rewrite')[1].content.split('\n').filter(isRound).every((l) => prove('R', 'old12').split('\n').includes(l)) && !isRound('# r\n'),
     'editTs or rewrite does not carry what its clause rests on')
   const unknownCd = /^(?:cd "\$D"|cd -|cd ~\/proj|cd|cd \/home\/u\/a && cd \/home\/u\/b|cd -P \/home\/u\/proj) && cat >> rec\.md <<EOF\n/
   clause('clause 3l — without the guard: each unknown fixture opens with the cd form it names (an expansion, cd -, cd ~/..., a bare cd, two cds, an option) and carries a round line and the relative gates/r.out, which lies under the tmp cwd /tmp/w',
-    H.unknown.length === 6 && H.unknown.every(([, i]) => unknownCd.test(i.command) && isRound(i.command.split('\n')[2]) && i.command.includes('- gate gates/r.out')) && under('gates/r.out', '/tmp/w') &&
-    isRound(H.orch[1].command.split('\n')[2]) && H.orch[1].command.startsWith('cd /home/u/proj && cat >> .doctrine/records/e1.md <<EOF\n') &&
-    H.kit('/x', 'g.out.result')[1].command.startsWith('cd /x\n'),
+    prove('H', 'unknown').length === 6 && prove('H', 'unknown').every(([, i]) => unknownCd.test(i.command) && isRound(i.command.split('\n')[2]) && i.command.includes('- gate gates/r.out')) && under('gates/r.out', '/tmp/w') &&
+    isRound(prove('H', 'orch')[1].command.split('\n')[2]) && prove('H', 'orch')[1].command.startsWith('cd /home/u/proj && cat >> .doctrine/records/e1.md <<EOF\n') &&
+    prove('H', 'kit')('/x', 'g.out.result')[1].command.startsWith('cd /x\n'),
     'an unknown, orch or kit fixture does not carry the form its clause names')
 
   // The shell's own reading, without the guard: each command run by real bash with a stub `node` first on PATH that
@@ -505,6 +521,7 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
     return { out: r.stdout, code: r.status }
   }
   const box = path.join(durable, 'bash'), recB = path.join(box, 'r.md')
+  fs.mkdirSync(path.join(box, '.doctrine', 'records'), { recursive: true })
   const moved = (f) => f[1].command.split(REC).join(recB)
   const ranRound = (n, f, cwd = box, rec = recB) => {
     fs.rmSync(rec, { force: true })
@@ -512,39 +529,40 @@ clause('clause 3i — without the guard: the kernel (realpath(3), not the lexica
     return { ran: r.out.includes(`RAN /p/hooks/dctr-token.mjs ${n} 0 0`), round: isRound(text), out: r.out }
   }
   const twins = [
-    ['hereString', ranRound(3, H.hereString[1].command, box, path.join(box, 'r.md')), true],
-    ['hereStringNoToken', ranRound(3, H.hereStringNoToken[1].command, box, path.join(box, 'r.md')), false],
-    ['arith', ranRound(3, H.arith[1].command, box, path.join(box, 'r.md')), true],
-    ['dateQuotedToken', ranRound(3, moved(F.dateQuotedToken)), true],
-    ['delimDashToken', ranRound(4, moved(G.delimDashToken)), true],
-    ['delimDoubleToken', ranRound(4, moved(G.delimDoubleToken)), true],
-    ['delimTabToken', ranRound(4, moved(G.delimTabToken)), true],
-    ['delimDash', ranRound(4, moved(G.delimDash)), false],
-    ['delimDouble', ranRound(4, moved(G.delimDouble)), false],
-    ['delimTab', ranRound(4, moved(G.delimTab)), false],
+    ['hereString', ranRound(3, prove('H', 'hereString')[1].command, box, path.join(box, 'r.md')), true],
+    ['hereStringNoToken', ranRound(3, prove('H', 'hereStringNoToken')[1].command, box, path.join(box, 'r.md')), false],
+    ['arith', ranRound(3, prove('H', 'arith')[1].command, box, path.join(box, 'r.md')), true],
+    ['dateQuotedToken', ranRound(3, moved(prove('F', 'dateQuotedToken'))), true],
+    ['delimDashToken', ranRound(4, moved(prove('G', 'delimDashToken'))), true],
+    ['delimDoubleToken', ranRound(4, moved(prove('G', 'delimDoubleToken'))), true],
+    ['delimTabToken', ranRound(4, moved(prove('G', 'delimTabToken'))), true],
+    ['delimDash', ranRound(4, moved(prove('G', 'delimDash'))), false],
+    ['delimDouble', ranRound(4, moved(prove('G', 'delimDouble'))), false],
+    ['delimTab', ranRound(4, moved(prove('G', 'delimTab'))), false],
+    // RT6-1 and MR6-B1(d): the printf form and the T=$(date) heredoc form, the publish on the `<<EOF &&` line or after
+    // EOF, each beside its refused twin.
+    ['printfToken', ranRound(1, prove('G', 'printfToken')[1].command, box, path.join(box, 'rec.md')), true],
+    ['printfNoToken', ranRound(1, prove('G', 'printfNoToken')[1].command, box, path.join(box, 'rec.md')), false],
+    ['heredocDollarTToken', ranRound(1, prove('G', 'heredocDollarTToken')[1].command, box, path.join(box, RT)), true],
+    ['heredocDollarTAfter', ranRound(1, prove('G', 'heredocDollarTAfter')[1].command, box, path.join(box, RT)), true],
+    ['heredocDollarT', ranRound(1, prove('G', 'heredocDollarT')[1].command, box, path.join(box, RT)), false],
   ]
   const projX = path.join(box, 'proj'), kitX = path.join(box, 'fixture'), away = path.join(box, 'away')
   fs.mkdirSync(path.join(projX, '.doctrine', 'records'), { recursive: true }); fs.mkdirSync(path.join(kitX, '.doctrine', 'records'), { recursive: true })
-  const orchRun = ranRound(3, H.orch[1].command.replace('/home/u/proj', projX), away, path.join(projX, '.doctrine', 'records', 'e1.md'))
-  const kitRun = ranRound(1, H.kit(kitX, 'g.out.result')[1].command, away, path.join(kitX, '.doctrine', 'records', 'truncate.md'))
+  const orchRun = ranRound(3, prove('H', 'orch')[1].command.replace('/home/u/proj', projX), away, path.join(projX, '.doctrine', 'records', 'e1.md'))
+  const kitRun = ranRound(1, prove('H', 'kit')(kitX, 'g.out.result')[1].command, away, path.join(kitX, '.doctrine', 'records', 'truncate.md'))
   const wrong = [...twins, ['orch', orchRun, true], ['kit', kitRun, true]].filter(([, r, ran]) => r.ran !== ran || !r.round)
-  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab) writes it and runs none, and orch and kit, run from another cwd, write the record under their cd target',
+  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, and orch and kit, run from another cwd, write the record under their cd target',
     wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
 }
 {
-  // The meta-check: every fixture key defined before clause 3 (a two-space-indented `name:`) is named by a clause-3
-  // line, so a fixture added without its proof turns the suite red.
-  const MARK = '// ---------------------------------------------------------------- clause 3: the fixtures carry their defects'
-  const unproved = (src) => {
-    const at = src.indexOf(MARK), head = src.slice(0, at), tail = src.slice(at)
-    return [...new Set([...head.matchAll(/^ {2}([a-zA-Z]+):/gm)].map((m) => m[1]))].sort().filter((k) => !new RegExp(`\\b${k}\\b`).test(tail))
-  }
-  const self = unproved(fs.readFileSync(import.meta.filename, 'utf8'))
-  clause('clause 3n — every fixture key defined before clause 3 is named by a clause-3 line', self.length === 0, `unproved: ${self.join(' ')}`)
-  const synthetic = `const F = {\n  ghost: 1,\n  seen: 2,\n}\n${MARK}\nclause('seen', F.seen)\n`
-  clause('clause 3o — the meta-check trips: a synthetic source whose key ghost no clause-3 line names is reported, and only ghost; the synthetic really defines ghost before the marker and never names it after',
-    JSON.stringify(unproved(synthetic)) === '["ghost"]' && synthetic.indexOf('  ghost:') < synthetic.indexOf(MARK) && !synthetic.slice(synthetic.indexOf(MARK)).includes('ghost'),
-    JSON.stringify(unproved(synthetic)))
+  // The meta-check, read at run time: every key of every table in TABLES that no clause-3 proof obtained.
+  const left = unproved(TABLES, proved)
+  clause('clause 3n — every fixture in every table of TABLES was obtained by a clause-3 proof through prove()', left.length === 0, `unproved: ${left.join(' ')}`)
+  const S = { seen: 1, tmpOut2: 2 }, done = new Set(['S.seen'])
+  clause('clause 3o — the meta-check trips: over a synthetic table whose key tmpOut2 no proof obtained it names S.tmpOut2 and only that; the synthetic really holds tmpOut2 unrecorded',
+    JSON.stringify(unproved({ S }, done)) === '["S.tmpOut2"]' && Object.hasOwn(S, 'tmpOut2') && !done.has('S.tmpOut2') && done.has('S.seen'),
+    JSON.stringify(unproved({ S }, done)))
 }
 fs.rmSync(tmp, { recursive: true, force: true })
 fs.rmSync(durable, { recursive: true, force: true })
