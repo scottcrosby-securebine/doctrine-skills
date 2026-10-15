@@ -2514,7 +2514,10 @@ export function runsToken(lex) {
  * A call writes a round line when it is Bash, or Write or Edit on a path ending `.md`, and a line it writes parses as a
  * round line (dctr-record.mjs; a Bash command is read through lexShell, every payload and code segment once the
  * shell's expansions are replaced) that the record on disk does not already carry: a Write that rewrites the whole
- * record, or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. Where it writes
+ * record, or an Edit whose new_string repeats its context, re-writes old rounds and is not a new round. That filter
+ * reads payloads (heredoc bodies, quoted strings); a round line echoed into the record also reaches the code-segment
+ * reading with its redirect attached, so re-echoing a round the record already carries counts as a new one (refused
+ * once; no capture writes that form). Where it writes
  * one it is refused when the call does not run dctr-token.mjs (a Write or Edit never can), and for each gate-shaped
  * path (gatePaths) in the record or the incoming text that resolves under a tmp dir: one in the incoming text is told
  * to use a durable path, one only in the record to append a correction, never an edit. `round` is the highest new
