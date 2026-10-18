@@ -525,7 +525,7 @@ export function codexJobMatch(records, cwd, notBefore) {
   return mine.reduce((a, b) => (Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a))
 }
 
-/** The role a long native check is registered under. It shares the seat markers, the cap and the
+/** The role a gate the launcher runs is registered under. It shares the seat markers, the cap and the
  *  lock, so a wave arriving while a gate runs stacks beside it instead of founding a second column. */
 export const GATE_ROLE = 'gate'
 

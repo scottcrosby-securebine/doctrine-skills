@@ -1,4 +1,4 @@
-// Runs a long native check where the user can watch it (issue #17's gap, found 2026-09-05).
+// Runs a native check where the user can watch it (issue #17's gap, found 2026-09-05).
 //
 //   node hooks/dctr-gate.mjs <label> <out-file> -- <command...>
 //
@@ -7,8 +7,8 @@
 // quoting. The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
 // `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
-// Run by the doctrine orchestrator at step 3 for a check that will outrun the Bash tool's own
-// ceiling — a full mutation gate is the known case. Inside herdr the check runs in a pane placed
+// Run by the doctrine orchestrator at step 3 for every gate, however short; a check that would outrun
+// the Bash tool's own ceiling (a full mutation gate) is why it exists. Inside herdr the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same two
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
