@@ -2294,7 +2294,9 @@ const decodeEscapes = (t) => t.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
  *   segments   the shell code split on ; & | newlines and subshell parens, each an array of words with quotes and
  *              backslashes removed and `#` comments dropped; a `$(...)` or backtick run stays whole inside its word,
  *   payloads   every heredoc body (`<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`, WORD any run such as END-RECORD) and
- *              every quoted string's text, with `\n` and `\t` decoded as printf and echo -e write them,
+ *              every quoted string's text, with `\n` and `\t` decoded as printf and echo -e write them, and in a heredoc
+ *              body `\\`, `\$` and `` \` `` unescaped first, as the shell does where the delimiter is unquoted (a quoted
+ *              one writes the backslash, and the path beside it is read all the same),
  *   redirects  `{ path, seg }`, `seg` the index of the segment it sits in: each `>`, `>>` or `>|` target with no fd
  *              number (so not `1>>` or `&>>`), pushed as it is read, then, when a segment whose command is `tee`
  *              ends, every later word of it not starting with `-`, which takes in a redirect operator and its target
@@ -2363,7 +2365,7 @@ export function lexShell(command) {
           if ((h.dash ? line.replace(/^\t+/, '') : line) === h.delim) break
           body.push(line)
         }
-        payloads.push(decodeEscapes(body.join('\n')))
+        payloads.push(decodeEscapes(body.join('\n').replace(/\\([\\$`])/g, '$1')))
       }
       pending = []
       continue

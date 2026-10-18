@@ -171,6 +171,9 @@ const G = {
   printfTmpGate: bash(`printf -- '- gate /tmp/x/r2.out\\n${LINE(2)}\\n' >> rec.md && ${TOKEN(2)}`),
   printfHomeGate: bash(`printf -- '- gate /home/u/r/r2.out\\n${LINE(2)}\\n' >> rec.md && ${TOKEN(2)}`),
   echoTabTmpGate: bash(`echo -e "- gate\\t/tmp/x/r2.out\\n${LINE(2)}" >> rec.md && ${TOKEN(2)}`),
+  // MR12-B1: a gate path in escaped backticks inside an unquoted heredoc, the form most captured round writes take.
+  heredocEscTick: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\nGate: \\\`/tmp/x/r3.out\\\`, exit 0.\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\nnode "/p/hooks/dctr-token.mjs" 1 0 0`),
+  heredocEscTickHome: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\nGate: \\\`/home/u/r/r3.out\\\`, exit 0.\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\nnode "/p/hooks/dctr-token.mjs" 1 0 0`),
   delimDash: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\n${TOKEN(4)}\nEND-RECORD`),
   delimDashToken: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\nEND-RECORD\n${TOKEN(4)}`),
   delimDouble: bash(`cat >> ${REC} <<"EOF"\n${LINE(4)}\n${TOKEN(4)}\nEOF`),
@@ -189,6 +192,12 @@ const GR = {
   clause('clause 1o — a gate path glued to a printf \\n or an echo -e \\t is read once the escape is decoded (F-A): /tmp/x/r2.out refused, /home/u/r/r2.out allowed',
     ds.every((d) => refuses(d, '/tmp/x/r2.out lies under /tmp', 'record the gate transcript at a durable path') && d.round === 2 && d.reasons.length === 1) && allows(home) && home.round === 2,
     [...ds, home].map(show).join(' '))
+}
+{
+  const d = decide(G.heredocEscTick), home = decide(G.heredocEscTickHome)
+  clause('clause 1w — a gate path in escaped backticks inside an unquoted heredoc is read as the shell writes it (MR12-B1): /tmp/x/r3.out refused, /home/u/r/r3.out allowed',
+    refuses(d, '/tmp/x/r3.out lies under /tmp', 'record the gate transcript at a durable path') && d.round === 1 && d.reasons.length === 1 && allows(home) && home.round === 1,
+    [d, home].map(show).join(' '))
 }
 {
   const d = decide(G.heredocDollarT), t = decide(G.heredocDollarTToken), a = decide(G.heredocDollarTAfter), p = decide(G.printfNoToken), pt = decide(G.printfToken)
@@ -641,9 +650,12 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
   // F-A under the shell: printf and echo -e decode the escape, so the gate path lands on a line of its own.
   const decodedLine = (f, want) => { fs.rmSync(path.join(box, 'rec.md'), { force: true }); sh(f[1].command, box); return fs.readFileSync(path.join(box, 'rec.md'), 'utf8').split('\n').includes(want) }
   const glued = [['printfTmpGate', '- gate /tmp/x/r2.out'], ['echoTabTmpGate', '- gate\t/tmp/x/r2.out']].filter(([k, want]) => !decodedLine(prove('G', k), want))
+  // MR12-B1 under the shell: the escaped backticks reach the record unescaped, and the command really carries \`.
+  const unescaped = (f, want) => { const p = path.join(box, RT); fs.rmSync(p, { force: true }); sh(f[1].command, box); const r = fs.readFileSync(p, 'utf8'); return f[1].command.includes('\\`') && r.includes(want) && !r.includes('\\`') && r.split('\n').some(isRound) }
+  const escaped = [['heredocEscTick', '`/tmp/x/r3.out`'], ['heredocEscTickHome', '`/home/u/r/r3.out`']].filter(([k, want]) => !unescaped(prove('G', k), want))
   const wrong = [...twins, ['orch', orchRun, true], ['kit', kitRun, true]].filter(([, r, ran]) => r.ran !== ran || !r.round)
-    .concat(glued.map(([k]) => [k, { decoded: false }]))
-  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, and printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own',
+    .concat(glued.map(([k]) => [k, { decoded: false }]), escaped.map(([k]) => [k, { unescaped: false }]))
+  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own, and heredocEscTick and heredocEscTickHome carry \\` and write their gate path in plain backticks beside a round line',
     wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
 }
 {
