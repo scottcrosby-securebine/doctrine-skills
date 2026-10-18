@@ -2278,12 +2278,13 @@ export function privateFindings(text) {
 const ISO_PLACEHOLDER = '2000-01-01T00:00:00Z'
 
 /** What a text reads as once the shell has expanded it: every `$(...)` replaced innermost first until none is
- *  left (so a quoted date format inside one, or `$(basename "$(pwd)")`, goes whole), then every backtick, `${...}` and
- *  `$VAR`, each by an ISO time, which reads as a round line's time and as its revision: the hub tells an orchestrator
- *  to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape. */
+ *  left (so a quoted date format inside one, or `$(basename "$(pwd)")`, goes whole), then every backtick, `${...}`,
+ *  `$VAR` and printf `%s`, each by an ISO time, which reads as a round line's time and as its revision: the hub tells
+ *  an orchestrator to read the time from the host clock as it writes, so `$(date -u ...)` is the usual shape, and a
+ *  seat has written `printf -- '- round: 1 closed %s at <sha> ...' "$T"`. */
 function expandShell(t) {
   for (let prev; prev !== t;) { prev = t; t = t.replace(/\$\([^()]*\)/g, ISO_PLACEHOLDER) }
-  return t.replace(/`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*/g, ISO_PLACEHOLDER)
+  return t.replace(/`[^`]*`|\$\{[^}]*\}|\$[A-Za-z_]\w*|%s/g, ISO_PLACEHOLDER)
 }
 
 /** `\n` and `\t` as printf and echo -e write them. */
@@ -2525,7 +2526,8 @@ export function runsToken(lex) {
  * to use a durable path, one only in the record to append a correction, never an edit. `round` is the highest new
  * round's n.
  * ponytail: what the shell decides at run time is not read. A round line the shell assembles from pieces (`printf '%s
- * closed %s' round: ...`), an expansion inside the round, blockers or alarm number, and a write inside `$(...)` or
+ * closed %s' round: ...`; a `%s` standing for its time or revision is read), an expansion inside the round, blockers or
+ * alarm number, and a write inside `$(...)` or
  * `bash -c '...'` are not seen as a round write; `false && node .../dctr-token.mjs`, `node --version
  * .../dctr-token.mjs` and a quoted checkout path holding whitespace count as a publish, and one inside `$(...)` does
  * not. A `..` in a gate path as written is collapsed before its links are followed (path.resolve); a cd inside a

@@ -174,6 +174,10 @@ const G = {
   // MR12-B1: a gate path in escaped backticks inside an unquoted heredoc, the form most captured round writes take.
   heredocEscTick: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\nGate: \\\`/tmp/x/r3.out\\\`, exit 0.\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\nnode "/p/hooks/dctr-token.mjs" 1 0 0`),
   heredocEscTickHome: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && cat >> ${RT} <<EOF\nGate: \\\`/home/u/r/r3.out\\\`, exit 0.\n- round: 1 closed $T at abc1234 blockers 0 alarm 0\nEOF\nnode "/p/hooks/dctr-token.mjs" 1 0 0`),
+  // KR13-B1: a round line printf assembles from a format string, its time (and revision) a %s, as a kit seat wrote it.
+  printfFmtNoToken: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && printf -- '- Publish failed: denied.\\n- round: 1 closed %s at abc1234 blockers 0 alarm 0\\n' "$T" >> ${RT}`),
+  printfFmtToken: bash(`T=$(date -u +%Y-%m-%dT%H:%M:%SZ) && printf -- '- round: 1 closed %s at abc1234 blockers 0 alarm 0\\n' "$T" >> ${RT} && node "/p/hooks/dctr-token.mjs" 1 0 0`),
+  printfFmtRev: bash(`REV=abc1234 && printf -- '- round: 1 closed %s at %s blockers 0 alarm 0\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" >> ${RT}`),
   delimDash: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\n${TOKEN(4)}\nEND-RECORD`),
   delimDashToken: bash(`cat >> ${REC} <<'END-RECORD'\n${LINE(4)}\nEND-RECORD\n${TOKEN(4)}`),
   delimDouble: bash(`cat >> ${REC} <<"EOF"\n${LINE(4)}\n${TOKEN(4)}\nEOF`),
@@ -198,6 +202,12 @@ const GR = {
   clause('clause 1w — a gate path in escaped backticks inside an unquoted heredoc is read as the shell writes it (MR12-B1): /tmp/x/r3.out refused, /home/u/r/r3.out allowed',
     refuses(d, '/tmp/x/r3.out lies under /tmp', 'record the gate transcript at a durable path') && d.round === 1 && d.reasons.length === 1 && allows(home) && home.round === 1,
     [d, home].map(show).join(' '))
+}
+{
+  const d = decide(G.printfFmtNoToken), t = decide(G.printfFmtToken), r = decide(G.printfFmtRev)
+  clause('clause 1x — a round line printf assembles from a format string with %s for its time, or its time and revision, is a round write (KR13-B1): refused without the token, allowed with it',
+    refuses(d, 'does not run dctr-token.mjs') && d.round === 1 && d.target === `/home/u/r/${RT}` && allows(t) && t.round === 1 && refuses(r, 'does not run dctr-token.mjs') && r.round === 1,
+    [d, t, r].map(show).join(' '))
 }
 {
   const d = decide(G.heredocDollarT), t = decide(G.heredocDollarTToken), a = decide(G.heredocDollarTAfter), p = decide(G.printfNoToken), pt = decide(G.printfToken)
@@ -638,6 +648,9 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
     ['heredocDollarTToken', ranRound(1, prove('G', 'heredocDollarTToken')[1].command, box, path.join(box, RT)), true],
     ['heredocDollarTAfter', ranRound(1, prove('G', 'heredocDollarTAfter')[1].command, box, path.join(box, RT)), true],
     ['heredocDollarT', ranRound(1, prove('G', 'heredocDollarT')[1].command, box, path.join(box, RT)), false],
+    ['printfFmtToken', ranRound(1, prove('G', 'printfFmtToken')[1].command, box, path.join(box, RT)), true],
+    ['printfFmtNoToken', ranRound(1, prove('G', 'printfFmtNoToken')[1].command, box, path.join(box, RT)), false],
+    ['printfFmtRev', ranRound(1, prove('G', 'printfFmtRev')[1].command, box, path.join(box, RT)), false],
     ['inTextGate', ranRound(3, moved(prove('F', 'inTextGate'))), true],
     // C's two builders, as every clause-2 call uses them.
     ['C.appendToken', ranRound(3, prove('C', 'appendToken')(recB, 3)), true],
@@ -655,7 +668,7 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
   const escaped = [['heredocEscTick', '`/tmp/x/r3.out`'], ['heredocEscTickHome', '`/home/u/r/r3.out`']].filter(([k, want]) => !unescaped(prove('G', k), want))
   const wrong = [...twins, ['orch', orchRun, true], ['kit', kitRun, true]].filter(([, r, ran]) => r.ran !== ran || !r.round)
     .concat(glued.map(([k]) => [k, { decoded: false }]), escaped.map(([k]) => [k, { unescaped: false }]))
-  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own, and heredocEscTick and heredocEscTickHome carry \\` and write their gate path in plain backticks beside a round line',
+  clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, printfFmtToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, printfFmtNoToken, printfFmtRev, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own, and heredocEscTick and heredocEscTickHome carry \\` and write their gate path in plain backticks beside a round line',
     wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
 }
 {
