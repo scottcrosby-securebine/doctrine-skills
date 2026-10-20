@@ -43,9 +43,7 @@ This procedure applies to every phase in a repo that carries `docs/PROJECT.md`, 
 
 Run `node <plugin-root>/hooks/dctr-project.mjs check` as your first action in such a phase, and again after every write that changes a state, a ruling, a return, the roster, a membership or the pointer. Run it before committing that write. Exit 0 is clean. Exit 1 lists findings: fix them before any further state change. Exit 2 means the project file is absent or unreadable, or the arguments were malformed. This is the stated way the check runs in a target repo. Add no CI step to an adopted repo. A hand edit made between sessions is caught at the next session's first check, so far as the file as it stands shows it: check keeps no history of any line, so an edit to a Coverage or Combined check line is not among them, and that gap is ruled and known.
 
-`node <plugin-root>/hooks/dctr-project.mjs status` is read-only and prints the project's progress view. It prints `unknown` for any source it cannot read. Read an `unknown` as "could not look", never as "nothing there". A return it labels obsolete is history, never current evidence.
-
-Name every gate transcript written under `Records:` with the extension `.out`, so its `.out.result` sibling is found. `status` finds gates only by that convention.
+`node <plugin-root>/hooks/dctr-project.mjs status` is read-only and prints the project's progress view. It prints `unknown` for any source it cannot read. Read an `unknown` as "could not look", never as "nothing there". A return it labels obsolete is history, never current evidence. Its open records are only those it searches, which its label names: each record directly under `Records:`, each one directory down that carries a `wrapper:` line, and each record an epic's Members line names. A record anywhere else is not among them, so its absence there says nothing.
 
 ### States and who moves them
 

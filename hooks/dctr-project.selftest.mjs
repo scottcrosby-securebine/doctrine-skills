@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, readRecords, trackedRoot, PROJECT_PATH } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, readRecords, memberRecords, trackedRoot, PROJECT_PATH, RECORDS_LABEL } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -735,7 +735,7 @@ for (const to of ['ID', 'Issue', 'constructor']) {
 {
   const model = build(GOOD)
   const readers = {
-    records: () => ({ open: [{ name: 'docs/records/p3.md', line: 'state: Open' }], gates: ['docs/records/gate1.out: pending'] }),
+    records: () => ({ open: [{ name: 'docs/records/p3.md', line: 'state: Open' }], unknown: ['docs/records/gone.md'] }),
     seats: () => ['wA9:p56 working general-purpose · 1'],
     codex: () => ['job-7 running'],
   }
@@ -747,8 +747,9 @@ for (const to of ['ID', 'Issue', 'constructor']) {
   clause('T-status 2 — the roster with each State, then the current epic, in spec order',
     lines.includes('  E3 Done') && at('current epic: E3') > at('  E3 Done') && at('  E3 Done') > at('  ES3:'),
     lines.join('\n'))
-  clause('T-status 3 — open records and gates from the reader, after the current epic',
-    at('docs/records/p3.md: state: Open') > at('current epic') && at('docs/records/gate1.out') > at('docs/records/p3.md'),
+  clause('T-status 3 — open records from the reader, under a label naming what was searched, after the current epic, a Members record it could not read as unknown, and no gates block',
+    at('docs/records/p3.md: state: Open') > at('current epic') && lines[at('docs/records/p3.md') - 1] === `${RECORDS_LABEL}:` &&
+    lines.includes('  docs/records/gone.md: unknown') && !lines.some((l) => /^gates\b|\.out\b/.test(l)),
     lines.join('\n'))
   clause('T-status 4 — a return that does not count is labelled obsolete with its baseline and revision (ER9), and a counting one is not',
     lines.includes('  docs/epics/E1.md Y0: obsolete (baseline R1, revision 000aaa)') && !lines.some((l) => l.includes(' Y1:')) && !lines.some((l) => l.includes(' X1:')),
@@ -763,12 +764,13 @@ for (const to of ['ID', 'Issue', 'constructor']) {
   const lines2 = (m, r) => { try { return statusLines(m, r) } catch (e) { return [`statusLines threw: ${e.message}`] } }
   const down = lines2(model, failing)
   clause('T-status 6 — every reader that throws or returns null prints unknown, never a guess',
-    down.includes('open records: unknown') && down.includes('gates: unknown') && down.includes('live seats: unknown') && down.includes('codex jobs: unknown') &&
+    down.includes('open records: unknown') && down.includes('live seats: unknown') && down.includes('codex jobs: unknown') &&
     !down.some((l) => /\(none\)/.test(l) && /seats|codex|records|gates/.test(l)),
     down.join('\n'))
-  clause('T-status 6b — and an empty answer is not unknown: a reader that returns nothing prints none',
-    lines2(model, { records: () => ({ open: [], gates: [] }), seats: () => [], codex: () => [] }).filter((l) => l === '  (none)').length === 4,
-    lines2(model, { records: () => ({ open: [], gates: [] }), seats: () => [], codex: () => [] }).join('\n'))
+  const nothing = lines2(model, { records: () => ({ open: [], unknown: [] }), seats: () => [], codex: () => [] })
+  clause('T-status 6b — and an empty answer is not unknown: empty seats and jobs print none, and empty open records print the searched-paths row, never a bare none',
+    nothing.filter((l) => l === '  (none)').length === 2 && nothing[nothing.indexOf(`${RECORDS_LABEL}:`) + 1] === '  none found in the searched paths',
+    nothing.join('\n'))
 
   const missing = { ...GOOD }; delete missing['docs/epics/E2.md']
   const m2 = lines2(build(missing), failing)
@@ -839,10 +841,19 @@ clause('CLI check — made no gh, curl or herdr call', !fs.existsSync(trip('gh')
 
 const rStatus = cli('status', good)
 const st = rStatus.stdout.split('\n')
-clause('CLI status — exits 0 on the good tree and reads records: last state line Open listed, a Shipped one not, a .out with no .result pending, one with a .result by its first line',
+clause('CLI status — exits 0 on the good tree and reads records: last state line Open listed, a Shipped one not, and the .out files beside them print nothing',
   rStatus.status === 0 && st.includes('  docs/records/p3.md: state: Open') && !st.some((l) => l.includes('p1.md')) &&
-  st.includes('  docs/records/gate1.out: pending') && st.includes('  docs/records/gate2.out: exit=0'),
+  !st.some((l) => l.includes('gate1.out') || l.includes('gate2.out') || /^gates\b/.test(l)),
   `status ${rStatus.status}: ${rStatus.stdout}${rStatus.stderr}`)
+const deepM = path.join(tmp, 'deep-member')
+writeTree(deepM, mutate([['docs/epics/E1.md', '- phase p1: docs/records/p1.md', '- phase p1: docs/records/a/b/p1.md']]))
+writeTree(deepM, { 'docs/records/a/b/p1.md': '# Phase p1 deep\nstate: Open\n', 'docs/records/a/b/stray.md': '# stray\nwrapper: doctrine-code\nstate: Open\n' })
+const stDeep = cli('status', deepM).stdout.split('\n')
+clause('CLI status — a record an epic Members line names two levels down is listed by the CLI, and an unnamed wrapped record beside it is not',
+  stDeep.includes('  Phase p1 deep: state: Open') && !stDeep.some((l) => l.includes('stray')), stDeep.join('\n'))
+clause('CLI status — [3: that record really sits two levels below Records and only the Members line names it]',
+  /^- phase p1: docs\/records\/a\/b\/p1\.md$/m.test(fs.readFileSync(path.join(deepM, 'docs/epics/E1.md'), 'utf8')) &&
+  fs.existsSync(path.join(deepM, 'docs/records/a/b/p1.md')) && !/a\/b\/stray/.test(fs.readFileSync(path.join(deepM, 'docs/epics/E1.md'), 'utf8')), 'fixture')
 clause('CLI status — HERDR_ENV unset prints live seats: unknown, and a missing codex state dir prints codex jobs: unknown',
   st.includes('live seats: unknown') && st.includes('codex jobs: unknown'), rStatus.stdout)
 clause('CLI status — [3: the environment really lacks both sources]',
@@ -884,7 +895,7 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('codex [1: through status, an unreadable jobs directory prints codex jobs: unknown]', sl.includes('codex jobs: unknown'), sl.join(' / '))
 }
 
-// ---------------------------------------------------------------- readRecords: headings, both state-line forms, every gate
+// ---------------------------------------------------------------- readRecords: headings, both state-line forms, the depth bound, Members records
 {
   const root = path.join(tmp, 'records'); const rel = 'recs'
   writeTree(root, {
@@ -894,28 +905,55 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     'recs/bare.md': 'state: Open\n',
     'recs/blocked.md': '# Phase blocked\n\nState: Open\nState: Blocked\n',
     'recs/boldkey.md': '# Phase boldkey\n\n**State:** Blocked. Q1 is unanswered.\n',
-    'recs/g-empty.out': 'z', 'recs/g-empty.out.result': '\nexit=4\n',
-    'recs/g-pending.out': 'x', 'recs/g-red.out': 'y', 'recs/g-red.out.result': 'exit=3\ncapture=incomplete\n',
+    'recs/g-pending.out': 'x', 'recs/g-red.out': 'y',
+    'recs/sub/wrapped.md': '# Phase wrapped\nwrapper: doctrine-code\n- State: Open\n',
+    'recs/sub/unwrapped.md': '# Copy unwrapped\n- State: Open\n',
+    'recs/sub/wrapped-done.md': '# Phase wrapped done\nwrapper: doctrine-code\n- State: Open\n- State: Exited\n',
+    'recs/sub/deep/wrapped.md': '# Deep wrapped\nwrapper: doctrine-code\n- State: Open\n',
+    'recs/sub/deep/member.md': '# Phase member deep\n- State: Blocked. Q2 open\n',
   })
-  const rec = readRecords(root, rel)
-  const open = rec.open.map((r) => `${r.name}: ${r.line}`)
+  fs.mkdirSync(path.join(root, 'recs/g-red.out.result'))
+  fs.mkdirSync(path.join(root, 'recs/sub/locked')); fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o000)
+  fs.mkdirSync(path.join(root, 'recs/locked1')); fs.chmodSync(path.join(root, 'recs/locked1'), 0o000)
+  fs.writeFileSync(path.join(root, 'recs/sealed.md'), '# Phase sealed\nState: Open\n'); fs.chmodSync(path.join(root, 'recs/sealed.md'), 0o000)
+  const members = [path.join(rel, 'sub/deep/member.md'), path.join(rel, 'beta.md'), path.join(rel, 'sub/deep/missing.md')]
+  let rec = null, err = null
+  try { rec = readRecords(root, rel, members) } catch (e) { err = e }
+  const open = rec ? rec.open.map((r) => `${r.name}: ${r.line}`) : []
   clause('records [1: an open record is named by its first heading, the bold list form of a state line is read, and a dash with no space is not a state line]',
-    open.includes('Phase alpha: State: Open') && open.includes('Phase beta: - **State: Open.** waiting on a ruling'), JSON.stringify(open))
+    open.includes('Phase alpha: State: Open') && open.includes('Phase beta: - **State: Open.** waiting on a ruling'), err?.message ?? JSON.stringify(open))
   clause('records [2: a record whose LAST state line is Exited is not open, in the bold form too, one ending Blocked is, and one with no heading keeps its path]',
     !open.some((l) => l.includes('Phase done')) && open.includes('Phase blocked: State: Blocked') && open.includes(`${path.join(rel, 'bare.md')}: state: Open`), JSON.stringify(open))
   clause('records [2: a state line with only its key in bold is read as the record parser reads it, so a Blocked record in that form is open]',
     open.includes('Phase boldkey: **State:** Blocked. Q1 is unanswered.'), JSON.stringify(open))
-  clause('records [1: every gate prints, pending or with the first line of its result file, an empty first line included]',
-    JSON.stringify(rec.gates) === JSON.stringify([`${path.join(rel, 'g-empty.out')}: `, `${path.join(rel, 'g-pending.out')}: pending`, `${path.join(rel, 'g-red.out')}: exit=3`]), JSON.stringify(rec.gates))
-  clause('records [3: the fixture carries both state-line forms, a closed record and both kinds of gate on disk]',
+  clause('records [1: one directory down, a record is open only with a wrapper: line, so a wrapped one is listed and an unwrapped copy is not]',
+    open.includes('Phase wrapped: - State: Open') && !open.some((l) => l.includes('Copy unwrapped')), JSON.stringify(open))
+  clause('records [2: one directory down, a wrapped record whose last state is Exited is not open]',
+    !open.some((l) => l.includes('Phase wrapped done')), JSON.stringify(open))
+  clause('records [1: two directories down nothing is read, wrapper line or not, unless a Members line names it]',
+    !open.some((l) => l.includes('Deep wrapped')) && open.includes('Phase member deep: - State: Blocked. Q2 open'), JSON.stringify(open))
+  clause('records [1: a Members record that is also found by the walk is listed once, and one that cannot be read is unknown, never dropped]',
+    open.filter((l) => l.startsWith('Phase beta')).length === 1 && rec?.unknown.includes(path.join(rel, 'sub/deep/missing.md')), JSON.stringify(rec))
+  clause('records [1: a depth-0 record it cannot read and a depth-1 directory it cannot list are unknown, never skipped as nothing there]',
+    rec?.unknown.includes(path.join(rel, 'sealed.md')) && rec?.unknown.includes(path.join(rel, 'locked1', path.sep)) && rec.unknown.length === 3, JSON.stringify(rec?.unknown))
+  clause('records [1: the walk never opens a directory below depth 1 and never reads a gate, so an unreadable directory two down and a result path that is a directory are not errors]',
+    err === null && rec && !('gates' in rec), err?.message ?? JSON.stringify(Object.keys(rec)))
+  fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o755)
+  const sealedUnreadable = (() => { try { fs.readFileSync(path.join(root, 'recs/sealed.md')); return process.getuid?.() === 0 } catch { return true } })()
+  const locked1Unreadable = (() => { try { fs.readdirSync(path.join(root, 'recs/locked1')); return process.getuid?.() === 0 } catch { return true } })()
+  fs.chmodSync(path.join(root, 'recs/locked1'), 0o755); fs.chmodSync(path.join(root, 'recs/sealed.md'), 0o644)
+  clause('records [3: the sealed record and the depth-1 directory really could not be read when the reader ran]', sealedUnreadable && locked1Unreadable, 'fixture')
+  clause('records [3: the fixture carries both state-line forms, a closed record, the depth-1 and depth-2 cases, a locked directory two down, and a result path that is a directory]',
     /^- \*\*State: Open\.\*\*/m.test(fs.readFileSync(path.join(root, 'recs/beta.md'), 'utf8')) && /^ +# /.test(fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8')) && fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8').trimEnd().endsWith('-State: Exited') && fs.readFileSync(path.join(root, 'recs/done.md'), 'utf8').trimEnd().endsWith('certified') &&
-    !fs.existsSync(path.join(root, 'recs/g-pending.out.result')) && fs.readFileSync(path.join(root, 'recs/g-red.out.result'), 'utf8').startsWith('exit=3'), 'fixture')
-  fs.rmSync(path.join(root, 'recs/g-red.out.result')); fs.mkdirSync(path.join(root, 'recs/g-red.out.result'))
-  let threw = false; try { readRecords(root, rel) } catch { threw = true }
-  clause('records [1: a result file that cannot be read throws, printed unknown, never pending]', threw, 'readRecords answered')
-  const sl = statusLines(build(GOOD), { records: () => rec, seats: () => null, codex: () => null })
-  clause('records [1: through status, the block is labelled gates and an open phase prints by its heading]',
-    sl.includes('gates:') && sl.includes(`  ${path.join(rel, 'g-red.out')}: exit=3`) && sl.includes('  Phase alpha: State: Open'), sl.join(' / '))
+    /^wrapper: /m.test(fs.readFileSync(path.join(root, 'recs/sub/wrapped.md'), 'utf8')) && !/wrapper:/.test(fs.readFileSync(path.join(root, 'recs/sub/unwrapped.md'), 'utf8')) &&
+    /^wrapper: /m.test(fs.readFileSync(path.join(root, 'recs/sub/deep/wrapped.md'), 'utf8')) && !/wrapper:/.test(fs.readFileSync(path.join(root, 'recs/sub/deep/member.md'), 'utf8')) &&
+    !fs.existsSync(path.join(root, 'recs/sub/deep/missing.md')) && fs.statSync(path.join(root, 'recs/g-red.out.result')).isDirectory() &&
+    (() => { fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o000); try { fs.readdirSync(path.join(root, 'recs/sub/locked')); return process.getuid?.() === 0 } catch { return true } finally { fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o755) } })(), 'fixture')
+  let threw = false; try { readRecords(root, 'nope') } catch { threw = true }
+  clause('records [1: a Records directory that cannot be read throws, printed unknown]', threw, 'readRecords answered')
+  const model = build(mutate([['docs/epics/E1.md', '- phase p1: docs/records/p1.md', '- phase p1: docs/records/x/y/p1.md\n- phase p9: docs/records/p1.md']]))
+  clause('records [1: memberRecords returns every record path an epic Members line names, once each, and none for a phase with no path]',
+    JSON.stringify(memberRecords(model).sort()) === JSON.stringify(['docs/records/p1.md', 'docs/records/p3.md', 'docs/records/x/y/p1.md']), JSON.stringify(memberRecords(model)))
 }
 
 // ---------------------------------------------------------------- Tracks: seats and codex jobs are read for the repo the project tracks

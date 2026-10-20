@@ -409,7 +409,7 @@ const SECTION5 = 'Run node --test test/limiter.test.js and record its result.'
 const projectCli = path.join(import.meta.dirname, 'dctr-project.mjs')
 const openRecords = (root) => {
   const out = spawnSync('node', [projectCli, 'status', root], { encoding: 'utf8', env: { ...process.env, HERDR_ENV: '' } }).stdout.split('\n')
-  const i = out.indexOf('open records:')
+  const i = out.findIndex((l) => l.startsWith('open records'))
   return i < 0 ? null : out.slice(i + 1, out.findIndex((l, j) => j > i && !l.startsWith('  '))).join('\n')
 }
 /** Every reader's view of `template` instantiated and appended to an Open and a Blocked record. */
@@ -1126,7 +1126,7 @@ clause('clause 3a16 — without the hook: the event-enumeration record, as resto
   (fs.statSync(path.join(trip, 'herdr')).mode & 0o111) !== 0, evHead.join(' | '))
 const fapControl = TEMPLATE && firstActionPause(TEMPLATE.replace('auto-cycle paused:', 'State: Paused.'), 'control')
 clause('clause 3a18 — the control: the same template written as `State: Paused` is read by none of clause 2g2\'s readers as that pause, and status no longer lists either phase as it did (E8-D16)',
-  Boolean(fapControl) && !fapOk(fapControl) && fapControl.every((x) => !x.paused && /^  e8 phase: - State: (Open|Blocked)/.test(x.before) && x.after === '  (none)'),
+  Boolean(fapControl) && !fapOk(fapControl) && fapControl.every((x) => !x.paused && /^  e8 phase: - State: (Open|Blocked)/.test(x.before) && x.after === '  none found in the searched paths'),
   JSON.stringify(fapControl))
 
 const emptyReply = JSON.parse(execFileSync(path.join(bin, 'herdr'), ['pane', 'get', 'w9:p1'], { env: { ...baseEnv, SHIM_LOG: path.join(tmp, 'empty-probe.log'), SHIM_SESSION: '' }, encoding: 'utf8' }))

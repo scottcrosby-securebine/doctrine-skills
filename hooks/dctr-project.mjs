@@ -10,7 +10,8 @@
 // per line, `<path>:<line>: <rule>: <message>`.
 //
 // `status` prints `unknown` for any field whose source cannot be read, never a guess. An empty answer
-// (a readable source with nothing in it) prints `(none)`, and the two are never the same line.
+// (a readable source with nothing in it) prints `(none)`, or for open records, which are searched only
+// where the block's label says, `none found in the searched paths`; the two are never the same line.
 //
 // Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines) are exported for
 // hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
@@ -112,8 +113,8 @@ export function parseDoc(text) {
       return
     }
     if (section === 'Members') {
-      const ph = /^- phase (.+?)(?::\s*.*)?$/.exec(t)
-      if (ph) doc.phases.push({ name: ph[1].trim(), line })
+      const ph = /^- phase (.+?)(?::\s*(.*))?$/.exec(t)
+      if (ph) doc.phases.push({ name: ph[1].trim(), record: ph[2]?.trim() || null, line })
       else if (!/^- issue \S/.test(t)) odd()
       return
     }
@@ -480,9 +481,12 @@ export function statusLines(model, readers) {
   out.push(`current epic: ${val(p, 'Current epic') || 'unknown'}`)
 
   const rec = ask(readers.records)
-  block('open records', rec && rec.open.map((r) => `${r.name}: ${r.line}`))
-  block('gates', rec && rec.gates)
-  if (rec) out.push('  (gates covers only .out transcripts under Records; pending means no sibling .out.result)')
+  if (!rec) out.push('open records: unknown')
+  else {
+    out.push(`${RECORDS_LABEL}:`)
+    const rows = [...rec.open.map((r) => `${r.name}: ${r.line}`), ...rec.unknown.map((u) => `${u}: unknown`)]
+    out.push(...(rows.length ? rows.map((r) => `  ${r}`) : ['  none found in the searched paths']))
+  }
 
   // Built only from the records it resolved, so one roster line it could not read or resolve makes the
   // whole list unknown: a return in that record would be missing from it.
@@ -501,30 +505,48 @@ export function statusLines(model, readers) {
 
 // ---------------------------------------------------------------- readers (the only I/O)
 
-/** Each `.md` under Records whose last state line is Open or Blocked, named by its first heading (its
- *  path where it has none), and every `.out` with `pending` or the first line of its `.out.result`. The
- *  state line is read by parseRecord in dctr-record.mjs, the plugin's one record parser. */
-/** Throws, printed unknown, when Records is absent or unreadable or a result file that exists cannot
- *  be read. A transcript with no result file is a pending gate, never a failed read. */
-export function readRecords(root, records) {
+/** The open-records block reads a bounded set, never every file under Records, so its label says what
+ *  that set is and an empty block never reads as "nothing there". */
+export const RECORDS_LABEL = 'open records (searched: Records depth 0, depth 1 with a wrapper: line, and Members records)'
+
+/** Every record path a `- phase <name>: <path>` Members line names, in the epics the roster resolves. */
+export const memberRecords = (model) => [...new Set([...resolveRoster(model).values()].flatMap(({ doc }) => doc.phases.map((m) => m.record).filter(Boolean)))]
+
+/** Open records: each `.md` directly in Records, each `.md` one directory down that also carries a
+ *  `wrapper:` line, and each path in `members` wherever it sits, whose last state line is Open or
+ *  Blocked, named by its first heading (its path where it has none). Nothing deeper is listed or read,
+ *  since Records also holds archived trees full of record copies. A copy that keeps its wrapper line
+ *  one directory down is still listed. The state and wrapper lines are read by parseRecord in dctr-record.mjs, the plugin's one
+ *  record parser. A file it should read and cannot, and a directory one down it cannot list, are
+ *  returned in `unknown`, printed unknown.
+ *  Throws, printed unknown, when Records itself is absent or unreadable. */
+export function readRecords(root, records, members = []) {
   if (!records || records === 'none') throw new Error('no Records path')
   const dir = path.join(root, records)
-  const names = fs.readdirSync(dir, { recursive: true }).map(String).sort()
-  const open = [], gates = []
-  for (const n of names) {
-    const rel = path.join(records, n), abs = path.join(dir, n)
-    if (n.endsWith('.md')) {
-      const raw = fs.readFileSync(abs, 'utf8').split('\n')
-      const { state } = parseRecord(raw.join('\n'))
-      if (state && restoreState(state.value)) {
-        open.push({ name: raw.find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: state.raw })
-      }
-    }
-    if (n.endsWith('.out')) {
-      gates.push(`${rel}: ${fs.existsSync(`${abs}.result`) ? fs.readFileSync(`${abs}.result`, 'utf8').split('\n')[0].trim() : 'pending'}`)
+  const found = [], open = [], unknown = [], seen = new Set()
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isFile() && e.name.endsWith('.md')) found.push({ rel: path.join(records, e.name), depth: 0 })
+    else if (e.isDirectory()) {
+      let sub
+      try { sub = fs.readdirSync(path.join(dir, e.name), { withFileTypes: true }) } catch { unknown.push(path.join(records, e.name, path.sep)); continue }
+      for (const f of sub) if (f.isFile() && f.name.endsWith('.md')) found.push({ rel: path.join(records, e.name, f.name), depth: 1 })
     }
   }
-  return { open, gates }
+  const consider = (rel, needWrapper) => {
+    const key = path.normalize(rel)
+    if (seen.has(key)) return
+    let text
+    try { text = fs.readFileSync(path.join(root, rel), 'utf8') } catch { seen.add(key); unknown.push(rel); return }
+    const { state, wrapper } = parseRecord(text)
+    if (needWrapper && !wrapper) return
+    seen.add(key)
+    if (state && restoreState(state.value)) {
+      open.push({ name: text.split('\n').find((l) => l.startsWith('#'))?.replace(/^#+\s*/, '').trim() || rel, line: state.raw })
+    }
+  }
+  for (const m of members) consider(m, false)
+  for (const f of found.sort((a, b) => (a.rel < b.rel ? -1 : 1))) consider(f.rel, f.depth === 1)
+  return { open, unknown }
 }
 
 /** The repo whose seats and codex jobs status reads: the project file's optional `Tracks:` path,
@@ -595,7 +617,7 @@ if (isMain) {
     process.exit(findings.length ? 1 : 0)
   }
   const lines = statusLines(model, {
-    records: () => readRecords(root, val(model.project, 'Records')),
+    records: () => readRecords(root, val(model.project, 'Records'), memberRecords(model)),
     seats: () => readSeats(trackedRoot(root, model)),
     codex: () => readCodex(trackedRoot(root, model)),
   })
