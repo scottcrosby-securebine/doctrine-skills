@@ -945,8 +945,10 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('records [1: a link that leads nowhere, named .md or sitting at depth 0, is unknown, never skipped as nothing there]',
     rec?.unknown.includes(path.join(rel, 'dangling.md')) && rec?.unknown.includes(path.join(rel, 'danglingdir')), JSON.stringify(rec?.unknown))
   let rec2 = null; try { rec2 = readRecords(root, rel, members2) } catch {}
-  clause('records [1: a dangling link the walk finds and a Members line also names is unknown once, and unknown rows come out sorted]',
-    rec2 && rec2.unknown.filter((u) => u === path.join(rel, 'dangling.md')).length === 1 && JSON.stringify(rec2.unknown) === JSON.stringify([...rec2.unknown].sort()), JSON.stringify(rec2?.unknown))
+  clause('records [1: a dangling link the walk finds and a Members line also names is unknown once]',
+    rec2 && rec2.unknown.filter((u) => u === path.join(rel, 'dangling.md')).length === 1, JSON.stringify(rec2?.unknown))
+  clause('records [1: unknown rows come out sorted, a Members path that cannot be read among the ones the walk found]',
+    rec && JSON.stringify(rec.unknown) === JSON.stringify([...rec.unknown].sort()), JSON.stringify(rec?.unknown))
   clause('records [1: the walk never opens a directory below depth 1 and never reads a gate, so an unreadable directory two down and a result path that is a directory are not errors]',
     err === null && rec && !('gates' in rec), err?.message ?? JSON.stringify(Object.keys(rec)))
   fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o755)

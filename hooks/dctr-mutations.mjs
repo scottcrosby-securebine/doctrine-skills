@@ -736,6 +736,8 @@ const MUTATIONS = [
     from: 'try { st = fs.statSync(path.join(root, r)) }', to: 'try { st = fs.lstatSync(path.join(root, r)) }' },
   { name: 'project status: a dangling link is skipped as nothing there', file: 'dctr-project.mjs', clause: 'records [1: a link that leads nowhere, named .md or sitting at depth 0, is unknown',
     from: "catch { if (name.endsWith('.md') || depth === 0) miss(r); continue }", to: 'catch { continue }' },
+  { name: 'project status: unknown rows are not sorted', file: 'dctr-project.mjs', clause: 'records [1: unknown rows come out sorted',
+    from: 'return { open, unknown: unknown.sort() }', to: 'return { open, unknown }' },
   { name: 'project status: a path the walk could not stat is not marked seen', file: 'dctr-project.mjs', clause: 'records [1: a dangling link the walk finds and a Members line also names is unknown once',
     from: 'const miss = (rel) => { seen.add(path.normalize(rel)); unknown.push(rel) }', to: 'const miss = (rel) => { unknown.push(rel) }' },
   { name: 'project status: the Tracks line is ignored', file: 'dctr-project.mjs', clause: 'tracks [1: a relative Tracks path resolves',
