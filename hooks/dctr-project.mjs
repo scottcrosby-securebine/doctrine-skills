@@ -13,7 +13,7 @@
 // (a readable source with nothing in it) prints `(none)`, or for open records, which are searched only
 // where the block's label says, `none found in the searched paths`; the two are never the same line.
 //
-// Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines) are exported for
+// Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines, memberRecords) are exported for
 // hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
 //
 // Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id, members.
@@ -516,22 +516,27 @@ export const memberRecords = (model) => [...new Set([...resolveRoster(model).val
  *  `wrapper:` line, and each path in `members` wherever it sits, whose last state line is Open or
  *  Blocked, named by its first heading (its path where it has none). Nothing deeper is listed or read,
  *  since Records also holds archived trees full of record copies. A copy that keeps its wrapper line
- *  one directory down is still listed. The state and wrapper lines are read by parseRecord in dctr-record.mjs, the plugin's one
- *  record parser. A file it should read and cannot, and a directory one down it cannot list, are
- *  returned in `unknown`, printed unknown.
+ *  one directory down is still listed. The state and wrapper lines are read by parseRecord in
+ *  dctr-record.mjs, the plugin's one record parser. A file it should read and cannot, and a directory
+ *  one down it cannot list, are returned in `unknown`, printed unknown.
  *  Throws, printed unknown, when Records itself is absent or unreadable. */
 export function readRecords(root, records, members = []) {
   if (!records || records === 'none') throw new Error('no Records path')
-  const dir = path.join(root, records)
   const found = [], open = [], unknown = [], seen = new Set()
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.isFile() && e.name.endsWith('.md')) found.push({ rel: path.join(records, e.name), depth: 0 })
-    else if (e.isDirectory()) {
-      let sub
-      try { sub = fs.readdirSync(path.join(dir, e.name), { withFileTypes: true }) } catch { unknown.push(path.join(records, e.name, path.sep)); continue }
-      for (const f of sub) if (f.isFile() && f.name.endsWith('.md')) found.push({ rel: path.join(records, e.name, f.name), depth: 1 })
+  // stat, not a Dirent's type, so a symlinked record or directory is followed as a read of it would be;
+  // a link that leads nowhere is unknown where it could be a record, or at depth 0 a directory of them.
+  const entries = (rel, depth) => {
+    for (const name of fs.readdirSync(path.join(root, rel))) {
+      const r = path.join(rel, name)
+      let st
+      try { st = fs.statSync(path.join(root, r)) } catch { if (name.endsWith('.md') || depth === 0) unknown.push(r); continue }
+      if (st.isFile() && name.endsWith('.md')) found.push({ rel: r, depth })
+      else if (st.isDirectory() && depth === 0) {
+        try { entries(r, 1) } catch { unknown.push(path.join(r, path.sep)) }
+      }
     }
   }
+  entries(records, 0)
   const consider = (rel, needWrapper) => {
     const key = path.normalize(rel)
     if (seen.has(key)) return
