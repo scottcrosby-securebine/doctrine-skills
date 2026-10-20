@@ -918,6 +918,7 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   writeTree(root, { 'elsewhere/linked.md': '# Phase linked\nState: Open\n', 'elsewhere/dir/wrapped.md': '# Phase linked dir\nwrapper: doctrine-code\nState: Blocked\n' })
   fs.symlinkSync('../elsewhere/linked.md', path.join(root, 'recs/link.md')); fs.symlinkSync('../elsewhere/dir', path.join(root, 'recs/linkdir'))
   fs.symlinkSync('../elsewhere/gone.md', path.join(root, 'recs/dangling.md')); fs.symlinkSync('../elsewhere/gone', path.join(root, 'recs/danglingdir'))
+  const members2 = [path.join(rel, 'dangling.md')]
   fs.writeFileSync(path.join(root, 'recs/sealed.md'), '# Phase sealed\nState: Open\n'); fs.chmodSync(path.join(root, 'recs/sealed.md'), 0o000)
   const members = [path.join(rel, 'sub/deep/member.md'), path.join(rel, 'beta.md'), path.join(rel, 'sub/deep/missing.md')]
   let rec = null, err = null
@@ -943,6 +944,9 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     open.includes('Phase linked: State: Open') && open.includes('Phase linked dir: State: Blocked'), JSON.stringify(open))
   clause('records [1: a link that leads nowhere, named .md or sitting at depth 0, is unknown, never skipped as nothing there]',
     rec?.unknown.includes(path.join(rel, 'dangling.md')) && rec?.unknown.includes(path.join(rel, 'danglingdir')), JSON.stringify(rec?.unknown))
+  let rec2 = null; try { rec2 = readRecords(root, rel, members2) } catch {}
+  clause('records [1: a dangling link the walk finds and a Members line also names is unknown once, and unknown rows come out sorted]',
+    rec2 && rec2.unknown.filter((u) => u === path.join(rel, 'dangling.md')).length === 1 && JSON.stringify(rec2.unknown) === JSON.stringify([...rec2.unknown].sort()), JSON.stringify(rec2?.unknown))
   clause('records [1: the walk never opens a directory below depth 1 and never reads a gate, so an unreadable directory two down and a result path that is a directory are not errors]',
     err === null && rec && !('gates' in rec), err?.message ?? JSON.stringify(Object.keys(rec)))
   fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o755)
@@ -951,14 +955,14 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   const locked1Unreadable = cannot(() => fs.readdirSync(path.join(root, 'recs/locked1')))
   fs.chmodSync(path.join(root, 'recs/locked1'), 0o755); fs.chmodSync(path.join(root, 'recs/sealed.md'), 0o644)
   clause('records [3: the sealed record and the depth-1 directory really could not be read when the reader ran]', sealedUnreadable && locked1Unreadable, 'fixture')
-  clause('records [3: the fixture carries both state-line forms, a closed record, the depth-1 and depth-2 cases, a locked directory two down, and a result path that is a directory]',
+  clause('records [3: the fixture carries both state-line forms, a closed record, the depth-1 and depth-2 cases, a locked directory two down, a result path that is a directory, and the linked, linked-directory and dangling symlinks]',
     /^- \*\*State: Open\.\*\*/m.test(fs.readFileSync(path.join(root, 'recs/beta.md'), 'utf8')) && /^ +# /.test(fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8')) && fs.readFileSync(path.join(root, 'recs/alpha.md'), 'utf8').trimEnd().endsWith('-State: Exited') && fs.readFileSync(path.join(root, 'recs/done.md'), 'utf8').trimEnd().endsWith('certified') &&
     /^wrapper: /m.test(fs.readFileSync(path.join(root, 'recs/sub/wrapped.md'), 'utf8')) && !/wrapper:/.test(fs.readFileSync(path.join(root, 'recs/sub/unwrapped.md'), 'utf8')) &&
     /^wrapper: /m.test(fs.readFileSync(path.join(root, 'recs/sub/deep/wrapped.md'), 'utf8')) && !/wrapper:/.test(fs.readFileSync(path.join(root, 'recs/sub/deep/member.md'), 'utf8')) &&
     !fs.existsSync(path.join(root, 'recs/sub/deep/missing.md')) && fs.statSync(path.join(root, 'recs/g-red.out.result')).isDirectory() &&
     (() => { fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o000); try { return cannot(() => fs.readdirSync(path.join(root, 'recs/sub/locked'))) } finally { fs.chmodSync(path.join(root, 'recs/sub/locked'), 0o755) } })() &&
     fs.lstatSync(path.join(root, 'recs/link.md')).isSymbolicLink() && fs.lstatSync(path.join(root, 'recs/linkdir')).isSymbolicLink() &&
-    fs.lstatSync(path.join(root, 'recs/dangling.md')).isSymbolicLink() && !fs.existsSync(path.join(root, 'recs/dangling.md')) && !fs.existsSync(path.join(root, 'recs/danglingdir')) &&
+    fs.lstatSync(path.join(root, 'recs/dangling.md')).isSymbolicLink() && fs.lstatSync(path.join(root, 'recs/danglingdir')).isSymbolicLink() && !fs.existsSync(path.join(root, 'recs/dangling.md')) && !fs.existsSync(path.join(root, 'recs/danglingdir')) &&
     /^wrapper: /m.test(fs.readFileSync(path.join(root, 'elsewhere/dir/wrapped.md'), 'utf8')), 'fixture')
   let threw = false; try { readRecords(root, 'nope') } catch { threw = true }
   clause('records [1: a Records directory that cannot be read throws, printed unknown]', threw, 'readRecords answered')

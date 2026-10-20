@@ -523,25 +523,26 @@ export const memberRecords = (model) => [...new Set([...resolveRoster(model).val
 export function readRecords(root, records, members = []) {
   if (!records || records === 'none') throw new Error('no Records path')
   const found = [], open = [], unknown = [], seen = new Set()
+  const miss = (rel) => { seen.add(path.normalize(rel)); unknown.push(rel) }
   // stat, not a Dirent's type, so a symlinked record or directory is followed as a read of it would be;
   // a link that leads nowhere is unknown where it could be a record, or at depth 0 a directory of them.
-  const entries = (rel, depth) => {
+  const walk = (rel, depth) => {
     for (const name of fs.readdirSync(path.join(root, rel))) {
       const r = path.join(rel, name)
       let st
-      try { st = fs.statSync(path.join(root, r)) } catch { if (name.endsWith('.md') || depth === 0) unknown.push(r); continue }
+      try { st = fs.statSync(path.join(root, r)) } catch { if (name.endsWith('.md') || depth === 0) miss(r); continue }
       if (st.isFile() && name.endsWith('.md')) found.push({ rel: r, depth })
       else if (st.isDirectory() && depth === 0) {
-        try { entries(r, 1) } catch { unknown.push(path.join(r, path.sep)) }
+        try { walk(r, 1) } catch { miss(path.join(r, path.sep)) }
       }
     }
   }
-  entries(records, 0)
+  walk(records, 0)
   const consider = (rel, needWrapper) => {
     const key = path.normalize(rel)
     if (seen.has(key)) return
     let text
-    try { text = fs.readFileSync(path.join(root, rel), 'utf8') } catch { seen.add(key); unknown.push(rel); return }
+    try { text = fs.readFileSync(path.join(root, rel), 'utf8') } catch { miss(rel); return }
     const { state, wrapper } = parseRecord(text)
     if (needWrapper && !wrapper) return
     seen.add(key)
@@ -551,7 +552,7 @@ export function readRecords(root, records, members = []) {
   }
   for (const m of members) consider(m, false)
   for (const f of found.sort((a, b) => (a.rel < b.rel ? -1 : 1))) consider(f.rel, f.depth === 1)
-  return { open, unknown }
+  return { open, unknown: unknown.sort() }
 }
 
 /** The repo whose seats and codex jobs status reads: the project file's optional `Tracks:` path,
