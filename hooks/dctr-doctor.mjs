@@ -202,10 +202,8 @@ const snapHookLogs = () => {
  *  runs would otherwise resolve other binaries. The PATH is sourced from a file, since a typed line past 1024 bytes is
  *  refused by a terminal in canonical mode and a long PATH alone can pass that. */
 const pathFile = path.join(root, 'path.sh')
-const hostLine = (cmd) => {
-  fs.writeFileSync(pathFile, `export PATH=${shq(process.env.PATH || '')}\n`)
-  return `cd ${shq(proj)} && . ${shq(pathFile)} && ${cmd}`
-}
+fs.writeFileSync(pathFile, `export PATH=${shq(process.env.PATH || '')}\n`)
+const hostLine = (cmd) => `cd ${shq(proj)} && . ${shq(pathFile)} && ${cmd}`
 
 function setupCodex() {
   const home = dir('codex-home')
@@ -230,7 +228,6 @@ function setupCodex() {
   return hostLine(`CODEX_HOME=${shq(home)} codex --dangerously-bypass-approvals-and-sandbox -c allow_login_shell=false ` +
     `-c check_for_update_on_startup=false -c model_reasoning_effort='"low"'${creds.model ? ` -c model=${shq(JSON.stringify(creds.model))}` : ''}`)
 }
-
 
 function setupClaude() {
   const cfg = dir('claude-cfg')
