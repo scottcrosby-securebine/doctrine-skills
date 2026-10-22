@@ -803,11 +803,12 @@ if (hasProc) {
   clause('clause 3g-ps — without the listing: ps names one child of the zombie\'s parent and its state is Z; ps gives this process a start time in seconds',
     psZ.length === 2 && /^Z/.test(psZ[1]) && Number.isInteger(selfLstart) && selfLstart > 0, JSON.stringify([psZ, selfLstart]))
 }
-// psProcs on two captured-shape listings, run on every host so Linux CI covers the macOS reader: 10 carries the
-// session in its environment, 11 is a platform binary ps shows no environment for, 12 has `a=1` among its arguments
-// and none in its environment, 13 exited before the -E call, 14 is a zombie, 15's -E row is another process's (it
-// started later), 16 exec'd between the two calls, 17's environment holds the name twice (a value carrying the text),
-// 18 is a platform binary that exec'd between the calls into a command that only appends arguments.
+// psProcs on three captured-shape listings (before, -E, after), run on every host so Linux CI covers the macOS reader:
+// 10 carries the session in its environment, 11 is a platform binary ps shows no environment for, 12 has `a=1` among
+// its arguments and none in its environment, 13 exited before the -E call and 22 before the after call, 14 is a zombie,
+// 15's -E row is another process's (it started later), 16 exec'd between the first two calls, 17's environment holds
+// the name twice (a value carrying the text), 18 and 20 are platform binaries that exec'd into a command that only
+// appends arguments (an option, and an argument shaped like NAME=value), 21 exec'd between the last two calls.
 const PS_PLAIN = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
   '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
@@ -818,6 +819,9 @@ const PS_PLAIN = [
   '   16    10 S    Thu Oct 22 19:51:16 2026     sh -c exec node w.js',
   '   17    10 S    Thu Oct 22 19:51:17 2026     node w2.js',
   '   18    10 S    Thu Oct 22 19:51:18 2026     /bin/sh',
+  '   20    10 S    Thu Oct 22 19:51:20 2026     /bin/dd',
+  '   21    10 S    Thu Oct 22 19:51:21 2026     node a.js',
+  '   22    10 S    Thu Oct 22 19:51:22 2026     node brief.js',
 ].join('\n')
 const PS_ENV = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server HOME=/Users/u CODEX_SESSION_ID=01a0e956-923c',
@@ -828,24 +832,41 @@ const PS_ENV = [
   '   16    10 S    Thu Oct 22 19:51:16 2026     node w.js HOME=/x CODEX_SESSION_ID=work',
   '   17    10 S    Thu Oct 22 19:51:17 2026     node w2.js NOTE=example CODEX_SESSION_ID=outer CODEX_SESSION_ID=work',
   '   18    10 S    Thu Oct 22 19:51:18 2026     /bin/sh -c while :; do :; done',
+  '   20    10 S    Thu Oct 22 19:51:20 2026     /bin/dd if=/dev/zero',
+  '   21    10 S    Thu Oct 22 19:51:21 2026     node a.js HOME=/x CODEX_SESSION_ID=s',
+  '   22    10 S    Thu Oct 22 19:51:22 2026     node brief.js HOME=/x',
+].join('\n')
+const PS_AFTER = [
+  '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
+  '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
+  '   12    10 R+   Thu Oct 22 19:51:12 2026     dd a=1',
+  '   14    10 Z    Thu Oct 22 19:51:14 2026     (true)',
+  '   15    10 S    Thu Oct 22 19:52:00 2026     node old.js',
+  '   16    10 S    Thu Oct 22 19:51:16 2026     node w.js',
+  '   17    10 S    Thu Oct 22 19:51:17 2026     node w2.js',
+  '   18    10 S    Thu Oct 22 19:51:18 2026     /bin/sh -c while :; do :; done',
+  '   20    10 S    Thu Oct 22 19:51:20 2026     /bin/dd if=/dev/zero',
+  '   21    10 S    Thu Oct 22 19:51:21 2026     node b.js',
 ].join('\n')
 const { psProcs } = await import('./dctr-state.mjs')
-const pp = Object.fromEntries(psProcs(PS_PLAIN, PS_ENV).map((p) => [p.pid, p]))
+const pp = Object.fromEntries(psProcs(PS_PLAIN, PS_ENV, PS_AFTER).map((p) => [p.pid, p]))
 let psThrew = null
-try { psProcs(PS_PLAIN + '\n   19    10 S    garbled HOME=/secret', PS_ENV) } catch (e) { psThrew = e.message }
-const ppBg = codexBackground({ procs: Object.values(pp).filter((p) => [10, 16, 17, 18].includes(p.pid)) }, { pid: 10, start: pp[10].start }, { inherited: 'outer', session: 'work' })
-clause('clause 1g2 — psProcs: the session from the environment -E adds, null where it adds none, where the -E row starts at another time or carries another command, where what it adds does not open with a NAME=value entry, and where it names the session twice; an argument holding = is no environment; a process with no -E row left out and every other kept; a row it cannot read throws naming its pid alone; the state is stat\'s first letter; over the exec\'d and doubled rows codexBackground reads unknown, not idle',
-  JSON.stringify(Object.keys(pp)) === '["10","11","12","14","15","16","17","18"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
+try { psProcs(PS_PLAIN + '\n   19    10 S    garbled HOME=/secret', PS_ENV, PS_AFTER) } catch (e) { psThrew = e.message }
+const ppBg = codexBackground({ procs: Object.values(pp).filter((p) => [10, 16, 17, 18, 20, 21].includes(p.pid)) }, { pid: 10, start: pp[10].start }, { inherited: 'outer', session: 'work' })
+const L = (t, n) => t.split('\n')[n]
+clause('clause 1g2 — psProcs: the session from the environment -E adds, null where it adds none, where the process was not steady across the three reads (another start, an exec before or after the -E read, including one that only appended arguments), and where the name appears twice; an argument holding = is no environment; a process missing from a later read left out and every other kept; a row it cannot read throws naming its pid alone; the state is stat\'s first letter; over the unsteady and doubled rows codexBackground reads unknown, not idle',
+  JSON.stringify(Object.keys(pp)) === '["10","11","12","14","15","16","17","18","20","21"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
   pp[10].start === new Date(2026, 9, 22, 19, 51, 11).getTime() / 1000 &&
   pp[11].session === null && pp[11].start < pp[10].start && pp[12].session === '' && pp[12].state === 'R' && pp[14].state === 'Z' && pp[14].session === null &&
-  pp[15].session === null && pp[16].session === null && pp[16].argv0 === 'sh' && pp[17].session === null && pp[18].session === null &&
+  pp[15].session === null && pp[16].session === null && pp[16].argv0 === 'sh' && pp[17].session === null && pp[18].session === null && pp[20].session === null && pp[21].session === null &&
   psThrew === 'a ps row could not be read: 19' && ppBg.running === true && ppBg.unknown !== null,
   `${JSON.stringify(pp)} threw ${psThrew} bg ${JSON.stringify(ppBg)}`)
-clause('clause 3g2 — without psProcs: the -E rows extend the plain rows by an environment for 10, 12 and 17 only, 12\'s arguments hold a=1, 13 has no -E row, 15\'s -E row starts at another time, 16\'s -E command is not its plain one, 17\'s names CODEX_SESSION_ID twice, and 18\'s -E row extends its plain one by arguments opening with -c',
-  PS_ENV.split('\n')[0].startsWith(PS_PLAIN.split('\n')[0] + ' ') && PS_ENV.split('\n')[1] === PS_PLAIN.split('\n')[1] && PS_ENV.split('\n')[2].startsWith(PS_PLAIN.split('\n')[2] + ' ') &&
-  /dd a=1$/.test(PS_PLAIN.split('\n')[2]) && !/^ +13 /m.test(PS_ENV) && !PS_ENV.includes('19:51:15') &&
-  !PS_ENV.split('\n')[5].startsWith(PS_PLAIN.split('\n')[6]) && PS_ENV.split('\n')[6].startsWith(PS_PLAIN.split('\n')[7] + ' ') && PS_ENV.split('\n')[6].split('CODEX_SESSION_ID=').length === 3 &&
-  PS_ENV.split('\n')[7].startsWith(PS_PLAIN.split('\n')[8] + ' -c '), 'ps fixture wrong')
+clause('clause 3g2 — without psProcs: the -E rows extend the before rows by an environment for 10, 12, 17, 21 and 22, 12\'s arguments hold a=1, 13 has no -E row and 22 no after row, 15\'s later rows start at another time, 16\'s -E and after commands are not its before one, 17\'s -E row names CODEX_SESSION_ID twice, 18\'s and 20\'s -E rows extend their before ones by arguments only (-c, if=/dev/zero) that the after rows also show, and 21\'s after command differs',
+  L(PS_ENV, 0).startsWith(L(PS_PLAIN, 0) + ' ') && L(PS_ENV, 1) === L(PS_PLAIN, 1) && L(PS_ENV, 2).startsWith(L(PS_PLAIN, 2) + ' ') && /dd a=1$/.test(L(PS_PLAIN, 2)) &&
+  !/^ +13 /m.test(PS_ENV) && !/^ +22 /m.test(PS_AFTER) && /^ +22 /m.test(PS_ENV) && !PS_ENV.includes('19:51:15') && !PS_AFTER.includes('19:51:15') &&
+  !L(PS_ENV, 5).startsWith(L(PS_PLAIN, 6)) && L(PS_AFTER, 5).endsWith('node w.js') && L(PS_ENV, 6).split('CODEX_SESSION_ID=').length === 3 &&
+  L(PS_ENV, 7).startsWith(L(PS_PLAIN, 8) + ' -c ') && L(PS_AFTER, 7) === L(PS_ENV, 7) && L(PS_ENV, 8).startsWith(L(PS_PLAIN, 9) + ' if=') && L(PS_AFTER, 8) === L(PS_ENV, 8) &&
+  L(PS_ENV, 9).startsWith(L(PS_PLAIN, 10) + ' ') && L(PS_AFTER, 9).endsWith('node b.js'), 'ps fixture wrong')
 // With no /proc on macOS, a ps that fails makes the listing an error, which codexBackground reads as unknown; run in a
 // child whose PATH holds only a failing ps. On a host with /proc the listing never reaches ps.
 if (hasProc) console.log('skip (linux): clause 1g3 drives processListing\'s ps branch, which only a host without /proc takes; the macOS run drives it')

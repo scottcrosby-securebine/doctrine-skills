@@ -24,9 +24,10 @@
 // line of ~/.codex/config.toml, and never writes ~/.codex or ~/.claude. It refuses to run on a token that expires
 // within the hour, or on a Codex login last refreshed over 7 days ago, so a scratch copy never refreshes, and so
 // never rotates, the user's token. Every process it
-// starts carries DCTR_DOCTOR_RUN=<scratch dir>, and at the end it stops its herdr server and kills the server's process
-// tree (read with ps), its process group, and each process whose environment carries that value (read from /proc where
-// the host has one).
+// starts carries DCTR_DOCTOR_RUN=<scratch dir>, and at the end it stops its herdr server, kills the server's process
+// tree (read with ps) and its process group while Node has not reaped the server, and kills each process whose
+// environment carries that value (read from /proc where the host has one). A server that exited before the end leaves
+// what it started to that /proc scan, so on macOS, which has none, such leftovers stay running.
 //
 // --control drops the prompt gate's trust line from the scratch Codex config, a run in which T1 and G1 must drift;
 // a doctor that reports them clean there cannot see. --save writes the observations, account identifiers redacted
