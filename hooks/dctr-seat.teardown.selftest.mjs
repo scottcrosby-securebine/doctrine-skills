@@ -180,15 +180,15 @@ const run = (payload, env = {}) => {
   } catch (e) { return { code: e.status ?? 1, out: String(e.stdout || '') + String(e.stderr || '') } }
 }
 // The hook timed from the moment its payload is handed over. It reads stdin only once its modules have loaded, so
-// waiting until it is blocked in that read (/proc/<pid>/syscall: read, 0 on x86_64 and 63 on arm64, on fd 0) leaves
+// waiting until it starts that read (a preload writes one byte to fd 3 as the hook calls readFileSync(0), which
+// needs no /proc and so runs on macOS too) leaves
 // node's start-up, which a loaded host stretches without bound, out of what is timed; what is left is the hook's own
 // lock waits, closes and hand-off. `atStart` runs at that moment, so a fixture timed against the hook starts there.
+const STDIN_READY = `--import=data:text/javascript,${encodeURIComponent("import fs from 'node:fs'; const r = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (f === 0) fs.writeSync(3, 'r'); return r.call(this, f, ...a) }")}`
 const runTimed = async (payload, atStart = () => {}) => {
-  const child = spawn('node', [hook], { stdio: ['pipe', 'ignore', 'ignore'], env: hookEnv() })
+  const child = spawn('node', [STDIN_READY, hook], { stdio: ['pipe', 'ignore', 'ignore', 'pipe'], env: hookEnv() })
   const exit = new Promise((resolve) => child.on('exit', (code) => resolve(code)))
-  const reading = () => { try { return /^(0|63) 0x0 /.test(fs.readFileSync(`/proc/${child.pid}/syscall`, 'utf8')) } catch { return false } }
-  for (const end = Date.now() + 30000; !reading() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5))
-  const booted = reading(), t0 = Date.now()
+  const booted = await new Promise((resolve) => { const t = setTimeout(() => resolve(false), 30000); child.stdio[3].once('data', () => { clearTimeout(t); resolve(true) }) }), t0 = Date.now()
   atStart()
   child.stdin.end(JSON.stringify({ session_id: SESSION, ...payload }))
   const bound = setTimeout(() => child.kill('SIGKILL'), 30000)

@@ -851,11 +851,15 @@ export function liveWork(sessionId) {
  * Every process on the host as codexAncestor and codexBackground in dctr-lib.mjs read them (E10H-R3-B4): pid, ppid,
  * state and start time from /proc/<pid>/stat, argv0 from its cmdline, and `session`, the CODEX_SESSION_ID in its
  * environment: '' when it has none, null when the environment cannot be read. A process that exits mid-read is left
- * out, as it is gone. `{ error }` when /proc cannot be listed (a host without it).
+ * out, as it is gone. With no /proc on macOS it reads ps instead (psProcs); elsewhere without /proc, `{ error }`.
  */
 export function processListing() {
   let pids
-  try { pids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)) } catch (e) { return { error: `/proc could not be read (${e.code || e.message})` } }
+  try { pids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)) } catch (e) {
+    if (process.platform !== 'darwin') return { error: `/proc could not be read (${e.code || e.message})` }
+    const ps = (flags) => execFileSync('ps', [flags, '-o', 'pid=,ppid=,stat=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+    try { return { procs: psProcs(ps('-axww'), ps('-axwwE')) } } catch (e2) { return { error: `ps could not be read (${e2.message})` } }
+  }
   const procs = []
   for (const id of pids) {
     let stat, cmd
@@ -866,6 +870,28 @@ export function processListing() {
     procs.push({ pid: Number(id), ppid: Number(f[1]), state: f[0], start: Number(f[19]), argv0: cmd.split('\0')[0], session })
   }
   return { procs }
+}
+
+/**
+ * processListing's procs on macOS, from two `ps -o pid=,ppid=,stat=,lstart=,command=` listings under LC_ALL=C, `plain`
+ * (-axww) and `withEnv` (-axwwE, which appends the environment to each command). `start` is lstart in epoch seconds,
+ * `state` the first letter of stat, argv0 the command's first word. A process's environment is what -E added past its
+ * plain command: '' with no CODEX_SESSION_ID in it, and null when -E added nothing, which is how ps shows a process
+ * whose environment it may not read (another user's, or a platform binary such as /bin/sleep). A process in only one
+ * listing, or whose start or command differs between them (a reused pid, an exec), is left out.
+ * shortcut: argv0 is cut at the first space, so an executable path holding a space is misread; no Codex path has one.
+ */
+export function psProcs(plain, withEnv) {
+  const row = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w{3} \w{3}\s+\d+ \d\d:\d\d:\d\d \d{4}) (.*)$/
+  const rows = (text) => new Map(String(text).split('\n').map((l) => row.exec(l)).filter(Boolean).map((m) => [Number(m[1]), m]))
+  const envs = rows(withEnv), procs = []
+  for (const [pid, m] of rows(plain)) {
+    const e = envs.get(pid)
+    if (!e || e[4] !== m[4] || !e[5].startsWith(m[5])) continue
+    const rest = e[5].slice(m[5].length).trim()
+    procs.push({ pid, ppid: Number(m[2]), state: m[3][0], start: Date.parse(m[4]) / 1000, argv0: m[5].trimStart().split(' ')[0], session: rest ? /(?:^| )CODEX_SESSION_ID=(\S*)/.exec(rest)?.[1] ?? '' : null })
+  }
+  return procs
 }
 
 /**

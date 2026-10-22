@@ -147,10 +147,13 @@ function hook(name, f, payload, env = {}) {
   try { j = r.stdout ? JSON.parse(r.stdout) : null } catch { /* the clause reports it */ }
   return { code: r.status, out: r.stdout, err: r.stderr, j }
 }
+/** A process that idles two minutes. node, not sleep: macOS's ps shows no environment for a platform binary such as
+ *  /bin/sleep, so the listing would read its CODEX_SESSION_ID as unknown there rather than as what it carries. */
+const idle = (env) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { env, stdio: 'ignore' })
 /** Background work of the session: a command as Codex runs one, CODEX_SESSION_ID in its environment, under this
  *  process (the suite's Codex). `end` kills it and resolves once it is reaped, so no listing reads it after. */
 const work = () => {
-  const c = spawn('sleep', ['120'], { env: { ...baseEnv, CODEX_SESSION_ID: 'work' }, stdio: 'ignore' })
+  const c = idle({ ...baseEnv, CODEX_SESSION_ID: 'work' })
   return { pid: c.pid, end: () => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) r(); else { c.on('exit', r); c.kill() } }) }
 }
 const recLines = (f, re) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => re.test(l))
@@ -372,7 +375,8 @@ function watcher(f, id, transcript, from, env = {}, turn = null, codex = { pid: 
       const pid = Number(out.trim())
       if (!pid) { console.log(`FAIL  a watcher for ${id} gave no pid`); bad++; resolve(); return }
       orphans.push(pid)
-      const gone = () => { try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] === 'Z' } catch { return true } }
+      // ps, not /proc/<pid>/stat, so macOS reads it too; a zombie is gone, and ps exits 1 once the pid is reaped.
+      const gone = () => { try { return execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()[0] === 'Z' } catch { return true } }
       const t = setInterval(() => { if (gone()) { clearInterval(t); resolve() } }, 20)
     })
   })
@@ -420,13 +424,13 @@ clause('clause 1d3 — the watcher fires nothing while the background work runs,
 // before its task_complete, sees the terminal running and holds; the terminal's completion lands next, and the
 // task_complete after it. Read at the task_complete, nothing was running; the Stop still held and must be re-run.
 const events = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } }
-// Standards R4-N2, the watcher's half: Codex started with CODEX_SESSION_ID set, so its helpers (a sleep standing in for
+// Standards R4-N2, the watcher's half: Codex started with CODEX_SESSION_ID set, so its helpers (an idle node standing in for
 // codex-code-mode-host) and the hook and watcher carry that inherited value. The Stop holds for the real work; once
 // that exits, the helper carrying the inherited value must not hold the watcher.
 const wih = heldProject('watch-inherited', 'v9')
 const wihT = rollout(wih, 'v9', F.BG_RUNNING)
 const OUTER = { CODEX_SESSION_ID: '01a0eb00-0000-7000-8000-0000000000aa' }
-const helper = spawn('sleep', ['120'], { env: { ...baseEnv, ...OUTER }, stdio: 'ignore' })
+const helper = idle({ ...baseEnv, ...OUTER })
 orphans.push(helper.pid)
 const wihWork = work()
 hook('dctr-cycle.mjs', wih, as(F.STOP_BG, wih, 'v9', wihT), { DCTR_TYPER_SCRIPT: stub, STUB_LOG: path.join(wih.dir, 'typer.log'), ...OUTER })
@@ -770,23 +774,63 @@ clause('clause 1e17 — two Stop entries, the second blocking: the typer the fir
 
 // Standards R4-N1: processListing's reads of /proc/<pid>/stat, against this process's own stat and a real zombie: sh
 // execs into sleep and never reaps the `true` it started. proc(5): after "(comm) " come field 3, the state, and field
-// 22, the start time in clock ticks. The zombie and its state are found with ps(1), not the listing.
+// 22, the start time in clock ticks. The zombie and its state are found with ps(1), not the listing; macOS, with no
+// /proc, has the listing read ps and its clause compares the start time ps gives for this process.
 const zParent = spawn('sh', ['-c', 'true & exec sleep 5'], { stdio: 'ignore' })
 orphans.push(zParent.pid)
-const psZOf = () => { try { return execFileSync('ps', ['-o', 'pid=,stat=', '--ppid', String(zParent.pid)], { encoding: 'utf8' }).trim().split(/\s+/) } catch { return [] } }
+const psZOf = () => { try { return execFileSync('ps', ['-axo', 'pid=,ppid=,stat='], { encoding: 'utf8' }).split('\n').map((l) => l.trim().split(/\s+/)).filter((r) => r[1] === String(zParent.pid)).map((r) => [r[0], r[2]])[0] || [] } catch { return [] } }
 await until(() => /^Z/.test(psZOf()[1] || ''))
 const psZ = psZOf()
 const zPid = Number(psZ[0])
-const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfFields = selfStat.slice(selfStat.lastIndexOf(') ') + 2).split(' ')
+const hasProc = fs.existsSync('/proc/self/stat')
+const selfStat = hasProc ? fs.readFileSync('/proc/self/stat', 'utf8') : '', selfFields = selfStat.slice(selfStat.lastIndexOf(') ') + 2).split(' ')
+const selfLstart = hasProc ? null : Date.parse(execFileSync('ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim()) / 1000
 const nowList = processListing()
 zParent.kill()
 const me = nowList.procs?.find((p) => p.pid === process.pid), zom = nowList.procs?.find((p) => p.pid === zPid)
-clause('clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out: this process is running (R) with the start time field 22 holds, its parent the suite\'s own; a zombie ps names reads Z, started no earlier than this process (Standards R4-N1)',
-  me?.state === 'R' && me.start === Number(selfFields[19]) && me.ppid === process.ppid && Number.isInteger(me.start) && me.start > 0 &&
-  zom?.state === 'Z' && zom.ppid === zParent.pid && zom.start >= me.start,
-  `${JSON.stringify(me)} ${JSON.stringify(zom)} ps ${JSON.stringify(psZ)}`)
-clause('clause 3g — without the listing: ps names one child of the zombie\'s parent and its state is Z; this process\'s stat field 22 is a positive tick count',
-  psZ.length === 2 && /^Z/.test(psZ[1]) && Number(selfFields[19]) > 0 && selfFields[0] === 'R', JSON.stringify([psZ, selfFields.slice(0, 1), selfFields[19]]))
+if (hasProc) {
+  clause('clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out: this process is running (R) with the start time field 22 holds, its parent the suite\'s own; a zombie ps names reads Z, started no earlier than this process (Standards R4-N1)',
+    me?.state === 'R' && me.start === Number(selfFields[19]) && me.ppid === process.ppid && Number.isInteger(me.start) && me.start > 0 &&
+    zom?.state === 'Z' && zom.ppid === zParent.pid && zom.start >= me.start,
+    `${JSON.stringify(me)} ${JSON.stringify(zom)} ps ${JSON.stringify(psZ)}`)
+  clause('clause 3g — without the listing: ps names one child of the zombie\'s parent and its state is Z; this process\'s stat field 22 is a positive tick count',
+    psZ.length === 2 && /^Z/.test(psZ[1]) && Number(selfFields[19]) > 0 && selfFields[0] === 'R', JSON.stringify([psZ, selfFields.slice(0, 1), selfFields[19]]))
+} else {
+  clause('clause 1g-ps — with no /proc, processListing reads ps: this process with the start time ps gives it and its parent the suite\'s own, its environment read with no CODEX_SESSION_ID; a zombie ps names reads Z, started no earlier than this process',
+    me?.start === selfLstart && me.ppid === process.ppid && me.session === (process.env.CODEX_SESSION_ID ?? '') &&
+    zom?.state === 'Z' && zom.ppid === zParent.pid && zom.start >= me.start,
+    `${JSON.stringify(me)} ${JSON.stringify(zom)} ps ${JSON.stringify(psZ)} lstart ${selfLstart}`)
+  clause('clause 3g-ps — without the listing: ps names one child of the zombie\'s parent and its state is Z; ps gives this process a start time in seconds',
+    psZ.length === 2 && /^Z/.test(psZ[1]) && Number.isInteger(selfLstart) && selfLstart > 0, JSON.stringify([psZ, selfLstart]))
+}
+// psProcs on two captured-shape listings, run on every host so Linux CI covers the macOS reader: 10 carries the
+// session in its environment, 11 is a platform binary ps shows no environment for, 12 has `a=1` among its arguments
+// and none in its environment, 13 is in the plain listing only, 14 is a zombie, 15's -E row is another process's.
+const PS_PLAIN = [
+  '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
+  '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
+  '   12    10 R+   Thu Oct 22 19:51:12 2026     dd a=1',
+  '   13    10 S    Thu Oct 22 19:51:13 2026     node gone.js',
+  '   14    10 Z    Thu Oct 22 19:51:14 2026     (true)',
+  '   15    10 S    Thu Oct 22 19:51:15 2026     node old.js',
+].join('\n')
+const PS_ENV = [
+  '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server HOME=/Users/u CODEX_SESSION_ID=01a0e956-923c',
+  '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
+  '   12    10 R+   Thu Oct 22 19:51:12 2026     dd a=1 HOME=/Users/u',
+  '   14    10 Z    Thu Oct 22 19:51:14 2026     (true)',
+  '   15    10 S    Thu Oct 22 19:52:00 2026     node old.js HOME=/Users/u CODEX_SESSION_ID=x',
+].join('\n')
+const { psProcs } = await import('./dctr-state.mjs')
+const pp = Object.fromEntries(psProcs(PS_PLAIN, PS_ENV).map((p) => [p.pid, p]))
+clause('clause 1g2 — psProcs: the session from the environment -E adds, null where it adds none, an argument holding = is no environment, a process in one listing or whose start differs is left out, the state is stat\'s first letter',
+  JSON.stringify(Object.keys(pp)) === '["10","11","12","14"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
+  pp[10].start === new Date(2026, 9, 22, 19, 51, 11).getTime() / 1000 &&
+  pp[11].session === null && pp[11].start < pp[10].start && pp[12].session === '' && pp[12].state === 'R' && pp[14].state === 'Z' && pp[14].session === null,
+  JSON.stringify(pp))
+clause('clause 3g2 — without psProcs: the -E rows extend the plain rows by an environment for 10 and 12 only, 12\'s arguments hold a=1, 13 has no -E row and 15\'s -E row starts at another time',
+  PS_ENV.split('\n')[0].startsWith(PS_PLAIN.split('\n')[0] + ' ') && PS_ENV.split('\n')[1] === PS_PLAIN.split('\n')[1] && PS_ENV.split('\n')[2].startsWith(PS_PLAIN.split('\n')[2] + ' ') &&
+  /dd a=1$/.test(PS_PLAIN.split('\n')[2]) && !/^ +13 /m.test(PS_ENV) && !PS_ENV.includes('19:51:15'), 'ps fixture wrong')
 
 // ---------------------------------------------------------------- clause 2: known-good inputs stay quiet
 
@@ -855,7 +899,7 @@ clause('clause 3h — without the hooks: the blocked Stop\'s continuation is a u
 const b5Out = F.CELL_RUNNING.filter((l) => /Script running with cell ID 6/.test(l))
 const envWork = work()
 await sleep(200)
-const workEnv = (() => { try { return fs.readFileSync(`/proc/${envWork.pid}/environ`, 'utf8') } catch { return '' } })()
+const workEnv = (() => { try { return hasProc ? fs.readFileSync(`/proc/${envWork.pid}/environ`, 'utf8') : execFileSync('ps', ['-wwE', '-o', 'command=', '-p', String(envWork.pid)], { encoding: 'utf8' }).trim().split(' ').join('\0') } catch { return '' } })()
 await envWork.end()
 clause('clause 3f — without the hooks: B5 run 1 reports cell 6 running and no later output of cell 6, its turn ends in a task_complete, CELL_DONE is the loop\'s completion after it; the derived lines differ from the capture only in that task_complete\'s last message; the suite runs as argv0 codex, and a work process carries CODEX_SESSION_ID',
   b5Out.length === 1 && F.CELL_DONE.every((l) => !/cell ID 6|Script completed/.test(l)) && J(F.CELL_RUNNING.at(-1)).payload.type === 'task_complete' &&

@@ -2822,6 +2822,16 @@ const MUTATIONS = [
   { name: "R4-N1: processListing reads the start time from the field after it", file: "dctr-state.mjs",
     clause: "clause 1g — processListing reads /proc/<pid>/stat as proc(5) lays it out",
     from: "start: Number(f[19]),", to: "start: Number(f[20])," },
+  // mac-port: processListing on macOS reads ps through psProcs, which clause 1g2 drives on every host.
+  { name: "mac-port: psProcs reads a process ps shows no environment for as carrying none", file: "dctr-state.mjs",
+    clause: "clause 1g2 — psProcs",
+    from: "?? '' : null })", to: "?? '' : '' })" },
+  { name: "mac-port: psProcs pairs the two listings by pid alone", file: "dctr-state.mjs",
+    clause: "clause 1g2 — psProcs",
+    from: "if (!e || e[4] !== m[4] || !e[5].startsWith(m[5])) continue", to: "if (!e) continue" },
+  { name: "mac-port: psProcs reads the session from the whole -E command, arguments included", file: "dctr-state.mjs",
+    clause: "clause 1g2 — psProcs",
+    from: "const rest = e[5].slice(m[5].length).trim()", to: "const rest = e[5].trim()" },
   // R4-N2 (round 4 real-environment run): a watcher outliving its session re-created the state dir its end removed.
   { name: "R4-N2 realenv: the watcher's exit log re-creates the state dir the session's end removed", file: "dctr-watch.mjs",
     clause: "clause 1d14 — exits without re-creating the session's state dir",

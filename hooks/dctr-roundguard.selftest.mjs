@@ -300,7 +300,7 @@ const H = {
 // ---------------------------------------------------------------- clause 2: the hook end to end
 
 const hook = path.join(import.meta.dirname, 'dctr-roundguard.mjs')
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-roundguard-'))
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-roundguard-')))   // macOS: os.tmpdir() is under the /var link
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
 const tripwire = path.join(tmp, 'herdr-was-called')
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/bin/sh\ntouch ${JSON.stringify(tripwire)}\nexit 0\n`)

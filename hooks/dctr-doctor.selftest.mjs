@@ -281,7 +281,10 @@ clause('3 the odd observations hold a null transcript line and null and wrongly 
 // herdr plays the server (a shell holding a child, neither ever stopped by `server stop`, and in one run an orphan
 // re-parented away from it), a stub claude answers
 // --version, and fake credentials sit in a scratch HOME. The run is interrupted while the drive waits for the host.
-// The stub's own settings (STUB_DIR, STUB_SAVE, STUB_ORPHAN) are written into the script, since the doctor passes
+// The server also starts, unless STUB_TREE is empty, a child in a session of its own: in the server's tree and out of its
+// process group, so only the ps walk of that tree stops it. The orphan is in a session of its own too, so neither the
+// tree nor the group reaches it and only the /proc scan does.
+// The stub's own settings (STUB_DIR, STUB_SAVE, STUB_ORPHAN, STUB_TREE) are written into the script, since the doctor passes
 // no variable of its caller's through to it; the server records the environment it was started with, and `environ`
 // prints the one the stub is run with.
 const STUB_HERDR = `#!/bin/sh
@@ -293,7 +296,8 @@ case "$1" in
     env > "$STUB_DIR/env"; ls -ld "$XDG_RUNTIME_DIR" > "$STUB_DIR/runtime" 2>&1
     mkdir -p "$XDG_CONFIG_HOME/herdr" && : > "$XDG_CONFIG_HOME/herdr/herdr.sock"
     [ -n "$STUB_SAVE" ] && echo '{}' > "$DCTR_DOCTOR_RUN/observations.json"
-    [ -n "$STUB_ORPHAN" ] && ( sleep 301 & )
+    [ -n "$STUB_ORPHAN" ] && ( perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 301 & )
+    [ -n "$STUB_TREE" ] && { perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 302 & echo $! > "$STUB_DIR/tree.pid"; }
     echo "$DCTR_DOCTOR_RUN" > "$STUB_DIR/root"; sleep 300 & echo "$$ $!" > "$STUB_DIR/server.pid"; wait ;;
   integration) mkdir -p "$CLAUDE_CONFIG_DIR" && echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
   workspace) echo '{"result":{"root_pane":{"pane_id":"p1"}}}' ;;
@@ -313,6 +317,14 @@ for (const d of ['/usr/bin', '/bin']) {
   try { names = fs.readdirSync(d) } catch { /* no such dir on this host */ }
   for (const n of names) if (!['herdr', 'codex', 'claude'].includes(n)) try { fs.symlinkSync(path.join(d, n), path.join(SYS, n)) } catch { /* already linked from the other dir */ }
 }
+// Without /proc (macOS) the run's marker cannot be read from the stub's processes, which are platform binaries whose
+// environment ps does not show, so what is left running is read from the pids the stub server recorded instead, and the
+// orphan outside the server's tree, which only the /proc scan finds, is not staged.
+const hasProc = fs.existsSync('/proc/self')
+const stubPids = (stub) => ['server.pid', 'tree.pid'].flatMap((f) => { try { return fs.readFileSync(path.join(stub, f), 'utf8').trim().split(' ') } catch (e) { if (e.code === 'ENOENT') return []; throw e } })
+const stubAlive = (stub) => stubPids(stub).filter((pid) => { const r = spawnSync('ps', ['-o', 'stat=', '-p', pid], { encoding: 'utf8' }); if (r.error) throw r.error; return r.status === 0 && !/^Z/.test(r.stdout.trim()) })
+/** pid, ppid and pgid as ps gives them, or null for a pid ps does not know. */
+const psIds = (pid) => { const r = spawnSync('ps', ['-o', 'pid=,ppid=,pgid=', '-p', String(pid)], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim().split(/\s+/).map(Number) : null }
 const markerProcs = (root) => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).filter((pid) => {
   try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`DCTR_DOCTOR_RUN=${root}`) } catch { return false }
 })
@@ -324,12 +336,13 @@ const envOf = (text) => Object.fromEntries(String(text ?? '').split('\n').filter
  *  variables the doctor was started with), parent (the environment the stub reads when run with the doctor's own),
  *  seen (the environment the stub server was started with), runtime (ls -ld of its XDG_RUNTIME_DIR) }. */
 async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true, tmpLen = 0, versionSleep = 0 }) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-int-')), stub = path.join(base, 'stub'), bin = path.join(base, 'bin')
+  // Under /tmp, not os.tmpdir(): macOS's is a /var/folders path long enough that the doctor rightly refuses its sockets.
+  const base = fs.mkdtempSync('/tmp/dctr-doctor-int-'), stub = path.join(base, 'stub'), bin = path.join(base, 'bin')
   // tmpLen: the doctor's TMPDIR made exactly that many bytes long, under /tmp where the caller's TMPDIR leaves no room.
   const outer = tmpLen && base.length + 2 > tmpLen ? fs.mkdtempSync('/tmp/dctr-doctor-len-') : null
   const tmp = tmpLen ? path.join(outer ?? base, 't'.repeat(tmpLen - (outer ?? base).length - 1)) : path.join(base, 't')
   for (const d of [stub, bin, tmp, path.join(base, 'home', '.claude')]) fs.mkdirSync(d, { recursive: true })
-  fs.writeFileSync(path.join(bin, 'herdr'), herdrScript.replace('\n', `\nSTUB_DIR='${stub}' STUB_SAVE=${save ? 1 : ''} STUB_ORPHAN=${orphan ? 1 : ''}\n`), { mode: 0o755 })
+  fs.writeFileSync(path.join(bin, 'herdr'), herdrScript.replace('\n', `\nSTUB_DIR='${stub}' STUB_SAVE=${save ? 1 : ''} STUB_ORPHAN=${orphan ? 1 : ''} STUB_TREE=${versionSleep ? '' : 1}\n`), { mode: 0o755 })
   // versionSleep: the stub claude marks that --version started, then sleeps that many seconds before it answers.
   fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\n${versionSleep ? `[ "$1" = --version ] && { : > '${stub}/versioning'; sleep ${versionSleep}; }\n` : ''}echo "0.0.0-stub (Claude Code)"\n`, { mode: 0o755 })
   fs.writeFileSync(path.join(base, 'home', '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'stub', expiresAt: Date.now() + 864e5 } }))
@@ -349,6 +362,8 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   // The orphan, seen before the signal: a sleep 301 carrying the run's marker.
   let orphans = 0
   if (started && orphan) await waitFor(() => { const r = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim(); orphans = markerProcs(r).filter((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('301') } catch { return false } }).length; return orphans }, 20000)
+  // The tree child's place, read before the signal: [its pid, ppid, pgid] and the server's.
+  const shape = started && !versionSleep ? await waitFor(() => { try { const [sv] = fs.readFileSync(path.join(stub, 'server.pid'), 'utf8').trim().split(' '); const t = psIds(fs.readFileSync(path.join(stub, 'tree.pid'), 'utf8').trim()); return t && { tree: t, server: psIds(sv) } } catch { return null } }, 20000) : null
   if (signal && started) child.kill(sig)
   const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('timeout'), 60000))])
   if (code === 'timeout') child.kill('SIGKILL')
@@ -356,20 +371,20 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   // The run's dir as the server saw it, so processes are looked for whether or not the dir is still there.
   let runRoot = null
   try { runRoot = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim() || null } catch { /* the server never ran */ }
-  const procs = runRoot ? markerProcs(runRoot) : []
+  const procs = runRoot ? (hasProc ? markerProcs(runRoot) : stubAlive(stub)) : []
   const left = roots.flatMap((r) => fs.readdirSync(r))
   let seen = {}, runtime = ''
   try { seen = envOf(fs.readFileSync(path.join(stub, 'env'), 'utf8')); runtime = fs.readFileSync(path.join(stub, 'runtime'), 'utf8') } catch { /* the server never ran */ }
   // Whatever the doctor left running is stopped here, so a failed clause leaves nothing behind.
   for (const pid of procs) try { process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
-  try { for (const pid of fs.readFileSync(path.join(stub, 'server.pid'), 'utf8').trim().split(' ')) process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
+  for (const pid of stubPids(stub)) try { process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
   fs.rmSync(base, { recursive: true, force: true })
   if (outer) fs.rmSync(outer, { recursive: true, force: true })
-  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime, tmp, window }
+  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime, tmp, window, shape }
 }
 const RUNS = {
   // The plain run's server also leaves an orphan outside its tree, which only the /proc scan finds.
-  plain: { orphan: true }, noProc: { noProc: true }, term: { sig: 'SIGTERM', noProc: true }, keep: { args: ['--keep'] }, save: { args: ['--save'], save: true },
+  plain: { orphan: hasProc }, noProc: { noProc: true }, term: { sig: 'SIGTERM', noProc: true }, keep: { args: ['--keep'] }, save: { args: ['--save'], save: true },
   // A herdr whose interpreter is missing: found on PATH, so the prerequisites pass, and its spawn fails.
   spawnFail: { herdrScript: '#!/nonexistent/sh\n', signal: false },
   // TMPDIRs of 62 and 60 bytes: at 62 herdr's socket path is 100 bytes and Claude Code's, at a 7-digit pid, 105; at 60
@@ -382,6 +397,7 @@ const RUNS = {
 process.umask(0o022)
 const ints = Object.fromEntries(await Promise.all(Object.entries(RUNS).map(async ([k, o]) => [k, await interrupted(o)])))
 const show = (r) => JSON.stringify({ ...r, stderr: r.stderr.slice(-300) })
+if (!hasProc) console.log('skip (darwin): the plain run stages no orphan outside the herdr server\'s tree, since only the /proc scan finds one; the desktop (Linux) run drives it')
 for (const [name, r] of [['plain', ints.plain], ['without /proc', ints.noProc]]) {
   clause(`1 an interrupted doctor (${name}) exits 130, removes its scratch dir and leaves no process carrying its run marker`,
     r.started && r.code === 130 && r.roots.length === 0 && r.procs.length === 0, show(r))
@@ -403,8 +419,10 @@ clause('1 a herdr server that cannot be spawned is cannot-run: exit 2, the scrat
   clause('3 the decoy variables were in the environment the doctor was started with, read by the stub run without the doctor',
     DECOYS.every((k) => p.parent[k] === p.decoys[k]) && DECOYS.length === 6, JSON.stringify(p.parent))
 }
+clause('3 the server\'s tree child is its child in a process group not the server\'s, read with ps before the signal, so only the walk of the tree reaches it',
+  ['plain', 'noProc', 'term'].every((k) => { const sh = ints[k].shape; return sh && sh.tree[1] === sh.server[0] && sh.tree[2] !== sh.server[2] && sh.server[2] === sh.server[0] }), JSON.stringify(['plain', 'noProc', 'term'].map((k) => ints[k].shape)))
 clause('3 the interrupted runs reached the stub server before the signal, and the --keep run shows the scratch dir held more than one file',
-  ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && ints.plain.orphans > 0, JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
+  ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && (!hasProc || ints.plain.orphans > 0), JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
 
 // Claude Code binds its socket in XDG_RUNTIME_DIR only while the path is at most 103 bytes, so a TMPDIR that pushes it
 // past that is cannot-run, while one that brings it to 103 runs.

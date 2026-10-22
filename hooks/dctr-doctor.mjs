@@ -25,7 +25,8 @@
 // within the hour, or on a Codex login last refreshed over 7 days ago, so a scratch copy never refreshes, and so
 // never rotates, the user's token. Every process it
 // starts carries DCTR_DOCTOR_RUN=<scratch dir>, and at the end it stops its herdr server and kills the server's process
-// tree (read with ps) and each process whose environment carries that value (read from /proc where the host has one).
+// tree (read with ps), its process group, and each process whose environment carries that value (read from /proc where
+// the host has one).
 //
 // --control drops the prompt gate's trust line from the scratch Codex config, a run in which T1 and G1 must drift;
 // a doctor that reports them clean there cannot see. --save writes the observations, account identifiers redacted
@@ -114,6 +115,9 @@ function cleanup() {
   } catch { /* no /proc (macOS): the server's tree above stands for it */ }
   pids.delete(process.pid)
   for (const pid of pids) try { process.kill(pid, 'SIGKILL') } catch { /* gone */ }
+  // The detached server's process group: what the server forked after the ps snapshot above, which on Linux the
+  // /proc scan catches and on macOS nothing else would.
+  try { if (serverPid) process.kill(-serverPid, 'SIGKILL') } catch { /* gone */ }
   if (opt.keep) return
   const keep = opt.save && fs.existsSync(path.join(root, SAVED))
   for (const f of keep ? fs.readdirSync(root).filter((f) => f !== SAVED) : ['.']) fs.rmSync(path.join(root, f), { recursive: true, force: true })
