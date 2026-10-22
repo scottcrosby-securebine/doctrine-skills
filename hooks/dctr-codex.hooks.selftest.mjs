@@ -882,7 +882,7 @@ clause('clause 3g2 — without psProcs: rows 10, 12, 17, 21 and 22 have -E rows 
   [[18, ' -c '], [20, ' if=']].every(([p, a]) => row(PS_AFTER, p) === row(PS_ENV, p) && row(PS_ENV, p).startsWith(row(PS_PLAIN, p) + a)) &&
   row(PS_AFTER, 21).endsWith('node b.js') && !row(PS_PLAIN, 23) && row(PS_ENV, 23) && row(PS_AFTER, 23) &&
   !row(PS_PLAIN, 24) && !row(PS_ENV, 24) && row(PS_AFTER, 24) &&
-  /^ +25 +1 Z /.test(row(PS_PLAIN, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_ENV, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_AFTER, 25)), 'ps fixture wrong')
+  /^ +25 +1 Z .*19:50:25/.test(row(PS_PLAIN, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_ENV, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_AFTER, 25)), 'ps fixture wrong')
 // With no /proc on macOS, a ps that fails makes the listing an error, which codexBackground reads as unknown; run in a
 // child whose PATH holds only a failing ps. On a host with /proc the listing never reaches ps.
 if (hasProc) console.log('skip (linux): clause 1g3 drives processListing\'s ps branch, which only a host without /proc takes; the macOS run drives it')
