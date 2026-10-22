@@ -218,10 +218,12 @@ is not the ready line, and, where the session runs in a herdr pane, herdr report
 done, for 60 seconds. An API error is the error the turn's end carries in the rollout, and a turn whose
 rollout has not grown for 15 minutes while it is unfinished is handed on as one. A running background
 terminal is a live process under the session's Codex process whose environment carries
-`CODEX_SESSION_ID`, read from `/proc`. The Stop reads it too and waits while one runs, and the watcher
-hands the Stop back once the work holding it has finished. A process whose environment cannot be read
-counts as running, and when that holds a Stop back for 60 seconds the record gets a paused line saying
-the doctrine could not tell.
+`CODEX_SESSION_ID`, read from `/proc` on Linux and from `ps` on macOS. The Stop reads it too and waits
+while one runs, and the watcher hands the Stop back once the work holding it has finished. A process
+whose environment cannot be read counts as running, and when that holds a Stop back for 60 seconds the
+record gets a paused line saying the doctrine could not tell. On macOS `ps` shows no environment for a
+system binary such as `/bin/sleep` or `/bin/zsh`, so a background command run through one always reads
+that way and pauses after 60 seconds rather than waiting quietly for it to finish.
 
 After a Codex, Claude Code or herdr update, run `node <plugin-root>/hooks/dctr-doctor.mjs`, with
 `--host codex` or `--host claude` to check one. It drives each installed host in scratch homes under
