@@ -282,7 +282,8 @@ clause('3 the odd observations hold a null transcript line and null and wrongly 
 // re-parented away from it), a stub claude answers
 // --version, and fake credentials sit in a scratch HOME. The run is interrupted while the drive waits for the host.
 // The server also starts, unless STUB_TREE is empty, a child in a session of its own: in the server's tree and out of its
-// process group, so only the ps walk of that tree stops it. The orphan is in a session of its own too, so neither the
+// process group, so only the ps walk of that tree stops it; and a child that leaves its tree and drops the run marker
+// while staying in its process group, so only the group kill stops it. The orphan is in a session of its own too, so neither the
 // tree nor the group reaches it and only the /proc scan does.
 // The stub's own settings (STUB_DIR, STUB_SAVE, STUB_ORPHAN, STUB_TREE) are written into the script, since the doctor passes
 // no variable of its caller's through to it; the server records the environment it was started with, and `environ`
@@ -298,6 +299,7 @@ case "$1" in
     [ -n "$STUB_SAVE" ] && echo '{}' > "$DCTR_DOCTOR_RUN/observations.json"
     [ -n "$STUB_ORPHAN" ] && ( perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 301 & )
     [ -n "$STUB_TREE" ] && { perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 302 & echo $! > "$STUB_DIR/tree.pid"; }
+    [ -n "$STUB_TREE" ] && ( env -u DCTR_DOCTOR_RUN sleep 303 & echo $! > "$STUB_DIR/group.pid" )
     echo "$DCTR_DOCTOR_RUN" > "$STUB_DIR/root"; sleep 300 & echo "$$ $!" > "$STUB_DIR/server.pid"; wait ;;
   integration) mkdir -p "$CLAUDE_CONFIG_DIR" && echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
   workspace) echo '{"result":{"root_pane":{"pane_id":"p1"}}}' ;;
@@ -317,11 +319,12 @@ for (const d of ['/usr/bin', '/bin']) {
   try { names = fs.readdirSync(d) } catch { /* no such dir on this host */ }
   for (const n of names) if (!['herdr', 'codex', 'claude'].includes(n)) try { fs.symlinkSync(path.join(d, n), path.join(SYS, n)) } catch { /* already linked from the other dir */ }
 }
-// Without /proc (macOS) the run's marker cannot be read from the stub's processes, which are platform binaries whose
-// environment ps does not show, so what is left running is read from the pids the stub server recorded instead, and the
-// orphan outside the server's tree, which only the /proc scan finds, is not staged.
+// What is left running is the processes carrying the run's marker, where /proc shows it, and the pids the stub server
+// recorded, which also covers the group child that dropped the marker. Without /proc (macOS) the marker cannot be read
+// from the stub's processes, which are platform binaries whose environment ps does not show, and the orphan outside the
+// server's tree, which only the /proc scan finds, is not staged.
 const hasProc = fs.existsSync('/proc/self')
-const stubPids = (stub) => ['server.pid', 'tree.pid'].flatMap((f) => { try { return fs.readFileSync(path.join(stub, f), 'utf8').trim().split(' ') } catch (e) { if (e.code === 'ENOENT') return []; throw e } })
+const stubPids = (stub) => ['server.pid', 'tree.pid', 'group.pid'].flatMap((f) => { try { return fs.readFileSync(path.join(stub, f), 'utf8').trim().split(' ') } catch (e) { if (e.code === 'ENOENT') return []; throw e } })
 const stubAlive = (stub) => stubPids(stub).filter((pid) => { const r = spawnSync('ps', ['-o', 'stat=', '-p', pid], { encoding: 'utf8' }); if (r.error) throw r.error; return r.status === 0 && !/^Z/.test(r.stdout.trim()) })
 /** pid, ppid and pgid as ps gives them, or null for a pid ps does not know. */
 const psIds = (pid) => { const r = spawnSync('ps', ['-o', 'pid=,ppid=,pgid=', '-p', String(pid)], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim().split(/\s+/).map(Number) : null }
@@ -362,8 +365,14 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   // The orphan, seen before the signal: a sleep 301 carrying the run's marker.
   let orphans = 0
   if (started && orphan) await waitFor(() => { const r = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim(); orphans = markerProcs(r).filter((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('301') } catch { return false } }).length; return orphans }, 20000)
-  // The tree child's place, read before the signal: [its pid, ppid, pgid] and the server's.
-  const shape = started && !versionSleep ? await waitFor(() => { try { const [sv] = fs.readFileSync(path.join(stub, 'server.pid'), 'utf8').trim().split(' '); const t = psIds(fs.readFileSync(path.join(stub, 'tree.pid'), 'utf8').trim()); return t && { tree: t, server: psIds(sv) } } catch { return null } }, 20000) : null
+  // The tree and group children's places, read before the signal: [pid, ppid, pgid] for each and the server, and, where
+  // /proc shows it, whether the group child carries the run's marker.
+  const shape = started && !versionSleep ? await waitFor(() => { try {
+    const [sv] = fs.readFileSync(path.join(stub, 'server.pid'), 'utf8').trim().split(' '), read = (f) => fs.readFileSync(path.join(stub, f), 'utf8').trim()
+    const t = psIds(read('tree.pid')), g = psIds(read('group.pid'))
+    const gMarked = hasProc ? fs.readFileSync(`/proc/${g?.[0]}/environ`, 'utf8').split('\0').some((v) => v.startsWith('DCTR_DOCTOR_RUN=')) : null
+    return t && g && { tree: t, group: g, gMarked, server: psIds(sv) }
+  } catch { return null } }, 20000) : null
   if (signal && started) child.kill(sig)
   const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('timeout'), 60000))])
   if (code === 'timeout') child.kill('SIGKILL')
@@ -371,7 +380,7 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   // The run's dir as the server saw it, so processes are looked for whether or not the dir is still there.
   let runRoot = null
   try { runRoot = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim() || null } catch { /* the server never ran */ }
-  const procs = runRoot ? (hasProc ? markerProcs(runRoot) : stubAlive(stub)) : []
+  const procs = runRoot ? [...new Set([...(hasProc ? markerProcs(runRoot) : []), ...stubAlive(stub)])] : []
   const left = roots.flatMap((r) => fs.readdirSync(r))
   let seen = {}, runtime = ''
   try { seen = envOf(fs.readFileSync(path.join(stub, 'env'), 'utf8')); runtime = fs.readFileSync(path.join(stub, 'runtime'), 'utf8') } catch { /* the server never ran */ }
@@ -419,8 +428,14 @@ clause('1 a herdr server that cannot be spawned is cannot-run: exit 2, the scrat
   clause('3 the decoy variables were in the environment the doctor was started with, read by the stub run without the doctor',
     DECOYS.every((k) => p.parent[k] === p.decoys[k]) && DECOYS.length === 6, JSON.stringify(p.parent))
 }
-clause('3 the server\'s tree child is its child in a process group not the server\'s, read with ps before the signal, so only the walk of the tree reaches it',
-  ['plain', 'noProc', 'term'].every((k) => { const sh = ints[k].shape; return sh && sh.tree[1] === sh.server[0] && sh.tree[2] !== sh.server[2] && sh.server[2] === sh.server[0] }), JSON.stringify(['plain', 'noProc', 'term'].map((k) => ints[k].shape)))
+clause('3 the server\'s tree child is its child in a process group not the server\'s, so only the walk of the tree reaches it; its group child is no child of it, in its process group, and carries no run marker where /proc shows one, so only the group kill reaches it; read with ps before the signal',
+  ['plain', 'noProc', 'term'].every((k) => { const sh = ints[k].shape; return sh && sh.tree[1] === sh.server[0] && sh.tree[2] !== sh.server[2] && sh.server[2] === sh.server[0] &&
+    sh.group[1] !== sh.server[0] && sh.group[2] === sh.server[2] && sh.gMarked !== true }), JSON.stringify(['plain', 'noProc', 'term'].map((k) => ints[k].shape)))
+// serverStillOurs (R1-B3): the server's pid is acted on while Node has not reaped it, or once reaped while no process
+// holds the pid; a reaped server whose pid another process holds is never acted on.
+clause('1 serverStillOurs: unreaped is ours whether or not the pid is taken, reaped with the pid free is ours, reaped with the pid taken is not',
+  lib.serverStillOurs({ reaped: false, pidTaken: true }) && lib.serverStillOurs({ reaped: false, pidTaken: false }) &&
+  lib.serverStillOurs({ reaped: true, pidTaken: false }) && !lib.serverStillOurs({ reaped: true, pidTaken: true }), 'serverStillOurs wrong')
 clause('3 the interrupted runs reached the stub server before the signal, and the --keep run shows the scratch dir held more than one file',
   ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && (!hasProc || ints.plain.orphans > 0), JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
 

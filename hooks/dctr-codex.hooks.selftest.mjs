@@ -45,7 +45,7 @@ process.on('exit', () => {
   try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }) } catch (e) { console.log(`FAIL  the suite's temp dir ${tmp} was not removed: ${e.code || e.message}`); process.exitCode = 1 }
 })
 process.env.TMPDIR = tmp
-const { CODEX_RESUME_LINE, LAUNCH_MESSAGE } = await import('./dctr-lib.mjs')
+const { CODEX_RESUME_LINE, LAUNCH_MESSAGE, codexBackground } = await import('./dctr-lib.mjs')
 const { stateDir, restoreFile, stopFactsFile, stopHeldFile, processListing } = await import('./dctr-state.mjs')
 
 const here = import.meta.dirname
@@ -805,7 +805,8 @@ if (hasProc) {
 }
 // psProcs on two captured-shape listings, run on every host so Linux CI covers the macOS reader: 10 carries the
 // session in its environment, 11 is a platform binary ps shows no environment for, 12 has `a=1` among its arguments
-// and none in its environment, 13 is in the plain listing only, 14 is a zombie, 15's -E row is another process's.
+// and none in its environment, 13 exited before the -E call, 14 is a zombie, 15's -E row is another process's (it
+// started later), 16 exec'd between the two calls, 17's environment holds the name twice (a value carrying the text).
 const PS_PLAIN = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
   '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
@@ -813,6 +814,8 @@ const PS_PLAIN = [
   '   13    10 S    Thu Oct 22 19:51:13 2026     node gone.js',
   '   14    10 Z    Thu Oct 22 19:51:14 2026     (true)',
   '   15    10 S    Thu Oct 22 19:51:15 2026     node old.js',
+  '   16    10 S    Thu Oct 22 19:51:16 2026     sh -c exec node w.js',
+  '   17    10 S    Thu Oct 22 19:51:17 2026     node w2.js',
 ].join('\n')
 const PS_ENV = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server HOME=/Users/u CODEX_SESSION_ID=01a0e956-923c',
@@ -820,17 +823,40 @@ const PS_ENV = [
   '   12    10 R+   Thu Oct 22 19:51:12 2026     dd a=1 HOME=/Users/u',
   '   14    10 Z    Thu Oct 22 19:51:14 2026     (true)',
   '   15    10 S    Thu Oct 22 19:52:00 2026     node old.js HOME=/Users/u CODEX_SESSION_ID=x',
+  '   16    10 S    Thu Oct 22 19:51:16 2026     node w.js HOME=/x CODEX_SESSION_ID=work',
+  '   17    10 S    Thu Oct 22 19:51:17 2026     node w2.js NOTE=example CODEX_SESSION_ID=outer CODEX_SESSION_ID=work',
 ].join('\n')
 const { psProcs } = await import('./dctr-state.mjs')
 const pp = Object.fromEntries(psProcs(PS_PLAIN, PS_ENV).map((p) => [p.pid, p]))
-clause('clause 1g2 — psProcs: the session from the environment -E adds, null where it adds none, an argument holding = is no environment, a process in one listing or whose start differs is left out, the state is stat\'s first letter',
-  JSON.stringify(Object.keys(pp)) === '["10","11","12","14"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
+let psThrew = null
+try { psProcs(PS_PLAIN + '\n   18    10 S    garbled', PS_ENV) } catch (e) { psThrew = e.message }
+const ppBg = codexBackground({ procs: Object.values(pp).filter((p) => [10, 16, 17].includes(p.pid)) }, { pid: 10, start: pp[10].start }, { inherited: 'outer', session: 'work' })
+clause('clause 1g2 — psProcs: the session from the environment -E adds, null where it adds none, where the -E row starts at another time or carries another command, and where it names the session twice; an argument holding = is no environment; a process with no -E row left out and every other kept; a row it cannot read throws; the state is stat\'s first letter; over the exec\'d and doubled rows codexBackground reads unknown, not idle',
+  JSON.stringify(Object.keys(pp)) === '["10","11","12","14","15","16","17"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
   pp[10].start === new Date(2026, 9, 22, 19, 51, 11).getTime() / 1000 &&
-  pp[11].session === null && pp[11].start < pp[10].start && pp[12].session === '' && pp[12].state === 'R' && pp[14].state === 'Z' && pp[14].session === null,
-  JSON.stringify(pp))
-clause('clause 3g2 — without psProcs: the -E rows extend the plain rows by an environment for 10 and 12 only, 12\'s arguments hold a=1, 13 has no -E row and 15\'s -E row starts at another time',
+  pp[11].session === null && pp[11].start < pp[10].start && pp[12].session === '' && pp[12].state === 'R' && pp[14].state === 'Z' && pp[14].session === null &&
+  pp[15].session === null && pp[16].session === null && pp[16].argv0 === 'sh' && pp[17].session === null &&
+  /a ps row could not be read: 18 /.test(psThrew || '') && ppBg.running === true && ppBg.unknown !== null,
+  `${JSON.stringify(pp)} threw ${psThrew} bg ${JSON.stringify(ppBg)}`)
+clause('clause 3g2 — without psProcs: the -E rows extend the plain rows by an environment for 10, 12 and 17 only, 12\'s arguments hold a=1, 13 has no -E row, 15\'s -E row starts at another time, 16\'s -E command is not its plain one, and 17\'s names CODEX_SESSION_ID twice',
   PS_ENV.split('\n')[0].startsWith(PS_PLAIN.split('\n')[0] + ' ') && PS_ENV.split('\n')[1] === PS_PLAIN.split('\n')[1] && PS_ENV.split('\n')[2].startsWith(PS_PLAIN.split('\n')[2] + ' ') &&
-  /dd a=1$/.test(PS_PLAIN.split('\n')[2]) && !/^ +13 /m.test(PS_ENV) && !PS_ENV.includes('19:51:15'), 'ps fixture wrong')
+  /dd a=1$/.test(PS_PLAIN.split('\n')[2]) && !/^ +13 /m.test(PS_ENV) && !PS_ENV.includes('19:51:15') &&
+  !PS_ENV.split('\n')[5].startsWith(PS_PLAIN.split('\n')[6]) && PS_ENV.split('\n')[6].startsWith(PS_PLAIN.split('\n')[7] + ' ') && PS_ENV.split('\n')[6].split('CODEX_SESSION_ID=').length === 3, 'ps fixture wrong')
+// With no /proc on macOS, a ps that fails makes the listing an error, which codexBackground reads as unknown; run in a
+// child whose PATH holds only a failing ps. On a host with /proc the listing never reaches ps.
+if (hasProc) console.log('skip (linux): clause 1g3 drives processListing\'s ps branch, which only a host without /proc takes; the macOS run drives it')
+else {
+  const failBin = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-ps-fail-'))
+  fs.writeFileSync(path.join(failBin, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { processListing } from ${JSON.stringify(path.join(here, 'dctr-state.mjs'))}; process.stdout.write(JSON.stringify(processListing()))`], { env: { ...process.env, PATH: failBin }, encoding: 'utf8', timeout: 30000 })
+  let got = null
+  try { got = JSON.parse(r.stdout) } catch { /* the clause reports it */ }
+  const stubFails = spawnSync(path.join(failBin, 'ps'), []).status
+  clause('clause 1g3 — with no /proc, a ps that fails makes processListing an error naming ps, so the Codex Stop reads unknown rather than idle',
+    /^ps could not be read/.test(got?.error || '') && !got.procs && codexBackground(got, { pid: 1, start: null }).unknown === got.error, `${r.stdout} ${r.stderr}`)
+  clause('clause 3g3 — without the listing: the stub ps exits 1', stubFails === 1, String(stubFails))
+  fs.rmSync(failBin, { recursive: true, force: true })
+}
 
 // ---------------------------------------------------------------- clause 2: known-good inputs stay quiet
 

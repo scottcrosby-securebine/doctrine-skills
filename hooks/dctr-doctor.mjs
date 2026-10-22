@@ -41,7 +41,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
-import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle, composerLine } from './dctr-lib.mjs'
+import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, serverStillOurs, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle, composerLine } from './dctr-lib.mjs'
 
 const USAGE = 'usage: node dctr-doctor.mjs [--host codex|claude] [--control] [--keep] [--save]\n'
 const argv = process.argv.slice(2), opt = { hosts: ['codex', 'claude'], control: false, keep: false, save: false }
@@ -87,7 +87,7 @@ if (opt.hosts.includes('claude')) {
 
 // ---- the cleanup, then the scratch dir and an allowlisted environment
 const SAVED = 'observations.json'
-let cleaned = false, serverPid = null
+let cleaned = false, serverPid = null, server = null
 /** The pids under `top` in `ps`'s process table, `top` included: the herdr server and whatever it spawned, read
  *  without /proc so a host that has none (macOS) still stops them. */
 function processTree(top) {
@@ -107,7 +107,10 @@ function cleanup() {
   cleaned = true
   try { herdr(['server', 'stop']) } catch { /* killed below */ }
   const pids = new Set()
-  try { if (serverPid) processTree(serverPid).forEach((p) => pids.add(p)) } catch { /* no ps: /proc below */ }
+  let pidTaken = true
+  try { process.kill(serverPid, 0) } catch (e) { pidTaken = e.code === 'EPERM' }
+  const ours = Boolean(serverPid) && serverStillOurs({ reaped: server?.exitCode !== null || server?.signalCode !== null, pidTaken })
+  try { if (ours) processTree(serverPid).forEach((p) => pids.add(p)) } catch { /* no ps: /proc below */ }
   try {
     for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
       try { if (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`DCTR_DOCTOR_RUN=${root}`)) pids.add(Number(pid)) } catch { /* gone, or not ours */ }
@@ -117,7 +120,7 @@ function cleanup() {
   for (const pid of pids) try { process.kill(pid, 'SIGKILL') } catch { /* gone */ }
   // The detached server's process group: what the server forked after the ps snapshot above, which on Linux the
   // /proc scan catches and on macOS nothing else would.
-  try { if (serverPid) process.kill(-serverPid, 'SIGKILL') } catch { /* gone */ }
+  try { if (ours) process.kill(-serverPid, 'SIGKILL') } catch { /* gone */ }
   if (opt.keep) return
   const keep = opt.save && fs.existsSync(path.join(root, SAVED))
   for (const f of keep ? fs.readdirSync(root).filter((f) => f !== SAVED) : ['.']) fs.rmSync(path.join(root, f), { recursive: true, force: true })
@@ -328,7 +331,7 @@ async function drive(host) {
 let code = 2
 try {
   let spawnError = null
-  const server = spawn('herdr', ['server'], { env, cwd: root, detached: true, stdio: 'ignore' })
+  server = spawn('herdr', ['server'], { env, cwd: root, detached: true, stdio: 'ignore' })
   server.on('error', (e) => { spawnError = e })
   serverPid = server.pid ?? null
   server.unref()
