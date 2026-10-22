@@ -337,7 +337,10 @@ const envOf = (text) => Object.fromEntries(String(text ?? '').split('\n').filter
 /** One interrupted doctor run: { code, roots (the doctor dirs left under its TMPDIR), left (files left in the run's dir),
  *  procs (processes still carrying the run's marker), started (the stub server ran), stderr, decoys (the decoy
  *  variables the doctor was started with), parent (the environment the stub reads when run with the doctor's own),
- *  seen (the environment the stub server was started with), runtime (ls -ld of its XDG_RUNTIME_DIR) }. */
+ *  seen (the environment the stub server was started with), runtime (ls -ld of its XDG_RUNTIME_DIR), tmp (the real dir
+ *  the doctor's TMPDIR names), window (a versionSleep run's state at the signal), shape (the tree and group children's
+ *  places), trustKeys (the project keys each host's trust lines name), linked (a tmpLink run's TMPDIR is a symlink to
+ *  tmp), calls (what the stub herdr was asked), path (the doctor's PATH), pathSh (each kept root's path.sh) }. */
 async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true, tmpLen = 0, versionSleep = 0, tmpLink = false, host = 'claude' }) {
   // Under /tmp, not os.tmpdir(): macOS's is a /var/folders path long enough that the doctor rightly refuses its sockets.
   // Its real path, since the doctor measures its own (macOS's /tmp is a link to /private/tmp).
