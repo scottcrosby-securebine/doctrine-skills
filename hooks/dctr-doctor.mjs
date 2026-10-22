@@ -135,7 +135,9 @@ for (const [sig, n] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
 }
 
 // The scratch dir sits under the caller's TMPDIR, so it is made before that variable goes.
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-'))
+// Its real path: the hosts resolve their cwd, and a trust key or transcript path under a symlinked TMPDIR (macOS's /tmp
+// and /var) would name a directory they never report.
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-')))
 const dir = (...p) => { const d = path.join(root, ...p); fs.mkdirSync(d, { recursive: true }); return d }
 const sock = path.join(root, 'x', 'herdr', 'herdr.sock')
 if (Buffer.byteLength(sock) > 100) { fs.rmSync(root, { recursive: true, force: true }); cannot(`the herdr socket path ${sock} is too long; set TMPDIR to a short dir such as /tmp`) }
@@ -195,6 +197,16 @@ const snapHookLogs = () => {
   }
 }
 
+/** A host's command line for its pane: in the project, with the doctor's own PATH set again, since the pane's login
+ *  shell under the scratch HOME rebuilds PATH (macOS's path_helper puts /etc/paths first) and the host and the hooks it
+ *  runs would otherwise resolve other binaries. The PATH is sourced from a file, since a typed line past 1024 bytes is
+ *  refused by a terminal in canonical mode and a long PATH alone can pass that. */
+const pathFile = path.join(root, 'path.sh')
+const hostLine = (cmd) => {
+  fs.writeFileSync(pathFile, `export PATH=${shq(process.env.PATH || '')}\n`)
+  return `cd ${shq(proj)} && . ${shq(pathFile)} && ${cmd}`
+}
+
 function setupCodex() {
   const home = dir('codex-home')
   write(path.join(home, 'auth.json'), creds.codex, 0o600)
@@ -215,9 +227,10 @@ function setupCodex() {
   config += `\n[projects.${JSON.stringify(proj)}]\ntrust_level = "trusted"\n\n[tui]\nscreen_reader_detection_done = true\n`
   if (creds.model) config += `\n[tui.model_availability_nux]\n${JSON.stringify(creds.model)} = 4\n`
   fs.writeFileSync(path.join(home, 'config.toml'), config)
-  return `cd ${shq(proj)} && CODEX_HOME=${shq(home)} codex --dangerously-bypass-approvals-and-sandbox -c allow_login_shell=false ` +
-    `-c check_for_update_on_startup=false -c model_reasoning_effort='"low"'${creds.model ? ` -c model=${shq(JSON.stringify(creds.model))}` : ''}`
+  return hostLine(`CODEX_HOME=${shq(home)} codex --dangerously-bypass-approvals-and-sandbox -c allow_login_shell=false ` +
+    `-c check_for_update_on_startup=false -c model_reasoning_effort='"low"'${creds.model ? ` -c model=${shq(JSON.stringify(creds.model))}` : ''}`)
 }
+
 
 function setupClaude() {
   const cfg = dir('claude-cfg')
@@ -227,7 +240,7 @@ function setupClaude() {
   const file = path.join(cfg, 'settings.json'), s = JSON.parse(fs.readFileSync(file, 'utf8'))
   for (const ev of LOGGED) ((s.hooks ||= {})[ev] ||= []).push(loggerGroup)
   fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n')
-  return `cd ${shq(proj)} && CLAUDE_CONFIG_DIR=${shq(cfg)} claude --model haiku --plugin-dir ${shq(PLUGIN)}`
+  return hostLine(`CLAUDE_CONFIG_DIR=${shq(cfg)} claude --model haiku --plugin-dir ${shq(PLUGIN)}`)
 }
 
 /** Polls `fn` every 500 ms until it returns a value other than null/undefined/false, or `ms` passes. */

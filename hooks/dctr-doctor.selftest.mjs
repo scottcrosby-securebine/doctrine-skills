@@ -323,7 +323,7 @@ for (const d of ['/usr/bin', '/bin']) {
 // recorded, which also covers the group child that dropped the marker. Without /proc (macOS) the marker cannot be read
 // from the stub's processes, which are platform binaries whose environment ps does not show, and the orphan outside the
 // server's tree, which only the /proc scan finds, is not staged.
-const hasProc = fs.existsSync('/proc/self')
+const hasProc = fs.existsSync('/proc/self'), REAL_TMP = fs.realpathSync('/tmp')
 const stubPids = (stub) => ['server.pid', 'tree.pid', 'group.pid'].flatMap((f) => { try { return fs.readFileSync(path.join(stub, f), 'utf8').trim().split(' ') } catch (e) { if (e.code === 'ENOENT') return []; throw e } })
 const stubAlive = (stub) => stubPids(stub).filter((pid) => { const r = spawnSync('ps', ['-o', 'stat=', '-p', pid], { encoding: 'utf8' }); if (r.error) throw r.error; return r.status === 0 && !/^Z/.test(r.stdout.trim()) })
 /** pid, ppid and pgid as ps gives them, or null for a pid ps does not know. */
@@ -338,11 +338,12 @@ const envOf = (text) => Object.fromEntries(String(text ?? '').split('\n').filter
  *  procs (processes still carrying the run's marker), started (the stub server ran), stderr, decoys (the decoy
  *  variables the doctor was started with), parent (the environment the stub reads when run with the doctor's own),
  *  seen (the environment the stub server was started with), runtime (ls -ld of its XDG_RUNTIME_DIR) }. */
-async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true, tmpLen = 0, versionSleep = 0 }) {
+async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = false, orphan = false, herdrScript = STUB_HERDR, signal = true, tmpLen = 0, versionSleep = 0, tmpLink = false }) {
   // Under /tmp, not os.tmpdir(): macOS's is a /var/folders path long enough that the doctor rightly refuses its sockets.
-  const base = fs.mkdtempSync('/tmp/dctr-doctor-int-'), stub = path.join(base, 'stub'), bin = path.join(base, 'bin')
+  // Its real path, since the doctor measures its own (macOS's /tmp is a link to /private/tmp).
+  const base = fs.mkdtempSync(path.join(REAL_TMP, 'dctr-doctor-int-')), stub = path.join(base, 'stub'), bin = path.join(base, 'bin')
   // tmpLen: the doctor's TMPDIR made exactly that many bytes long, under /tmp where the caller's TMPDIR leaves no room.
-  const outer = tmpLen && base.length + 2 > tmpLen ? fs.mkdtempSync('/tmp/dctr-doctor-len-') : null
+  const outer = tmpLen && base.length + 2 > tmpLen ? fs.mkdtempSync(path.join(REAL_TMP, 'dctr-doctor-len-')) : null
   const tmp = tmpLen ? path.join(outer ?? base, 't'.repeat(tmpLen - (outer ?? base).length - 1)) : path.join(base, 't')
   for (const d of [stub, bin, tmp, path.join(base, 'home', '.claude')]) fs.mkdirSync(d, { recursive: true })
   fs.writeFileSync(path.join(bin, 'herdr'), herdrScript.replace('\n', `\nSTUB_DIR='${stub}' STUB_SAVE=${save ? 1 : ''} STUB_ORPHAN=${orphan ? 1 : ''} STUB_TREE=${versionSleep ? '' : 1}\n`), { mode: 0o755 })
@@ -351,7 +352,10 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   fs.writeFileSync(path.join(base, 'home', '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'stub', expiresAt: Date.now() + 864e5 } }))
   // Decoys in the doctor's own environment: two XDG dirs outside its scratch dir, and four names its hosts need none of.
   const decoys = Object.fromEntries(DECOYS.map((k) => [k, path.join(base, 'decoy', k)]))
-  const env = { PATH: `${bin}:${SYS}`, HOME: path.join(base, 'home'), TMPDIR: tmp, ...decoys }
+  // tmpLink: the doctor is handed its TMPDIR through a symlink to that dir, as macOS hands /tmp and /var.
+  if (tmpLink) fs.symlinkSync(tmp, path.join(base, 'tlink'))
+  const linked = tmpLink ? fs.lstatSync(path.join(base, 'tlink')).isSymbolicLink() : null
+  const env = { PATH: `${bin}:${SYS}`, HOME: path.join(base, 'home'), TMPDIR: tmpLink ? path.join(base, 'tlink') : tmp, ...decoys }
   const parent = envOf(spawnSync(path.join(bin, 'herdr'), ['environ'], { env, encoding: 'utf8', timeout: 30000 }).stdout)
   const child = spawn(process.execPath, [...(noProc ? ['--import', NO_PROC] : []), path.join(import.meta.dirname, 'dctr-doctor.mjs'), '--host', 'claude', ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''
@@ -382,6 +386,13 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   try { runRoot = fs.readFileSync(path.join(stub, 'root'), 'utf8').trim() || null } catch { /* the server never ran */ }
   const procs = runRoot ? [...new Set([...(hasProc ? markerProcs(runRoot) : []), ...stubAlive(stub)])] : []
   const left = roots.flatMap((r) => fs.readdirSync(r))
+  // The project key the doctor wrote into Claude Code's .claude.json, read while a --keep run's scratch dir is still there.
+  let calls = ''
+  try { calls = fs.readFileSync(path.join(stub, 'calls'), 'utf8') } catch { /* the stub never ran */ }
+  let pathSh = null
+  try { pathSh = roots.map((r) => fs.readFileSync(path.join(r, 'path.sh'), 'utf8')) } catch { /* not written */ }
+  let trustKeys = null
+  try { trustKeys = roots.map((r) => Object.keys(JSON.parse(fs.readFileSync(path.join(r, 'claude-cfg', '.claude.json'), 'utf8')).projects)) } catch { /* not written */ }
   let seen = {}, runtime = ''
   try { seen = envOf(fs.readFileSync(path.join(stub, 'env'), 'utf8')); runtime = fs.readFileSync(path.join(stub, 'runtime'), 'utf8') } catch { /* the server never ran */ }
   // Whatever the doctor left running is stopped here, so a failed clause leaves nothing behind.
@@ -389,9 +400,11 @@ async function interrupted({ sig = 'SIGINT', args = [], noProc = false, save = f
   for (const pid of stubPids(stub)) try { process.kill(Number(pid), 'SIGKILL') } catch { /* gone */ }
   fs.rmSync(base, { recursive: true, force: true })
   if (outer) fs.rmSync(outer, { recursive: true, force: true })
-  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime, tmp, window, shape }
+  return { code, roots, left, procs, started, runRoot, orphans, stderr, decoys, parent, seen, runtime, tmp, window, shape, trustKeys, linked, calls, path: env.PATH, pathSh }
 }
 const RUNS = {
+  // TMPDIR handed through a symlink, kept so the trust key the doctor wrote can be read.
+  linked: { args: ['--keep'], tmpLink: true },
   // The plain run's server also leaves an orphan outside its tree, which only the /proc scan finds.
   plain: { orphan: hasProc }, noProc: { noProc: true }, term: { sig: 'SIGTERM', noProc: true }, keep: { args: ['--keep'] }, save: { args: ['--save'], save: true },
   // A herdr whose interpreter is missing: found on PATH, so the prerequisites pass, and its spawn fails.
@@ -431,6 +444,23 @@ clause('1 a herdr server that cannot be spawned is cannot-run: exit 2, the scrat
 clause('3 the server\'s tree child is its child in a process group not the server\'s, so only the walk of the tree reaches it; its group child is no child of it, in its process group, and carries no run marker where /proc shows one, so only the group kill reaches it; read with ps before the signal',
   ['plain', 'noProc', 'term'].every((k) => { const sh = ints[k].shape; return sh && sh.tree[1] === sh.server[0] && sh.tree[2] !== sh.server[2] && sh.server[2] === sh.server[0] &&
     sh.group[1] !== sh.server[0] && sh.group[2] === sh.server[2] && sh.gMarked !== true }), JSON.stringify(['plain', 'noProc', 'term'].map((k) => ints[k].shape)))
+// The host's command line carries the doctor's PATH, since the pane's login shell under the scratch HOME rebuilds it
+// (macOS's path_helper puts /etc/paths first) and the host and its hooks would resolve other binaries.
+{
+  const k = ints.keep, launch = k.calls.split('\n').find((l) => / claude --model haiku /.test(l)) || ''
+  clause('1 the doctor launches the host with its own PATH on the command line, ahead of the host\'s config dir',
+    k.started && k.roots.length === 1 && launch.includes(`&& . ${lib.shq(path.join(k.roots[0], 'path.sh'))} && CLAUDE_CONFIG_DIR=`) &&
+    JSON.stringify(k.pathSh) === JSON.stringify([`export PATH=${lib.shq(k.path)}\n`]), `${launch} ${JSON.stringify(k.pathSh)}`)
+  clause('3 the keep run\'s doctor PATH is the fixture\'s bin and tool dirs, read without the doctor', k.path.split(':').length === 2 && k.path.endsWith(SYS), k.path)
+}
+// D1: a TMPDIR reached through a symlink still gives the hosts trust keys under the real path they resolve.
+{
+  const l = ints.linked, realProj = l.roots[0] ? path.join(l.roots[0], 'proj') : null
+  clause('1 a doctor handed its TMPDIR through a symlink writes Claude Code\'s project trust key under the real path, which the host resolves',
+    l.started && l.roots.length === 1 && JSON.stringify(l.trustKeys) === JSON.stringify([[realProj]]) && !realProj.includes('tlink'), show(l))
+  clause('3 the linked run\'s TMPDIR was a symlink and its scratch dir sits under the real dir, read without the doctor',
+    l.linked === true && l.roots.length === 1 && l.roots[0].startsWith(l.tmp + '/'), JSON.stringify({ linked: l.linked, roots: l.roots, tmp: l.tmp }))
+}
 clause('3 the interrupted runs reached the stub server before the signal, and the --keep run shows the scratch dir held more than one file',
   ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && (!hasProc || ints.plain.orphans > 0), JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
 

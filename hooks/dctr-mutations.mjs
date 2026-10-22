@@ -1070,6 +1070,14 @@ const MUTATIONS = [
     clause: "1 an interrupted doctor (without /proc) exits 130, removes its scratch dir and leaves no process carrying its run marker",
     from: "try { if (ours) processTree(serverPid).forEach((p) => pids.add(p)) }",
     to: "try { if (false) processTree(serverPid).forEach((p) => pids.add(p)) }" },
+  // mac-port-doctor D1: the scratch root is its real path, so a symlinked TMPDIR (macOS /tmp, /var) keys trust where the hosts look.
+  { name: "mac-port-doctor: the doctor keys its hosts' trust under a symlinked TMPDIR's path", file: "dctr-doctor.mjs",
+    clause: "1 a doctor handed its TMPDIR through a symlink writes Claude Code's project trust key under the real path, which the host resolves",
+    from: "const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-')))", to: "const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-doctor-'))" },
+  // mac-port-doctor D3: each host's command line carries the doctor's PATH, which the pane's login shell rebuilds.
+  { name: "mac-port-doctor: the host launches with the PATH the pane's login shell rebuilt", file: "dctr-doctor.mjs",
+    clause: "1 the doctor launches the host with its own PATH on the command line, ahead of the host's config dir",
+    from: "  return `cd ${shq(proj)} && . ${shq(pathFile)} && ${cmd}`", to: "  return `cd ${shq(proj)} && ${cmd}`" },
   // mac-port R1-B4: a group-only stub child (out of the tree, no run marker) that only the group kill reaches.
   { name: "mac-port: the doctor leaves its server's process group running", file: "dctr-doctor.mjs",
     clause: "1 an interrupted doctor (plain) exits 130, removes its scratch dir and leaves no process carrying its run marker",
