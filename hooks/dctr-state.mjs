@@ -875,16 +875,19 @@ export function processListing() {
 /**
  * processListing's procs on macOS, from three `ps -o pid=,ppid=,stat=,lstart=,command=` listings under LC_ALL=C taken
  * in turn: `before` (-axww), `withEnv` (-axwwE, which appends the environment to each command) and `after` (-axww).
- * `start` is lstart in epoch seconds, `state` the first letter of stat, argv0 the command's first word. A process
- * missing from a later listing exited during the reads (each ps lists itself) and is left out; every other one is
- * kept, so none drops out of the tree. Its environment is what -E added past its command, read only where the process
- * was steady across the reads: the same start and command before and after, and an -E row with that start whose
- * command opens with it, so no exec in between can pass its new arguments off as environment. Its session is '' with
- * no CODEX_SESSION_ID in that text, the value with exactly one, and null, unknown, where it was not steady, where -E
- * added nothing (how ps shows an environment it may not read: another user's, or a platform binary such as /bin/sleep),
- * or where the name appears twice, since ps joins the entries with spaces and a value can carry that text. A non-empty
- * row no listing's pattern reads throws, naming its pid alone (ps prints a newline in a value as \012, so every row is
- * one line).
+ * The processes are those in both later listings, so one that exited during the reads is left out, and so is each ps's
+ * own row; one born after the first listing is kept. Identity (ppid, state, start, argv0) comes from `after`, the latest
+ * read, so a pid reused during the reads is described as the process now holding it. `start` is lstart in epoch
+ * seconds, `state` the first letter of stat, argv0 the command's first word. The environment is what -E added past the
+ * command, read only where the process was steady: in all three listings with the same start and command before and
+ * after, and an -E row whose command opens with it, so a single exec in between cannot pass its new arguments off as
+ * environment. Its session is '' with no CODEX_SESSION_ID in that text, the value with exactly one, and null, unknown,
+ * where it was not steady, where -E added nothing (how ps shows an environment it may not read: another user's, or a
+ * platform binary such as /bin/sleep), or where the name appears twice, since ps joins the entries with spaces and a
+ * value can carry that text. A non-empty row no listing's pattern reads throws, naming its pid alone (ps prints a
+ * newline in a value as \012, so every row is one line).
+ * shortcut: two execs that return a platform binary to its first command, or a pid reused, inside one read pass the
+ * steadiness check (ruled a recorded limit, mac-port ALARM4); a fix needs an atomic read of argv and environment.
  * shortcut: argv0 is cut at the first space, so an executable path holding a space is misread; no Codex path has one.
  */
 export function psProcs(before, withEnv, after) {
@@ -894,14 +897,14 @@ export function psProcs(before, withEnv, after) {
     if (!m) throw new Error(`a ps row could not be read: ${l.trim().split(/\s+/)[0]}`)
     return [Number(m[1]), m]
   }))
-  const envs = rows(withEnv), afters = rows(after), procs = []
-  for (const [pid, m] of rows(before)) {
-    const e = envs.get(pid), a = afters.get(pid)
-    if (!e || !a) continue
-    const steady = e[4] === m[4] && a[4] === m[4] && a[5] === m[5] && e[5].startsWith(m[5])
+  const befores = rows(before), envs = rows(withEnv), procs = []
+  for (const [pid, a] of rows(after)) {
+    const m = befores.get(pid), e = envs.get(pid)
+    if (!e) continue
+    const steady = Boolean(m) && a[4] === m[4] && a[5] === m[5] && e[5].startsWith(m[5])
     const rest = steady ? e[5].slice(m[5].length).trim() : ''
     const ids = [...rest.matchAll(/(?:^| )CODEX_SESSION_ID=(\S*)/g)]
-    procs.push({ pid, ppid: Number(m[2]), state: m[3][0], start: Date.parse(m[4]) / 1000, argv0: m[5].trimStart().split(' ')[0], session: rest && ids.length < 2 ? ids[0]?.[1] ?? '' : null })
+    procs.push({ pid, ppid: Number(a[2]), state: a[3][0], start: Date.parse(a[4]) / 1000, argv0: a[5].trimStart().split(' ')[0], session: rest && ids.length < 2 ? ids[0]?.[1] ?? '' : null })
   }
   return procs
 }
