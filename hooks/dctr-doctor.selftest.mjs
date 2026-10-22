@@ -431,11 +431,6 @@ clause('1 a herdr server that cannot be spawned is cannot-run: exit 2, the scrat
 clause('3 the server\'s tree child is its child in a process group not the server\'s, so only the walk of the tree reaches it; its group child is no child of it, in its process group, and carries no run marker where /proc shows one, so only the group kill reaches it; read with ps before the signal',
   ['plain', 'noProc', 'term'].every((k) => { const sh = ints[k].shape; return sh && sh.tree[1] === sh.server[0] && sh.tree[2] !== sh.server[2] && sh.server[2] === sh.server[0] &&
     sh.group[1] !== sh.server[0] && sh.group[2] === sh.server[2] && sh.gMarked !== true }), JSON.stringify(['plain', 'noProc', 'term'].map((k) => ints[k].shape)))
-// serverStillOurs (R1-B3): the server's pid is acted on while Node has not reaped it, or once reaped while no process
-// holds the pid; a reaped server whose pid another process holds is never acted on.
-clause('1 serverStillOurs: unreaped is ours whether or not the pid is taken, reaped with the pid free is ours, reaped with the pid taken is not',
-  lib.serverStillOurs({ reaped: false, pidTaken: true }) && lib.serverStillOurs({ reaped: false, pidTaken: false }) &&
-  lib.serverStillOurs({ reaped: true, pidTaken: false }) && !lib.serverStillOurs({ reaped: true, pidTaken: true }), 'serverStillOurs wrong')
 clause('3 the interrupted runs reached the stub server before the signal, and the --keep run shows the scratch dir held more than one file',
   ['plain', 'noProc', 'term', 'keep', 'save'].every((k) => ints[k].started && ints[k].runRoot) && ints.keep.left.length > 1 && (!hasProc || ints.plain.orphans > 0), JSON.stringify(Object.fromEntries(Object.entries(ints).map(([k, r]) => [k, r.started]))))
 

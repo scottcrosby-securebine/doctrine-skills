@@ -2204,11 +2204,6 @@ function usageFieldsOk(text, usage, host) {
 }
 
 /** 0 when no signal drifts, an unobserved one (ok null) included, 1 on any drift (2, cannot run, is the driver's). */
-/** Whether the doctor may still act on the herdr server's recorded pid, its tree and its process group: while Node has
- *  not reaped the server its pid cannot be reused, and once reaped, a pid no process holds leaves any members of its
- *  old group behind a group id the kernel does not hand out again. A reaped server whose pid a process holds is a
- *  reused pid, and acting on it would reach another program's processes. */
-export const serverStillOurs = ({ reaped, pidTaken }) => !reaped || !pidTaken
 export const doctorExit = (rows) => (rows.every((r) => r.ok !== false) ? 0 : 1)
 
 /** The hook areas the drive never exercises, which a green run says nothing about. */

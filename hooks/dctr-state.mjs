@@ -880,7 +880,8 @@ export function processListing() {
  * Its environment is what -E added past its plain command: '' with no CODEX_SESSION_ID in it, the value with exactly
  * one, and null, unknown, when -E added nothing (how ps shows an environment it may not read: another user's, or a
  * platform binary such as /bin/sleep), when the -E row's start or command differs (a reused pid, an exec between the
- * two calls), or when it holds the name twice, since ps joins the entries with spaces and a value can carry that text.
+ * two calls), when what -E added does not open with a NAME=value entry (an exec that only appended arguments), or when
+ * it holds the name twice, since ps joins the entries with spaces and a value can carry that text.
  * A non-empty row neither listing's pattern reads throws (ps prints a newline in a value as \012, so every row is one
  * line).
  * shortcut: argv0 is cut at the first space, so an executable path holding a space is misread; no Codex path has one.
@@ -889,7 +890,7 @@ export function psProcs(plain, withEnv) {
   const row = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w{3} \w{3}\s+\d+ \d\d:\d\d:\d\d \d{4}) (.*)$/
   const rows = (text) => new Map(String(text).split('\n').filter((l) => l.trim()).map((l) => {
     const m = row.exec(l)
-    if (!m) throw new Error(`a ps row could not be read: ${l.trim().slice(0, 80)}`)
+    if (!m) throw new Error(`a ps row could not be read: ${l.trim().split(/\s+/)[0]}`)
     return [Number(m[1]), m]
   }))
   const envs = rows(withEnv), procs = []
@@ -898,7 +899,8 @@ export function psProcs(plain, withEnv) {
     if (!e) continue
     const rest = e[4] === m[4] && e[5].startsWith(m[5]) ? e[5].slice(m[5].length).trim() : ''
     const ids = [...rest.matchAll(/(?:^| )CODEX_SESSION_ID=(\S*)/g)]
-    procs.push({ pid, ppid: Number(m[2]), state: m[3][0], start: Date.parse(m[4]) / 1000, argv0: m[5].trimStart().split(' ')[0], session: !rest || ids.length > 1 ? null : ids[0]?.[1] ?? '' })
+    const env = /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest) && ids.length < 2
+    procs.push({ pid, ppid: Number(m[2]), state: m[3][0], start: Date.parse(m[4]) / 1000, argv0: m[5].trimStart().split(' ')[0], session: env ? ids[0]?.[1] ?? '' : null })
   }
   return procs
 }

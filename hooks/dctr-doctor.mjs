@@ -41,7 +41,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
-import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, serverStillOurs, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle, composerLine } from './dctr-lib.mjs'
+import { trustedHash, hookEventLabel, shq, doctorVerdict, doctorExit, doctorSummary, doctorRedact, DOCTOR_PLAIN, DOCTOR_MARKED, DOCTOR_DRAFT, READY_STATUSES, composerIdle, composerLine } from './dctr-lib.mjs'
 
 const USAGE = 'usage: node dctr-doctor.mjs [--host codex|claude] [--control] [--keep] [--save]\n'
 const argv = process.argv.slice(2), opt = { hosts: ['codex', 'claude'], control: false, keep: false, save: false }
@@ -107,9 +107,10 @@ function cleanup() {
   cleaned = true
   try { herdr(['server', 'stop']) } catch { /* killed below */ }
   const pids = new Set()
-  let pidTaken = true
-  try { process.kill(serverPid, 0) } catch (e) { pidTaken = e.code === 'EPERM' }
-  const ours = Boolean(serverPid) && serverStillOurs({ reaped: server?.exitCode !== null || server?.signalCode !== null, pidTaken })
+  // The server's pid, tree and group are acted on only while Node has not reaped the server, so its pid cannot have been
+  // reused; cleanup runs synchronously, so no reap lands between this read and the kills. A server that exited earlier
+  // leaves its leftovers to the /proc scan, where the host has one.
+  const ours = Boolean(serverPid) && server?.exitCode === null && server?.signalCode === null
   try { if (ours) processTree(serverPid).forEach((p) => pids.add(p)) } catch { /* no ps: /proc below */ }
   try {
     for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
