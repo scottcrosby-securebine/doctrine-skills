@@ -889,6 +889,9 @@ export function processListing() {
  * shortcut: two execs that return a platform binary to its first command, or a pid reused, inside one read pass the
  * steadiness check (ruled a recorded limit, mac-port ALARM4); a fix needs an atomic read of argv and environment.
  * shortcut: argv0 is cut at the first space, so an executable path holding a space is misread; no Codex path has one.
+ * shortcut: a single CODEX_SESSION_ID=<x> inside another variable's value reads as the session <x>, since ps joins the
+ * entries with spaces and one occurrence cannot be told from an entry (ruled a recorded limit, mac-port-merge Q2,
+ * 2026-10-23); the Linux reader's NUL-separated environ has no such case, and no process of Codex's own carries it.
  */
 export function psProcs(before, withEnv, after) {
   const row = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w{3} \w{3}\s+\d+ \d\d:\d\d:\d\d \d{4}) (.*)$/

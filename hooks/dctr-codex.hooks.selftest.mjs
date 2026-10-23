@@ -810,7 +810,8 @@ if (hasProc) {
 // holds the name twice (a value carrying the text), 18 and 20 are platform binaries that exec'd into a command that only
 // appends arguments (an option, and an argument shaped like NAME=value), 21 exec'd between the last two calls, 23 was
 // born after the first call, 24 is in the after listing only (as the last ps is), and 25 is a pid that a zombie child
-// of pid 1 held before and a worker under Codex holds in the later two calls.
+// of pid 1 held before and a worker under Codex holds in the later two calls. 26 has no CODEX_SESSION_ID of its own but a
+// NOTE whose value carries the text once: it reads as a session, the recorded limit (mac-port-merge Q2).
 const PS_PLAIN = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
   '   11    10 S    Thu Oct  2 09:05:00 2026     /bin/sleep 120',
@@ -825,6 +826,7 @@ const PS_PLAIN = [
   '   21    10 S    Thu Oct 22 19:51:21 2026     node a.js',
   '   22    10 S    Thu Oct 22 19:51:22 2026     node brief.js',
   '   25     1 Z    Thu Oct 22 19:50:25 2026     (old)',
+  '   26    10 S    Thu Oct 22 19:51:26 2026     node note.js',
 ].join('\n')
 const PS_ENV = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server HOME=/Users/u CODEX_SESSION_ID=01a0e956-923c',
@@ -840,6 +842,7 @@ const PS_ENV = [
   '   22    10 S    Thu Oct 22 19:51:22 2026     node brief.js HOME=/x',
   '   23    10 S    Thu Oct 22 19:51:23 2026     node born.js HOME=/x CODEX_SESSION_ID=work',
   '   25    10 S    Thu Oct 22 19:52:25 2026     node worker.js HOME=/x CODEX_SESSION_ID=work',
+  '   26    10 S    Thu Oct 22 19:51:26 2026     node note.js NOTE=example CODEX_SESSION_ID=work HOME=/x',
 ].join('\n')
 const PS_AFTER = [
   '   10     1 S    Thu Oct 22 19:51:11 2026     /Users/u/.local/bin/codex app-server',
@@ -855,25 +858,28 @@ const PS_AFTER = [
   '   23    10 S    Thu Oct 22 19:51:23 2026     node born.js',
   '   24    10 R+   Thu Oct 22 19:51:24 2026     ps -axww -o pid=,ppid=,stat=,lstart=,command=',
   '   25    10 S    Thu Oct 22 19:52:25 2026     node worker.js',
+  '   26    10 S    Thu Oct 22 19:51:26 2026     node note.js',
 ].join('\n')
 const { psProcs } = await import('./dctr-state.mjs')
 const pp = Object.fromEntries(psProcs(PS_PLAIN, PS_ENV, PS_AFTER).map((p) => [p.pid, p]))
 let psThrew = null
 try { psProcs(PS_PLAIN + '\n   19    10 S    garbled HOME=/secret', PS_ENV, PS_AFTER) } catch (e) { psThrew = e.message }
 const ppBg = codexBackground({ procs: Object.values(pp).filter((p) => [10, 16, 17, 18, 20, 21, 23, 25].includes(p.pid)) }, { pid: 10, start: pp[10].start }, { inherited: 'outer', session: 'work' })
+const ppBg26 = codexBackground({ procs: Object.values(pp).filter((p) => [10, 26].includes(p.pid)) }, { pid: 10, start: pp[10].start }, { inherited: null, session: '01a0e956-923c' })
 const L = (t, n) => t.split('\n')[n]
-clause('clause 1g2 — psProcs: the processes in both later reads, with their identity from the last; the session from the environment -E adds, null where it adds none, where the process was not steady across the three reads (another start, a birth after the first read, an exec before or after the -E read, including one that only appended arguments), and where the name appears twice; an argument holding = is no environment; a row it cannot read throws naming its pid alone; the state is stat\'s first letter; over the unsteady, doubled, born and reused rows codexBackground reads unknown, not idle',
-  JSON.stringify(Object.keys(pp)) === '["10","11","12","14","15","16","17","18","20","21","23","25"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
+clause('clause 1g2 — psProcs: the processes in both later reads, with their identity from the last; the session from the environment -E adds, null where it adds none, where the process was not steady across the three reads (another start, a birth after the first read, an exec before or after the -E read, including one that only appended arguments), and where the name appears twice; an argument holding = is no environment; a row it cannot read throws naming its pid alone; the state is stat\'s first letter; over the unsteady, doubled, born and reused rows codexBackground reads unknown, not idle; a single CODEX_SESSION_ID= inside another variable\'s value reads as the session, the recorded limit, and codexBackground counts it as work',
+  JSON.stringify(Object.keys(pp)) === '["10","11","12","14","15","16","17","18","20","21","23","25","26"]' && pp[10].session === '01a0e956-923c' && pp[10].argv0 === '/Users/u/.local/bin/codex' && pp[10].ppid === 1 &&
   pp[10].start === new Date(2026, 9, 22, 19, 51, 11).getTime() / 1000 &&
   pp[11].session === null && pp[11].start < pp[10].start && pp[12].session === '' && pp[12].state === 'R' && pp[14].state === 'Z' && pp[14].session === null &&
   pp[15].session === null && pp[15].start === new Date(2026, 9, 22, 19, 52, 0).getTime() / 1000 && pp[16].session === null && pp[16].argv0 === 'node' &&
   pp[17].session === null && pp[18].session === null && pp[20].session === null && pp[21].session === null && pp[21].argv0 === 'node' && pp[23].session === null &&
   pp[25].session === null && pp[25].ppid === 10 && pp[25].state === 'S' && pp[25].argv0 === 'node' &&
-  psThrew === 'a ps row could not be read: 19' && ppBg.running === true && ppBg.unknown !== null,
-  `${JSON.stringify(pp)} threw ${psThrew} bg ${JSON.stringify(ppBg)}`)
+  psThrew === 'a ps row could not be read: 19' && ppBg.running === true && ppBg.unknown !== null &&
+  pp[26].session === 'work' && ppBg26.running === true && ppBg26.unknown === null && JSON.stringify(ppBg26.pids) === '[26]',
+  `${JSON.stringify(pp)} threw ${psThrew} bg ${JSON.stringify(ppBg)} bg26 ${JSON.stringify(ppBg26)}`)
 const row = (t, pid) => t.split('\n').find((l) => new RegExp(`^ +${pid} `).test(l))
 const extends_ = (pid) => row(PS_ENV, pid).startsWith(row(PS_PLAIN, pid) + ' ')
-clause('clause 3g2 — without psProcs: rows 10, 12, 17, 21 and 22 have -E rows extending their before rows, and 10, 12 and 17 have after rows equal to their before rows; 11\'s and 14\'s three rows are equal; 12\'s arguments hold a=1; 13 has no -E or after row and 22 no after row; 15\'s -E and after rows start at another time than its before row; 16\'s -E and after commands differ from its before one; 17\'s -E row names CODEX_SESSION_ID twice; 18\'s and 20\'s -E and after rows equal each other and extend their before rows by arguments only (-c, if=/dev/zero); 21\'s after command differs from its before one; 23 has no before row; 24 is in the after listing only; 25\'s before row is a zombie child of pid 1 and its later rows a child of 10 started later',
+clause('clause 3g2 — without psProcs: rows 10, 12, 17, 21 and 22 have -E rows extending their before rows, and 10, 12 and 17 have after rows equal to their before rows; 11\'s and 14\'s three rows are equal; 12\'s arguments hold a=1; 13 has no -E or after row and 22 no after row; 15\'s -E and after rows start at another time than its before row; 16\'s -E and after commands differ from its before one; 17\'s -E row names CODEX_SESSION_ID twice; 18\'s and 20\'s -E and after rows equal each other and extend their before rows by arguments only (-c, if=/dev/zero); 21\'s after command differs from its before one; 23 has no before row; 24 is in the after listing only; 25\'s before row is a zombie child of pid 1 and its later rows a child of 10 started later; 26\'s -E row extends its before row, its after row equals it, and it names CODEX_SESSION_ID once, inside NOTE\'s value',
   [10, 12, 17, 21, 22].every(extends_) && [10, 12, 17].every((p) => row(PS_AFTER, p) === row(PS_PLAIN, p)) &&
   [11, 14].every((p) => row(PS_ENV, p) === row(PS_PLAIN, p) && row(PS_AFTER, p) === row(PS_PLAIN, p)) && /dd a=1$/.test(row(PS_PLAIN, 12)) &&
   !row(PS_ENV, 13) && !row(PS_AFTER, 13) && row(PS_ENV, 22) && !row(PS_AFTER, 22) &&
@@ -882,7 +888,8 @@ clause('clause 3g2 — without psProcs: rows 10, 12, 17, 21 and 22 have -E rows 
   [[18, ' -c '], [20, ' if=']].every(([p, a]) => row(PS_AFTER, p) === row(PS_ENV, p) && row(PS_ENV, p).startsWith(row(PS_PLAIN, p) + a)) &&
   row(PS_AFTER, 21).endsWith('node b.js') && !row(PS_PLAIN, 23) && row(PS_ENV, 23) && row(PS_AFTER, 23) &&
   !row(PS_PLAIN, 24) && !row(PS_ENV, 24) && row(PS_AFTER, 24) &&
-  /^ +25 +1 Z .*19:50:25/.test(row(PS_PLAIN, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_ENV, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_AFTER, 25)), 'ps fixture wrong')
+  /^ +25 +1 Z .*19:50:25/.test(row(PS_PLAIN, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_ENV, 25)) && /^ +25 +10 S .*19:52:25/.test(row(PS_AFTER, 25)) &&
+  extends_(26) && row(PS_AFTER, 26) === row(PS_PLAIN, 26) && row(PS_ENV, 26).split('CODEX_SESSION_ID=').length === 2 && / NOTE=example CODEX_SESSION_ID=work /.test(row(PS_ENV, 26)), 'ps fixture wrong')
 // With no /proc on macOS, a ps that fails makes the listing an error, which codexBackground reads as unknown; run in a
 // child whose PATH holds only a failing ps. On a host with /proc the listing never reaches ps.
 if (hasProc) console.log('skip (linux): clause 1g3 drives processListing\'s ps branch, which only a host without /proc takes; the macOS run drives it')
