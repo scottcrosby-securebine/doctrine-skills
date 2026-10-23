@@ -6,6 +6,8 @@ three cases are the standing test that it did not.
 
 `e9-phase/` is not one of them: it is the code phase E9's drives run through doctrine-code on Codex CLI and on Claude Code, and its own README says how to build it.
 
+`drives/` is not one of them either: it holds the grader brief E3's skill drives are graded with, a template whose slots the drive's orchestrator fills.
+
 Run a change against all three. Each proves something the others cannot:
 
 | Case | Proves |
