@@ -6,7 +6,8 @@ comparison, the integrated critic, the red team, and the counters, in that order
 optional, and it runs fused mode only; pure gauntlet runs in prose. On Codex, which has no Workflow
 tool, `harness/round.codex.mjs` runs the same script unchanged (On Codex, below). Where the host has
 neither, or the round needs a judgment call the script does not model, the prose flow in `SKILL.md` is
-the round, unchanged.
+the round, unchanged. Its red team is answered by the other model family's seat, which decides which of
+the two a round runs through on Claude Code (The red-team call, below).
 
 ## What the script does and does not hold
 
@@ -45,6 +46,20 @@ behaviour of the host rather than something it documents, so re-check it if a re
 the journalled verdict unchanged. What it means here: a run journaled with no `sections` key resumes
 into that key's block, so re-run it, or resume it with `sections: []` supplied, which is what it meant.
 
+## The red-team call
+
+The red team is the one call in the round that no seat of your own model family answers: hub step 4
+gives it to the red-team seat from the other model family that your host reference names. The script
+marks it with `label: 'red-team'`, and that label is the routing signal. The Workflow tool dispatches
+every call itself and does not route on a label, so a red team run inside it is a seat of your own
+family: run a round through the Workflow tool only where the other-family seat is absent, and record
+its red team as the same-model one the hub's Fallbacks row makes it. Everywhere else, on Claude Code as
+on Codex, run the round through `round.codex.mjs` (On Codex, below, with the Agent tool in place of
+`spawn_agent` on Claude Code), which hands you every call and keeps the label in each pending key. The
+pending call whose key starts `red-team#` goes to the other-family seat as your host reference gives
+it, dispatched read-only in the dispatch's own words with the message file's content verbatim as its
+brief, and its reply goes verbatim into the answer file like any other. Never answer it from a
+`spawn_agent` seat, which cannot change provider, or from any other seat of your own family.
 
 ## On Codex
 
@@ -57,7 +72,8 @@ Workflow tool.
 2. Run `node <plugin-root>/skills/doctrine-gauntlet/harness/round.codex.mjs <args.json> <journal-dir>`,
    `<plugin-root>` being the plugin directory that holds `skills/`.
 3. Exit 3: each `pending ...` line names a message file and the answer file it needs. Dispatch one blind
-   `spawn_agent` seat per message file, as many at once as your session runs and the rest as seats
+   `spawn_agent` seat per message file, except the `red-team#` one, which goes to the other model
+   family's seat (The red-team call, above), as many at once as your session runs and the rest as seats
    finish, with the file's content verbatim as its message, and wait on them. Read each message file
    whole, in chunks where your host cuts a long read (the hub's host reference, Reading). Write each seat's final reply, verbatim, to its answer file, and `null` for a seat
    that died or returned nothing. Then run step 2 again.
@@ -88,7 +104,7 @@ them, is refused. Start a new journal directory for each round.
 | `criticPrompt` | the integrated critic, assembled from the critic brief; its return carries a `recorded` list for the failures step 7 ruled inherited and the marked-stale clause violations item 8 routes there, checked per finding against `inherited` and `stale` exactly as the red team's. The script also reads item 8's vocabulary off the roll call the way item 5's is read off the red team's: a `CLEAR` with a blocking or recorded finding under the same axis, a `BLOCKING` with no finding under it anywhere, a `CANNOT JUDGE` with a finding under it, and a recorded finding naming an axis the dispatcher never named, each block. See **Two kinds of block** below for why none of them can be waived |
 | `criticAxes` | item 3's named axes and item 2's six; the script adds every `[JUDGE]` and `[UNMEASURED]` line of the floor report it just ran, hands the critic that report under item 1, and blocks on any axis missing from the return — and on a line for an axis nobody named, or named twice, which is the script's own rule: a line it cannot count is a line it will not guess about |
 | `redTeamPrompt` | the red team, assembled from the red team brief |
-| `redTeamItems` | the brief's four attack items, `[1, 2, 3, 4]` by default; the script appends the critic's report to the red team's prompt (item 1 attacks what the critic passed) — renders, diff and ledger you name in `redTeamPrompt` yourself |
+| `redTeamItems` | the brief's four attack items, `[1, 2, 3, 4]` by default; the script appends this round's floor report and the critic's whole returned report, roll call included, to the red team's prompt (item 1 attacks what the critic passed) — everything else the red team brief's assembly list names, renders, diff and ledger among it, you put in `redTeamPrompt` yourself |
 | `tieIsPass` | `true` only where fidelity is the run's bar (The brief); a named-material grant keeps it `false` |
 | `counters` | `{ cleanPasses, unresolvedRounds, sectionRejections, sectionResets }` from the ledger's run-state block; the script returns them updated. `sectionResets` is yours to write: when the user rules on a deadlocked section and you clear its rejections, add one there, and a second deadlock on the same section returns marked terminal |
 
@@ -107,7 +123,7 @@ exactly these.
 
 | agent | shape | notes |
 |---|---|---|
-| section critic | `{ accept: bool, notes: string[] }` | an accepting verdict may still carry notes; they go to the docket |
+| section critic | `{ accept: bool, notes: string[], rollCall: [{axis, word, line?}], blocking: [{axis, finding}], recorded: [{axis, finding}] }` | the roll call is the integrated critic's, field for field: one line per axis that critic was dispatched on, in item 8's vocabulary, since `SKILL.md`'s item 8 asks it of every briefed critic and a section critic is one; `blocking` and `recorded` are the integrated critic's lists. An accepting verdict may still carry notes; they go to the docket. A rejecting verdict's reasons are its notes, each blocking finding under its axis and each `CANNOT JUDGE` roll-call line with its text, never a finding in `recorded` or a `BLOCKING` roll-call line: the script hands them to the next builder and the retry critic and carries them into a deadlock entry |
 | floor | as the `floorPrompt` row above gives it | `report` is the instrument's own words and the script reads its `[JUDGE]`/`[UNMEASURED]` lines |
 | blind pass | as the `blindPrompt` row above gives it | |
 | integrated critic | `{ rollCall: [{axis, word, line?}], blocking: [{axis, finding}], polish: string[], recorded: [{axis, finding}] }` | |
@@ -138,8 +154,9 @@ attack list — blocks. An adversary that reports nothing has reported nothing, 
 otherwise count clean on the strength of it.
 
 Return: `{ clean, exit, valve, counters, blocking[], recorded[], sections, floor, blind, critic,
-redTeam, deadlocked }`. Each section's entry carries any notes its critic attached to the
-accepting verdict — docket material, not blocking. `blocking` is every reason the round was not clean, one string
+redTeam, deadlocked }`. Each section's entry carries `verdict`, its critic's last verdict whole, roll
+call included, which is the section roll call to record and read; and `notes`, which for an
+accepted section are docket material, not blocking, and for a deadlocked one its last rejection's reasons. `blocking` is every reason the round was not clean, one string
 each, readable without interpretation; `recorded` is every reason that would have blocked
 and was ruled inherited, stale or waived, plus the script's own informational lines — the
 blind-pass skip and the ruling flags, each labelled not a failure — so nothing silent ever
@@ -150,7 +167,11 @@ counters never see section loops and the user rules. A dead builder or critic re
 same way — that section never passed, and the gate begins only after every section does —
 and either early return still carries any pre-phase `blocking` lines (an empty axis or
 item set) and every section's no-return line: dispatch and agent defects, not results of
-the aborted round. The Workflow tool cannot keep one
+the aborted round. A section accept its own roll call refuses returns the same way, and its
+`blocking` lines are that critic's return read exactly as the integrated critic's is: a finding
+on the work goes into that section's `builderPrompt` on the next dispatch, and into its
+`priorNotes`, which reach only the retry critic, or to the user; only a defect in the critic's
+report sends the critic back. The Workflow tool cannot keep one
 critic alive across retries, so each retry's critic is a fresh agent handed every earlier
 rejection of that section — `priorNotes` plus this round's, oldest first — and told it is the same critic — the count still
 means something, and the deviation from step 6's persisting critic is this one. The
@@ -172,7 +193,9 @@ can reach it.
 - **A defect in the work**, or evidence that never reached a reviewer: the floor not run, an
   `[UNMEASURED]` item, a failed gate, a critic's `BLOCKING` or `CANNOT JUDGE` on an axis, a red
   team `NOT RUN`, a finding either reviewer files, a lost blind pass. These go through `block()`
-  and `inherited`/`waived` excuse them. That is what those lists are for, and each such call
+  and `inherited`/`waived` excuse them, except a critic's `BLOCKING` whose only findings are
+  recorded under an inherited failure or a marked-stale clause, which the script excuses by
+  reading those findings, since that ruling names the failure or the clause and never the axis. That is what those lists are for, and each such call
   carries the **name** a ruling must match.
 - **A defect in the report**: a roll call missing a line, carrying one twice, naming something
   nobody dispatched, or using a word outside its vocabulary; a reviewer's word contradicting the
@@ -244,8 +267,7 @@ args set each with the result it must produce, run through the Workflow tool:
 1. **Break it**: a critic return omitting one axis of `criticAxes` and a red team return
    omitting item 2 must both appear in `blocking`, and the round must not be clean. Most roll-call shape
    checks have a broken fixture of their own and each must block on its own line — which check a
-   fixture is for is in its **key** and its stub prompt, not in a list here. Two are unpinned and
-   named under coverage below. A `_note` says why
+   fixture is for is in its **key** and its stub prompt, not in a list here. A `_note` says why
    the fixture is built the way it is, and several say nothing about which check they cover.
    `critic-recorded-no-axis` carries a second job: its finding text quotes the dispatch's
    inherited failure, so routing that check back through the ruling machinery makes the
@@ -290,12 +312,7 @@ deadlocks eventually either way and no fixture bounds the loop; pinning it needs
 rejects until the mutated bound is reached, which would dispatch dozens of agents, and it was
 judged not worth that. **Per-check unwaivability is only partly pinned**: several broken
 fixtures name their own axis or item in `waived` so that routing *those* checks back through
-`block()` fails their own fixture, but most `malformed()` sites carry no such guard. And **one
-roll-call check still has no fixture** — a line carrying a word outside the vocabulary. Every
-fixture's roll call uses in-vocabulary words, so that reason has never been emitted by the suite:
-delete the check and every fixture still passes. Its twin, a line naming something the dispatcher
-never named, is pinned. `critic-axes-not-array` hands a non-array `criticAxes`, so the dispatched
-set falls back to empty and every axis the critic returns is one nobody named.
+`block()` fails their own fixture, but most `malformed()` sites carry no such guard.
 
 On Codex the runner has its own three-clause test, `harness/round.codex.selftest.mjs`, which runs every
 fixture here through `round.codex.mjs` with a stand-in seat per call and runs in CI. It checks the runner

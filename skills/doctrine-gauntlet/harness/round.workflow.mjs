@@ -39,13 +39,20 @@ export const meta = {
 
 const WORDS = { critic: ['CLEAR', 'BLOCKING', 'CANNOT JUDGE'], redTeam: ['BROKE', 'HELD', 'NOT RUN'] }
 
+const AXIS_FINDING = { type: 'object', properties: { axis: { type: 'string' }, finding: { type: 'string' } }, required: ['axis', 'finding'] }
+const AXIS_ROLL_CALL = { type: 'array', items: { type: 'object', properties: { axis: { type: 'string' }, word: { type: 'string' }, line: { type: 'string' } }, required: ['axis', 'word'] } }
+// A section critic is a briefed critic answering the same axes, so its return carries the integrated
+// critic's roll call, blocking and recorded fields, the same objects, beside its verdict and notes.
 const SECTION_CRITIC = {
   type: 'object',
   properties: {
     accept: { type: 'boolean' },
     notes: { type: 'array', items: { type: 'string' } },
+    rollCall: AXIS_ROLL_CALL,
+    blocking: { type: 'array', items: AXIS_FINDING },
+    recorded: { type: 'array', items: AXIS_FINDING },
   },
-  required: ['accept', 'notes'],
+  required: ['accept', 'notes', 'rollCall', 'blocking', 'recorded'],
 }
 const FLOOR = {
   type: 'object',
@@ -62,11 +69,10 @@ const BLIND = {
   properties: { winner: { type: 'string', enum: ['A', 'B', 'tie'] }, why: { type: 'string' } },
   required: ['winner', 'why'],
 }
-const AXIS_FINDING = { type: 'object', properties: { axis: { type: 'string' }, finding: { type: 'string' } }, required: ['axis', 'finding'] }
 const CRITIC = {
   type: 'object',
   properties: {
-    rollCall: { type: 'array', items: { type: 'object', properties: { axis: { type: 'string' }, word: { type: 'string' }, line: { type: 'string' } }, required: ['axis', 'word'] } },
+    rollCall: AXIS_ROLL_CALL,
     blocking: { type: 'array', items: AXIS_FINDING },
     polish: { type: 'array', items: { type: 'string' } },
     recorded: { type: 'array', items: AXIS_FINDING },
@@ -115,7 +121,8 @@ const recorded = []   // reasons that would block but the run ruled inherited, s
 const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
 
 // A reason blocks unless the run already ruled it inherited (step 7) or waived it; a
-// marked-stale roll-call word is excused before it reaches here (staleExplained below); either
+// roll-call BLOCKING whose only findings are recorded under a marked-stale clause or an inherited
+// failure is excused before it reaches here (staleExplained and inheritedExplained below); either
 // way it is written down, because a recorded failure that nobody can see is a silent pass.
 // A ruling matches by containment, because the same fact reaches here under more than one
 // name — an [UNMEASURED] item's text, and the full report line that became a critic axis.
@@ -167,6 +174,81 @@ function checkRollCall(rollCall, expected, words, key, who) {
   return seen
 }
 
+// The integrated critic's return and a section critic's accept, read the same way: `ret` is a CRITIC
+// or SECTION_CRITIC return, `axes` the set the dispatcher fixed for it, `who` the name its reasons carry.
+function judgeCritic(ret, axes, who) {
+  const seen = checkRollCall(ret.rollCall, axes, WORDS.critic, 'axis', who)
+  for (const axis of axes) {
+    const r = seen.get(axis)
+    if (!r || !WORDS.critic.includes(r.word)) continue
+    // Item 8: a CANNOT JUDGE names what was missing — it is cleared by handing that over,
+    // and a line naming nothing forces the orchestrator to ask again, which the law forbids.
+    if (r.word === 'CANNOT JUDGE' && !(r.line || '').trim()) { malformed(`${who} roll call: ${axis} CANNOT JUDGE naming nothing missing — cleared by re-dispatch with a named lack`); continue }
+    // Item 8's own vocabulary, enforced the way item 5's is on the red team: a `CLEAR` is
+    // "an axis you ran and found nothing on", so a finding filed under one contradicts the
+    // word, and a `BLOCKING` "carries its finding below", so one with nothing below it never
+    // filed what it found. These three are defects in the *return*, not in the work, so they
+    // are pushed straight to `blocking` and cannot be waived. That is not decoration: `block()`
+    // matches a ruling by containment against the reason text. These three quote the **axis**,
+    // and the axis is exactly what a ruling names, so routing them through it lets a ruling on
+    // an axis excuse the check that caught the critic contradicting itself about that axis; the
+    // unnamed-axis check below quotes the **finding**, and was observed being excused by an
+    // `inherited` word inside the very finding it caught. Different text, same hole. The user
+    // rules on the work, never on whether a reviewer's return is well-formed.
+    // A `CLEAR` carrying a **polish** note is deliberately not here: `polish` is untagged
+    // strings by schema, and the red team this mirrors counts polish as satisfying a `BROKE`
+    // (below) and never blocks a `HELD` that has one. Blocking it would reject honest work.
+    if (r.word === 'CLEAR' && ret.blocking.some((b) => b.axis === axis && said(b))) malformed(`${who} roll call: ${axis} CLEAR with a blocking finding under it — a CLEAR is an axis you found nothing on`)
+    if (r.word === 'CLEAR' && ret.recorded.some((c) => c.axis === axis && said(c))) malformed(`${who} roll call: ${axis} CLEAR with a recorded finding under it — recorded is where a non-CLEAR goes`)
+    if (r.word === 'BLOCKING' && !ret.blocking.some((b) => b.axis === axis && said(b)) && !ret.recorded.some((c) => c.axis === axis && said(c))) malformed(`${who} roll call: ${axis} BLOCKING with no finding under it — a BLOCKING carries its finding below`)
+    // Item 8: a `CANNOT JUDGE` is "an axis whose evidence never reached you". Evidence that
+    // never arrived cannot have produced a finding, so a finding filed under one contradicts
+    // the word. This check is **not** redundant with the non-`CLEAR` block below, and the
+    // argument that it was is the one this fixed: that block is waivable, so on an axis the
+    // user ruled inherited or waived BOTH the abstention and the finding are recorded, the
+    // round comes back clean, and a phase can exit on a critic that abstained and filed a
+    // defect on the same axis. Observed at cleanPasses 2 with exit true before this line.
+    if (r.word === 'CANNOT JUDGE' && (ret.blocking.some((b) => b.axis === axis && said(b)) || ret.recorded.some((c) => c.axis === axis && said(c)))) malformed(`${who} roll call: ${axis} CANNOT JUDGE with a finding under it — evidence that never reached you cannot have produced one`)
+    // Item 8 rules an axis BLOCKING whose only findings are recorded, under a marked-stale clause
+    // or an inherited failure. The ruling that excuses it names the clause or the failure, never
+    // the axis, so block()'s axis-name containment cannot see it — the check reads the axis's own
+    // findings instead: no blocking finding, and at least one recorded finding naming a
+    // marked-stale clause or an inherited failure, means the word is explained.
+    const onlyRecorded = r.word === 'BLOCKING' && !ret.blocking.some((b) => b.axis === axis)
+    const staleExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && match([c.finding], STALE))
+    const inheritedExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && match([c.finding], INHERITED))
+    if (staleExplained) recorded.push(`${who} roll call, stale clause per its prompt: ${axis} BLOCKING`)
+    else if (inheritedExplained) recorded.push(`${who} roll call, inherited failure per its ruling: ${axis} BLOCKING`)
+    else if (r.word !== 'CLEAR') block(`${who} roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
+  }
+  for (const f of [...ret.blocking, ...ret.recorded]) if (!said(f)) malformed(`${who}: a finding on ${f.axis} carries no text — the word carries its finding below`)
+  for (const b of ret.blocking) {
+    if (!axes.includes(b.axis)) malformed(`${who} finding names no axis: ${b.finding}`)
+    else block(`${who}: ${b.axis} — ${b.finding}`, [b.axis])
+  }
+  // Step 7's inherited failures and the run's marked-stale clause violations are recorded,
+  // named as which they are, and do not block — the same per-finding rule as the red team's
+  // recorded list, checked against the same two lists.
+  for (const r of ret.recorded) {
+    // The axis test comes first and short-circuits, and both halves of that matter. A finding on
+    // an axis nobody named must not *also* be filed as a legitimate inherited record, and must not
+    // consume the ruling that would have excused it — run as a second pass this check blocked the
+    // round and left both of those behind anyway, which is the defect it exists to prevent. Its
+    // sentence differs from the `ret.blocking` check above on purpose: that one is waivable,
+    // this one is not, and two identical strings with opposite waivability cannot be read apart
+    // in the return.
+    if (!axes.includes(r.axis)) { malformed(`${who} recorded finding names no axis: ${r.finding}`); continue }
+    const inh = match([r.finding], INHERITED)
+    const stale = inh ? null : match([r.finding], STALE)
+    const named = inh || stale
+    if (!named) malformed(`${who}: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${r.axis}: ${r.finding}`)
+    else {
+      usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
+      recorded.push(`${who}, ${inh ? 'inherited' : 'stale clause'} per its prompt: ${r.axis} — ${r.finding}`)
+    }
+  }
+}
+
 if (!DISPATCHED_AXES.length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
 if (!ITEMS.length) malformed('red team items: none named — a roll call against an empty set counts nothing')
 
@@ -188,6 +270,7 @@ const sections = await pipeline(sectionArgs, async (s) => {
   // then every rejection this round — handed to each retry's critic in place of memory
   let work = null
   let dead = false
+  let lastVerdict = null   // the critic's last verdict, whole: the caller records its roll call and reads its lines
   while (true) {
     const buildPrompt = notes.length ? `${s.builderPrompt}\n\nThe section critic rejected the previous attempt with these notes; address every one:\n- ${notes.join('\n- ')}` : s.builderPrompt
     work = await agent(buildPrompt, { label: `build:${s.name}`, phase: 'Sections' })
@@ -195,21 +278,37 @@ const sections = await pipeline(sectionArgs, async (s) => {
     const priors = history.length ? `\n\nYou are the same critic across retries; your earlier rejections of this section, oldest first, which the builder was told to address:\n${history.map((h, n) => `Rejection ${n + 1}:\n- ${h.join('\n- ')}`).join('\n')}` : ''
     const verdict = await agent(`${s.criticPrompt}${priors}\n\nThe builder's return:\n${work}`, { label: `critic:${s.name}`, phase: 'Sections', schema: SECTION_CRITIC })
     if (!verdict) { malformed(`section ${s.name}: critic returned nothing`); dead = true; break }
-    if (verdict.accept) { notes = verdict.notes; break }   // an accept can carry notes; they go to the docket, not the floor
+    lastVerdict = verdict
+    if (verdict.accept) {
+      // An accept is read off its roll call exactly as the integrated critic's return is, against the
+      // axes the dispatcher fixed and this dispatch's rulings. Anything that files into `blocking` —
+      // a malformed return, or an abstention or BLOCKING no ruling excuses — refuses the accept, and
+      // the section has not passed; what a ruling excuses is recorded and the accept stands.
+      const before = blocking.length
+      judgeCritic(verdict, DISPATCHED_AXES, `section ${s.name} critic`)
+      if (blocking.length > before) { dead = true; break }
+      notes = verdict.notes; break   // an accept can carry notes; they go to the docket, not the floor
+    }
     rejections += 1
     counters.sectionRejections[s.name] = rejections
-    notes = verdict.notes
-    history.push(verdict.notes)
+    // A rejection's reasons are its notes, every blocking finding under its axis, and every CANNOT JUDGE line with
+    // its text, the one reason item 8 puts only in the roll call; a BLOCKING line's finding is already in blocking, or
+    // in recorded when a ruling excuses it, which the builder must never be told to fix. The next builder, the retry
+    // critic and the deadlock entry all see these. Only identical strings are merged, so no axis's reason is lost.
+    notes = [...new Set([...verdict.notes,
+      ...verdict.blocking.filter((b) => (b.finding || '').trim()).map((b) => `${b.axis}: ${b.finding}`),
+      ...verdict.rollCall.filter((r) => r.word === 'CANNOT JUDGE' && (r.line || '').trim()).map((r) => `${r.axis} ${r.word}: ${r.line.trim()}`)])]
+    history.push(notes)
     if (rejections >= 3) { deadlocked.push({ name: s.name, notes, resets: counters.sectionResets[s.name] || 0 }); break }
   }
-  return { name: s.name, work, rejections, notes, dead }
+  return { name: s.name, work, rejections, notes, dead, verdict: lastVerdict }
 })
 // A round that rebuilt any section is a diff after the last clean pass, so the count restarts
 // here — before the deadlock return can carry a stale count out — and two clean passes must
 // both be over the work as it now stands.
 if (sectionArgs.length) counters.cleanPasses = 0
-// A dead builder or critic means that section never passed, and the gate begins only after
-// every section passes — so a dead pair returns pre-gate exactly as a deadlock does.
+// A dead builder or critic, or an accept its own roll call refused, means that section never passed,
+// and the gate begins only after every section passes — so it returns pre-gate exactly as a deadlock does.
 if (deadlocked.length || sections.some((s) => s && s.dead)) {
   // The pair is deadlocked; the round counters never see section loops, so this goes to the
   // user before any gate runs. A section already reset once by the user is deadlocked again,
@@ -258,81 +357,16 @@ const criticPrompt = floor
   : a.criticPrompt
 const critic = await agent(criticPrompt, { label: 'integrated-critic', phase: 'Gate', schema: CRITIC })
 if (!critic) malformed('integrated critic: no return')
-else {
-  const seen = checkRollCall(critic.rollCall, criticAxes, WORDS.critic, 'axis', 'critic')
-  for (const axis of criticAxes) {
-    const r = seen.get(axis)
-    if (!r || !WORDS.critic.includes(r.word)) continue
-    // Item 8: a CANNOT JUDGE names what was missing — it is cleared by handing that over,
-    // and a line naming nothing forces the orchestrator to ask again, which the law forbids.
-    if (r.word === 'CANNOT JUDGE' && !(r.line || '').trim()) { malformed(`critic roll call: ${axis} CANNOT JUDGE naming nothing missing — cleared by re-dispatch with a named lack`); continue }
-    // Item 8's own vocabulary, enforced the way item 5's is on the red team: a `CLEAR` is
-    // "an axis you ran and found nothing on", so a finding filed under one contradicts the
-    // word, and a `BLOCKING` "carries its finding below", so one with nothing below it never
-    // filed what it found. These three are defects in the *return*, not in the work, so they
-    // are pushed straight to `blocking` and cannot be waived. That is not decoration: `block()`
-    // matches a ruling by containment against the reason text. These three quote the **axis**,
-    // and the axis is exactly what a ruling names, so routing them through it lets a ruling on
-    // an axis excuse the check that caught the critic contradicting itself about that axis; the
-    // unnamed-axis check below quotes the **finding**, and was observed being excused by an
-    // `inherited` word inside the very finding it caught. Different text, same hole. The user
-    // rules on the work, never on whether a reviewer's return is well-formed.
-    // A `CLEAR` carrying a **polish** note is deliberately not here: `polish` is untagged
-    // strings by schema, and the red team this mirrors counts polish as satisfying a `BROKE`
-    // (below) and never blocks a `HELD` that has one. Blocking it would reject honest work.
-    if (r.word === 'CLEAR' && critic.blocking.some((b) => b.axis === axis && said(b))) malformed(`critic roll call: ${axis} CLEAR with a blocking finding under it — a CLEAR is an axis you found nothing on`)
-    if (r.word === 'CLEAR' && critic.recorded.some((c) => c.axis === axis && said(c))) malformed(`critic roll call: ${axis} CLEAR with a recorded finding under it — recorded is where a non-CLEAR goes`)
-    if (r.word === 'BLOCKING' && !critic.blocking.some((b) => b.axis === axis && said(b)) && !critic.recorded.some((c) => c.axis === axis && said(c))) malformed(`critic roll call: ${axis} BLOCKING with no finding under it — a BLOCKING carries its finding below`)
-    // Item 8: a `CANNOT JUDGE` is "an axis whose evidence never reached you". Evidence that
-    // never arrived cannot have produced a finding, so a finding filed under one contradicts
-    // the word. This check is **not** redundant with the non-`CLEAR` block below, and the
-    // argument that it was is the one this fixed: that block is waivable, so on an axis the
-    // user ruled inherited or waived BOTH the abstention and the finding are recorded, the
-    // round comes back clean, and a phase can exit on a critic that abstained and filed a
-    // defect on the same axis. Observed at cleanPasses 2 with exit true before this line.
-    if (r.word === 'CANNOT JUDGE' && (critic.blocking.some((b) => b.axis === axis && said(b)) || critic.recorded.some((c) => c.axis === axis && said(c)))) malformed(`critic roll call: ${axis} CANNOT JUDGE with a finding under it — evidence that never reached you cannot have produced one`)
-    // Item 8 rules a stale-only axis BLOCKING with its finding in `recorded`. The ruling that
-    // excuses it names a *clause*, never the axis, so block()'s axis-name containment can never
-    // see it — the check reads the axis's own findings instead: no blocking finding, and at
-    // least one recorded finding naming a marked-stale clause, means the word is explained.
-    // The inherited twin needs none of this because the orchestrator's inherited line names the
-    // axis and block() matches it directly.
-    const staleExplained = r.word === 'BLOCKING' &&
-      !critic.blocking.some((b) => b.axis === axis) &&
-      critic.recorded.some((c) => c.axis === axis && match([c.finding], STALE))
-    if (staleExplained) recorded.push(`critic roll call, stale clause per its prompt: ${axis} BLOCKING`)
-    else if (r.word !== 'CLEAR') block(`critic roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
-  }
-  for (const f of [...critic.blocking, ...critic.recorded]) if (!said(f)) malformed(`critic: a finding on ${f.axis} carries no text — the word carries its finding below`)
-  for (const b of critic.blocking) {
-    if (!criticAxes.includes(b.axis)) malformed(`critic finding names no axis: ${b.finding}`)
-    else block(`critic: ${b.axis} — ${b.finding}`, [b.axis])
-  }
-  // Step 7's inherited failures and the run's marked-stale clause violations are recorded,
-  // named as which they are, and do not block — the same per-finding rule as the red team's
-  // recorded list, checked against the same two lists.
-  for (const r of critic.recorded) {
-    // The axis test comes first and short-circuits, and both halves of that matter. A finding on
-    // an axis nobody named must not *also* be filed as a legitimate inherited record, and must not
-    // consume the ruling that would have excused it — run as a second pass this check blocked the
-    // round and left both of those behind anyway, which is the defect it exists to prevent. Its
-    // sentence differs from the `critic.blocking` check above on purpose: that one is waivable,
-    // this one is not, and two identical strings with opposite waivability cannot be read apart
-    // in the return.
-    if (!criticAxes.includes(r.axis)) { malformed(`critic recorded finding names no axis: ${r.finding}`); continue }
-    const inh = match([r.finding], INHERITED)
-    const stale = inh ? null : match([r.finding], STALE)
-    const named = inh || stale
-    if (!named) malformed(`critic: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${r.axis}: ${r.finding}`)
-    else {
-      usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
-      recorded.push(`critic, ${inh ? 'inherited' : 'stale clause'} per its prompt: ${r.axis} — ${r.finding}`)
-    }
-  }
-}
-const redTeamPrompt = critic
-  ? `${a.redTeamPrompt}\n\nThe integrated critic's report this round, which item 1 attacks:\n${JSON.stringify(critic, null, 2)}`
-  : a.redTeamPrompt
+else judgeCritic(critic, criticAxes, 'critic')
+// The red team is handed the floor report the critic was handed, so it can refute the critic's floor
+// axes against the instrument's own words, and the critic's whole return; never the critic's prompt.
+const redTeamPrompt = [
+  a.redTeamPrompt,
+  floor && `This round's floor report, every line of it:\n${floor.report}`,
+  critic && `The integrated critic's report this round, which item 1 attacks:\n${JSON.stringify(critic, null, 2)}`,
+].filter(Boolean).join('\n\n')
+// The label 'red-team' is the routing signal workflow.md names for the other model family's seat;
+// round.codex.mjs keeps it in the pending call's key.
 const redTeam = await agent(redTeamPrompt, { label: 'red-team', phase: 'Gate', schema: RED_TEAM })
 if (!redTeam) malformed('red team: no return')
 else {

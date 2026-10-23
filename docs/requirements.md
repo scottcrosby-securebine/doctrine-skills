@@ -74,9 +74,9 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 
   Without it: a fan-out of web-search agents with per-claim adversarial verification.
 
-- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it, nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script.
+- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it, nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script where the other-family red-team seat (the codex plugin's, on Claude Code) is absent. With that seat present, the round runs through `harness/round.codex.mjs` instead, which needs nothing installed, so its red team reaches the other model family.
 
-  Without it: the prose flow in the skill is the round, unchanged.
+  Without it: the round runs through `round.codex.mjs` on Codex and wherever the other-family red-team seat is present, and otherwise the prose flow in the skill is the round, unchanged.
 
 - **Claude Design**, on a claude.ai login. A gauntlet run with a bound Design project can push finished sections for you to watch in the Design pane as the run goes. A Design project is a rendering, never a design-system binding.
 

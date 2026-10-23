@@ -138,7 +138,7 @@ The **current baseline** of a file is its latest `baseline` or `done-means-chang
 
 An epic's first `Combined check:` line is ruled by the same `baseline` ruling that rules its Done means, as the worked example below shows. A ruling that changes the line afterwards is its own `baseline` ruling in that epic's record. Either way the ruling's quoted words carry what runs and the pass rule verbatim, never a description of them, since nothing else records what the owner approved. The test is containment, not a delimiter: the epic's `Combined check:` line, from what runs through the pass rule, appears inside the ruling's quote as an unbroken run of the same characters, a trailing period aside. Whatever leads into it is the owner's own prose and carries no approval, so the `Combined check:` key itself need not appear, as the worked example below shows. Nothing marks where the approved words begin, and nothing needs to: the line under test is what you search for. Containment is a property of the ruling when it is written, not a standing invariant of the line: a later repair that needs no ruling, which SKILL.md's "A Combined check change" defines, leaves the line no longer contained in any quote, and that is correct and not a missing ruling. Its `Items:` stay empty, since the line is no item. SKILL.md, "A Combined check change", says which changes need that ruling, which get none, and what it voids.
 
-A return **counts** only when all four hold:
+A return **counts** only when all four hold, and the accounting check SKILL.md's exit passes step 4 names applies all four to every return before it counts it:
 
 - the file has a `Certification target:` and it is not `none`;
 - its Baseline is the current baseline;

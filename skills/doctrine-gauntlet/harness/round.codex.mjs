@@ -1,4 +1,5 @@
-// Runs one gauntlet round (round.workflow.mjs, unchanged) on a host with no Workflow tool.
+// Runs one gauntlet round (round.workflow.mjs, unchanged) on Codex, and on Claude Code wherever the
+// round's red team must reach the other model family's seat (workflow.md, The red-team call).
 //
 //   node round.codex.mjs <args.json> <journal-dir>
 //

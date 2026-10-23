@@ -44,7 +44,7 @@ at runtime.
 
 ## Codex — as a visual red team
 
-On Codex CLI the visual red team comes from the other model family, Claude: run `claude -p` read-only as the hub's host reference gives it, with the render paths in the prompt and an instruction to read each image before judging. The two paths below are for Claude Code, where Codex is the other family.
+On Codex CLI the visual red team comes from the other model family, Claude: run `claude -p` read-only as the hub's host reference gives it, with the render paths in the prompt, in a restyle the predecessor's renders named as the predecessor's (SKILL.md hands the red team the predecessor), and an instruction to read each image before judging. The two paths below are for Claude Code, where Codex is the other family.
 
 Codex **sees** images, which is what makes it usable as an adversary on rendered work.
 Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
@@ -71,8 +71,8 @@ Three rules, each one a failure observed 2026-08-30/31 while this path was teste
    startup outright. Name the render paths in the prompt text instead; codex views them
    itself (verified: its `Viewed Image` tool call puts the pixels, not the metadata, in
    front of the model). The attach-everything rule below still binds: name **every** render
-   the round produced, by path, plus any `--crop` shots. Not the reference: SKILL.md
-   hands the red team no predecessor, only the ledger.
+   the round produced, by path, plus any `--crop` shots, and in a restyle the predecessor's
+   renders, named as the predecessor's: SKILL.md hands the red team the predecessor.
 2. **A prompt against a dead seat succeeds.** `agent prompt` and `agent wait` can return
    cleanly when the seat died at startup (a codex self-update loop produced exactly this).
    `herdr agent get red-team` must show an `agent_session` id before you treat any answer
@@ -97,7 +97,8 @@ Attach **every render the round produced**, not a token pair. Nothing in this sk
 composites a contact sheet and nothing needs to: the harness writes discrete PNGs at
 `<outPrefix>-<theme>-<width>.png` — 360/768/1440/2560 in each theme, eight files on a
 two-theme run — and `-i` is variadic, so pass each one with its own `-i`, plus any
-`--crop` shots the round took, and never the reference (SKILL.md hands the red team no
+`--crop` shots the round took, and in a restyle the predecessor's renders, each on its own
+`-i` and named in the prompt as the predecessor's (SKILL.md hands the red team the
 predecessor). Do not reach for a compositing tool
 (`montage` and friends) to make one image out of them; the discrete files are the
 deliverable format and `floor.md` names them. A red team judging two images has judged

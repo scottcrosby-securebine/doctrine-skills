@@ -118,9 +118,9 @@ Adding, renaming, or rescoping a skill touches all of:
 (the technical floor its critics depend on), `floor.md` (how to drive that
 harness — flags, exit codes, render honesty), `harness/round.workflow.mjs` (one
 fused-gate round as a Workflow-tool script: structure and counters only, never a
-brief), `harness/round.codex.mjs` and its selftest (the same round on Codex, which has no Workflow
-tool: it runs the script unchanged and hands each agent call to `spawn_agent` seats through a
-journal), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
+brief), `harness/round.codex.mjs` and its selftest (the same round on Codex, and on Claude Code wherever
+the other-family red-team seat is present: it runs the script unchanged and hands each agent call
+to a seat through a journal, the `red-team#` call to the other model family's seat), `workflow.md` (how to invoke it and its tamper test), `tools.md` (Codex and Claude
 Design invocation). The sidecars exist so
 SKILL.md carries decision content and gate law while operating manuals and review
 history load on demand. The split rule: if it changes what an agent *decides*, it
@@ -130,8 +130,8 @@ of rulings already made, read by a maintainer and never assembled into a prompt.
 Two of those were removed on 2026-08-29 because this repo is used by people other
 than its author and internal review history is not theirs to download. `harness/floor.mjs`,
 `harness/round.workflow.mjs` and `harness/round.codex.mjs` with its selftest are the only code any *skill* ships; the repo also tracks `tools/doc-check.mjs`, its sidecar `tools/doc-check.selftest.mjs`, `tools/herdr-lint.mjs` and its sidecar `tools/herdr-lint.selftest.mjs`, `fixtures/shadcn.sh`, the fixture phase under `fixtures/e9-phase/` and the files under `hooks/`, none of which a skill loads. One qualification since issue #19: the hub's steps 3 and 5 *name* `hooks/dctr-gate.mjs` and `hooks/dctr-token.mjs`, `doctrine-pane` names `hooks/dctr-pane.mjs`, and `doctrine-project` names `hooks/dctr-project.mjs` and `hooks/dctr-token.mjs`, as commands a run invokes — invocation, not loading; no skill carries its content and the harness files stay the only code any skill ships. The hooks are loaded by the harness rather than by a skill, which is why the layer-not-fork law does not reach them and why they need their own gate. The floor is run as
-`node floor.mjs` rather than executed; the workflow script is run by the Workflow tool, or on
-Codex by `round.codex.mjs`, each wrapping its body in an async function — so `node --check` rejects its top-level `return`
+`node floor.mjs` rather than executed; the workflow script is run by `round.codex.mjs` on
+Codex and wherever the other-family red-team seat is present, otherwise by the Workflow tool, each wrapping its body in an async function — so `node --check` rejects its top-level `return`
 and the syntax gate is `new Function` around the body, as `workflow.md` records. `git ls-files -s`
 shows exactly one mode-100755 file in the repo, and it is `fixtures/shadcn.sh`. The workflow
 script carries no brief text, for the reasons and with the disclosed exceptions `workflow.md` gives, and its

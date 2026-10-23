@@ -7,15 +7,19 @@
 // with one check removed fails that check's fixture, the runner refuses an answer asked under
 // another prompt or one its schema rejects, the CLI exits as its header says on every refusal, a
 // runner failure and a throw, runs through a symlinked directory, resumes past a half-written record of its own, leaves the caller's args as given,
-// hands a schema call its schema, and pends every section's builder at once. Clause 2 runs every
+// hands a schema call its schema, and pends every section's builder at once; that the section critic's
+// schema requires its roll call; and that the red-team call keeps its label, carries the floor report
+// and the critic's whole return and never the critic's prompt, each against a negative specimen. Clause 2 runs every
 // fixture through the runner and confirms each meets its expect, and runs one end to end through the
 // CLI. Clause 3 proves, without the CLI, that the stand-in's returns are the stub prompts' own text,
-// that the mutated script really lacks the check, and that the throwing args really throw.
+// that the mutated script really lacks the check, that the throwing args really throw, and that only
+// the floor report can supply the floor-report fixture's red-team reply.
 
 import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync, chmodSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { step, readAnswer, promptHash } from './round.codex.mjs'
 
@@ -174,7 +178,7 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
     r = cliIn(argsFile, j); seen.push(['then the critic', r.status === 3 && existsSync(join(j, 'pending', encodeURIComponent('critic:hero#1') + '.md'))])
     answer(j, 'critic:hero#1', 'I accept it')
     r = cliIn(argsFile, j); seen.push(['a reply its schema refuses exits 2, keeps the message to re-ask with, and writes no result', r.status === 2 && /re-ask/.test(r.stderr) && existsSync(join(j, 'pending', encodeURIComponent('critic:hero#1') + '.md')) && !existsSync(join(j, 'result.json'))])
-    answer(j, 'critic:hero#1', '{"accept": true, "notes": []}')
+    answer(j, 'critic:hero#1', stubReply(FIXTURES.clean.args.sections[0].criticPrompt))
     r = cliIn(argsFile, j); seen.push(['a valid re-ask is taken', r.status === 3])
     answer(j, 'build:hero#1', 'a different build')
     r = cliIn(argsFile, j); seen.push(['an answer asked under another prompt exits 2 and names a new journal', r.status === 2 && /new journal/.test(r.stderr) && !existsSync(join(j, 'result.json'))])
@@ -239,6 +243,141 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
   const before = JSON.stringify(args)
   await run(SCRIPT, args)
   clause('1f a round run through step() leaves the caller\'s args as given', JSON.stringify(args) === before, 'args changed')
+}
+
+// ---- Clause 1, what the round hands its seats: the section critic's schema, and the red-team call ----
+// Drive one args set with the stand-in until a call whose label or key is `label` pends; return it and the answers so far.
+async function until(script, args, label) {
+  const answers = {}
+  for (let i = 0; i < 50; i++) {
+    const r = await step(script, args, answers)
+    if (r.done || r.refused) return null
+    const hit = r.pending.find((p) => p.label === label || p.key === label)
+    if (hit) return { call: hit, answers }
+    for (const p of r.pending) {
+      const got = readAnswer(stubReply(p.prompt) ?? 'null', p.schema)
+      if (!got.ok) return null
+      answers[p.key] = { hash: p.hash, value: got.value }
+    }
+  }
+  return null
+}
+{
+  const sc = await until(SCRIPT, FIXTURES.clean.args, 'critic:hero')
+  const schema = sc && sc.call.schema
+  const full = stubReply(FIXTURES.clean.args.sections[0].criticPrompt)
+  const mutate = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace(anchor, to) : null
+  // For each field the section schema requires beyond accept and notes, the negative is the full reply with only that field removed, so the schema
+  // refuses it for that field alone: the schema with that field dropped from its required list must take it.
+  const REQUIRED = "required: ['accept', 'notes', 'rollCall', 'blocking', 'recorded']"
+  const fields = []
+  for (const field of ['rollCall', 'blocking', 'recorded']) {
+    const without = JSON.stringify((({ [field]: _, ...rest }) => rest)(JSON.parse(full)))
+    const loose = mutate(REQUIRED, REQUIRED.replace(`, '${field}'`, ''))
+    const looseSchema = loose && (await until(loose, FIXTURES.clean.args, 'critic:hero'))?.call.schema
+    fields.push({ field, refused: !!schema && readAnswer(without, schema).ok === false, loose: !!loose, taken: !!looseSchema && readAnswer(without, looseSchema).ok === true })
+  }
+  clause('1i the section critic\'s schema refuses an accept whose only defect is a missing roll call, blocking list or recorded list, and takes one carrying all three', !!schema && readAnswer(full, schema).ok === true && fields.every((f) => f.refused && f.taken), `takes the full reply ${!!schema && readAnswer(full, schema).ok === true}; ${fields.map((f) => `${f.field}: refused without it ${f.refused}, ${f.loose ? `the loosened schema takes it ${f.taken}` : 'required-list anchor not found exactly once'}`).join('; ')}`)
+
+  // The red-team call of the floor-report fixture: its label is the routing signal workflow.md names
+  // for the other model family's seat, its prompt carries the critic's whole return, roll call
+  // included, and never the critic's assembled prompt or the instructions the script adds to it.
+  const FX = FIXTURES['redteam-handed-floor-report'].args
+  const CRITIC_ONLY = 'Your roll call answers every axis you were told to'
+  const redTeamCall = async (script) => {
+    const u = await until(script, FX, 'red-team')
+    if (!u) return ['no red-team call pended']
+    const critic = Object.entries(u.answers).find(([k]) => k.startsWith('integrated-critic#'))
+    const out = []
+    if (u.call.key !== 'red-team#1') out.push(`key ${u.call.key}`)
+    if (!critic || !critic[1].value.rollCall.length || !u.call.prompt.includes(JSON.stringify(critic[1].value, null, 2))) out.push('the critic\'s whole return, roll call included, is not in the prompt')
+    if (u.call.prompt.includes(FX.criticPrompt) || u.call.prompt.includes(CRITIC_ONLY)) out.push('the critic\'s assembled prompt is in the prompt')
+    return out
+  }
+  const got = await redTeamCall(SCRIPT)
+  clause('1j the red-team call pends under its label, red-team#1, carrying the critic\'s whole return and not its assembled prompt', !got.length, got.join('; '))
+  // Negative specimens, one per behaviour: each anchor must occur exactly once or the mutant proves nothing.
+  const specimens = [
+    ['the label rewritten', mutate("label: 'red-team'", "label: 'adversary'"), 'no red-team call pended'],
+    ['the roll call stripped from the critic\'s return', mutate('JSON.stringify(critic, null, 2)', 'JSON.stringify({ ...critic, rollCall: undefined }, null, 2)'), 'roll call included'],
+    ['the critic\'s assembled prompt forwarded', mutate('const redTeam = await agent(redTeamPrompt,', "const redTeam = await agent(redTeamPrompt + '\\n\\n' + criticPrompt,"), 'assembled prompt'],
+  ]
+  const missed = []
+  for (const [name, mutant, want] of specimens) {
+    if (!mutant) { missed.push(`${name}: anchor not found exactly once`); continue }
+    const m = await redTeamCall(mutant)
+    if (!m.some((l) => l.includes(want))) missed.push(`${name}: not caught (${m.join('; ') || 'no finding'})`)
+  }
+  const noFloor = mutate("  floor && `This round's floor report, every line of it:\\n${floor.report}`,\n", '')
+  clause('1l the script without the floor report in the red-team prompt fails the floor-report fixture', !!noFloor && (await judge(noFloor, 'redteam-handed-floor-report')).length > 0, noFloor ? 'fixture still met its expect' : 'anchor not found exactly once')
+  const noRefusal = mutate('if (blocking.length > before) { dead = true; break }', 'if (false) { dead = true; break }')
+  clause('1m the script without the section-accept refusal fails a broken section fixture', !!noRefusal && (await judge(noRefusal, 'section-blocking-unruled')).length > 0, noRefusal ? 'fixture still met its expect' : 'anchor not found exactly once')
+  // A rejection whose finding sits only in `blocking` must still reach the next builder, the retry critic's history and the deadlock entry.
+  const FIND = 'REJECTION-IN-BLOCKING: the wall clips at 360'   // the critic's stub states it too, so its history is read after the script's own preamble
+  const RX = FIXTURES['section-rejection-findings-in-blocking'].args
+  const b2 = (await until(SCRIPT, RX, 'build:hero#2'))?.call, c2 = (await until(SCRIPT, RX, 'critic:hero#2'))?.call
+  const dl = await run(SCRIPT, RX).then((r) => r.deadlocked && r.deadlocked[0], () => null)
+  clause('1n a rejection carrying its finding only in blocking reaches the retry builder, the retry critic and the deadlock entry', !!(b2 && b2.prompt.includes(FIND) && c2 && (c2.prompt.split('your earlier rejections')[1] || '').includes(FIND) && dl && dl.notes.some((n) => n.includes(FIND))), `builder ${!!(b2 && b2.prompt.includes(FIND))}, critic ${!!(c2 && (c2.prompt.split('your earlier rejections')[1] || '').includes(FIND))}, deadlock ${!!(dl && dl.notes.some((n) => n.includes(FIND)))}`)
+  // Every field a section verdict carries reaches the consumers that need it: each axis's blocking finding and each
+  // CANNOT JUDGE roll-call line reach the deadlock entry, and each section's entry in the round's return carries its verdict.
+  const deadNotes = async (name, script = SCRIPT, args = FIXTURES[name].args) => { const r = await run(script, args).catch(() => null); return (r && r.deadlocked && r.deadlocked[0] && r.deadlocked[0].notes) || [] }
+  // The notes a rejection owes, read from each case's critic return: its own notes, one per blocking finding, axis first,
+  // and one per CANNOT JUDGE roll-call line. Every one must reach the deadlock entry, so a blocking finding lost by text
+  // or as its list's first entry is missed. The two-axis fixture already carries the wall's finding in its notes, so a
+  // case of it with notes emptied leaves each axis's finding only in blocking. Not covered here: a merge that drops the
+  // critic's own notes (every case's notes are empty or repeat a blocking note), or that keeps only the first of several
+  // CANNOT JUDGE lines (the cannot-judge case has one).
+  const twoAxes = FIXTURES['section-rejection-two-axes-same-text'].args
+  const NOTES_IN = '"notes": ["the wall: contrast is too low"]'
+  const emptied = twoAxes.sections[0].criticPrompt.split(NOTES_IN).length === 2
+    ? { ...twoAxes, sections: [{ ...twoAxes.sections[0], criticPrompt: twoAxes.sections[0].criticPrompt.replace(NOTES_IN, '"notes": []') }] } : null
+  const NOTED = [
+    ['section-rejection-two-axes-same-text', twoAxes],
+    ['section-rejection-two-axes-same-text, notes emptied', emptied],
+    ['section-rejection-cannot-judge-line', FIXTURES['section-rejection-cannot-judge-line'].args],
+  ]
+  const owed = (args) => {
+    const v = JSON.parse(stubReply(args.sections[0].criticPrompt))
+    return [...v.notes, ...v.blocking.filter((b) => (b.finding || '').trim()).map((b) => `${b.axis}: ${b.finding}`),
+      ...v.rollCall.filter((r) => r.word === 'CANNOT JUDGE' && (r.line || '').trim()).map((r) => `${r.axis} ${r.word}: ${r.line.trim()}`)]
+  }
+  const missing = async (script) => (await Promise.all(NOTED.map(async ([name, args]) => {
+    const got = await deadNotes(null, script, args)
+    return owed(args).filter((n) => !got.includes(n)).map((n) => `${name}: ${n}`)
+  }))).flat()
+  const lost = await missing(SCRIPT)
+  // A merge that keeps only the last axis of equal finding texts, and merges that drop the first blocking finding or the
+  // first CANNOT JUDGE line, must each be caught.
+  const BLOCKING_NOTES = "...verdict.blocking.filter((b) => (b.finding || '').trim())"
+  const CANNOT_NOTES = "...verdict.rollCall.filter((r) => r.word === 'CANNOT JUDGE' && (r.line || '').trim())"
+  const lossy = [
+    ['the last axis of equal texts kept', mutate(BLOCKING_NOTES, "...verdict.blocking.filter((b, i, all) => (b.finding || '').trim() && all.findLastIndex((x) => x.finding === b.finding) === i)")],
+    ['the first blocking finding dropped', mutate(BLOCKING_NOTES, `${BLOCKING_NOTES}.slice(1)`)],
+    ['the first CANNOT JUDGE line dropped', mutate(CANNOT_NOTES, `${CANNOT_NOTES}.slice(1)`)],
+  ]
+  const uncaught = []
+  for (const [what, script] of lossy) if (!script || !(await missing(script)).length) uncaught.push(script ? what : `${what}: anchor not found exactly once`)
+  const cleanRun = await run(SCRIPT, FIXTURES.clean.args).catch(() => null)
+  // The entry's verdict is the critic's whole return, and the script with that verdict cut to its roll call is caught.
+  const verdictOf = (r) => r && r.sections && r.sections[0] && r.sections[0].verdict
+  const verdictKept = isDeepStrictEqual(verdictOf(cleanRun), JSON.parse(full))
+  const cut = mutate('verdict: lastVerdict }', 'verdict: lastVerdict && { rollCall: lastVerdict.rollCall } }')
+  const cutRun = cut && await run(cut, FIXTURES.clean.args).catch(() => null)
+  const cutCaught = !!cutRun && !isDeepStrictEqual(verdictOf(cutRun), JSON.parse(full))
+  clause('1o a rejection keeps every axis\'s finding and every CANNOT JUDGE roll-call line, and each section entry carries its critic\'s whole verdict', !!emptied && NOTED.every(([, args]) => owed(args).length > 0) && !lost.length && !uncaught.length && verdictKept && cutCaught, `${emptied ? '' : 'two-axis notes anchor not found exactly once; '}notes lost ${JSON.stringify(lost)}; lossy merges not caught ${JSON.stringify(uncaught)}; verdict kept whole ${verdictKept}; ${cut ? `a verdict cut to its roll call caught ${cutCaught}` : 'verdict anchor not found exactly once'}`)
+  const excused = await deadNotes('section-rejection-excused-lines-beside-defect')
+  clause('1p a rejection hands on its real defect and neither a stale-clause nor an inherited BLOCKING line', excused.some((n) => n.includes('REAL-DEFECT')) && !excused.some((n) => n.includes('retired focus-ring clause') || n.includes('host banner')), JSON.stringify(excused))
+  clause('1k each negative specimen of the red-team call (label rewritten, roll call stripped, critic prompt forwarded) is caught by 1j\'s reading', !missed.length, missed.join('; '))
+}
+
+// ---- Clause 3, the floor-report fixture: only its floor report can supply the red team's reply ----
+{
+  const FX = FIXTURES['redteam-handed-floor-report'].args
+  const floor = JSON.parse(stubReply(FX.floorPrompt))
+  const reply = stubReply(floor.report)
+  let parsed = null
+  try { parsed = JSON.parse(reply) } catch {}
+  clause('3e the floor-report fixture\'s red-team prompt states no reply of its own, and its floor report states one', stubReply(FX.redTeamPrompt) === null && !!parsed && Array.isArray(parsed.rollCall), `own ${stubReply(FX.redTeamPrompt)}, report ${reply}`)
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')
