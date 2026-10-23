@@ -3,7 +3,7 @@
 // live host: each tamper edits one captured fact the way a host update would move it. The same three clauses cover
 // the summary the doctor prints, the scan of hooks/ and skills/ for account identifiers with the redaction --save
 // applies, --save taking no path, and the doctor's cleanup when it is interrupted, which runs the doctor itself under
-// a stub herdr and reads /proc for what it left running (Linux).
+// a stub herdr and reads what it left running from /proc where the host has it and from the pids the stub recorded, so it runs on macOS too.
 //   1. each tampered capture makes exactly the signals named for it drift, and the exit code 1; a capture tampered so
 //      a signal cannot be observed reads that row unobserved (ok null), with no drift, the exit code 0 and the summary
 //      naming it;
