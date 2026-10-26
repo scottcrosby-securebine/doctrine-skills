@@ -799,5 +799,61 @@ if (typeof process.getuid === 'function' && process.getuid() === 0) {
     `unlink answered ${unlinkProbe}: if it succeeded, clause 8c would be asserting a refusal the launcher never had to make`)
 }
 
+// The same refusal where only the result is unremovable: a directory stands where <out>.result goes, in a writable
+// directory, so the command record could be written and only the stale-result refusal stops the launch. Clause 8c's
+// read-only directory also refuses the record, which would mask a lost stale-result refusal.
+const dirRes = path.join(tmp, 'dirres.out')
+fs.mkdirSync(`${dirRes}.result`); fs.writeFileSync(path.join(`${dirRes}.result`, 'keep'), 'x')
+// And a previous launch's record, which must be gone before the stale result is touched (F69).
+fs.writeFileSync(`${dirRes}.cmd`, '["true"]\n')
+let dirRefusal
+try { execFileSync('node', [script, 'dirres gate', dirRes, '--', 'echo ran'], { env, encoding: 'utf8', stdio: 'pipe' }); dirRefusal = { status: 0, stderr: '' } }
+catch (e) { dirRefusal = { status: e.status, stderr: String(e.stderr) } }
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300)
+clause('clause 8e — a result the launcher cannot remove, the record writable, makes it REFUSE before the record and the check, the previous record already gone',
+  dirRefusal.status === 1 && dirRefusal.stderr.includes('could not clear a previous') && !fs.existsSync(dirRes) && !fs.existsSync(`${dirRes}.cmd`),
+  `status ${dirRefusal.status}; stderr ${JSON.stringify(dirRefusal.stderr.trim())}; transcript ${fs.existsSync(dirRes)}; record ${fs.existsSync(`${dirRes}.cmd`)}`)
+const dirProbe = (() => { try { fs.rmSync(`${dirRes}.result`, { force: true }); return 'removed' } catch (e) { return e.code } })()
+const cmdProbe = (() => { try { fs.writeFileSync(`${dirRes}.probe`, 'x'); fs.rmSync(`${dirRes}.probe`); return 'writable' } catch (e) { return e.code } })()
+clause('clause 8f — that result really refuses removal and its directory really takes a new file, proved without the launcher',
+  dirProbe !== 'removed' && cmdProbe === 'writable',
+  `removal ${dirProbe}, write ${cmdProbe}: otherwise 8e proves nothing about which refusal fired`)
+fs.rmSync(`${dirRes}.result`, { recursive: true, force: true })
+
+// The record's own refusal: the stale result is removable, but a directory stands at <out>.cmd.partial, so only the
+// record cannot be written. The launcher must refuse and the check must never start (F67).
+const noRec = path.join(tmp, 'norec.out')
+fs.writeFileSync(`${noRec}.result`, `${exitLine(0)}\n`)
+fs.mkdirSync(`${noRec}.cmd.partial`); fs.writeFileSync(path.join(`${noRec}.cmd.partial`, 'keep'), 'x')
+let recRefusal
+try { execFileSync('node', [script, 'norec gate', noRec, '--', 'echo ran'], { env, encoding: 'utf8', stdio: 'pipe' }); recRefusal = { status: 0, stderr: '' } }
+catch (e) { recRefusal = { status: e.status, stderr: String(e.stderr) } }
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300)
+clause('clause 8g — a record the launcher cannot write makes it REFUSE: exit 1, says so, and the check never runs',
+  recRefusal.status === 1 && recRefusal.stderr.includes(`could not write ${noRec}.cmd`) && !fs.existsSync(noRec) && !fs.existsSync(`${noRec}.result`),
+  `status ${recRefusal.status}; stderr ${JSON.stringify(recRefusal.stderr.trim())}; transcript ${fs.existsSync(noRec)}; result ${fs.existsSync(`${noRec}.result`)}`)
+const partialProbe = (() => { try { fs.writeFileSync(`${noRec}.cmd.partial`, 'x'); return 'written' } catch (e) { return e.code } })()
+clause('clause 8h — that record path really refuses a write, proved without the launcher',
+  partialProbe !== 'written',
+  `write ${partialProbe}: otherwise 8g proves nothing about the record's refusal`)
+fs.rmSync(`${noRec}.cmd.partial`, { recursive: true, force: true })
+
+// <out>.cmd (QI39-R14): the argv a launch runs, as JSON, in place before the check starts, so a reader can tell which
+// gate ran what without parsing shell text, a killed gate included.
+const cmdOf = (out) => { try { return JSON.parse(fs.readFileSync(`${out}.cmd`, 'utf8')) } catch { return null } }
+clause('clause 9a — each launch leaves <out>.cmd holding its argv as given: the single string, and the argv form word for word',
+  JSON.stringify(cmdOf(out1)) === JSON.stringify([BROKEN]) && JSON.stringify(cmdOf(out3)) === JSON.stringify(['bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4']),
+  `${JSON.stringify(cmdOf(out1))} ${JSON.stringify(cmdOf(out3))}`)
+const out9 = path.join(tmp, 'slow.out')
+launch('slow gate', out9, 'sleep 2; echo late')
+const early = { cmd: cmdOf(out9), result: fs.existsSync(`${out9}.result`) }
+const t9 = waitDone(out9)
+clause('clause 9b — the record is in place when the launcher returns, before the check has finished',
+  JSON.stringify(early.cmd) === JSON.stringify(['sleep 2; echo late']) && !early.result,
+  `at return: cmd ${JSON.stringify(early.cmd)}, result present ${early.result}`)
+clause('clause 9c — that check really was still running at return: its result came later, with its output',
+  verdict(out9) === exitLine(0) && t9.includes('late') && !early.result,
+  `verdict ${JSON.stringify(verdict(out9))}; transcript ${JSON.stringify(t9)}: a check already done at return would make 9b prove nothing about "before"`)
+
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

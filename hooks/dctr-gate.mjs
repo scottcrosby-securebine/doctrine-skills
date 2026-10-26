@@ -12,8 +12,8 @@
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
 // stacks next to it. Outside herdr the check runs detached from the harness with the same two
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
-// on malformed arguments or when a previous run's `<out>.result` or `.result.partial` cannot be
-// removed — a display failure
+// on malformed arguments, when a previous run's `<out>.result` or `.result.partial` cannot be
+// removed, or when `<out>.cmd` cannot be written — a display failure
 // must never fail the gate it is showing. One path is one check at a time: two launches on the same
 // `<out>` are not detected, and the first to finish publishes under the other's name.
 //
@@ -30,6 +30,11 @@
 //                 `error=<message>` when the check could not be spawned at all (`exit=127`), since
 //                 that message is the launcher's and the transcript is the check's. A previous run's
 //                 result on the same path is removed before the check starts.
+//
+// Beside them, `<out>.cmd` is the check's argv as a JSON array, written by this launcher before the check
+// starts and replaced by the next launch on the same path. It is not the verdict and not the transcript:
+// it tells a reader which command a gate ran, a killed gate included (QI39-R14). The previous launch's record is
+// removed before its result, so no interruption leaves one launch's record beside another's state.
 //
 // Wait for the RESULT FILE to exist, never for a line inside the transcript:
 //   until [ -f <out>.result ]; do sleep 15; done; cat <out>.result
@@ -285,8 +290,16 @@ if (argv[0] === '--run') {
   // or detached, and the window between this process exiting and that one reaching its first line is
   // exactly where a caller's wait would have read the stale file. Refuse to run if it cannot be
   // cleared: a wait that never ends is visible, and a stale pass is not.
-  try { fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }
+  // The previous launch's command record goes FIRST: a launch killed after the result is gone and before its own record
+  // is written must not leave the previous launch's identity beside it (F69).
+  try { fs.rmSync(`${outFile}.cmd`, { force: true }); fs.rmSync(`${outFile}.result`, { force: true }); fs.rmSync(`${outFile}.result.partial`, { force: true }) }
   catch (e) { console.error(`${PREFIX}-gate: could not clear a previous ${outFile}.result (${e.message}); refusing to run`); process.exit(1) }
+  // `<out>.cmd`: the argv this launch runs, as JSON, in place before the check starts, so a reader can tell which
+  // gate ran what, a killed one included, without parsing the shell text that launched it (QI39-R14).
+  try {
+    fs.mkdirSync(path.dirname(outFile), { recursive: true })
+    fs.writeFileSync(`${outFile}.cmd.partial`, `${JSON.stringify(command)}\n`); fs.renameSync(`${outFile}.cmd.partial`, `${outFile}.cmd`)
+  } catch (e) { console.error(`${PREFIX}-gate: could not write ${outFile}.cmd (${e.message}); refusing to run`); process.exit(1) }
 
   const detached = (reason) => {
     // FOUR empties: marker, paneId, tabId, workspace. The detached path has no pane and no tab, and
