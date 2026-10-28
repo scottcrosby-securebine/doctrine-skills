@@ -1110,8 +1110,8 @@ if (blankImages.size) {
 
 /* Everything below is the same judgement as the blank-image block above: the
    renders a critic is about to grade are not the artifact, which is a gap in
-   THIS run rather than a design question — so it blocks, and the user waives it
-   or fixes it. None of them is a page defect and none of them gates. */
+   THIS run rather than a design question — so it blocks until the user waives it,
+   fixes it, or names it inherited within SKILL.md's Inherited failure row. None of them is a page defect and none of them gates. */
 if (badStatus.size) {
   unmeasured.push(`the server did not answer 200: ${[...badStatus].join(', ')}. Everything below was measured against whatever it did serve — an error page renders, scores a clean floor and prints its own h1 next to the verdict. If this IS the deliverable (a designed 404, say), waive this; otherwise the artifact was never rendered.`)
 }
@@ -1125,7 +1125,7 @@ if (unscrolled.size) {
   unmeasured.push(`the settle scroll hit its 60-step cap before the bottom of the page, so the tail was never scrolled into view, its lazy content never loaded, and it was shot blank:\n    ${[...unscrolled].join('\n    ')}\n  Shoot the long page in sections, or raise the cap knowing a feed that grows as you scroll will never satisfy it.`)
 }
 if (canvasText.size) {
-  unmeasured.push(`text was painted into a canvas, where it has no element, no computed style and no node for axe or anything here to read — its contrast and its size are NOT measured by this run: ${[...canvasText].join(', ')}. Read those labels by eye against their background, or waive knowing nobody checked them. (SVG text is a different case and is handled: axe reports it undetermined and it blocks above.)`)
+  unmeasured.push(`text was painted into a canvas, where it has no element, no computed style and no node for axe or anything here to read — its contrast and its size are NOT measured by this run: ${[...canvasText].join(', ')}. Read those labels by eye against their background, or waive knowing nobody checked them, or name it inherited within SKILL.md's Inherited failure row. (SVG text is a different case and is handled: axe reports it undetermined and it blocks above.)`)
 }
 if (framesBlind.size) {
   unmeasured.push(`this page renders content inside a frame and nothing here enters one, so heading structure, target size, layout and type scale cover the host document only: ${[...framesBlind].join(', ')}. The h1 gate was suppressed rather than run on a count that is wrong. Point the harness at the frame's own URL to measure it.`)
@@ -1217,7 +1217,7 @@ if (identity) {
   console.log(`  h1:    ${identity.h1}   (${identity.chars} chars of text)`)
 }
 console.log(`\n=== TECHNICAL FLOOR: ${verdict} ===`)
-if (unmeasured.length) console.log('Unmeasured is not clean. Report it; the user waives it or the run stops.')
+if (unmeasured.length) console.log('Unmeasured is not clean. Report it; it blocks until the user waives it or the run names it inherited within SKILL.md\'s Inherited failure row.')
 /* exit 3, not 0: a caller keying on status must not read "nothing failed" as
    "the floor passed" when items were never measured. */
 process.exit(failures ? 1 : (unmeasured.length ? 3 : 0))

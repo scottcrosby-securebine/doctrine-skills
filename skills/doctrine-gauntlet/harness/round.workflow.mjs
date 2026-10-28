@@ -12,7 +12,7 @@
 //                                        // gate) and returns the report; '' blocks, it is not a skip
 //   blindPrompt,                         // the blind comparison pass; '' on a no-reference run
 //   candidateIs: 'A',                    // which neutral filename is the build
-//   inherited: [],                       // failures step 7 rules inherited; recorded, not blocking
+//   inherited: [],                       // failures the run names inherited (SKILL.md, the Inherited failure row); recorded, not blocking
 //   stale: [],                           // clauses the run marked stale; a recorded violation of one is recorded, not blocking
 //   waived: [],                          // reasons the user has waived; recorded, not blocking
 //   criticPrompt,                        // the integrated critic, assembled from the critic brief
@@ -20,6 +20,7 @@
 //                                        // floor's [JUDGE]/[UNMEASURED] lines are added by the script
 //   redTeamPrompt,                       // assembled from the red team brief
 //   redTeamItems: [1, 2, 3, 4],
+//   roundAlarm: 4,                       // the round alarm's N, the user's figure in the anchor (doctrine step 5), a positive integer
 //   tieIsPass: false,                    // true only where fidelity is the run's bar; a named-material grant keeps it false
 //   counters: { cleanPasses, unresolvedRounds, sectionRejections: { [name]: n }, sectionResets: { [name]: n } },
 // }
@@ -116,11 +117,14 @@ const INHERITED = listArg('inherited', a.inherited, [])
 const STALE = listArg('stale', a.stale, [])
 const WAIVED = listArg('waived', a.waived, [])
 const DISPATCHED_AXES = listArg('critic axes', a.criticAxes, [])
+// The valve fires at every multiple of the user's N; a value that is not a positive integer is a miscall, and 4 is used.
+const ROUND_ALARM = a.roundAlarm === undefined ? 4 : Number.isInteger(a.roundAlarm) && a.roundAlarm > 0 ? a.roundAlarm
+  : (malformed('round alarm: present but not a positive integer — 4 is used instead and this round is not clean'), 4)
 const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const recorded = []   // reasons that would block but the run ruled inherited, stale or waived; named, never silent
 const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
 
-// A reason blocks unless the run already ruled it inherited (step 7) or waived it; a
+// A reason blocks unless the run already ruled it inherited (SKILL.md, the Inherited failure row) or waived it; a
 // roll-call BLOCKING whose only findings are recorded under a marked-stale clause or an inherited
 // failure is excused before it reaches here (staleExplained and inheritedExplained below); either
 // way it is written down, because a recorded failure that nobody can see is a silent pass.
@@ -226,7 +230,7 @@ function judgeCritic(ret, axes, who) {
     if (!axes.includes(b.axis)) malformed(`${who} finding names no axis: ${b.finding}`)
     else block(`${who}: ${b.axis} — ${b.finding}`, [b.axis])
   }
-  // Step 7's inherited failures and the run's marked-stale clause violations are recorded,
+  // Inherited failures (SKILL.md, the Inherited failure row) and the run's marked-stale clause violations are recorded,
   // named as which they are, and do not block — the same per-finding rule as the red team's
   // recorded list, checked against the same two lists.
   for (const r of ret.recorded) {
@@ -329,7 +333,7 @@ else {
     for (const line of floor.report.split('\n')) if (/\[(JUDGE|UNMEASURED)\]/.test(line)) floorLines.push(line.trim())
     for (const u of floor.unmeasured) {
       if (!u.trim()) { malformed('floor: returned an empty unmeasured entry — nothing a waiver can name'); continue }
-      block(`floor: [UNMEASURED] ${u} — blocks until the user waives it`, [u])
+      block(`floor: [UNMEASURED] ${u} — blocks until the user waives it or the run names it inherited`, [u])
     }
     // The report is the instrument's word; an [UNMEASURED] line the agent left out of its array is
     // still unmeasured, and a critic's CLEAR on it is a judgment on a thing nobody measured.
@@ -428,7 +432,7 @@ const clean = blocking.length === 0
 if (clean) counters.cleanPasses += 1
 else { counters.cleanPasses = 0; counters.unresolvedRounds += 1 }
 const exit = counters.cleanPasses >= 2
-const valve = !clean && counters.unresolvedRounds % 4 === 0
+const valve = !clean && counters.unresolvedRounds % ROUND_ALARM === 0
 log(`round ${clean ? 'clean' : 'not clean'} — clean passes ${counters.cleanPasses}, unresolved rounds ${counters.unresolvedRounds}, recorded ${recorded.length}${exit ? ' — phase exits' : ''}${valve ? ' — VALVE: stop and ask the user' : ''}`)
 
 return { clean, exit, valve, counters, blocking, recorded, sections, floor, blind, critic, redTeam, deadlocked }

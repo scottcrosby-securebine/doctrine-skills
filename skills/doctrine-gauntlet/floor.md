@@ -368,7 +368,7 @@ The two markers that carry gate law:
   The harness cannot tell a page that ships broken images from a dev server that failed to
   serve good ones — but under either reading **the renders every critic is about to grade
   are not the artifact**, which is a gap in this run rather than a design question, so it
-  blocks and the user fixes it or waives it. Graded as design instead, it becomes the
+  blocks as SKILL.md's Technical floor rules for every `[UNMEASURED]` line. Graded as design instead, it becomes the
   campaign whose client's eventual complaint was that the pages had no identifiable
   photographs. Two cases are deliberately not counted, both verified in Chromium: an
   `<img>` with no `src` (or `src=""`) is deliberate blank markup rather than a 404, and a
@@ -433,7 +433,7 @@ when the project has no `node_modules` of its own. **Do not hardcode a path into
 of it.**
 
 If the page renders but axe cannot be obtained, accessibility is **unmeasured, not
-passed**: say so and let the user waive it or stop.
+passed**: say so; it blocks as SKILL.md's Technical floor rules, and only the user can waive it.
 
 **A repo may vendor axe instead of depending on it, and the harness looks for that before
 giving up.** After `require('axe-core')` fails from every root it knows, it reads the first

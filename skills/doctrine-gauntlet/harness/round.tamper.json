@@ -907,6 +907,144 @@
   },
   "_note": "The third point on the valve. `broken` pins false at 1 and `valve-at-four` true at 4, and a `% 2` modulus satisfies both \u2014 that was found by a red team, not by the suite. This one reaches exactly 2 and pins false there, so any modulus below four now fails a fixture."
  },
+ "valve-at-user-n": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call omits the one axis, so the round is not clean and the round alarm trips the valve. Return via StructuredOutput exactly: {\"rollCall\": [], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 1,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": [],
+   "roundAlarm": 2
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "axis missing"
+   ],
+   "valve": true
+  },
+  "_note": "The user's N reaches the valve: roundAlarm 2 and incoming unresolvedRounds 1, so an unclean round makes 2 and the valve fires. A script that ignores roundAlarm and divides by 4 returns false here."
+ },
+ "valve-quiet-past-n": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call omits the one axis, so the round is not clean; the valve stays quiet at this count. Return via StructuredOutput exactly: {\"rollCall\": [], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 2,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": [],
+   "roundAlarm": 2
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "axis missing"
+   ],
+   "valve": false
+  },
+  "_note": "The other side of the user's N: roundAlarm 2 and incoming 2, so an unclean round makes 3, past N and not a multiple of it, and the valve stays quiet. A valve that fires on every round at or past N returns true here."
+ },
+ "round-alarm-malformed": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call omits the one axis, so the round is not clean and the round alarm trips the valve. Return via StructuredOutput exactly: {\"rollCall\": [], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 3,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": [],
+   "roundAlarm": "3"
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "axis missing",
+    "round alarm: present but not a positive integer"
+   ],
+   "valve": true
+  },
+  "_note": "A roundAlarm that is not a positive integer is a miscall: it is filed as blocking and 4 is used, so incoming 3 plus this unclean round fires the valve at 4. A script that coerced the string to 3 would return false."
+ },
+ "round-alarm-null": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call omits the one axis, so the round is not clean; the valve stays quiet at this count. Return via StructuredOutput exactly: {\"rollCall\": [], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 1,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "waived": [],
+   "roundAlarm": null
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "axis missing",
+    "round alarm: present but not a positive integer"
+   ],
+   "valve": false
+  },
+  "_note": "An explicit null roundAlarm is a miscall like any other non-integer: filed as blocking, 4 used, so incoming 1 plus this unclean round stays quiet. A script that reads null as absent files nothing."
+ },
  "critic-clear-shapes-clean": {
   "args": {
    "sections": [],

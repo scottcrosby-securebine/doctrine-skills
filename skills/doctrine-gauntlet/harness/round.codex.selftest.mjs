@@ -370,6 +370,26 @@ async function until(script, args, label) {
   clause('1k each negative specimen of the red-team call (label rewritten, roll call stripped, critic prompt forwarded) is caught by 1j\'s reading', !missed.length, missed.join('; '))
 }
 
+// ---- The round alarm: the user's N reaches the valve, and a malformed N is filed, not coerced ----
+{
+  const UN = FIXTURES['valve-at-user-n'] && FIXTURES['valve-at-user-n'].args
+  const BAD = FIXTURES['round-alarm-malformed'] && FIXTURES['round-alarm-malformed'].args
+  const next = (a) => a.counters.unresolvedRounds + 1
+  const QUIET = FIXTURES['valve-quiet-past-n'] && FIXTURES['valve-quiet-past-n'].args
+  clause('3h the quiet fixture\'s next count is past its N and not a multiple of it', !!QUIET && Number.isInteger(QUIET.roundAlarm) && next(QUIET) > QUIET.roundAlarm && next(QUIET) % QUIET.roundAlarm !== 0, 'fixture missing or not that case')
+  clause('3f the user-N fixture is one a fixed 4 cannot fire: its next count is a multiple of its N and not of 4', !!UN && Number.isInteger(UN.roundAlarm) && next(UN) % UN.roundAlarm === 0 && next(UN) % 4 !== 0, 'fixture missing or reachable by 4')
+  clause('3g the malformed fixture\'s round alarm is not a positive integer, and read as a number it would not fire where 4 does', !!BAD && !Number.isInteger(BAD.roundAlarm) && next(BAD) % Number(BAD.roundAlarm) !== 0 && next(BAD) % 4 === 0, 'fixture missing or not that case')
+  const once = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace(anchor, to) : null
+  const fixedFour = once('% ROUND_ALARM === 0', '% 4 === 0')
+  const coerced = once('Number.isInteger(a.roundAlarm) && a.roundAlarm > 0 ? a.roundAlarm', 'Number(a.roundAlarm) > 0 ? Number(a.roundAlarm)')
+  clause('1q the script dividing by a fixed 4 fails the user-N valve fixture', !!fixedFour && (await judge(fixedFour, 'valve-at-user-n')).length > 0, fixedFour ? 'fixture still met its expect' : 'anchor not found exactly once')
+  const atOrPast = once('% ROUND_ALARM === 0', ' >= ROUND_ALARM')
+  clause('1s the script firing on every round at or past N fails the quiet fixture', !!atOrPast && (await judge(atOrPast, 'valve-quiet-past-n')).length > 0, atOrPast ? 'fixture still met its expect' : 'anchor not found exactly once')
+  const nullAbsent = once('a.roundAlarm === undefined ? 4', 'a.roundAlarm == null ? 4')
+  clause('1t the script reading an explicit null round alarm as absent fails the null fixture', !!nullAbsent && (await judge(nullAbsent, 'round-alarm-null')).length > 0, nullAbsent ? 'fixture still met its expect' : 'anchor not found exactly once')
+  clause('1r the script coercing a malformed round alarm fails that fixture', !!coerced && (await judge(coerced, 'round-alarm-malformed')).length > 0, coerced ? 'fixture still met its expect' : 'anchor not found exactly once')
+}
+
 // ---- Clause 3, the floor-report fixture: only its floor report can supply the red team's reply ----
 {
   const FX = FIXTURES['redteam-handed-floor-report'].args

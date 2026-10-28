@@ -98,13 +98,14 @@ them, is refused. Start a new journal directory for each round.
 | `floorPrompt` | a prompt carrying the floor invocation itself — the command line, the flags this run's shape needs (theme, fragment, crop), and the exit-code meanings, read out of `floor.md` by you — plus every documented gate, returning `{ exitCode, report, unmeasured[], failedGates[] }`. The filename alone hands over nothing: no path beside this skill resolves from inside a seat, and an agent told to "run the floor (`floor.md`)" holds neither the command nor what its exit codes mean; `''` is not a skip — the round blocks on a floor nobody ran unless `waived` or `inherited` names `floor` |
 | `blindPrompt` | the blind comparison pass per The comparison, returning `{ winner: 'A'|'B'|'tie', why }`; `''` declares a no-reference run and is recorded, not checked — on a run that has a reference, an empty `blindPrompt` is exactly the omission step 7 warns about, and only you can see it |
 | `candidateIs` | `'A'` or `'B'` — which neutral filename is the build; you randomized the pair, so only you know |
-| `inherited` | names of failures step 7 rules inherited; a failed gate, unmeasured item, critic axis or red team item matching one is recorded, not blocking |
+| `inherited` | names of failures the run names inherited (SKILL.md, the Inherited failure row); a failed gate, unmeasured item, critic axis or red team item matching one is recorded, not blocking |
 | `stale` | names of clauses the run's staleness marker ruled stale (the not-gradeable table's Stale clause row); a recorded finding naming one is a stale-clause record, not blocking — the escalation is the orchestrator's, already filed at binding |
 | `waived` | names the user has waived — `floor`, an `[UNMEASURED]` item's text, a critic axis, `blind pass`, `red team item 3` — recorded, not blocking; the user rules, the script only remembers. A name matches by containment, so an item's text covers both its `[UNMEASURED]` line and the critic axis made from it — and a short name can cover more than you meant, so a ruling that excused several distinct reasons comes back flagged in `recorded`, as does one that matched nothing; neither flag is itself a failure. A ruling given for an abstention also covers a fresh finding on the same axis in a later round — the flags and the `recorded` lines are where that surfaces, so re-check any recorded line you did not expect. On the same name `inherited` wins over `waived`. Step 7's unrun consumer items are an environment gap, recorded and never blocking — keep them out of the return's `unmeasured`, have the floor agent name them in `report` as prose without the `[UNMEASURED]` tag (a tagged line there re-enters the cross-check), and record them yourself per step 7 |
-| `criticPrompt` | the integrated critic, assembled from the critic brief; its return carries a `recorded` list for the failures step 7 ruled inherited and the marked-stale clause violations item 8 routes there, checked per finding against `inherited` and `stale` exactly as the red team's. The script also reads item 8's vocabulary off the roll call the way item 5's is read off the red team's: a `CLEAR` with a blocking or recorded finding under the same axis, a `BLOCKING` with no finding under it anywhere, a `CANNOT JUDGE` with a finding under it, and a recorded finding naming an axis the dispatcher never named, each block. See **Two kinds of block** below for why none of them can be waived |
+| `criticPrompt` | the integrated critic, assembled from the critic brief; its return carries a `recorded` list for the failures the run named inherited and the marked-stale clause violations item 8 routes there, checked per finding against `inherited` and `stale` exactly as the red team's. The script also reads item 8's vocabulary off the roll call the way item 5's is read off the red team's: a `CLEAR` with a blocking or recorded finding under the same axis, a `BLOCKING` with no finding under it anywhere, a `CANNOT JUDGE` with a finding under it, and a recorded finding naming an axis the dispatcher never named, each block. See **Two kinds of block** below for why none of them can be waived |
 | `criticAxes` | item 3's named axes and item 2's six; the script adds every `[JUDGE]` and `[UNMEASURED]` line of the floor report it just ran, hands the critic that report under item 1, and blocks on any axis missing from the return — and on a line for an axis nobody named, or named twice, which is the script's own rule: a line it cannot count is a line it will not guess about |
 | `redTeamPrompt` | the red team, assembled from the red team brief |
 | `redTeamItems` | the brief's four attack items, `[1, 2, 3, 4]` by default; the script appends this round's floor report and the critic's whole returned report, roll call included, to the red team's prompt (item 1 attacks what the critic passed) — everything else the red team brief's assembly list names, renders, diff and ledger among it, you put in `redTeamPrompt` yourself |
+| `roundAlarm` | the round alarm's N, the user's figure in the anchor (doctrine step 5), default `4`; a value that is not a positive integer is a miscall, recorded as blocking, and `4` is used |
 | `tieIsPass` | `true` only where fidelity is the run's bar (The brief); a named-material grant keeps it `false` |
 | `counters` | `{ cleanPasses, unresolvedRounds, sectionRejections, sectionResets }` from the ledger's run-state block; the script returns them updated. `sectionResets` is yours to write: when the user rules on a deadlocked section and you clear its rejections, add one there, and a second deadlock on the same section returns marked terminal |
 
@@ -143,7 +144,7 @@ why a `CLEAR` carrying a polish note cannot be checked and is ruled honest, whil
 `BROKE` *is* discharged by a polish or recorded entry as well as a blocking one — a polish note on
 the red team side can be attributed to its item and on the critic side cannot.
 
-**`recorded` is required on both**, even when empty. It carries the failures **step 7** ruled
+**`recorded` is required on both**, even when empty. It carries the failures the run named
 inherited — not critic item 7, which is the bar — and violations of clauses the run marked stale.
 Each reviewer's own list is defined in its own brief: the critic's in item 8, the red team's in
 item 5. A finding in it that names neither an `inherited` failure of this dispatch nor a `stale`
@@ -161,7 +162,7 @@ each, readable without interpretation; `recorded` is every reason that would hav
 and was ruled inherited, stale or waived, plus the script's own informational lines — the
 blind-pass skip and the ruling flags, each labelled not a failure — so nothing silent ever
 passes. `exit` is the fused gate's two consecutive clean
-passes. `valve` is the four-round stop: put it to the user as doctrine step 5's diagnosis, never as a bare count. `deadlocked` is a section whose
+passes. `valve` is the round alarm's stop, at every multiple of `roundAlarm`: put it to the user as doctrine step 5's diagnosis, never as a bare count. `deadlocked` is a section whose
 critic rejected it three times: the round returns before any gate runs, because the
 counters never see section loops and the user rules. A dead builder or critic returns the
 same way — that section never passed, and the gate begins only after every section does —
@@ -298,7 +299,7 @@ args set each with the result it must produce, run through the Workflow tool:
 
 ### What the suite covers, and what it does not
 
-Beyond the checks named above the fixtures pin the ruling machinery, the four-round valve, the
+Beyond the checks named above the fixtures pin the ruling machinery, the round-alarm valve, the
 roll-call integrity rules, a floor `[UNMEASURED]` item, the blind pass losing, and the section
 deadlock. **No enumeration of them lives here on purpose**: every earlier version of this
 paragraph named a subset and went stale as fixtures were added, which reviews filed repeatedly as a defect. Read `_readme` and the `_note` on each fixture.
