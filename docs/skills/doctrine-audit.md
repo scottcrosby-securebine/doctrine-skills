@@ -12,7 +12,7 @@ The trigger is a bug hunt or a deep code audit: you want drift, feature gaps, lo
 
 The other wrappers cover the neighbouring cases. If something is already broken, throwing, failing or slow, that is `doctrine-debug`: it starts from a symptom, where this skill starts from a scope. If you want a feature built or a spec implemented, that is `doctrine-code`. If the problem is documentation that has fallen behind the code, that is `doctrine-docs`. This skill has a drift lens that reports where docs and config disagree with code, but a documentation sweep is a different job with a different gate.
 
-The hub is not for one-off questions or single-file edits, and the same holds here. A one-file scope is fine as a first run, and the README shows one. A question you could answer by reading the file yourself is not a job for it.
+The hub is not for one-off questions or a one-off edit to a single file nothing else reads, and the same holds here. A one-file scope is fine as a first run, and the README shows one. A question you could answer by reading the file yourself is not a job for it.
 
 ## What it asks you first
 

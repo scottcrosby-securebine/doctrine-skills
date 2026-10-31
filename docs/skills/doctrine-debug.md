@@ -6,7 +6,7 @@ Diagnosing and fixing one reported defect under the doctrine: a feedback loop fi
 
 Use it when you can point at something that is broken, throwing, failing or slow, and you want it diagnosed and fixed rather than only found. The trigger in the skill's description is a report of a defect plus a request to fix it with the doctrine.
 
-It is not the skill for a hunt. If you do not yet have a symptom and want the codebase searched for drift, gaps and bugs, that is `doctrine-audit`. If the work is a feature, a spec or a ticket rather than a defect, that is `doctrine-code`. For a documentation sweep, use `doctrine-docs`; for a proposal, brief, PRD or report, use `doctrine-write`. The hub itself says it is not for one-off questions or single-file edits, and that holds here: a typo you can see and fix in one line does not need two phases and a red team.
+It is not the skill for a hunt. If you do not yet have a symptom and want the codebase searched for drift, gaps and bugs, that is `doctrine-audit`. If the work is a feature, a spec or a ticket rather than a defect, that is `doctrine-code`. For a documentation sweep, use `doctrine-docs`; for a proposal, brief, PRD or report, use `doctrine-write`. The hub itself says it is not for one-off questions or a one-off edit to a single file nothing else reads, and that holds here: a typo you can see and fix in one line does not need two phases and a red team.
 
 The shape this wrapper assumes is a bug with a reproduction you can build. Where no local reproduction seam exists (no local database, a UI behind auth), it uses your project's documented CI or production-probe paths, or stops and asks you. It will not hypothesize without a loop.
 

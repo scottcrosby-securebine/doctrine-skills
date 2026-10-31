@@ -17,7 +17,7 @@ Two neighbours look similar and are not:
 - `doctrine-write` is for when the writing itself is the deliverable: a proposal, a brief, a PRD, a report. Its own spec draws the line: doctrine-docs owns codebase-doc sweeps, doctrine-research owns producing researched content, and doctrine-write is chained after either when the prose is the product.
 - `doctrine-research` is for a multi-source question that needs a fact-checked recommendation. Its spec sends codebase questions to `doctrine-audit` and names no boundary against this skill; the line above comes from doctrine-write.
 
-For bug hunts, use `doctrine-audit`. For a single-file edit or a one-off question, no wrapper applies.
+For bug hunts, use `doctrine-audit`. For a one-off edit to a single file nothing else reads, or a one-off question, no wrapper applies.
 
 ## What it asks you first
 

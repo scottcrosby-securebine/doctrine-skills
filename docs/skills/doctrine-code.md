@@ -13,7 +13,7 @@ The boundary against the other wrappers is the shape of the request, not the lan
 - The deliverable is a rendered page judged by how it looks: [doctrine-gauntlet](doctrine-gauntlet.md). doctrine-code does cover UI work, but it judges it by a visual check against the running app, not by a builder-and-critic loop against a reference.
 - A documentation sweep: [doctrine-docs](doctrine-docs.md). A proposal, brief, PRD or report: [doctrine-write](doctrine-write.md).
 
-If the work is a one-off question or a single-file edit, the hub says not to use the doctrine at all.
+If the work is a one-off question or a one-off edit to a single file nothing else reads, the hub says not to use the doctrine at all.
 
 ## What it asks you first
 
