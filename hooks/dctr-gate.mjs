@@ -79,7 +79,7 @@ const usage = () => {
 // hub step 3 puts an env prefix after `--`, so that form is the documented one. It goes after bash's
 // long options, which bash rejects after a short one (`bash -o pipefail --norc` exits 2), and only
 // when `-c` is among bash's own options, never a script's argument (`bash t.sh -c`).
-// shortcut: `env -S` / `--split-string` leaves the argv untouched, and a GNU long option taking a separate operand (`--unset NAME`, `--chdir DIR`) is read as a flag, so its operand is taken for the program: untouched unless that operand is literally `bash`. BSD env has neither, so no fixture here can drive them; parse them if a gate needs it.
+// shortcut: `env -S` / `--split-string` leaves the argv untouched, and a GNU long option taking a separate operand (`--unset NAME`, `--chdir DIR`) is read as a flag, so its operand is taken for the program: untouched unless that operand is named `bash`. BSD env has no such long options, so no fixture here can drive them; parse them if a gate needs it.
 const pipefailArgv = (cmd) => {
   let prog = 0
   if (path.basename(cmd[0]) === 'env') {
