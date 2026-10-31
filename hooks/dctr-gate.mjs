@@ -4,7 +4,8 @@
 //
 // Everything after `--` is the check's argv, passed through exactly as given: one argument runs
 // under `bash -o pipefail -c`, several are executed as they stand, so `bash -c "a; b"` keeps its
-// quoting, except that `-o pipefail` goes in after a `bash` given a `-c` option (`pipefailArgv`).
+// quoting, except that `-o pipefail` goes in when the argv runs `bash -c`, directly or after `env`
+// (`pipefailArgv`).
 // The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
 // `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
