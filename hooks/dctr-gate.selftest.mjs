@@ -704,6 +704,12 @@ const argvCases = [
   ['4v', 'env -- then an assignment: failure caught', 1, ['env', '--', 'DCTR_K=1', 'bash', '-c', 'false | cat']],
   ['4w', 'env with a clustered -iu NAME: failure caught', 1, ['env', '-iu', 'DCTR_K', 'bash', '-c', 'false | cat']],
   ['4x', 'env with an assignment whose name has a dot: failure caught', 1, ['env', 'dctr.k=1', 'bash', '-c', 'false | cat']],
+  ['4y', 'env -- then an assignment on a passing pipeline stays exit 0', 0, ['env', '--', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat']],
+  ['4z', 'env -iu NAME on a passing pipeline stays exit 0', 0, ['env', '-iu', 'DCTR_K', 'bash', '-c', 'echo ok | cat']],
+  ['4za', 'a dotted assignment name on a passing pipeline stays exit 0', 0, ['env', 'dctr.k=1', 'bash', '-c', 'echo ok | cat']],
+  ['4zb', 'env -u with its name attached and ending in P: failure caught', 1, ['env', '-uGROUP', 'bash', '-c', 'false | cat']],
+  ['4zc', 'env -u with an attached name holding S: failure caught', 1, ['env', '-uS', 'bash', '-c', 'false | cat']],
+  ['4zd', 'env -u with an attached name on a passing pipeline stays exit 0', 0, ['env', '-uGROUP', 'bash', '-c', 'echo ok | cat']],
 ]
 for (const [id, what, want, cmd] of argvCases) {
   const out = path.join(tmp, `argv-${id}.out`)
@@ -715,6 +721,12 @@ const bareShapes = argvCases.filter(([, , want]) => want === 1).map(([, , , cmd]
   .map((cmd) => spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8' }).status)
 clause('clause 4p — every failing shape and the script exit 0 without the launcher, so the clauses above measure it',
   bareShapes.every((s) => s === 0), `bare statuses: ${bareShapes.join(',')}`)
+
+// A non-bash program behind an attached env value keeps its argv: the P inside `-uP` is the value.
+const outEcho = path.join(tmp, 'argv-echo.out')
+launch('argv env echo', outEcho, 'env', '-uP', 'echo', 'bash', '-c', 'hello')
+clause('clause 4ze — a non-bash program behind env -uP keeps its argv exactly',
+  waitDone(outEcho).split('\n').includes('bash -c hello'), 'pipefail must never be inserted into another program\'s arguments')
 
 const bareEnv = spawnSync('env', ['DCTR_K=1', 'bash', '-c', 'false | cat'], { encoding: 'utf8' })
 const bareSh = spawnSync('sh', ['-c', 'false | cat'], { encoding: 'utf8' })

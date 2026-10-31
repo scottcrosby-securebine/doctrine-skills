@@ -79,7 +79,7 @@ const usage = () => {
 // hub step 3 puts an env prefix after `--`, so that form is the documented one. It goes after bash's
 // long options, which bash rejects after a short one (`bash -o pipefail --norc` exits 2), and only
 // when `-c` is among bash's own options, never a script's argument (`bash t.sh -c`).
-// shortcut: `env -S` / `--split-string` (one string split into argv) leaves the argv untouched, as before this change; parse it if a gate needs it.
+// shortcut: `env -S` / `--split-string` leaves the argv untouched, and a GNU long option taking a separate operand (`--unset NAME`, `--chdir DIR`) is read as a flag, so its operand is taken for the program: untouched unless that operand is literally `bash`. BSD env has neither, so no fixture here can drive them; parse them if a gate needs it.
 const pipefailArgv = (cmd) => {
   let prog = 0
   if (path.basename(cmd[0]) === 'env') {
@@ -87,8 +87,14 @@ const pipefailArgv = (cmd) => {
     for (prog = 1; prog < cmd.length; prog++) {
       const a = cmd[prog]
       if (envOpts && a === '--') { envOpts = false; continue }
-      if (envOpts && /^-[A-Za-z0-9]*S|^--split-string/.test(a)) return cmd
-      if (envOpts && (/^-[A-Za-z0-9]*[uCP]$/.test(a) || /^--(unset|chdir)$/.test(a))) { prog++; continue }
+      if (envOpts && /^--split-string/.test(a)) return cmd
+      if (envOpts && /^-[^-]/.test(a)) {
+        // A short cluster ends at its first value-taking option; the rest of the token is that value.
+        const at = a.slice(1).search(/[uCPS]/)
+        if (at >= 0 && a[at + 1] === 'S') return cmd
+        if (at === a.length - 2) prog++
+        continue
+      }
       if (envOpts && a.startsWith('-')) continue
       if (/^[^=]+=/.test(a)) { envOpts = false; continue }
       break
