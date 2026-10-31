@@ -4,7 +4,8 @@
 //
 // Everything after `--` is the check's argv, passed through exactly as given: one argument runs
 // under `bash -o pipefail -c`, several are executed as they stand, so `bash -c "a; b"` keeps its
-// quoting. The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
+// quoting, except that `-o pipefail` goes in after a `bash` given a `-c` option (`pipefailArgv`).
+// The first live use joined them with spaces and lost it (sbsforge-platform, 2026-09-05).
 // `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
 // Run by the doctrine orchestrator at step 3 for every gate, however short; a check that would outrun
@@ -72,6 +73,17 @@ const usage = () => {
   console.error("   or: node dctr-gate.mjs --run <out> <marker> <pane-id|''> <tab-id|''> <workspace|''> <label> -- <command...>")
   process.exit(1)
 }
+// An argv check is spawned as given, so `-- bash -c 'npm test | tail'` reported tail's status. Insert
+// `-o pipefail` after bash when it runs with a `-c` option, directly or after `env` and its
+// assignments and options: hub step 3 puts an env prefix after `--`, so that form is the documented one.
+// shortcut: an env option taking a value (`-u NAME`) stops the scan and leaves the argv untouched, as today; parse env's options if a gate needs it.
+const pipefailArgv = (cmd) => {
+  let i = path.basename(cmd[0]) === 'env' ? 1 : 0
+  if (i) while (i < cmd.length && (/^\w+=/.test(cmd[i]) || cmd[i].startsWith('-'))) i++
+  return path.basename(cmd[i] ?? '') === 'bash' && cmd.slice(i + 1).some((a) => /^-[a-z]*c[a-z]*$/.test(a))
+    ? [...cmd.slice(0, i + 1), '-o', 'pipefail', ...cmd.slice(i + 1)]
+    : cmd
+}
 
 if (argv[0] === '--run') {
   // Inside the pane, or detached. Run the check, tee, mark the exit, tidy the pane.
@@ -136,7 +148,7 @@ if (argv[0] === '--run') {
   // wrong in: a false failure is visible and a false pass is not.
   const child = command.length === 1
     ? spawn('bash', ['-o', 'pipefail', '-c', command[0]], { stdio: ['ignore', 'pipe', 'pipe'] })
-    : spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
+    : spawn(command[0], pipefailArgv(command).slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
   // The check never started, so the pane is ALIVE and nothing here closes it. Keeping the record is
   // the whole point of having one: dropping it left exactly the live-pane-with-no-record that the
   // completion path above is written to avoid, one screen up in the same function.

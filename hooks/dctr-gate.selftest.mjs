@@ -653,6 +653,43 @@ clause('clause 4c — the fixture really carries the defect: bash alone exits 0 
   bare.status === 0 && withPf.status !== 0,
   `this clause is what proves clause 4 measures anything: bare=${bare.status} pipefail=${withPf.status}`)
 
+// An argv check is spawned as given, so `-- bash -c 'npm test | tail'` reported tail's status (four
+// October gates). The launcher inserts pipefail after bash, directly or under `env`, which hub step 3
+// prescribes for an env prefix.
+const outA = path.join(tmp, 'argv-pipe.out')
+launch('argv piped gate', outA, 'bash', '-c', 'false | cat')
+waitDone(outA)
+clause('clause 4d — an argv `bash -c` check whose upstream fails records a FAILURE',
+  verdict(outA) === exitLine(1),
+  `an argv check spawned as given reports the last stage: got ${JSON.stringify(verdict(outA))}`)
+
+const outE = path.join(tmp, 'argv-env-pipe.out')
+launch('argv env piped gate', outE, 'env', 'DCTR_K=1', 'bash', '-c', 'false | cat')
+waitDone(outE)
+clause('clause 4e — the same check behind an `env K=V` prefix records a FAILURE',
+  verdict(outE) === exitLine(1),
+  `the env prefix hub step 3 prescribes must not hide the upstream: got ${JSON.stringify(verdict(outE))}`)
+
+const outAg = path.join(tmp, 'argv-pipe-good.out')
+launch('argv piped good gate', outAg, 'bash', '-c', 'echo ok | cat')
+const tAg = waitDone(outAg)
+clause('clause 4f — an argv `bash -c` pipeline that really passes still records exit=0',
+  verdict(outAg) === exitLine(0) && tAg.split('\n').includes('ok'),
+  `got ${JSON.stringify(verdict(outAg))}`)
+
+const outS = path.join(tmp, 'argv-sh.out')
+launch('argv sh gate', outS, 'sh', '-c', 'false | cat')
+waitDone(outS)
+clause('clause 4g — an argv that does not run bash is spawned untouched (sh keeps its own last-stage status)',
+  verdict(outS) === exitLine(0),
+  `only bash gets pipefail inserted: got ${JSON.stringify(verdict(outS))}`)
+
+const bareEnv = spawnSync('env', ['DCTR_K=1', 'bash', '-c', 'false | cat'], { encoding: 'utf8' })
+const bareSh = spawnSync('sh', ['-c', 'false | cat'], { encoding: 'utf8' })
+clause('clause 4h — the fixtures carry the defect without the launcher: env-prefixed bash and sh both exit 0 on them',
+  bareEnv.status === 0 && bareSh.status === 0,
+  `proves clauses 4d, 4e and 4g measure the launcher: env=${bareEnv.status} sh=${bareSh.status}`)
+
 // ---------------------------------------------------------------------------------------------
 // B2: a check printing its own `exit=` line used to end the documented `until grep -q '^exit='` wait
 // while still running. `env` with a variable named `exit` does it with no hostile input, which is the

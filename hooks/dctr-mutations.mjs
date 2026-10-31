@@ -98,6 +98,14 @@ const MUTATIONS = [
     clause: 'clause 4 — a piped check whose upstream fails under a succeeding last stage records a FAILURE',
     from: "spawn('bash', ['-o', 'pipefail', '-c', command[0]]",
     to: "spawn('bash', ['-c', command[0]]" },
+  { name: 'the argv gate path drops pipefail, so an argv `bash -c` pipeline reports its last stage', file: 'dctr-gate.mjs',
+    clause: 'clause 4d — an argv `bash -c` check whose upstream fails records a FAILURE',
+    from: 'spawn(command[0], pipefailArgv(command).slice(1)',
+    to: 'spawn(command[0], command.slice(1)' },
+  { name: 'the argv pipefail scan stops at `env`, so an env-prefixed `bash -c` pipeline reports its last stage', file: 'dctr-gate.mjs',
+    clause: 'clause 4e — the same check behind an `env K=V` prefix records a FAILURE',
+    from: "let i = path.basename(cmd[0]) === 'env' ? 1 : 0",
+    to: 'let i = 0' },
   // THE SPLIT, reverted: the verdict goes back into the transcript, which is the whole contract
   // Scott's 2026-09-11 ruling replaced. Every clause that reads `<out>.result` then finds no file, and
   // clause 1 is the first of them — named here because the harness reports the clause it was told to
