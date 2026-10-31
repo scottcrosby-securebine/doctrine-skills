@@ -684,6 +684,30 @@ clause('clause 4g — an argv that does not run bash is spawned untouched (sh ke
   verdict(outS) === exitLine(0),
   `only bash gets pipefail inserted: got ${JSON.stringify(verdict(outS))}`)
 
+// Each argv shape the launcher must parse, run through it: bash's long options must stay ahead of the
+// inserted short option, env's value-taking options are skipped, and a script's own `-c` is not bash's.
+const pfScript = path.join(tmp, 'pf.sh')
+fs.writeFileSync(pfScript, 'false | cat\n')
+const argvCases = [
+  ['4i', 'a long option before -c: failure caught', 1, ['bash', '--norc', '-c', 'false | cat']],
+  ['4j', 'env -u NAME before bash: failure caught', 1, ['env', '-u', 'DCTR_K', 'bash', '-c', 'false | cat']],
+  ['4k', 'an uppercase option clustered with c: failure caught', 1, ['bash', '-Ec', 'false | cat']],
+  ['4l', 'env-prefixed passing pipeline stays exit 0', 0, ['env', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat']],
+  ['4m', 'a long option before -c on a passing pipeline stays exit 0', 0, ['bash', '--norc', '-c', 'echo ok | cat']],
+  ['4n', 'an env -u operand named bash is not taken for the program', 0, ['env', '-u', 'bash', 'bash', '-c', 'echo ok | cat']],
+  ['4o', 'a script given -c as its own argument is spawned untouched', 0, ['bash', pfScript, '-c']],
+]
+for (const [id, what, want, cmd] of argvCases) {
+  const out = path.join(tmp, `argv-${id}.out`)
+  launch(`argv ${id}`, out, ...cmd)
+  waitDone(out)
+  clause(`clause ${id} — ${what}`, verdict(out) === exitLine(want), `${JSON.stringify(cmd)}: got ${JSON.stringify(verdict(out))}`)
+}
+const bareShapes = argvCases.filter(([, , want]) => want === 1).map(([, , , cmd]) => cmd).concat([['bash', pfScript, '-c']])
+  .map((cmd) => spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8' }).status)
+clause('clause 4p — the failing shapes and the script exit 0 without the launcher, so 4i to 4k and 4o measure it',
+  bareShapes.every((s) => s === 0), `bare statuses: ${bareShapes.join(',')}`)
+
 const bareEnv = spawnSync('env', ['DCTR_K=1', 'bash', '-c', 'false | cat'], { encoding: 'utf8' })
 const bareSh = spawnSync('sh', ['-c', 'false | cat'], { encoding: 'utf8' })
 clause('clause 4h — the fixtures carry the defect without the launcher: env-prefixed bash and sh both exit 0 on them',

@@ -104,8 +104,20 @@ const MUTATIONS = [
     to: 'spawn(command[0], command.slice(1)' },
   { name: 'the argv pipefail scan stops at `env`, so an env-prefixed `bash -c` pipeline reports its last stage', file: 'dctr-gate.mjs',
     clause: 'clause 4e — the same check behind an `env K=V` prefix records a FAILURE',
-    from: "let i = path.basename(cmd[0]) === 'env' ? 1 : 0",
-    to: 'let i = 0' },
+    from: "if (path.basename(cmd[0]) === 'env') {",
+    to: 'if (false) {' },
+  { name: 'pipefail goes in straight after bash, ahead of its long options, which bash then rejects', file: 'dctr-gate.mjs',
+    clause: 'clause 4m — a long option before -c on a passing pipeline stays exit 0',
+    from: '  const at = j\n',
+    to: '  const at = i + 1\n' },
+  { name: 'env -u is read as a lone option, so its operand is taken for the program', file: 'dctr-gate.mjs',
+    clause: 'clause 4j — env -u NAME before bash: failure caught',
+    from: "if (/^-[uCP]$/.test(a)) { i++; continue }",
+    to: "if (/^-[uCP]$/.test(a)) { continue }" },
+  { name: 'option clusters are read lowercase only, so -Ec gets no pipefail', file: 'dctr-gate.mjs',
+    clause: 'clause 4k — an uppercase option clustered with c: failure caught',
+    from: '/^[-+][A-Za-z]+$/.test(cmd[j])',
+    to: '/^[-+][a-z]+$/.test(cmd[j])' },
   // THE SPLIT, reverted: the verdict goes back into the transcript, which is the whole contract
   // Scott's 2026-09-11 ruling replaced. Every clause that reads `<out>.result` then finds no file, and
   // clause 1 is the first of them — named here because the harness reports the clause it was told to

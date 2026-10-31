@@ -74,15 +74,32 @@ const usage = () => {
   process.exit(1)
 }
 // An argv check is spawned as given, so `-- bash -c 'npm test | tail'` reported tail's status. Insert
-// `-o pipefail` after bash when it runs with a `-c` option, directly or after `env` and its
-// assignments and options: hub step 3 puts an env prefix after `--`, so that form is the documented one.
-// shortcut: an env option taking a value (`-u NAME`) stops the scan and leaves the argv untouched, as today; parse env's options if a gate needs it.
+// `-o pipefail` when bash runs a `-c` string, directly or after `env` and its assignments and options:
+// hub step 3 puts an env prefix after `--`, so that form is the documented one. It goes after bash's
+// long options, which bash rejects after a short one (`bash -o pipefail --norc` exits 2), and only
+// when `-c` is among bash's own options, never a script's argument (`bash t.sh -c`).
+// shortcut: `env -S` (one string split into argv) leaves the argv untouched, as before this change; parse it if a gate needs it.
 const pipefailArgv = (cmd) => {
-  let i = path.basename(cmd[0]) === 'env' ? 1 : 0
-  if (i) while (i < cmd.length && (/^\w+=/.test(cmd[i]) || cmd[i].startsWith('-'))) i++
-  return path.basename(cmd[i] ?? '') === 'bash' && cmd.slice(i + 1).some((a) => /^-[a-z]*c[a-z]*$/.test(a))
-    ? [...cmd.slice(0, i + 1), '-o', 'pipefail', ...cmd.slice(i + 1)]
-    : cmd
+  let i = 0
+  if (path.basename(cmd[0]) === 'env') {
+    for (i = 1; i < cmd.length; i++) {
+      const a = cmd[i]
+      if (a === '--') { i++; break }
+      if (/^-[uCP]$/.test(a)) { i++; continue }
+      if (/^-S/.test(a)) return cmd
+      if (!a.startsWith('-') && !/^\w+=/.test(a)) break
+    }
+  }
+  if (path.basename(cmd[i] ?? '') !== 'bash') return cmd
+  let j = i + 1
+  while (j < cmd.length && /^--./.test(cmd[j])) j += /^--(rcfile|init-file)$/.test(cmd[j]) ? 2 : 1
+  const at = j
+  let c = false
+  for (; j < cmd.length && /^[-+][A-Za-z]+$/.test(cmd[j]); j++) {
+    if (cmd[j].includes('c')) c = true
+    if (/[oO]/.test(cmd[j])) j++
+  }
+  return c ? [...cmd.slice(0, at), '-o', 'pipefail', ...cmd.slice(at)] : cmd
 }
 
 if (argv[0] === '--run') {
