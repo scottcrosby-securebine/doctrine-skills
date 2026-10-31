@@ -696,6 +696,14 @@ const argvCases = [
   ['4m', 'a long option before -c on a passing pipeline stays exit 0', 0, ['bash', '--norc', '-c', 'echo ok | cat']],
   ['4n', 'an env -u operand named bash is not taken for the program', 0, ['env', '-u', 'bash', 'bash', '-c', 'echo ok | cat']],
   ['4o', 'a script given -c as its own argument is spawned untouched', 0, ['bash', pfScript, '-c']],
+  ['4q', 'a bash -o operand before -c: failure caught', 1, ['bash', '-o', 'errexit', '-c', 'false | cat']],
+  ['4r', 'a bash -o operand before -c on a passing pipeline stays exit 0', 0, ['bash', '-o', 'errexit', '-c', 'echo ok | cat']],
+  ['4s', 'a --rcfile operand before -c: failure caught', 1, ['bash', '--rcfile', '/dev/null', '-c', 'false | cat']],
+  ['4t', 'a --rcfile operand before -c on a passing pipeline stays exit 0', 0, ['bash', '--rcfile', '/dev/null', '-c', 'echo ok | cat']],
+  ['4u', 'an uppercase cluster on a passing pipeline stays exit 0', 0, ['bash', '-Ec', 'echo ok | cat']],
+  ['4v', 'env -- then an assignment: failure caught', 1, ['env', '--', 'DCTR_K=1', 'bash', '-c', 'false | cat']],
+  ['4w', 'env with a clustered -iu NAME: failure caught', 1, ['env', '-iu', 'DCTR_K', 'bash', '-c', 'false | cat']],
+  ['4x', 'env with an assignment whose name has a dot: failure caught', 1, ['env', 'dctr.k=1', 'bash', '-c', 'false | cat']],
 ]
 for (const [id, what, want, cmd] of argvCases) {
   const out = path.join(tmp, `argv-${id}.out`)
@@ -705,7 +713,7 @@ for (const [id, what, want, cmd] of argvCases) {
 }
 const bareShapes = argvCases.filter(([, , want]) => want === 1).map(([, , , cmd]) => cmd).concat([['bash', pfScript, '-c']])
   .map((cmd) => spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8' }).status)
-clause('clause 4p — the failing shapes and the script exit 0 without the launcher, so 4i to 4k and 4o measure it',
+clause('clause 4p — every failing shape and the script exit 0 without the launcher, so the clauses above measure it',
   bareShapes.every((s) => s === 0), `bare statuses: ${bareShapes.join(',')}`)
 
 const bareEnv = spawnSync('env', ['DCTR_K=1', 'bash', '-c', 'false | cat'], { encoding: 'utf8' })
