@@ -21,7 +21,7 @@ The red team here is Codex, run as the `codex:codex-rescue` subagent.
 
 Dispatch it with the Agent tool as `subagent_type: "codex:codex-rescue"`, never with the Skill tool, which has no such skill. Check that it is present in the Agent tool's own subagent list. If it is absent there, the plugin is absent and the hub's Fallbacks row applies.
 
-A wrapper that gives its own invocation of this red team, as `doctrine-gauntlet`'s `tools.md` does to attach renders, uses that invocation and not this subagent. For that wrapper the seat is absent only when its invocation's own command is, and the Fallbacks row applies then. Whether `codex:codex-rescue` is installed does not decide it.
+A wrapper that gives its own invocation of this red team, as `doctrine-gauntlet`'s `tools.md` does to attach renders, uses that invocation and not this subagent. For that wrapper the seat is absent when its invocation's own command is, and one whose command is present and fails is retried and substituted as the hub's Fallbacks section says. Whether `codex:codex-rescue` is installed decides neither.
 
 The seat forwards to the Codex CLI, and returns either a start line or the full result.
 
