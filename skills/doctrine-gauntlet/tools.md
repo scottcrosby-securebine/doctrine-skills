@@ -53,10 +53,9 @@ at runtime.
 On Codex CLI the visual red team comes from the other model family, Claude: run `claude -p` read-only as the hub's host reference gives it, with the render paths in the prompt, in a restyle the predecessor's renders named as the predecessor's (SKILL.md hands the red team the predecessor), and an instruction to read each image before judging. The two paths below are for Claude Code, where Codex is the other family.
 
 Codex **sees** images, which is what makes it usable as an adversary on rendered work.
-On Claude Code these two paths are the red team whether or not the `codex:codex-rescue`
-subagent is installed, as the hub's host reference says for a wrapper that gives its own
-invocation. The seat is absent only when `command -v codex` finds nothing, and the hub's
-Fallbacks row applies then.
+On Claude Code these two paths are this skill's own invocation, which the hub's host
+reference puts ahead of the `codex:codex-rescue` subagent; its own command is `codex`, so
+the seat is absent when `command -v codex` finds nothing.
 Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
 
 ### With herdr — a visible seat (issue #18)

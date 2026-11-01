@@ -457,7 +457,7 @@ try {
     for (const [w, h] of WIDTHS) {
       /* 360 is a phone, so it renders as one. A plain 360px window lays out any
          page at 360, viewport tag or none, and passed a page a real phone lays
-         out at 980px and shows at about 37%. A fragment's viewport tag is its
+         out at 980px and shrinks to about 37%. A fragment's viewport tag is its
          host page's, so a fragment keeps the plain window. */
       const phone = w === WIDTHS[0][0] && !FRAGMENT
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1, ...(phone ? { isMobile: true, hasTouch: true } : {}) })
@@ -761,9 +761,14 @@ try {
           const first = document.querySelector('main, section, article, div')
           const fcs = first ? getComputedStyle(first) : cs
           return {
-            hScroll: document.documentElement.scrollWidth > window.innerWidth + 1,
+            /* clientWidth, not innerWidth: on a phone, content wider than the
+               screen zooms the page out and innerWidth grows with it, which
+               hid the overflow and blamed the viewport tag instead */
+            hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
             scrollW: document.documentElement.scrollWidth,
-            layoutW: window.innerWidth,
+            layoutW: document.documentElement.clientWidth,
+            // measured, not inferred from the width: width=980, initial-scale=1 crops at scale 1
+            layoutScale: window.visualViewport ? window.visualViewport.scale : null,
             h1: window.__deep('h1').length,
             headingSkip: skip,
             /* Nothing here enters a frame — every walk above is this document's.
@@ -939,7 +944,7 @@ try {
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
         if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
-        if (noViewport) console.log(`  ! NO MOBILE VIEWPORT: the page lays out ${struct.layoutW}px wide, so a ${w}px phone shows it at about ${Math.round(w / struct.layoutW * 100)}% (no viewport tag, or one that does not set width=device-width)`)
+        if (noViewport) console.log(`  ! NO MOBILE VIEWPORT: the page lays out ${struct.layoutW}px wide on a ${w}px phone, ${struct.layoutScale == null ? 'at a scale this browser does not report' : struct.layoutScale < 0.99 ? `shrunk to ${Math.round(struct.layoutScale * 100)}%` : `cropped at full size`} (no viewport tag, or one that does not set width=device-width)`)
         /* The size printed is the painted box. The gate is on the HIT AREA — a
            24x24 square centred on the control that something else answers for —
            so the line says which of the two it convicted on. */

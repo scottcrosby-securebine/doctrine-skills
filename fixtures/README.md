@@ -59,10 +59,16 @@ common way to mistake this case for broken.
 
 The page carries a viewport tag because the 360 render is a phone. Its tamper test, last
 run 2026-11-01: delete the `<meta name="viewport" ...>` tag from the served copy and the
-same command exits **1** with `NO MOBILE VIEWPORT: the page lays out 980px wide, so a 360px
-phone shows it at about 37%` at 360. Independently of the harness, a Playwright context
-with `isMobile: true` at 360 reports `innerWidth` 980 for the stripped copy and 360 for
-this one.
+same command exits **1** with `NO MOBILE VIEWPORT: the page lays out 980px wide on a 360px
+phone, shrunk to 37%` at 360; with the tag changed to `width=980, initial-scale=1` the
+same line ends `cropped at full size`, the scale being measured, not inferred. With the
+tag kept and a 600px-wide element added before the enquiries line, it exits **1** with
+`HORIZONTAL SCROLL` at 360 and no `NO MOBILE VIEWPORT` line: a phone zooms out to fit the
+overflow, so the check reads the layout width, not `innerWidth`. Independently of the
+harness, a Playwright context with `isMobile: true` at 360 reports `clientWidth` 980 and
+`visualViewport.scale` 0.37 for the stripped copy, 980 and 1 for the `width=980` copy,
+360 and 1 for this one, and `clientWidth` 360 with `innerWidth` 621 for the copy with the
+wide element.
 
 **Case 2 — the shadcn app.** Run the recipe above, then `npm run build` and serve the
 production output (`npx next start -p 3117`) — not `next dev`, whose HMR client is one
