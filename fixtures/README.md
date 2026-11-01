@@ -60,8 +60,9 @@ common way to mistake this case for broken.
 The page carries a viewport tag because the 360 render is a phone. Its tamper test, last
 run 2026-11-01: delete the `<meta name="viewport" ...>` tag from the served copy and the
 same command exits **1** with `NO MOBILE VIEWPORT: the page lays out 980px wide on a 360px
-phone, shrunk to 37%` at 360; with the tag changed to `width=980, initial-scale=1` the
-same line ends `cropped at full size`, the scale being measured, not inferred. With the
+phone, shown at 37% scale` at 360; with the tag changed to `width=980, initial-scale=1` the
+same line says `shown at 100% scale`, and with `initial-scale=2` `shown at 200% scale`, the
+scale being measured, not inferred. With the
 tag kept and a 600px-wide element added before the enquiries line, it exits **1** with
 `HORIZONTAL SCROLL` at 360 and no `NO MOBILE VIEWPORT` line: a phone zooms out to fit the
 overflow, so the check reads the layout width, not `innerWidth`. Independently of the

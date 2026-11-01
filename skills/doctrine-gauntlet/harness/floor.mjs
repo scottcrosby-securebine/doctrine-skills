@@ -3,9 +3,10 @@
  *   node floor.mjs <url-or-file.html> <outPrefix> [dark|light|both]
  *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
  *
- * Renders 360/768/1440/2560 in the themes asked for, writes full-page
- * screenshots, and reports the floor: horizontal scroll, heading structure, axe
- * serious/critical, target size, page errors, reduced motion.
+ * Renders 360/768/1440/2560 in the themes asked for (360 as a phone), writes
+ * full-page screenshots, and reports the floor: horizontal scroll, a missing
+ * mobile viewport at 360, heading structure, axe serious/critical, target
+ * size, page errors, reduced motion.
  *
  * Exit codes:  0 clean · 1 failing configurations · 2 could not run ·
  *              3 nothing failed but something went unmeasured (NOT a pass).
@@ -943,8 +944,8 @@ try {
           || smallTargets.length
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
-        if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
-        if (noViewport) console.log(`  ! NO MOBILE VIEWPORT: the page lays out ${struct.layoutW}px wide on a ${w}px phone, ${struct.layoutScale == null ? 'at a scale this browser does not report' : struct.layoutScale < 0.99 ? `shrunk to ${Math.round(struct.layoutScale * 100)}%` : `cropped at full size`} (no viewport tag, or one that does not set width=device-width)`)
+        if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${struct.layoutW}`)
+        if (noViewport) console.log(`  ! NO MOBILE VIEWPORT: the page lays out ${struct.layoutW}px wide on a ${w}px phone, shown at ${struct.layoutScale == null ? 'a scale this browser does not report' : `${Math.round(struct.layoutScale * 100)}% scale`} (no viewport tag, or one that does not set width=device-width)`)
         /* The size printed is the painted box. The gate is on the HIT AREA — a
            24x24 square centred on the control that something else answers for —
            so the line says which of the two it convicted on. */
