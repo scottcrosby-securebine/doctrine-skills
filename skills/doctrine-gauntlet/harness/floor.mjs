@@ -455,7 +455,12 @@ try {
   for (const theme of themes) {
     fingerprint[theme] = {}
     for (const [w, h] of WIDTHS) {
-      const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1 })
+      /* 360 is a phone, so it renders as one. A plain 360px window lays out any
+         page at 360, viewport tag or none, and passed a page a real phone lays
+         out at 980px and shows at about 37%. A fragment's viewport tag is its
+         host page's, so a fragment keeps the plain window. */
+      const phone = w === WIDTHS[0][0] && !FRAGMENT
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1, ...(phone ? { isMobile: true, hasTouch: true } : {}) })
       await ctx.addInitScript(INSTRUMENT)
       try {
         const page = await ctx.newPage()
@@ -758,6 +763,7 @@ try {
           return {
             hScroll: document.documentElement.scrollWidth > window.innerWidth + 1,
             scrollW: document.documentElement.scrollWidth,
+            layoutW: window.innerWidth,
             h1: window.__deep('h1').length,
             headingSkip: skip,
             /* Nothing here enters a frame — every walk above is this document's.
@@ -925,12 +931,15 @@ try {
         const h1Unknown = struct.frames > 0 && struct.h1 === 0
         if (h1Unknown) framesBlind.add(`${struct.frames} frame(s) at ${theme} ${w}px`)
         const h1Bad = h1Unknown ? false : (FRAGMENT ? struct.h1 > 1 : struct.h1 !== 1)
-        const bad = struct.hScroll || h1Bad || struct.headingSkip
+        // on the phone context only: without a working viewport tag the layout viewport is wider than the screen
+        const noViewport = phone && struct.layoutW > w + 1
+        const bad = struct.hScroll || noViewport || h1Bad || struct.headingSkip
           || axeOut.serious.length || axeOut.critical.length || crashes.length
           || smallTargets.length
         if (bad) failures++
         console.log(`\n[${theme} ${w}px] ${bad ? 'FAIL' : 'ok'}  height=${struct.height}`)
         if (struct.hScroll) console.log(`  ! HORIZONTAL SCROLL: scrollWidth=${struct.scrollW} vs ${w}`)
+        if (noViewport) console.log(`  ! NO MOBILE VIEWPORT: the page lays out ${struct.layoutW}px wide, so a ${w}px phone shows it at about ${Math.round(w / struct.layoutW * 100)}% (no viewport tag, or one that does not set width=device-width)`)
         /* The size printed is the painted box. The gate is on the HIT AREA — a
            24x24 square centred on the control that something else answers for —
            so the line says which of the two it convicted on. */

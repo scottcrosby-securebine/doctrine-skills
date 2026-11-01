@@ -15,7 +15,9 @@ node <this-skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|bo
 
 ## What it does
 
-Renders 360/768/1440/**2560** in the themes asked for, scrolls first so lazy images load,
+Renders 360/768/1440/**2560** in the themes asked for, 360 as a phone (mobile emulation,
+so a page with no working viewport tag lays out wider than the screen and that configuration
+fails as `NO MOBILE VIEWPORT`), scrolls first so lazy images load,
 hides dev-server overlays, checks heading structure, layout and target size, compares type
 scale across widths, and runs axe when it can resolve it. Two more checks **gate** and were
 missing from this list: **uncaught page errors** — a `pageerror` fails that configuration,
@@ -127,7 +129,8 @@ silently re-rule every 1440 clip as a deliberate responsive scroller.
   the type scale: a design-system card specimen, a partial, anything rendered inside
   something else. A missing `h1` is not a defect (exactly one is still fine), and the
   theme-reachability and frozen-type judgements are suppressed because neither is this
-  file's to answer. Read the flag by ownership, not by the `h1` clause alone — a card
+  file's to answer. The viewport tag is the host page's too, so 360 renders as a plain
+  360px window and `NO MOBILE VIEWPORT` never fires. Read the flag by ownership, not by the `h1` clause alone — a card
   that requires exactly one `h1` still wants this flag. **It suppresses no `[UNMEASURED]`
   line, and the one-theme line included**: that push is gated on `--single-theme` alone
   and never consults `--fragment`, so a single-theme card shot with `--fragment` by itself

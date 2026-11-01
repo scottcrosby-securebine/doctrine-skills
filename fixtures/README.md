@@ -57,6 +57,13 @@ without it the page ships one theme, the run reports the switch had no effect, a
 exits **3**. That exit-3 is the correct answer to the wrong question, and it is the most
 common way to mistake this case for broken.
 
+The page carries a viewport tag because the 360 render is a phone. Its tamper test, last
+run 2026-11-01: delete the `<meta name="viewport" ...>` tag from the served copy and the
+same command exits **1** with `NO MOBILE VIEWPORT: the page lays out 980px wide, so a 360px
+phone shows it at about 37%` at 360. Independently of the harness, a Playwright context
+with `isMobile: true` at 360 reports `innerWidth` 980 for the stripped copy and 360 for
+this one.
+
 **Case 2 — the shadcn app.** Run the recipe above, then `npm run build` and serve the
 production output (`npx next start -p 3117`) — not `next dev`, whose HMR client is one
 more moving part in the render every critic is about to grade. Then:

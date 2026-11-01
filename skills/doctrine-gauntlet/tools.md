@@ -8,8 +8,14 @@ reach for them, the authorization boundary, and the fallback.
 
 ```bash
 codex exec --sandbox workspace-write --skip-git-repo-check -C <target-repo> \
-  "<art direction>. Save it to <path inside that repo>."
+  "<art direction>. Save it to <path inside that repo>." < /dev/null
 ```
+
+**Close stdin on every `codex exec`.** Whenever stdin is not a terminal, `codex exec`
+reads it and appends it to the prompt, so under an agent's shell, where stdin is an open
+pipe, it prints "Reading additional input from stdin..." and waits until the command is
+killed. A prompt given as an argument carries `< /dev/null`, as every invocation here
+does; a prompt piped in on stdin closes it when the pipe ends.
 
 Run with `-C` at the repo you are writing into and name a destination inside it — where
 the project already keeps its images, found by grepping for the existing ones, not a new
@@ -47,6 +53,10 @@ at runtime.
 On Codex CLI the visual red team comes from the other model family, Claude: run `claude -p` read-only as the hub's host reference gives it, with the render paths in the prompt, in a restyle the predecessor's renders named as the predecessor's (SKILL.md hands the red team the predecessor), and an instruction to read each image before judging. The two paths below are for Claude Code, where Codex is the other family.
 
 Codex **sees** images, which is what makes it usable as an adversary on rendered work.
+On Claude Code these two paths are the red team whether or not the `codex:codex-rescue`
+subagent is installed, as the hub's host reference says for a wrapper that gives its own
+invocation. The seat is absent only when `command -v codex` finds nothing, and the hub's
+Fallbacks row applies then.
 Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
 
 ### With herdr — a visible seat (issue #18)
@@ -86,12 +96,13 @@ Three rules, each one a failure observed 2026-08-30/31 while this path was teste
 
 ```bash
 codex exec --sandbox read-only --skip-git-repo-check "<what to attack>" \
-  -i contact-sheet-dark.png -i contact-sheet-light.png
+  -i contact-sheet-dark.png -i contact-sheet-light.png < /dev/null
 ```
 
 `-i` is **variadic**: put the prompt *before* the flags, after a `--` separator, or on
 stdin. A prompt trailing after `-i` is swallowed as another filename and the run dies
-asking for input.
+asking for input. The first two forms also need stdin closed with `< /dev/null` (above),
+and the third is a pipe into `codex exec`, which closes it: an open stdin hangs all three.
 
 Attach **every render the round produced**, not a token pair. Nothing in this skill
 composites a contact sheet and nothing needs to: the harness writes discrete PNGs at
@@ -117,7 +128,7 @@ rather than blocking on the call.
 
 ```bash
 codex exec -c model_reasoning_effort="medium" --sandbox read-only --skip-git-repo-check \
-  "<what to attack>" -i shot-dark-1440.png -i shot-light-1440.png
+  "<what to attack>" -i shot-dark-1440.png -i shot-light-1440.png < /dev/null
 ```
 
 ## Claude Design — the write sequence

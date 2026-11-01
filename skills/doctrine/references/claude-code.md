@@ -21,6 +21,8 @@ The red team here is Codex, run as the `codex:codex-rescue` subagent.
 
 Dispatch it with the Agent tool as `subagent_type: "codex:codex-rescue"`, never with the Skill tool, which has no such skill. Check that it is present in the Agent tool's own subagent list. If it is absent there, the plugin is absent and the hub's Fallbacks row applies.
 
+A wrapper that gives its own invocation of this red team, as `doctrine-gauntlet`'s `tools.md` does to attach renders, uses that invocation and not this subagent. For that wrapper the seat is absent only when its invocation's own command is, and the Fallbacks row applies then. Whether `codex:codex-rescue` is installed does not decide it.
+
 The seat forwards to the Codex CLI, and returns either a start line or the full result.
 
 **Where its return is.** Its return is in its job record: `<config dir>/plugins/data/codex-openai-codex/state/<workspace-basename>-<hash>/jobs/<task-id>.json`, where `<config dir>` is `$CLAUDE_CONFIG_DIR` when that variable is set and `~/.claude` otherwise, with the fields status, pid, logFile, result, createdAt, summary and workspaceRoot. For the hub's ownership test, workspaceRoot is the workspace the record names and createdAt is when it was created.
