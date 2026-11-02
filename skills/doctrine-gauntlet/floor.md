@@ -297,7 +297,7 @@ The two markers that carry gate law:
   rather than as a flat absence, because absence is not what was measured.
 
   **Target size measures the hit area, not the painted box, and only on controls a person
-  can see.** Three things had to be true before the number was defensible.
+  can see; a control whose box already clears 24x24 passes on its box and is never probed.** Three things had to be true before the number was defensible.
   *Visibility*: the only filter was a non-zero box, so a closed drawer, an `opacity: 0`
   group and the links inside a shut `<details>` all failed 2.5.8 — controls that accept no
   pointer at all, `elementFromPoint` at their centre returning `<body>`. Most responsive
@@ -357,7 +357,7 @@ The two markers that carry gate law:
   otherwise undeterminable. Discarding it is how a live production page returned **124
   undeterminable text pairs at 1440 in both themes** under a clean `PASS` with no contrast
   line printed at all, while the skill told the orchestrator contrast had been measured
-  and not assumed. **Contrast ids go to `[UNMEASURED]`** — the floor list requires text
+  and not assumed. **Contrast ids go to `[UNMEASURED]`, and so does `frame-tested` for the reason given above** — the floor list requires text
   contrast measured, so a contrast nobody could compute is a floor item this run does not
   have — **and every other id goes to `[JUDGE]`**, because the rest of that bucket names no
   floor item, carries real noise, and a blanket block on it would leave the gate unclosable
