@@ -79,7 +79,7 @@ what a passing check prints, and a check that measures *most* prints it with a r
 behind it.
 
 **2560 is in the ladder because a whole defect class lives above 1440**: fixed-pixel type
-stays byte-identical while the layout keeps expanding, so the pictures grow and the words
+stays byte-identical while the text column keeps widening, so the pictures grow and the words
 do not. That costs two extra configurations per run and is the only thing that finds it —
 seven gauntlet rounds at 360/768/1440 passed a page whose nav was 13px at every resolution
 up to 4K.
