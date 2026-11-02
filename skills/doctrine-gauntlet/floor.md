@@ -321,7 +321,7 @@ The two markers that carry gate law:
 
   The rest of the split stands. The spec's own exceptions are implemented: an undersized
   target that is *inline in a sentence* is dropped entirely, one that is *isolated* —
-  nothing within a 24px-diameter circle — is spec-compliant and prints as `[JUDGE]`, and
+  no other target's box within 12px of its centre and no other target's centre within 24px — is spec-compliant and prints as `[JUDGE]`, and
   only a **crowded** undersized target fails and gates. That split is not hedging: the
   spec really does clear an isolated 145x14px link, and that link was a live campaign's
   primary call to action which the client rejected on sight. The harness must not invent a
