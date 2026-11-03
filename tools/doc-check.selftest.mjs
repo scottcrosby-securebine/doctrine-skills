@@ -835,55 +835,47 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     lines(quietDocs[5][0].text)[2] === '<!-- ' + bare + ' -->',
     'a quiet fixture that carried a defect would make clause 2ea a pass for the wrong reason')
 
-  // Span markers. `marker` is a definition's opening words; `say` names the span with a quoted closing
-  // marker, `sayOpen` without one.
+  // Span markers. `marker` is a definition's opening words; `say` is an instruction to paste from it.
   const marker = '**Rule** ='
   const def = marker + ' anything a reader would act on wrongly, ending at the close.'
   const say = (m) => 'Paste the whole span from `' + m + '` through "the close".'
-  const sayOpen = (m) => 'Paste the whole span from `' + m + '` through the end of its paragraph.'
   const spanTrip = (f, line, via) => f.length === 1 && f[0].startsWith('span-marker: x.md:' + line + ' ') && f[0].includes(via)
   const spanOwnText = [say(marker), '', def].join('\n')
   const spanOwn = run(clone(), [{ name: 'x.md', text: spanOwnText }])
-  clause('clause 1fa — an extraction starting inside its own instruction trips',
-    spanTrip(spanOwn, 1, 'takes in the span-copy instruction on line 1') && spanOwn[0].includes('first "' + marker + '" (line 1)'), JSON.stringify(spanOwn))
-  // The second instruction's extraction starts inside the first instruction, not inside itself.
+  clause('clause 1fa — a marker first occurring inside its own instruction trips',
+    spanTrip(spanOwn, 1, 'first occurs at line 1 inside') && spanOwn[0].includes('span on line 3'), JSON.stringify(spanOwn))
+  // The second instruction's marker first occurs inside the first instruction, not inside itself.
   const spanEarlierText = [say(marker), '', 'Hand the adversary the span from `' + marker + '` through "the close" too.', '', def].join('\n')
   const spanEarlier = run(clone(), [{ name: 'x.md', text: spanEarlierText }])
-  clause('clause 1fb — an extraction starting inside another span instruction trips too',
-    spanEarlier.length === 2 && spanEarlier.every((f) => f.includes('takes in the span-copy instruction on line 1')) &&
+  clause('clause 1fb — a marker first occurring inside another span instruction trips too',
+    spanEarlier.length === 2 && spanEarlier.every((f) => f.includes('first occurs at line 1 inside') && f.includes('span on line 5')) &&
     spanEarlier[0].startsWith('span-marker: x.md:1 ') && spanEarlier[1].startsWith('span-marker: x.md:3 '), JSON.stringify(spanEarlier))
-  // An earlier mention, in another sentence or in the instruction's own, starts the extraction there.
+  const spanNoneText = [say(marker), '', 'The definition was deleted.'].join('\n')
+  const spanNone = run(clone(), [{ name: 'x.md', text: spanNoneText }])
+  // A definition that survives only inside a comment or a fence is not a span either.
+  const spanHiddenText = [say(marker), '', '<!-- ' + def + ' -->', '', '```', def, '```'].join('\n')
+  const spanHidden = run(clone(), [{ name: 'x.md', text: spanHiddenText }])
+  clause('clause 1fc — a marker occurring nowhere outside span instructions, or only in a comment or a fence, trips',
+    [spanNone, spanHidden].every((f) => spanTrip(f, 1, 'occurs nowhere outside')), JSON.stringify([spanNone, spanHidden]))
+  // A mention outside every instruction, before the instruction or before the definition, is ambiguous.
   const spanMentionText = ['The marker is `' + marker + '`.', say(marker), def].join('\n')
   const spanMention = run(clone(), [{ name: 'x.md', text: spanMentionText }])
-  const spanSelfText = 'Paste the definition of `' + marker + '` from `' + marker + '` through "the close".'
-  const spanSelf = run(clone(), [{ name: 'x.md', text: spanSelfText }])
-  clause('clause 1fc — an earlier mention, alone or inside the instruction, makes the extraction take in the instruction',
-    spanTrip(spanMention, 2, 'takes in the span-copy instruction on line 2') && spanMention[0].includes('(line 1)') &&
-    spanTrip(spanSelf, 1, 'takes in the span-copy instruction on line 1'), JSON.stringify([spanMention, spanSelf]))
+  const spanMentionFirstText = ['The marker is `' + marker + '`.', '', def, '', say(marker)].join('\n')
+  const spanMentionFirst = run(clone(), [{ name: 'x.md', text: spanMentionFirstText }])
+  clause('clause 1fd — a marker occurring twice outside span instructions trips as ambiguous, whichever comes first',
+    spanTrip(spanMention, 2, 'occurs 2 times outside') && spanMention[0].includes('(lines 1, 3)') &&
+    spanTrip(spanMentionFirst, 5, 'occurs 2 times outside') && spanMentionFirst[0].includes('(lines 1, 3)'), JSON.stringify([spanMention, spanMentionFirst]))
   // The second syntax branch, double quotes, after a capitalised `From`.
   const spanQuotedText = ['From "' + marker + '" through "the close", paste the whole span.', '', def].join('\n')
   const spanQuoted = run(clone(), [{ name: 'x.md', text: spanQuotedText }])
-  clause('clause 1fd — a double-quoted marker after a capitalised From trips the same way',
-    spanTrip(spanQuoted, 1, 'takes in the span-copy instruction on line 1'), JSON.stringify(spanQuoted))
-  // No closing marker: only the opening one can be tested.
-  const spanNoneText = [sayOpen(marker), '', 'The definition was deleted.'].join('\n')
-  const spanNone = run(clone(), [{ name: 'x.md', text: spanNoneText }])
-  const spanHiddenText = [sayOpen(marker), '', '<!-- ' + def + ' -->', '', '```', def, '```'].join('\n')
-  const spanHidden = run(clone(), [{ name: 'x.md', text: spanHiddenText }])
-  clause('clause 1fe — with no closing marker, a marker occurring nowhere outside instructions, or only in a comment or a fence, trips',
-    [spanNone, spanHidden].every((f) => spanTrip(f, 1, 'occurs nowhere outside')), JSON.stringify([spanNone, spanHidden]))
-  const spanFirstText = [sayOpen(marker), '', def].join('\n')
-  const spanFirst = run(clone(), [{ name: 'x.md', text: spanFirstText }])
-  clause('clause 1ff — with no closing marker, a marker first occurring inside its instruction trips',
-    spanTrip(spanFirst, 1, 'first occurs at line 1 inside') && spanFirst[0].includes('span on line 3'), JSON.stringify(spanFirst))
-  const spanTwiceText = ['The marker is `' + marker + '`.', sayOpen(marker), def].join('\n')
-  const spanTwice = run(clone(), [{ name: 'x.md', text: spanTwiceText }])
-  clause('clause 1fg — with no closing marker, a marker occurring twice outside instructions trips as ambiguous',
-    spanTrip(spanTwice, 2, 'occurs 2 times outside') && spanTwice[0].includes('(lines 1, 3)'), JSON.stringify(spanTwice))
+  clause('clause 1fe — a double-quoted marker after a capitalised From trips the same way',
+    spanTrip(spanQuoted, 1, 'first occurs at line 1 inside'), JSON.stringify(spanQuoted))
 
   // Known-good: the definition before the instruction, a marker described not quoted, a `to` range, the
-  // instruction inside a fence, the instruction inside a comment, a document with no instruction, and the
-  // hub's shape, a definition and an instruction with no closing marker on one line.
+  // instruction inside a fence, the instruction inside a comment, a document with no instruction, the
+  // hub's shape (definition and instruction on one line), two instructions each copying a span that
+  // holds the other's instruction, and `throughout`, which is not `through`.
+  const brief = '**Brief** ='
   const spanQuietDocs = [
     [{ name: 'x.md', text: [def, '', say(marker)].join('\n') }],
     [{ name: 'x.md', text: ['Paste the span from the bold word Rule through "the close".', '', def].join('\n') }],
@@ -891,41 +883,39 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     [{ name: 'x.md', text: ['```', say(marker), '```', '', def].join('\n') }],
     [{ name: 'x.md', text: ['<!-- ' + say(marker) + ' -->', '', def].join('\n') }],
     [{ name: 'x.md', text: def }, { name: 'y.md', text: 'Unrelated prose with no instruction in it.' }],
-    [{ name: 'x.md', text: def + ' ' + sayOpen(marker) }],
+    [{ name: 'x.md', text: def + ' ' + say(marker) }],
+    [{ name: 'x.md', text: [def, brief + ' the brief opens.', say(marker), 'End brief.', 'Paste the brief from `' + brief + '` through "End brief.".'].join('\n') }],
+    [{ name: 'x.md', text: 'Apply the guidance from "The brief" throughout every review.' }],
   ]
   const spanQuiet = spanQuietDocs.map((d) => run(clone(), d))
-  clause('clause 2fa — a definition before its instruction, a described marker, a `to` range, an instruction in a fence or a comment, a document with no instruction, and the hub shape are all silent',
+  clause('clause 2fa — a definition before its instruction, a described marker, a `to` range, an instruction in a fence or a comment, a document with no instruction, the hub shape, nested instructions, and `throughout` are all silent',
     spanQuiet.every((f) => f.length === 0), JSON.stringify(spanQuiet))
 
-  // Clause 3: what a literal extraction takes from each input, and where each marker sits, read with
-  // indexOf alone and never the checker.
-  const at = (t, x, from = 0) => t.indexOf(x, from)
-  const lineAt = (t, i) => t.slice(0, i).split('\n').length
-  // A literal extraction: the first marker to the next "the close" after it, both included.
-  const extract = (t) => { const a = at(t, marker); const b = at(t, 'the close', a + marker.length); return b === -1 ? '' : t.slice(a, b + 'the close'.length) }
-  const instr = (t, line) => lines(t)[line - 1]
-  clause('clause 3fa — each broken input with a closing marker really extracts across an instruction line',
-    extract(spanOwnText).includes('through "the close') && lineAt(spanOwnText, at(spanOwnText, marker)) === 1 &&
-    extract(spanEarlierText).includes('through "the close') && lineAt(spanEarlierText, at(spanEarlierText, marker)) === 1 && instr(spanEarlierText, 3).includes('from `' + marker + '` through') &&
-    extract(spanMentionText).includes('through "the close') && lineAt(spanMentionText, at(spanMentionText, marker)) === 1 && !/through/.test(instr(spanMentionText, 1)) &&
-    lines(spanSelfText).length === 1 && at(spanSelfText, marker) < at(spanSelfText, 'from `') && extract(spanSelfText).includes('through "the close') &&
-    instr(spanQuotedText, 1).startsWith('From "' + marker + '" through "the close"') && extract(spanQuotedText).includes('through "the close') &&
-    !extract(lines(spanOwnText)[2]).includes('through'),
-    'each broken fixture must carry an extraction that crosses an instruction, without the checker being asked')
-  clause('clause 3fb — each broken input with no closing marker really misplaces or repeats the marker',
-    !/through "/.test(spanNoneText) && spanNoneText.split(marker).length === 2 && instr(spanNoneText, 1) === sayOpen(marker) &&
-    spanHiddenText.split(marker).length === 4 && instr(spanHiddenText, 3).startsWith('<!-- ' + marker) && instr(spanHiddenText, 5) === '```' && instr(spanHiddenText, 6).startsWith(marker) &&
-    lineAt(spanFirstText, at(spanFirstText, marker)) === 1 && instr(spanFirstText, 3).startsWith(marker) &&
-    spanTwiceText.split(marker).length === 4 && !/through/.test(instr(spanTwiceText, 1)) && instr(spanTwiceText, 3).startsWith(marker),
-    'each broken fixture must hold the misplaced or repeated marker without the checker being asked')
-  clause('clause 3fc — each quiet span input really holds what its place in clause 2fa says',
-    at(spanQuietDocs[0][0].text, marker) === 0 && !extract(spanQuietDocs[0][0].text).includes('through') &&
-    !spanQuietDocs[1][0].text.includes('from `') && !spanQuietDocs[1][0].text.includes('from "') &&
-    /from `abc1234` to /.test(spanQuietDocs[2][0].text) && !/through/.test(spanQuietDocs[2][0].text) &&
-    lines(spanQuietDocs[3][0].text)[0] === '```' && lines(spanQuietDocs[3][0].text)[1] === say(marker) &&
-    lines(spanQuietDocs[4][0].text)[0].startsWith('<!-- Paste') &&
+  // Clause 3: where each marker sits, read with indexOf alone and never the checker. Every instruction
+  // line is compared whole against the instruction it is meant to be, so a fixture that lost its
+  // instruction fails here and not only in clause 1.
+  const occ = (t, x) => { const r = []; for (let i = t.indexOf(x); i !== -1; i = t.indexOf(x, i + 1)) r.push(t.slice(0, i).split('\n').length); return r }
+  const ln = (t, n) => lines(t)[n - 1]
+  clause('clause 3fa — each broken span input really holds its instruction and its markers where asserted',
+    ln(spanOwnText, 1) === say(marker) && occ(spanOwnText, marker).join() === '1,3' && ln(spanOwnText, 3) === def &&
+    ln(spanEarlierText, 1) === say(marker) && ln(spanEarlierText, 3) === 'Hand the adversary the span from `' + marker + '` through "the close" too.' && occ(spanEarlierText, marker).join() === '1,3,5' &&
+    ln(spanNoneText, 1) === say(marker) && occ(spanNoneText, marker).join() === '1' &&
+    ln(spanHiddenText, 1) === say(marker) && occ(spanHiddenText, marker).join() === '1,3,6' && ln(spanHiddenText, 3) === '<!-- ' + def + ' -->' && ln(spanHiddenText, 5) === '```' && ln(spanHiddenText, 7) === '```' &&
+    ln(spanMentionText, 2) === say(marker) && occ(spanMentionText, marker).join() === '1,2,3' && !ln(spanMentionText, 1).includes('through') &&
+    ln(spanMentionFirstText, 5) === say(marker) && occ(spanMentionFirstText, marker).join() === '1,3,5' && !ln(spanMentionFirstText, 1).includes('through') &&
+    ln(spanQuotedText, 1).startsWith('From "' + marker + '" through ') && occ(spanQuotedText, marker).join() === '1,3',
+    'each broken fixture must hold its instruction and markers at the asserted lines without the checker being asked')
+  const q = spanQuietDocs.map((d) => d[0].text)
+  clause('clause 3fb — each quiet span input really holds what its place in clause 2fa says',
+    occ(q[0], marker).join() === '1,3' && ln(q[0], 1) === def && ln(q[0], 3) === say(marker) &&
+    !q[1].includes('from `') && !q[1].includes('from "') &&
+    /from `abc1234` to /.test(q[2]) && !/through/.test(q[2]) &&
+    ln(q[3], 1) === '```' && ln(q[3], 2) === say(marker) && ln(q[3], 3) === '```' &&
+    ln(q[4], 1) === '<!-- ' + say(marker) + ' -->' &&
     !spanQuietDocs[5].some((d) => d.text.includes('through')) &&
-    at(spanQuietDocs[6][0].text, marker) === 0 && spanQuietDocs[6][0].text.split(marker).length === 3 && !/through "/.test(spanQuietDocs[6][0].text),
+    q[6] === def + ' ' + say(marker) && q[6].indexOf(marker) === 0 &&
+    occ(q[7], marker).join() === '1,3' && occ(q[7], brief).join() === '2,5' && ln(q[7], 3) === say(marker) && ln(q[7], 1) === def && ln(q[7], 2).startsWith(brief) &&
+    /throughout/.test(q[8]) && !/through\b/.test(q[8]),
     'a quiet fixture that carried a defect would make clause 2fa a pass for the wrong reason')
 
   return bad ? 1 : 0

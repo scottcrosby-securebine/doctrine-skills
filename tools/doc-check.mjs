@@ -185,25 +185,23 @@
 // a space: an abbreviation or an ellipsis between the two stems splits the site in two and neither
 // half is read.
 //
-// **The span-marker rule reads one shape: `from`, a marker in single backticks or double quotes,
-// `through`, and optionally a closing marker quoted the same way.** That is the shape every
-// span-copy instruction in this corpus has used. It reads no further for intent, so a range of values
-// written that way, `from "low" through "high"`, is read as an instruction and trips: write such a
-// range with `to`, or unquoted. `from X to Y` is not read at all, because this corpus writes commit and
-// version ranges that way and their first endpoint is usually first named right there. A marker
-// described rather than quoted ("the bold word Blocking") is not read, and that is the repair the rule
-// pushes towards, not a gap in it. A marker in a double-backtick code span is not read either.
+// **The span-marker rule reads one shape: `from`, a marker in single backticks or double quotes, and
+// the word `through`.** That is the shape every span-copy instruction in this corpus has used. It
+// reads no further for intent, so a range of values written that way, `from "low" through "high"`, is
+// read as an instruction and trips: write such a range with `to`, or unquoted. `from X to Y` is not
+// read at all, because this corpus writes commit and version ranges that way and their first endpoint
+// is usually first named right there. A marker described rather than quoted ("the bold word
+// Blocking") is not read, and that is the repair the rule pushes towards, not a gap in it. A marker in
+// a double-backtick code span is not read either.
 //
-// With a closing marker the test is the extraction an agent would make, the first opening marker to
-// the next closing marker after it, and it asks only whether that text takes in a span-copy
-// instruction, not whether it ends where the author meant. With no closing marker only the opening
-// one is tested, and a marker mentioned again outside every instruction, before or after its
-// definition, is reported as ambiguous even where the first hit happens to be right. A mention
-// before the instruction's `from`, in the same sentence or not, is such a mention: beside a
-// definition it makes the instruction ambiguous, and with no definition it is taken for the span and
-// nothing is reported.
-// Everything is looked for in the instruction's own document, so an instruction naming a span in
-// another document is judged against the wrong one, and passes or trips by accident.
+// Only the opening marker is tested; where the extraction ends is not. The span is taken to be the
+// marker's one occurrence outside every span-copy instruction, so the marker mentioned again outside
+// them, before or after its definition, is reported as ambiguous even where the first hit happens to
+// be right: state the marker once. An instruction's extent is its `from … through` words alone, so a
+// mention earlier in the instruction's own sentence counts as outside it: beside a definition that
+// makes the instruction ambiguous, and with no definition the mention is taken for the span and
+// nothing is reported. Everything is looked for in the instruction's own document, so an instruction
+// naming a span in another document is judged against the wrong one, and passes or trips by accident.
 //
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
 // description. And these rules catch reference, roster, echo, derivation, citation, exemption and span-marker defects only:
@@ -490,41 +488,32 @@ function checkRefuteExemption(sources) {
   return findings
 }
 
-// A span-copy instruction: `from`, a quoted or backticked opening marker, `through`, and optionally a
-// quoted or backticked closing marker.
-const SPAN_COPY = /\bfrom\s+(?:`([^`\n]+)`|"([^"\n]+)")\s+through(?:\s+(?:`([^`\n]+)`|"([^"\n]+)"))?/gi
+// A span-copy instruction: `from`, a quoted or backticked opening marker, then the word `through`.
+const SPAN_COPY = /\bfrom\s+(?:`([^`\n]+)`|"([^"\n]+)")\s+through\b/gi
 
-/** An instruction that names the text to paste by its markers sends an agent searching for them, and
-    what it pastes is the first hit. With a closing marker that is exact: from the first opening
-    marker to the next closing marker after it. Where that extraction takes in a span-copy
-    instruction, its own or another's, the paste is the instruction: a gauntlet round once went out
-    with an empty blocking definition that way. With no closing marker only the opening one can be
-    tested: its first occurrence must sit outside every such instruction, and be its only one there,
-    or the first hit may be a mention rather than the span. One document at a time, fences and
-    comments out first, a comment's line breaks kept so the lines named are exact. */
+/** An instruction that names the text to paste by its opening words sends an agent searching for
+    those words, and what it pastes starts at the first hit. The span is the marker's one occurrence
+    outside every span-copy instruction. Where the first occurrence sits inside such an instruction,
+    its own or another's, the paste is the instruction: a gauntlet round once went out with an empty
+    blocking definition that way. Where the marker occurs nowhere outside them there is no span, and
+    where it occurs more than once outside them the first hit may be a mention, not the span. One
+    document at a time, fences and comments out first, a comment's line breaks kept so the lines named
+    are exact. */
 function checkSpanMarkers(sources) {
   const findings = []
   for (const src of sources) {
     const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => CUT + m.replace(/[^\n]/g, '')))
-    const spans = [...text.matchAll(SPAN_COPY)].map((m) => ({ at: m.index, end: m.index + m[0].length, marker: m[1] ?? m[2], close: m[3] ?? m[4] }))
-    const within = (from, to) => spans.find((s) => s.at < to && from < s.end)
+    const spans = [...text.matchAll(SPAN_COPY)].map((m) => ({ at: m.index, end: m.index + m[0].length, marker: m[1] ?? m[2] }))
+    const inside = (i) => spans.some((s) => i >= s.at && i < s.end)
     const lineOf = (i) => text.slice(0, i).split('\n').length
     for (const s of spans) {
-      const head = `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}"`
-      const first = text.indexOf(s.marker)
-      if (s.close) {
-        // The instruction itself carries the closing marker after the opening one, so a stop always exists.
-        const stop = text.indexOf(s.close, first + s.marker.length)
-        const hit = within(first, stop + s.close.length)
-        if (hit) findings.push(`${head} through "${s.close}", but a literal extraction from the first "${s.marker}" (line ${lineOf(first)}) to the next "${s.close}" (line ${lineOf(stop)}) takes in the span-copy instruction on line ${lineOf(hit.at)}`)
-        continue
-      }
       const all = []
-      for (let i = first; i !== -1; i = text.indexOf(s.marker, i + 1)) all.push(i)
-      const outside = all.filter((i) => !within(i, i + 1))
-      if (!outside.length) findings.push(`${head}, which occurs nowhere outside a span-copy instruction — a literal search has no span to land on`)
-      else if (within(all[0], all[0] + 1)) findings.push(`${head}, which first occurs at line ${lineOf(all[0])} inside a span-copy instruction, not at the span on line ${lineOf(outside[0])} — a literal search pastes the instruction`)
-      else if (outside.length > 1) findings.push(`${head}, which occurs ${outside.length} times outside span-copy instructions (lines ${outside.map(lineOf).join(', ')}) — a literal search takes the first, which may be a mention and not the span`)
+      for (let i = text.indexOf(s.marker); i !== -1; i = text.indexOf(s.marker, i + 1)) all.push(i)
+      const outside = all.filter((i) => !inside(i))
+      const head = `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which`
+      if (!outside.length) findings.push(`${head} occurs nowhere outside a span-copy instruction — a literal search has no span to land on`)
+      else if (inside(all[0])) findings.push(`${head} first occurs at line ${lineOf(all[0])} inside a span-copy instruction, not at the span on line ${lineOf(outside[0])} — a literal search pastes the instruction`)
+      else if (outside.length > 1) findings.push(`${head} occurs ${outside.length} times outside span-copy instructions (lines ${outside.map(lineOf).join(', ')}) — a literal search takes the first, which may be a mention and not the span`)
     }
   }
   return findings
