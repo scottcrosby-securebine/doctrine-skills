@@ -185,8 +185,18 @@
 // a space: an abbreviation or an ellipsis between the two stems splits the site in two and neither
 // half is read.
 //
+// **The span-marker rule reads one shape: `from`, a marker in backticks or double quotes, `through`.**
+// That is the shape every span-copy instruction in this corpus has used. `from X to Y` is not read,
+// because this corpus writes commit and version ranges that way and their first endpoint is usually
+// first named right there. A marker described rather than quoted ("the bold word Blocking") is not
+// read either, and that is the repair the rule pushes towards, not a gap in it. Only the opening
+// marker is tested: an end marker that first occurs early still yields the right span once the search
+// starts at the right place. The span is looked for in the instruction's own document, so an
+// instruction naming a span in another document is judged against the wrong one, and passes or trips
+// by accident.
+//
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
-// description. And these rules catch reference, roster, echo, derivation, citation and exemption defects only:
+// description. And these rules catch reference, roster, echo, derivation, citation, exemption and span-marker defects only:
 // a stale *number*,
 // or a claim paraphrased rather than copied, passes untouched. Both the echo rule and the citation
 // rule read text through one normalisation: emphasis, case and spacing fall away, and a code span
@@ -470,6 +480,35 @@ function checkRefuteExemption(sources) {
   return findings
 }
 
+// A span-copy instruction: `from` and a quoted or backticked opening marker, then `through`.
+const SPAN_COPY = /\bfrom\s+(?:`([^`\n]+)`|"([^"\n]+)")\s+through\b/g
+
+/** An instruction that names the text to paste by its opening words sends an agent searching for
+    those words, and the first hit is what it pastes. Where the first occurrence sits inside a
+    span-copy instruction, its own or another's, the paste is the instruction: a gauntlet round once
+    went out with an empty blocking definition that way. Where the words occur nowhere outside such
+    instructions, there is no span to land on at all. One document at a time, fences and comments out
+    first, a comment's line breaks kept so the lines named are exact. */
+function checkSpanMarkers(sources) {
+  const findings = []
+  for (const src of sources) {
+    const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => CUT + m.replace(/[^\n]/g, '')))
+    const spans = [...text.matchAll(SPAN_COPY)].map((m) => ({ at: m.index, end: m.index + m[0].length, marker: m[1] ?? m[2] }))
+    const inside = (i) => spans.some((s) => i >= s.at && i < s.end)
+    const lineOf = (i) => text.slice(0, i).split('\n').length
+    for (const s of spans) {
+      const first = text.indexOf(s.marker)
+      let span = first
+      while (span !== -1 && inside(span)) span = text.indexOf(s.marker, span + 1)
+      if (span === first) continue
+      findings.push(span === -1
+        ? `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which occurs nowhere outside a span-copy instruction — a literal search has no span to land on`
+        : `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which first occurs at line ${lineOf(first)} inside a span-copy instruction, not at the span on line ${lineOf(span)} — a literal search pastes the instruction`)
+    }
+  }
+  return findings
+}
+
 // The gate itself.
 
 /** Runs every check over one corpus and returns the findings as printable strings, in the order
@@ -487,6 +526,7 @@ function check({ tamper, docs }) {
     ...checkAnchors(sources),
     ...checkEchoes(sources),
     ...checkRefuteExemption(sources),
+    ...checkSpanMarkers(sources),
   ]
 }
 

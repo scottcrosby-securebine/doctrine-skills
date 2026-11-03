@@ -835,5 +835,60 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     lines(quietDocs[5][0].text)[2] === '<!-- ' + bare + ' -->',
     'a quiet fixture that carried a defect would make clause 2ea a pass for the wrong reason')
 
+  // Span markers. `marker` is a definition's opening words; `say` an instruction to paste from it.
+  const marker = '**Rule** ='
+  const def = marker + ' anything a reader would act on wrongly, ending at the close.'
+  const say = (m) => 'Paste the whole span from `' + m + '` through "the close".'
+  const spanOwnText = [say(marker), '', def].join('\n')
+  const spanOwn = run(clone(), [{ name: 'x.md', text: spanOwnText }])
+  clause('clause 1fa — a span marker whose first occurrence is its own instruction trips',
+    spanOwn.length === 1 && spanOwn[0].startsWith('span-marker: x.md:1 ') && spanOwn[0].includes('first occurs at line 1') && spanOwn[0].includes('span on line 3'), JSON.stringify(spanOwn))
+  // The second instruction's marker first occurs inside the first instruction, not inside itself.
+  const spanEarlierText = [say(marker), '', 'Hand the adversary the span from `' + marker + '` through "the close" too.', '', def].join('\n')
+  const spanEarlier = run(clone(), [{ name: 'x.md', text: spanEarlierText }])
+  clause('clause 1fb — a span marker first occurring inside another span instruction trips too',
+    spanEarlier.length === 2 && spanEarlier.every((f) => f.includes('first occurs at line 1') && f.includes('span on line 5')) &&
+    spanEarlier[0].startsWith('span-marker: x.md:1 ') && spanEarlier[1].startsWith('span-marker: x.md:3 '), JSON.stringify(spanEarlier))
+  const spanNoneText = [say(marker), '', 'The definition was deleted.'].join('\n')
+  const spanNone = run(clone(), [{ name: 'x.md', text: spanNoneText }])
+  // A definition that survives only inside a comment or a fence is not a span either.
+  const spanHiddenText = [say(marker), '', '<!-- ' + def + ' -->', '', '```', def, '```'].join('\n')
+  const spanHidden = run(clone(), [{ name: 'x.md', text: spanHiddenText }])
+  clause('clause 1fc — a span marker occurring nowhere outside span instructions, or only in a comment or a fence, trips',
+    [spanNone, spanHidden].every((f) => f.length === 1 && f[0].startsWith('span-marker: x.md:1 ') && f[0].includes('occurs nowhere outside')), JSON.stringify([spanNone, spanHidden]))
+
+  // Known-good: the definition before the instruction, a marker described not quoted, a `to` range, the
+  // instruction inside a fence, the instruction inside a comment, and the instruction in another document.
+  const spanQuietDocs = [
+    [{ name: 'x.md', text: [def, '', say(marker)].join('\n') }],
+    [{ name: 'x.md', text: ['Paste the span from the bold word Rule through "the close".', '', def].join('\n') }],
+    [{ name: 'x.md', text: ['The repair ran from `abc1234` to `def5678`.'].join('\n') }],
+    [{ name: 'x.md', text: ['```', say(marker), '```', '', def].join('\n') }],
+    [{ name: 'x.md', text: ['<!-- ' + say(marker) + ' -->', '', def].join('\n') }],
+    [{ name: 'x.md', text: def }, { name: 'y.md', text: 'Unrelated prose with no instruction in it.' }],
+  ]
+  const spanQuiet = spanQuietDocs.map((d) => run(clone(), d))
+  clause('clause 2fa — a definition before its instruction, a described marker, a `to` range, an instruction in a fence or a comment, and a document with no instruction are all silent',
+    spanQuiet.every((f) => f.length === 0), JSON.stringify(spanQuiet))
+
+  // Clause 3: each broken input really puts the marker's first raw occurrence inside an instruction,
+  // or nowhere outside one, and each quiet input really does not, read with indexOf alone.
+  const at = (t, s) => t.indexOf(s)
+  const lineAt = (t, i) => t.slice(0, i).split('\n').length
+  clause('clause 3fa — the broken span inputs really carry the marker first inside an instruction, or never outside one',
+    lineAt(spanOwnText, at(spanOwnText, marker)) === 1 && lines(spanOwnText)[0] === say(marker) && lines(spanOwnText)[2].startsWith(marker) &&
+    lineAt(spanEarlierText, at(spanEarlierText, marker)) === 1 && lines(spanEarlierText)[2].includes('from `' + marker + '` through') && lines(spanEarlierText)[4].startsWith(marker) &&
+    spanNoneText.split(marker).length === 2 &&
+    spanHiddenText.split(marker).length === 4 && lines(spanHiddenText)[2].startsWith('<!-- ' + marker) && lines(spanHiddenText)[4] === '```' && lines(spanHiddenText)[5].startsWith(marker),
+    'each broken fixture must hold the misplaced marker without the checker being asked')
+  clause('clause 3fb — each quiet span input really holds what its place in clause 2fa says',
+    at(spanQuietDocs[0][0].text, marker) === 0 &&
+    !spanQuietDocs[1][0].text.includes('from `') && !spanQuietDocs[1][0].text.includes('from "') &&
+    /from `abc1234` to /.test(spanQuietDocs[2][0].text) && !/through/.test(spanQuietDocs[2][0].text) &&
+    lines(spanQuietDocs[3][0].text)[0] === '```' && lines(spanQuietDocs[3][0].text)[1] === say(marker) &&
+    lines(spanQuietDocs[4][0].text)[0].startsWith('<!-- Paste') &&
+    !spanQuietDocs[5].some((d) => d.text.includes('through')),
+    'a quiet fixture that carried a defect would make clause 2fa a pass for the wrong reason')
+
   return bad ? 1 : 0
 }
