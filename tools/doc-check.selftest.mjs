@@ -857,8 +857,21 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   clause('clause 1fc — a span marker occurring nowhere outside span instructions, or only in a comment or a fence, trips',
     [spanNone, spanHidden].every((f) => f.length === 1 && f[0].startsWith('span-marker: x.md:1 ') && f[0].includes('occurs nowhere outside')), JSON.stringify([spanNone, spanHidden]))
 
+  // A mention of the marker before its definition: the first hit outside every instruction may be the
+  // mention, so two occurrences outside them are ambiguous.
+  const spanMentionText = ['The marker is `' + marker + '`.', say(marker), def].join('\n')
+  const spanMention = run(clone(), [{ name: 'x.md', text: spanMentionText }])
+  clause('clause 1fd — a marker occurring twice outside span instructions trips as ambiguous',
+    spanMention.length === 1 && spanMention[0].startsWith('span-marker: x.md:2 ') && spanMention[0].includes('occurs 2 times outside') && spanMention[0].includes('(lines 1, 3)'), JSON.stringify(spanMention))
+  // The second syntax branch, a double-quoted marker, and a capitalised `From` with the copy word after it.
+  const spanQuotedText = ['From "' + marker + '" through "the close", paste the whole span.', '', def].join('\n')
+  const spanQuoted = run(clone(), [{ name: 'x.md', text: spanQuotedText }])
+  clause('clause 1fe — a double-quoted marker after a capitalised From trips the same way',
+    spanQuoted.length === 1 && spanQuoted[0].startsWith('span-marker: x.md:1 ') && spanQuoted[0].includes('first occurs at line 1') && spanQuoted[0].includes('span on line 3'), JSON.stringify(spanQuoted))
+
   // Known-good: the definition before the instruction, a marker described not quoted, a `to` range, the
-  // instruction inside a fence, the instruction inside a comment, and the instruction in another document.
+  // instruction inside a fence, the instruction inside a comment, a document with no instruction, and a
+  // from-through range in a sentence with no copy word.
   const spanQuietDocs = [
     [{ name: 'x.md', text: [def, '', say(marker)].join('\n') }],
     [{ name: 'x.md', text: ['Paste the span from the bold word Rule through "the close".', '', def].join('\n') }],
@@ -866,9 +879,10 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     [{ name: 'x.md', text: ['```', say(marker), '```', '', def].join('\n') }],
     [{ name: 'x.md', text: ['<!-- ' + say(marker) + ' -->', '', def].join('\n') }],
     [{ name: 'x.md', text: def }, { name: 'y.md', text: 'Unrelated prose with no instruction in it.' }],
+    [{ name: 'x.md', text: 'Grades run from "low" through "high", and low comes first.' }],
   ]
   const spanQuiet = spanQuietDocs.map((d) => run(clone(), d))
-  clause('clause 2fa — a definition before its instruction, a described marker, a `to` range, an instruction in a fence or a comment, and a document with no instruction are all silent',
+  clause('clause 2fa — a definition before its instruction, a described marker, a `to` range, an instruction in a fence or a comment, a document with no instruction, and a range with no copy word are all silent',
     spanQuiet.every((f) => f.length === 0), JSON.stringify(spanQuiet))
 
   // Clause 3: each broken input really puts the marker's first raw occurrence inside an instruction,
@@ -878,7 +892,9 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   clause('clause 3fa — the broken span inputs really carry the marker first inside an instruction, or never outside one',
     lineAt(spanOwnText, at(spanOwnText, marker)) === 1 && lines(spanOwnText)[0] === say(marker) && lines(spanOwnText)[2].startsWith(marker) &&
     lineAt(spanEarlierText, at(spanEarlierText, marker)) === 1 && lines(spanEarlierText)[2].includes('from `' + marker + '` through') && lines(spanEarlierText)[4].startsWith(marker) &&
-    spanNoneText.split(marker).length === 2 &&
+    spanNoneText.split(marker).length === 2 && lines(spanNoneText)[0] === say(marker) && !lines(spanNoneText).slice(1).some((l) => l.includes(marker)) &&
+    spanMentionText.split(marker).length === 4 && lines(spanMentionText)[0].includes(marker) && !/through/.test(lines(spanMentionText)[0]) && lines(spanMentionText)[1] === say(marker) && lines(spanMentionText)[2].startsWith(marker) &&
+    lines(spanQuotedText)[0].startsWith('From "' + marker + '" through') && /paste/.test(lines(spanQuotedText)[0]) && lines(spanQuotedText)[2].startsWith(marker) && at(spanQuotedText, marker) < lines(spanQuotedText)[0].length &&
     spanHiddenText.split(marker).length === 4 && lines(spanHiddenText)[2].startsWith('<!-- ' + marker) && lines(spanHiddenText)[4] === '```' && lines(spanHiddenText)[5].startsWith(marker),
     'each broken fixture must hold the misplaced marker without the checker being asked')
   clause('clause 3fb — each quiet span input really holds what its place in clause 2fa says',
@@ -887,7 +903,8 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     /from `abc1234` to /.test(spanQuietDocs[2][0].text) && !/through/.test(spanQuietDocs[2][0].text) &&
     lines(spanQuietDocs[3][0].text)[0] === '```' && lines(spanQuietDocs[3][0].text)[1] === say(marker) &&
     lines(spanQuietDocs[4][0].text)[0].startsWith('<!-- Paste') &&
-    !spanQuietDocs[5].some((d) => d.text.includes('through')),
+    !spanQuietDocs[5].some((d) => d.text.includes('through')) &&
+    /from "low" through/.test(spanQuietDocs[6][0].text) && !/span|past|cop|quot|extract/i.test(spanQuietDocs[6][0].text),
     'a quiet fixture that carried a defect would make clause 2fa a pass for the wrong reason')
 
   return bad ? 1 : 0

@@ -185,15 +185,20 @@
 // a space: an abbreviation or an ellipsis between the two stems splits the site in two and neither
 // half is read.
 //
-// **The span-marker rule reads one shape: `from`, a marker in backticks or double quotes, `through`.**
-// That is the shape every span-copy instruction in this corpus has used. `from X to Y` is not read,
+// **The span-marker rule reads one shape: `from`, a marker in single backticks or double quotes,
+// `through`, in a sentence carrying a copy word (span, paste, copy, quote, extract).** That is the
+// shape every span-copy instruction in this corpus has used; the copy word is what keeps a range of
+// values out, and a sentence that copies without one of those words is not read. A marker in a
+// double-backtick code span is not read either. The span is taken to be the marker's one occurrence
+// outside every span-copy instruction, so a marker mentioned again outside them, before or after its
+// definition, is reported as ambiguous even where the first hit happens to be right. `from X to Y` is not read,
 // because this corpus writes commit and version ranges that way and their first endpoint is usually
 // first named right there. A marker described rather than quoted ("the bold word Blocking") is not
 // read either, and that is the repair the rule pushes towards, not a gap in it. Only the opening
 // marker is tested: an end marker that first occurs early still yields the right span once the search
 // starts at the right place. The span is looked for in the instruction's own document, so an
-// instruction naming a span in another document is judged against the wrong one, and passes or trips
-// by accident.
+// instruction naming a span in another document is judged against the wrong one, and trips as having
+// no span.
 //
 // `CLAUDE.md` and `README.md` are outside the corpus, so this tool cannot police its own
 // description. And these rules catch reference, roster, echo, derivation, citation, exemption and span-marker defects only:
@@ -232,9 +237,9 @@ const ATTRIBUTED = /(?:`([^`\n]+)`|(item \d+))'s?\s+"([^"]*?)"/g
 // citation, not a citation. Discovery has to see the text with fences already gone, or it reports
 // the example as a dead anchor.
 // Everything a reader would not read as prose comes out here, so every check reads prose alone. One
-// check does not take the text exactly as this leaves it: the exemption check takes comments out
-// itself first, to keep their line breaks, and only then calls this for the fences, so a change to
-// how a comment is recognised is a change in both places. An HTML comment is prose the author struck out: a citation inside one is not made, and a
+// check does not take the text exactly as this leaves it: the exemption and span-marker checks take
+// comments out themselves first, to keep their line breaks, and only then call this for the fences,
+// so a change to how a comment is recognised is a change in all three places. An HTML comment is prose the author struck out: a citation inside one is not made, and a
 // rule inside one is not stated. A fenced block is a code sample the same way.
 /** Strips everything a reader would not read as prose: HTML comments and fenced blocks, each
     replaced by a CUT so the text on either side never becomes adjacent. */
@@ -480,30 +485,43 @@ function checkRefuteExemption(sources) {
   return findings
 }
 
-// A span-copy instruction: `from` and a quoted or backticked opening marker, then `through`.
-const SPAN_COPY = /\bfrom\s+(?:`([^`\n]+)`|"([^"\n]+)")\s+through\b/g
+// A span-copy instruction: `from` and a quoted or backticked opening marker, then `through`, in a
+// sentence that says to copy. Without the copy word a range of values ("from "low" through "high"")
+// would read as an instruction.
+const SPAN_COPY = /\bfrom\s+(?:`([^`\n]+)`|"([^"\n]+)")\s+through\b/gi
+const COPY_WORDS = /\b(?:span|past(?:e|ed|es|ing)\b|cop(?:y|ied|ies|ying)\b|quot(?:e|ed|es|ing)\b|extract)/i
 
 /** An instruction that names the text to paste by its opening words sends an agent searching for
-    those words, and the first hit is what it pastes. Where the first occurrence sits inside a
-    span-copy instruction, its own or another's, the paste is the instruction: a gauntlet round once
-    went out with an empty blocking definition that way. Where the words occur nowhere outside such
-    instructions, there is no span to land on at all. One document at a time, fences and comments out
-    first, a comment's line breaks kept so the lines named are exact. */
+    those words, and the first hit is what it pastes. The span is the marker's one occurrence outside
+    every span-copy instruction. Where the first occurrence sits inside such an instruction, its own or
+    another's, the paste is the instruction: a gauntlet round once went out with an empty blocking
+    definition that way. Where the words occur nowhere outside such instructions there is no span, and
+    where they occur more than once outside them the first hit may be a mention, not the span. One
+    document at a time, fences and comments out first, a comment's line breaks kept so the lines named
+    are exact. */
 function checkSpanMarkers(sources) {
   const findings = []
   for (const src of sources) {
     const text = prose(src.text.replace(/<!--[\s\S]*?-->/g, (m) => CUT + m.replace(/[^\n]/g, '')))
-    const spans = [...text.matchAll(SPAN_COPY)].map((m) => ({ at: m.index, end: m.index + m[0].length, marker: m[1] ?? m[2] }))
+    // The sentence around a match: back to the last terminal stop or line start, on to the next.
+    const sentence = (at, end) => {
+      const from = Math.max(text.lastIndexOf('\n', at), ...[...text.slice(0, at).matchAll(/[.!?]\s/g)].map((m) => m.index))
+      const rest = text.slice(end).search(/[.!?](\s|$)|\n/)
+      return text.slice(from + 1, rest === -1 ? text.length : end + rest)
+    }
+    const spans = [...text.matchAll(SPAN_COPY)]
+      .map((m) => ({ at: m.index, end: m.index + m[0].length, marker: m[1] ?? m[2] }))
+      .filter((s) => COPY_WORDS.test(sentence(s.at, s.end)))
     const inside = (i) => spans.some((s) => i >= s.at && i < s.end)
     const lineOf = (i) => text.slice(0, i).split('\n').length
     for (const s of spans) {
-      const first = text.indexOf(s.marker)
-      let span = first
-      while (span !== -1 && inside(span)) span = text.indexOf(s.marker, span + 1)
-      if (span === first) continue
-      findings.push(span === -1
-        ? `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which occurs nowhere outside a span-copy instruction — a literal search has no span to land on`
-        : `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which first occurs at line ${lineOf(first)} inside a span-copy instruction, not at the span on line ${lineOf(span)} — a literal search pastes the instruction`)
+      const all = []
+      for (let i = text.indexOf(s.marker); i !== -1; i = text.indexOf(s.marker, i + 1)) all.push(i)
+      const outside = all.filter((i) => !inside(i))
+      const head = `span-marker: ${src.name}:${lineOf(s.at)} names its span from "${s.marker}", which`
+      if (!outside.length) findings.push(`${head} occurs nowhere outside a span-copy instruction — a literal search has no span to land on`)
+      else if (inside(all[0])) findings.push(`${head} first occurs at line ${lineOf(all[0])} inside a span-copy instruction, not at the span on line ${lineOf(outside[0])} — a literal search pastes the instruction`)
+      else if (outside.length > 1) findings.push(`${head} occurs ${outside.length} times outside span-copy instructions (lines ${outside.map(lineOf).join(', ')}) — a literal search takes the first, which may be a mention and not the span`)
     }
   }
   return findings
