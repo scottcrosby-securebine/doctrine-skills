@@ -871,6 +871,12 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   clause('clause 1fe — a double-quoted marker after a capitalised From trips the same way',
     spanTrip(spanQuoted, 1, 'first occurs at line 1 inside'), JSON.stringify(spanQuoted))
 
+  // An instruction with no quoted closing marker is read the same way.
+  const spanOpenText = ['Paste from `' + marker + '` through the end of its paragraph.', def].join('\n')
+  const spanOpen = run(clone(), [{ name: 'x.md', text: spanOpenText }])
+  clause('clause 1ff — an instruction with no quoted closing marker trips the same way',
+    spanTrip(spanOpen, 1, 'first occurs at line 1 inside') && spanOpen[0].includes('span on line 2'), JSON.stringify(spanOpen))
+
   // Known-good: the definition before the instruction, a marker described not quoted, a `to` range, the
   // instruction inside a fence, the instruction inside a comment, a document with no instruction, the
   // hub's shape (definition and instruction on one line), two instructions each copying a span that
@@ -894,27 +900,36 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   // Clause 3: where each marker sits, read with indexOf alone and never the checker. Every instruction
   // line is compared whole against the instruction it is meant to be, so a fixture that lost its
   // instruction fails here and not only in clause 1.
+  // The instructions and the definition as literals, typed out here, never taken from `say` or `def`.
+  const SAY = 'Paste the whole span from `**Rule** =` through "the close".'
+  const DEF = '**Rule** = anything a reader would act on wrongly, ending at the close.'
+  const isSpanCopy = (l) => /\bfrom\s+`\*\*\w+\*\* =`\s+through\b/i.test(l) || /\bfrom\s+"\*\*\w+\*\* ="\s+through\b/i.test(l)
   const occ = (t, x) => { const r = []; for (let i = t.indexOf(x); i !== -1; i = t.indexOf(x, i + 1)) r.push(t.slice(0, i).split('\n').length); return r }
   const ln = (t, n) => lines(t)[n - 1]
   clause('clause 3fa — each broken span input really holds its instruction and its markers where asserted',
-    ln(spanOwnText, 1) === say(marker) && occ(spanOwnText, marker).join() === '1,3' && ln(spanOwnText, 3) === def &&
-    ln(spanEarlierText, 1) === say(marker) && ln(spanEarlierText, 3) === 'Hand the adversary the span from `' + marker + '` through "the close" too.' && occ(spanEarlierText, marker).join() === '1,3,5' &&
-    ln(spanNoneText, 1) === say(marker) && occ(spanNoneText, marker).join() === '1' &&
-    ln(spanHiddenText, 1) === say(marker) && occ(spanHiddenText, marker).join() === '1,3,6' && ln(spanHiddenText, 3) === '<!-- ' + def + ' -->' && ln(spanHiddenText, 5) === '```' && ln(spanHiddenText, 7) === '```' &&
-    ln(spanMentionText, 2) === say(marker) && occ(spanMentionText, marker).join() === '1,2,3' && !ln(spanMentionText, 1).includes('through') &&
-    ln(spanMentionFirstText, 5) === say(marker) && occ(spanMentionFirstText, marker).join() === '1,3,5' && !ln(spanMentionFirstText, 1).includes('through') &&
-    ln(spanQuotedText, 1).startsWith('From "' + marker + '" through ') && occ(spanQuotedText, marker).join() === '1,3',
+    ln(spanOwnText, 1) === SAY && occ(spanOwnText, marker).join() === '1,3' && ln(spanOwnText, 3) === DEF &&
+    ln(spanEarlierText, 1) === SAY && ln(spanEarlierText, 3) === 'Hand the adversary the span from `**Rule** =` through "the close" too.' && occ(spanEarlierText, marker).join() === '1,3,5' &&
+    ln(spanNoneText, 1) === SAY && occ(spanNoneText, marker).join() === '1' &&
+    ln(spanHiddenText, 1) === SAY && occ(spanHiddenText, marker).join() === '1,3,6' && ln(spanHiddenText, 3) === '<!-- ' + DEF + ' -->' && ln(spanHiddenText, 5) === '```' && ln(spanHiddenText, 7) === '```' &&
+    ln(spanMentionText, 2) === SAY && occ(spanMentionText, marker).join() === '1,2,3' && !ln(spanMentionText, 1).includes('through') &&
+    ln(spanMentionFirstText, 5) === SAY && occ(spanMentionFirstText, marker).join() === '1,3,5' && !ln(spanMentionFirstText, 1).includes('through') &&
+    ln(spanQuotedText, 1).startsWith('From "**Rule** =" through ') && occ(spanQuotedText, marker).join() === '1,3' &&
+    ln(spanOpenText, 1) === 'Paste from `**Rule** =` through the end of its paragraph.' && ln(spanOpenText, 2) === DEF &&
+    [spanOwnText, spanEarlierText, spanNoneText, spanHiddenText, spanQuotedText, spanOpenText].every((t) => isSpanCopy(ln(t, 1))) && isSpanCopy(ln(spanEarlierText, 3)) && isSpanCopy(ln(spanMentionText, 2)) && isSpanCopy(ln(spanMentionFirstText, 5)) &&
+    !isSpanCopy(ln(spanMentionText, 1)) && !isSpanCopy(ln(spanMentionFirstText, 1)),
     'each broken fixture must hold its instruction and markers at the asserted lines without the checker being asked')
   const q = spanQuietDocs.map((d) => d[0].text)
   clause('clause 3fb — each quiet span input really holds what its place in clause 2fa says',
-    occ(q[0], marker).join() === '1,3' && ln(q[0], 1) === def && ln(q[0], 3) === say(marker) &&
+    occ(q[0], marker).join() === '1,3' && ln(q[0], 1) === DEF && ln(q[0], 3) === SAY &&
     !q[1].includes('from `') && !q[1].includes('from "') &&
     /from `abc1234` to /.test(q[2]) && !/through/.test(q[2]) &&
-    ln(q[3], 1) === '```' && ln(q[3], 2) === say(marker) && ln(q[3], 3) === '```' &&
-    ln(q[4], 1) === '<!-- ' + say(marker) + ' -->' &&
+    ln(q[3], 1) === '```' && ln(q[3], 2) === SAY && ln(q[3], 3) === '```' &&
+    ln(q[4], 1) === '<!-- ' + SAY + ' -->' &&
     !spanQuietDocs[5].some((d) => d.text.includes('through')) &&
-    q[6] === def + ' ' + say(marker) && q[6].indexOf(marker) === 0 &&
-    occ(q[7], marker).join() === '1,3' && occ(q[7], brief).join() === '2,5' && ln(q[7], 3) === say(marker) && ln(q[7], 1) === def && ln(q[7], 2).startsWith(brief) &&
+    q[6] === DEF + ' ' + SAY && q[6].indexOf(marker) === 0 &&
+    occ(q[7], marker).join() === '1,3' && occ(q[7], brief).join() === '2,5' && ln(q[7], 3) === SAY && ln(q[7], 1) === DEF && ln(q[7], 2).startsWith('**Brief** =') &&
+    ln(q[7], 5) === 'Paste the brief from `**Brief** =` through "End brief.".' && isSpanCopy(ln(q[7], 3)) && isSpanCopy(ln(q[7], 5)) &&
+    isSpanCopy(ln(q[0], 3)) && isSpanCopy(ln(q[3], 2)) && isSpanCopy(q[6]) &&
     /throughout/.test(q[8]) && !/through\b/.test(q[8]),
     'a quiet fixture that carried a defect would make clause 2fa a pass for the wrong reason')
 
