@@ -876,6 +876,12 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
   const spanOpen = run(clone(), [{ name: 'x.md', text: spanOpenText }])
   clause('clause 1ff — an instruction with no quoted closing marker trips the same way',
     spanTrip(spanOpen, 1, 'first occurs at line 1 inside') && spanOpen[0].includes('span on line 2'), JSON.stringify(spanOpen))
+  // A comment spanning three lines above the instruction: the line numbers stay exact only because the
+  // comment's line breaks are put back before the scan.
+  const spanCommentText = ['<!-- a comment', 'over', 'three lines -->', say(marker), '', def].join('\n')
+  const spanComment = run(clone(), [{ name: 'x.md', text: spanCommentText }])
+  clause('clause 1fg — a three-line comment above the instruction leaves the reported lines exact',
+    spanTrip(spanComment, 4, 'first occurs at line 4 inside') && spanComment[0].includes('span on line 6'), JSON.stringify(spanComment))
 
   // Known-good: the definition before the instruction, a marker described not quoted, a `to` range, the
   // instruction inside a fence, the instruction inside a comment, a document with no instruction, the
@@ -915,6 +921,7 @@ export function runSelftest({ check, CUT, ECHO_MIN_WORDS, CITATION_MIN_WORDS }) 
     ln(spanMentionFirstText, 5) === SAY && occ(spanMentionFirstText, marker).join() === '1,3,5' && !ln(spanMentionFirstText, 1).includes('through') &&
     ln(spanQuotedText, 1).startsWith('From "**Rule** =" through ') && occ(spanQuotedText, marker).join() === '1,3' &&
     ln(spanOpenText, 1) === 'Paste from `**Rule** =` through the end of its paragraph.' && ln(spanOpenText, 2) === DEF &&
+    ln(spanCommentText, 1) === '<!-- a comment' && ln(spanCommentText, 2) === 'over' && ln(spanCommentText, 3) === 'three lines -->' && ln(spanCommentText, 4) === SAY && ln(spanCommentText, 6) === DEF && occ(spanCommentText, marker).join() === '4,6' && isSpanCopy(ln(spanCommentText, 4)) &&
     [spanOwnText, spanEarlierText, spanNoneText, spanHiddenText, spanQuotedText, spanOpenText].every((t) => isSpanCopy(ln(t, 1))) && isSpanCopy(ln(spanEarlierText, 3)) && isSpanCopy(ln(spanMentionText, 2)) && isSpanCopy(ln(spanMentionFirstText, 5)) &&
     !isSpanCopy(ln(spanMentionText, 1)) && !isSpanCopy(ln(spanMentionFirstText, 1)),
     'each broken fixture must hold its instruction and markers at the asserted lines without the checker being asked')
