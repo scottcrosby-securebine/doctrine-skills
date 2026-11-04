@@ -223,8 +223,11 @@ the one check whose absence is invisible in the output.
 `.md` under `skills/` against `doctrine-gauntlet`'s fixture file and fails on a stale fixture name in a
 document that names a live hyphenated one, on three or more fixture names listed inside one sentence, on
 the same long claim appearing in two places, on a fixture the documents' own derivation rule cannot
-classify, and on an attributed citation that no longer resolves — against the document it names where it
-names one, against the corpus where it names only a section. Every one of those rules is
+classify, on an attributed citation that no longer resolves — against the document it names where it
+names one, against the corpus where it names only a section — on a sentence about claims in a rewrite that
+omits the refute exemption another sentence in the same document carries, and on a span-copy instruction
+(`from`, a quoted marker, `through`) whose marker first occurs inside such an instruction or does not
+occur exactly once outside them. Every one of those rules is
 narrower than that sentence makes it sound, and the tool's own header is where each narrowing is
 written down. **Its
 header states what it does not catch, and that list is longer than what it does** — read it before
