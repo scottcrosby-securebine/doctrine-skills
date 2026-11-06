@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -127,7 +127,8 @@ export function liveSeatsPartial(sessionId) {
   const seats = [], unreadable = []
   for (const f of names.filter((n) => n.endsWith('.json'))) {
     const file = path.join(seatsDir(sessionId), f)
-    try { seats.push(JSON.parse(fs.readFileSync(file, 'utf8'))) } catch { unreadable.push(file) }
+    // A marker removed between the listing and this read is gone, not unreadable (R-A2).
+    try { seats.push(JSON.parse(fs.readFileSync(file, 'utf8'))) } catch (e) { if (e.code !== 'ENOENT') unreadable.push(file) }
   }
   return { seats, unreadable }
 }
@@ -832,17 +833,24 @@ export function pauseMessageOnce(recordPath) {
   return fresh.length ? fresh.map((p) => pauseMessage(p.reason, pauseActionAt(p, entries, start))).join('\n') : null
 }
 
-/** The first live work this session has, as a reason, or null (E8-D7, E8-R8): a seat without its SubagentStop,
- *  a gate without its result file, a codex seat whose job is not terminal. Markers that cannot be read are live:
- *  an unknown count is never an empty one. */
-export function liveWork(sessionId) {
+/** The first live work this session has, as a reason, or null (E8-D7, E8-R8, R-A2): what seatLive decides for each
+ *  marker, given `inFlight` (inFlightIds of the Stop's background_tasks, null when unknown) and `cwd`, the workspace
+ *  an unlisted codex seat with no job link has its job looked up in. Markers that cannot be read are live: an unknown
+ *  count is never an empty one. */
+export function liveWork(sessionId, inFlight = null, cwd = null) {
   let found
   try { found = liveSeatsPartial(sessionId) } catch (e) { return `the seat markers could not be read (${e.message})` }
   if (found.unreadable.length) return `a seat marker could not be read: ${found.unreadable[0]}`
   for (const s of found.seats) {
-    let status = null
-    if (s.codexJob) { try { status = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch { /* not terminal */ } }
-    if (seatLive(s, Boolean(s.file) && fs.existsSync(`${s.file}.result`), status)) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
+    let jobStatus = null, jobMissing = false, foundJob = null
+    if (s.codexJob) { try { jobStatus = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch (e) { jobMissing = e.code === 'ENOENT' } }
+    else if (inFlight && s.role === CODEX_ROLE && !inFlight.has(String(s.agent_id))) {
+      // The stop path's own lookup (dctr-seat.mjs): the newest job since the seat started; no cwd to look in is unknown.
+      let notBefore = 0
+      try { notBefore = fs.statSync(path.join(seatsDir(sessionId), `${s.agent}.json`)).mtimeMs - 60000 } catch { /* the epoch, then */ }
+      foundJob = cwd ? codexJobMatch(codexJobRecords(cwd), cwd, notBefore) : {}
+    }
+    if (seatLive(s, { resultExists: Boolean(s.file) && fs.existsSync(`${s.file}.result`), jobStatus, jobMissing, inFlight, foundJob })) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
   }
   return null
 }

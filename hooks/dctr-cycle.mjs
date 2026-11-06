@@ -22,7 +22,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
-  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, treeExcludes,
+  followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, inFlightIds, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
   hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
@@ -116,13 +116,16 @@ try {
   if (event === 'Stop') {
     // S4: what an idle_prompt later needs to know about this Stop, persisted by Stop alone, so a StopFailure or a
     // submitted prompt never replaces them with unknowns: the payload's two live-work lists (RB6-3) and its ready line.
+    // R-A2: the in-flight ids too, so the idle_prompt judges the markers against the list this Stop saw.
+    const inFlight = inFlightIds(payload.background_tasks)
     writeMarker(stopFactsFile(sessionId), {
       backgroundEmpty: !backgroundLive(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
+      inFlight: inFlight && [...inFlight],
     })
 
     const keyLine = claimKey(record.entries)
     const warned = Boolean(sessionWarned(record.entries, sessionId))
-    const live = liveWork(sessionId)
+    const live = liveWork(sessionId, inFlight, payload.cwd)
     let hash = null
     const decision = cycleDecision({
       sessionId,
@@ -181,7 +184,8 @@ try {
     let lastStop = null
     try { lastStop = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')) } catch { /* no Stop yet in this session */ }
     const reason = notifyDecision(kind, {
-      error: payload.error, claimHeld: paneId ? paneClaimHeld(paneId) : false, liveWork: liveWork(sessionId), lastStop, host, why: payload.dctr_why,
+      error: payload.error, claimHeld: paneId ? paneClaimHeld(paneId) : false, host, why: payload.dctr_why,
+      liveWork: liveWork(sessionId, Array.isArray(lastStop?.inFlight) ? new Set(lastStop.inFlight) : null, payload.cwd), lastStop,
     })
     log(`${kind} decided ${reason ? `pause: ${reason}` : 'nothing'}`)
     if (reason) pause(reason)

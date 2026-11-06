@@ -1078,15 +1078,24 @@ export const backgroundLive = (tasks) => (Array.isArray(tasks)
 export const nonEmpty = (v) => (v === undefined || v === null ? false : Array.isArray(v) ? v.length > 0 : typeof v === 'object' ? Object.keys(v).length > 0 : Boolean(v))
 
 /**
- * Whether one seat marker is live work (E8-D7, E8-R8): a gate while its result file is missing, a codex seat
- * while its job's status is not terminal (an unreadable status is not terminal), and any other seat, since its
- * marker goes at SubagentStop.
+ * Whether one seat marker is live work (E8-D7, E8-R8, R-A2): a gate while its result file is missing; a seat with a
+ * codex job link while the job's status is not terminal (an unreadable status is not terminal, a job file that no
+ * longer exists is: the codex plugin deletes only its oldest records); any other seat while `inFlight`, the ids the
+ * Stop lists as background work, is unknown (null) or lists it; and an unlisted codex seat with no link while the
+ * job looked up for it (`foundJob`, its record, null when none) has a status that is not terminal. A marker can outlive its seat (a focused
+ * pane, a failed close, an interrupted seat), and a foreground seat cannot run after the main turn has ended.
  */
-export function seatLive(seat, resultExists, jobStatus) {
+export function seatLive(seat, { resultExists = false, jobStatus = null, jobMissing = false, inFlight = null, foundJob = null } = {}) {
   if (seat?.role === GATE_ROLE) return !resultExists
-  if (seat?.codexJob) return !codexTerminal(jobStatus)
-  return true
+  if (seat?.codexJob) return !jobMissing && !codexTerminal(jobStatus)
+  if (!inFlight || inFlight.has(String(seat?.agent_id))) return true
+  return seat?.role === CODEX_ROLE && Boolean(foundJob) && !codexTerminal(foundJob.status)
 }
+
+/** The ids a Stop's `background_tasks` lists, whatever each entry's type or status, or null when the value is not a
+ *  list (Codex, an older Claude Code), which keeps seatLive's old rule (R-A2). */
+export const inFlightIds = (tasks) => (Array.isArray(tasks)
+  ? new Set(tasks.filter((t) => t && typeof t === 'object' && t.id != null).map((t) => String(t.id))) : null)
 
 /** A record line that counts as progress (B7, E8-R9): a wave, round, finding raised, finding cleared or ruling
  *  line, a wave the continuity skills dispatched excepted. */

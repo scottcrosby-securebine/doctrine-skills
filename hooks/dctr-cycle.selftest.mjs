@@ -166,9 +166,22 @@ clause('clause 1h5 — backgroundLive: an empty list or only completed, failed o
 clause('clause 1h2 — endsReady reads the message\'s last line only; nonEmpty counts a listed task or cron and never an empty list or object',
   endsReady('done\nauto-cycle: ready\n') && !endsReady('auto-cycle: ready\nthen more') && !endsReady(undefined) &&
   nonEmpty([{ id: 1 }]) && nonEmpty({ a: 1 }) && !nonEmpty([]) && !nonEmpty({}) && !nonEmpty(null) && !nonEmpty(undefined), 'wrong')
-clause('clause 1h3 — seatLive: a gate is live until its result file, a codex seat until its job is terminal (unreadable is not), any other seat is live',
-  seatLive({ role: 'gate' }, false, null) && !seatLive({ role: 'gate' }, true, null) && seatLive({ codexJob: '/j' }, false, 'running') &&
-  seatLive({ codexJob: '/j' }, false, null) && !seatLive({ codexJob: '/j' }, false, 'completed') && seatLive({ agent: 'x' }, false, null), 'wrong')
+clause('clause 1h3 — seatLive: a gate is live until its result file, a codex seat until its job is terminal (unreadable is not, a missing job file is), any other seat while the in-flight list is unknown (R-A2)',
+  seatLive({ role: 'gate' }, { resultExists: false }) && !seatLive({ role: 'gate' }, { resultExists: true }) && seatLive({ codexJob: '/j' }, { jobStatus: 'running' }) &&
+  seatLive({ codexJob: '/j' }, { jobStatus: null }) && !seatLive({ codexJob: '/j' }, { jobStatus: 'completed' }) && !seatLive({ codexJob: '/j' }, { jobStatus: null, jobMissing: true }) &&
+  seatLive({ codexJob: '/j' }, { jobStatus: 'running', inFlight: new Set() }) && seatLive({ agent: 'x' }, { inFlight: null }) && seatLive({ agent: 'x' }, {}), 'wrong')
+const CR = lib.CODEX_ROLE
+clause('clause 1h6 — seatLive with a known in-flight list (R-A2): a listed seat is live, an unlisted one is not, and an unlisted codex seat with no job link is live only while its looked-up job is not terminal',
+  seatLive({ agent_id: 'a' }, { inFlight: new Set(['a']) }) && !seatLive({ agent_id: 'a' }, { inFlight: new Set() }) && !seatLive({ agent: 'x' }, { inFlight: new Set(['a']) }) &&
+  seatLive({ agent_id: 'c', role: CR }, { inFlight: new Set(), foundJob: { status: 'running' } }) && seatLive({ agent_id: 'c', role: CR }, { inFlight: new Set(), foundJob: {} }) &&
+  !seatLive({ agent_id: 'c', role: CR }, { inFlight: new Set(), foundJob: { status: 'completed' } }) && !seatLive({ agent_id: 'c', role: CR }, { inFlight: new Set(), foundJob: null }) &&
+  seatLive({ agent_id: 'c', role: CR }, { inFlight: new Set(['c']), foundJob: null }) && !seatLive({ agent_id: 'o' }, { inFlight: new Set(), foundJob: { status: 'running' } }) &&
+  seatLive({ role: 'gate' }, { resultExists: false, inFlight: new Set() }), 'wrong')
+const IF = lib.inFlightIds
+clause('clause 1h7 — inFlightIds: the ids of a background_tasks list whatever their type or status, an empty set for an empty list, null for anything not a list (R-A2)',
+  typeof IF === 'function' && IF([]) instanceof Set && IF([]).size === 0 &&
+  JSON.stringify([...IF([{ id: 'a', type: 'subagent', status: 'running' }, { id: 'b', type: 'shell' }, null, 'x', {}])]) === '["a","b"]' &&
+  IF(undefined) === null && IF(null) === null && IF({}) === null && IF('a') === null, 'wrong')
 
 const idleOk = { claimHeld: false, liveWork: null, lastStop: { backgroundEmpty: true, cronsEmpty: true, ready: false } }
 clause('clause 1i — notifyDecision: permission_prompt is R7, StopFailure R9 with its error, an unexplained idle_prompt R8 (E8-D18, T5)',
@@ -340,7 +353,7 @@ const NEG = [
   ['question with no answer', { lines: ['- question: Q3 opened 2026-09-24T01:00:00Z which cap?'] }, {}, {}, 'pause', 'open question Q3: which cap?'],
   ['no warned line', { warned: false }, {}, {}, 'none', null],
   ['paused after warned', { lines: ['- auto-cycle paused: question: which way?'] }, {}, {}, 'none', null],
-  ["live seat", {}, {}, {}, "wait", null, seatUp],
+  ["live seat", {}, { background_tasks: undefined }, {}, "wait", null, seatUp],
   ['gate without its result', {}, {}, {}, 'wait', null, gateLive],
   ['codex job running', {}, {}, {}, 'wait', null, codexLive],
   ['background task', {}, { background_tasks: [{ id: 'b1' }] }, {}, 'wait', null],
@@ -826,7 +839,7 @@ clause('clause 2c14 — a second permission prompt after the session\'s next Sto
   !paused(idle3).some((l) => l.includes('session idle')) && paused(noFacts).length === 1,
   `${show(rb52, { code: 0, msg: '', err: '' })} || ${JSON.stringify([paused(idle7), paused(idle3), paused(noFacts)])}`)
 // RB6-3: each of E8-D7's live-work conditions, carried from a Stop to the next idle_prompt, writes no R8.
-const liveBehind = [['seat', {}, seatUp], ['gate', {}, gateLive], ['codex job', {}, codexLive], ['background task', { background_tasks: [{ id: 'b1' }] }], ['session cron', { session_crons: [{ id: 'c1' }] }]]
+const liveBehind = [['seat', { background_tasks: undefined }, seatUp],['gate', {}, gateLive], ['codex job', {}, codexLive], ['background task', { background_tasks: [{ id: 'b1' }] }], ['session cron', { session_crons: [{ id: 'c1' }] }]]
   .map(([n, more, pre], i) => { const f = fixture(`idle-live-${i}`); pre?.(f); const env = { HERDR_PANE_ID: `w9:plive${i}` }
     run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, more } })
 clause('clause 2o2 — a seat, a gate, a codex job, a background task or a session cron live at the Stop: the next idle_prompt writes no paused line (E8-D7, E8-D18, RB6-3)',
@@ -1016,6 +1029,45 @@ clause('clause 2q — the typer is spawned only for the launching fixtures, with
 
 const hj = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'hooks.json'), 'utf8')).hooks
 const runsCycle = (entry) => entry?.hooks?.[0]?.command?.endsWith('/hooks/dctr-cycle.mjs"') && entry.hooks[0].timeout > 0
+// R-A2: a marker kept for its pane, or never removed, holds the cycle only while its work still runs.
+const RA2_ID = 'ag-ra2'
+const ra2Seat = (role) => (f) => write(path.join(seatsDir(f.session), 'dctr-ra2-1.json'), JSON.stringify({ agent: 'dctr-ra2-1', agent_id: RA2_ID, paneId: 'w9:p7', ...(role ? { role } : {}) }))
+const ra2Cc = (f) => path.join(f.dir, 'cc')
+const ra2Job = (status) => (f) => {
+  ra2Seat(lib.CODEX_ROLE)(f)
+  if (status) write(path.join(ra2Cc(f), 'plugins/data/codex-openai-codex/state', `${path.basename(f.proj)}-ra2/jobs/task-ra2.json`),
+    JSON.stringify({ id: 'task-ra2', workspaceRoot: f.proj, createdAt: new Date().toISOString(), status }))
+}
+const ra2Link = (job) => (f) => {
+  const file = path.join(f.dir, 'linked-job.json')
+  if (job !== undefined) write(file, job)
+  write(path.join(seatsDir(f.session), 'dctr-ra2-1.json'), JSON.stringify({ agent: 'dctr-ra2-1', agent_id: RA2_ID, paneId: 'w9:p7', role: lib.CODEX_ROLE, codexJob: file }))
+}
+const ra2Dangling = (f) => { fs.mkdirSync(seatsDir(f.session), { recursive: true }); fs.symlinkSync(path.join(f.dir, 'gone.json'), path.join(seatsDir(f.session), 'dctr-ra2-1.json')) }
+const RA2 = [
+  ['stale seat, not listed', ra2Seat(), {}, true],
+  ['seat listed as background work', ra2Seat(), { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'running' }] }, false],
+  ['codex seat, no link, its job running', ra2Job('running'), {}, false],
+  ['codex seat, no link, its job completed', ra2Job('completed'), {}, true],
+  ['codex seat, no link, no job', ra2Job(null), {}, true],
+  ['codex seat, its job file missing', ra2Link(undefined), {}, true],
+  ['codex seat, its job file unparseable', ra2Link('{'), {}, false],
+  ['a marker gone between listing and read', ra2Dangling, {}, true],
+].map(([name, pre, more, want]) => {
+  const f = fixture(`ra2-${name.replace(/[^a-z0-9]+/gi, '-')}`); pre(f)
+  return { name, f, more, want, r: run(f, more, { CLAUDE_CONFIG_DIR: ra2Cc(f) }) }
+})
+const ra2Bad = RA2.filter(({ r, want }) => launched(r) !== want || r.code !== 0)
+clause('clause 2s — R-A2: a seat marker the Stop does not list holds no cycle, a listed seat and a running codex job do, a missing job file is finished, an unparseable one holds, and a marker gone mid-read is gone',
+  ra2Bad.length === 0, ra2Bad.map(({ name, f, r }) => `${name}: ${show(f, r)}`).join(' || '))
+
+const ra2Idle = [['stale', {}, true], ['listed', { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'running' }] }, false]].map(([n, more, r8], i) => {
+  const f = fixture(`ra2-idle-${n}`); ra2Seat()(f); const env = { HERDR_PANE_ID: `w9:pra2i${i}` }
+  run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, r8 }
+})
+clause('clause 2s2 — R-A2: the idle_prompt judges the markers against the list its Stop saw: a stale seat no longer hides an idle session, a listed one still does',
+  ra2Idle.every(({ f, r8 }) => paused(f).some((l) => l.includes('session idle')) === r8), JSON.stringify(ra2Idle.map(({ n, f }) => [n, paused(f)])))
+
 clause('clause 2r — hooks.json runs dctr-cycle.mjs on Stop, on Notification with matcher permission_prompt|idle_prompt, on StopFailure and on UserPromptSubmit, the prompt gate beside it there (E8-D18, E8-R31, E10 S1)',
   hj.Stop?.length === 1 && runsCycle(hj.Stop[0]) && !hj.Stop[0].matcher && hj.Notification?.length === 1 && runsCycle(hj.Notification[0]) &&
   hj.Notification[0].matcher === 'permission_prompt|idle_prompt' && hj.StopFailure?.length === 1 && runsCycle(hj.StopFailure[0]) &&
@@ -1051,7 +1103,20 @@ clause('clause 2r2 — hooks.json names the four events, says each stands down u
 
 const gitQuiet = (repoDir, ...a) => { try { return git(repoDir, ...a) } catch { return null } }
 const tracked = negs.find((n) => n.name === 'tracked handoff with no backup commit').f
-clause('clause 3a — without the hook: the tracked fixture\'s handoff is not ignored and has no commit, the tracked good one has one, the ignored one is ignored',
+const ra2 = (n) => RA2.find((x) => x.name === n)
+const ra2Marker = (n) => { try { return JSON.parse(fs.readFileSync(path.join(seatsDir(ra2(n).f.session), 'dctr-ra2-1.json'), 'utf8')) } catch { return null } }
+const ra2JobAt = (n) => { try { return JSON.parse(fs.readFileSync(path.join(ra2Cc(ra2(n).f), 'plugins/data/codex-openai-codex/state', `${path.basename(ra2(n).f.proj)}-ra2/jobs/task-ra2.json`), 'utf8')) } catch { return null } }
+clause('clause 3r — without the hook: each R-A2 fixture still holds the marker it was built with (no codexJob where none was linked, the role and agent id as written), the listed one is the only payload naming that id, the looked-up jobs carry their statuses in this workspace, the linked files are missing or unparseable, and the dangling marker is a link to nothing',
+  ['stale seat, not listed', 'seat listed as background work'].every((n) => ra2Marker(n)?.agent_id === RA2_ID && !ra2Marker(n).codexJob && !ra2Marker(n).role) &&
+  RA2.filter((x) => JSON.stringify(x.more).includes(RA2_ID)).map((x) => x.name).join() === 'seat listed as background work' &&
+  ra2JobAt('codex seat, no link, its job running')?.status === 'running' && ra2JobAt('codex seat, no link, its job completed')?.status === 'completed' &&
+  ra2JobAt('codex seat, no link, its job running')?.workspaceRoot === ra2('codex seat, no link, its job running').f.proj && ra2JobAt('codex seat, no link, no job') === null &&
+  ['codex seat, no link, its job running', 'codex seat, no link, no job'].every((n) => ra2Marker(n)?.role === lib.CODEX_ROLE && !ra2Marker(n).codexJob) &&
+  !fs.existsSync(ra2Marker('codex seat, its job file missing')?.codexJob || '/') &&
+  (() => { try { JSON.parse(fs.readFileSync(ra2Marker('codex seat, its job file unparseable').codexJob, 'utf8')); return false } catch (e) { return e instanceof SyntaxError } })() &&
+  (() => { const m = path.join(seatsDir(ra2('a marker gone between listing and read').f.session), 'dctr-ra2-1.json'); return fs.lstatSync(m).isSymbolicLink() && !fs.existsSync(m) })(),
+  JSON.stringify(RA2.map((x) => [x.name, ra2Marker(x.name)])))
+clause('clause 3a — without the hook:the tracked fixture\'s handoff is not ignored and has no commit, the tracked good one has one, the ignored one is ignored',
   gitQuiet(tracked.proj, 'check-ignore', 'docs/handoffs/h.md') === null && gitQuiet(tracked.proj, 'log', '--format=%H', '--', 'docs/handoffs/h.md') === '' &&
   /^[0-9a-f]{40}$/.test(gitQuiet(goodT.proj, 'log', '-1', '--format=%H', '--', 'docs/handoffs/h.md')) && gitQuiet(good.proj, 'check-ignore', 'docs/handoffs/h.md') === 'docs/handoffs/h.md',
   'git fixtures wrong')
