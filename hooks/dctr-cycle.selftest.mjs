@@ -1051,6 +1051,7 @@ const ra2Dangling = (f) => { fs.mkdirSync(seatsDir(f.session), { recursive: true
 const RA2 = [
   ['stale seat, not listed', ra2Seat(), {}, true],
   ['seat listed as background work', ra2Seat(), { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'running' }] }, false],
+  ['seat listed with an ended status', ra2Seat(), { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'completed' }] }, false],
   ['codex seat, no link, its job running', ra2Job('running'), {}, false],
   ['codex seat, no link, its job completed', ra2Job('completed'), {}, true],
   ['codex seat, no link, no job', ra2Job(null), {}, true],
@@ -1068,7 +1069,7 @@ clause('clause 2s — R-A2: a seat marker the Stop does not list holds no cycle,
 
 const ra2Idle = [['stale', {}, true], ['listed', { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'completed' }] }, false]].map(([n, more, r8], i) => {
   const f = fixture(`ra2-idle-${n}`); ra2Seat()(f); const env = { HERDR_PANE_ID: `w9:pra2i${i}` }
-  run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, r8 }
+  run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, r8, more }
 })
 clause('clause 2s2 — R-A2: the idle_prompt judges the markers against the list its Stop saw: a stale seat no longer hides an idle session, a listed one still does',
   ra2Idle.every(({ f, r8 }) => paused(f).some((l) => l.includes('session idle')) === r8), JSON.stringify(ra2Idle.map(({ n, f }) => [n, paused(f)])))
@@ -1113,7 +1114,8 @@ const ra2Marker = (n) => { try { return JSON.parse(fs.readFileSync(path.join(sea
 const ra2JobAt = (n) => { try { return JSON.parse(fs.readFileSync(path.join(ra2Cc(ra2(n).f), 'plugins/data/codex-openai-codex/state', `${path.basename(ra2(n).f.proj)}-ra2/jobs/task-ra2.json`), 'utf8')) } catch { return null } }
 clause('clause 3r — without the hook: each R-A2 fixture still holds the marker it was built with (no codexJob where none was linked, the role and agent id as written), the listed one is the only payload naming that id, the looked-up jobs carry their statuses in this workspace, the linked files are missing or unparseable, and the dangling marker is a link to nothing',
   ['stale seat, not listed', 'seat listed as background work'].every((n) => ra2Marker(n)?.agent_id === RA2_ID && !ra2Marker(n).codexJob && !ra2Marker(n).role) &&
-  RA2.filter((x) => JSON.stringify(x.more).includes(RA2_ID)).map((x) => x.name).join() === 'seat listed as background work' &&
+  RA2.filter((x) => JSON.stringify(x.more).includes(RA2_ID)).map((x) => x.name).join() === 'seat listed as background work,seat listed with an ended status' &&
+  !lib.backgroundLive(ra2('seat listed with an ended status').more.background_tasks) &&
   ra2JobAt('codex seat, no link, its job running')?.status === 'running' && ra2JobAt('codex seat, no link, its job completed')?.status === 'completed' &&
   ra2JobAt('codex seat, no link, its job running')?.workspaceRoot === ra2('codex seat, no link, its job running').f.proj && ra2JobAt('codex seat, no link, no job') === null &&
   ['codex seat, no link, its job running', 'codex seat, no link, no job'].every((n) => ra2Marker(n)?.role === lib.CODEX_ROLE && !ra2Marker(n).codexJob) &&
@@ -1123,7 +1125,7 @@ clause('clause 3r — without the hook: each R-A2 fixture still holds the marker
   JSON.stringify(RA2.map((x) => [x.name, ra2Marker(x.name)])))
 const ra2Raw = ra2('codex seat, no link, an unreadable job record').f
 clause('clause 3r2 — without the hook: the listed idle fixture lists its seat with an ended status, so backgroundLive alone cannot hold it, and the unreadable-record fixture\'s job file does not parse',
-  !lib.backgroundLive([{ id: RA2_ID, type: 'subagent', status: 'completed' }]) && lib.inFlightIds([{ id: RA2_ID, status: 'completed' }]).has(RA2_ID) &&
+  (() => { const t = ra2Idle.find((x) => x.n === 'listed').more.background_tasks; return !lib.backgroundLive(t) && lib.inFlightIds(t).has(RA2_ID) })() &&
   (() => { try { JSON.parse(fs.readFileSync(path.join(ra2Cc(ra2Raw), 'plugins/data/codex-openai-codex/state', `${path.basename(ra2Raw.proj)}-ra2/jobs/task-ra2.json`), 'utf8')); return false } catch (e) { return e instanceof SyntaxError } })(),
   'fixture')
 // R-A2 round 1, B2: the marker's time is read from the same open file as its contents, so a replacement between the
@@ -1131,6 +1133,22 @@ clause('clause 3r2 — without the hook: the listed idle fixture lists its seat 
 const mtSeat = path.join(seatsDir('ra2-mtime'), 'dctr-x-1.json')
 write(mtSeat, JSON.stringify({ agent: 'dctr-x-1', agent_id: 'm1' })); fs.utimesSync(mtSeat, new Date(1e12), new Date(1e12))
 const mtRead = state.liveSeatsPartial('ra2-mtime').seats[0]
+const rpSeat = path.join(seatsDir('ra2-replace'), 'dctr-x-1.json')
+write(rpSeat, JSON.stringify({ agent: 'dctr-x-1', agent_id: 'r1' })); fs.utimesSync(rpSeat, new Date(1e12), new Date(1e12))
+const realRead = fs.readFileSync
+let replaced = false, rpRead = null
+fs.readFileSync = function (f, ...rest) {
+  const out = realRead.call(this, f, ...rest)
+  if (typeof f === 'number' && !replaced) {
+    replaced = true
+    state.writeMarker(rpSeat, { agent: 'dctr-x-1', agent_id: 'r1', codexJob: '/linked' }); fs.utimesSync(rpSeat, new Date(2e12), new Date(2e12))
+  }
+  return out
+}
+try { rpRead = state.liveSeatsPartial('ra2-replace').seats[0] } finally { fs.readFileSync = realRead }
+clause('clause 1h9 — a marker replaced between the read of its contents and the read of its time keeps the time of the file read, not the replacement\'s (R-A2 round 2, B5)',
+  replaced && rpRead?.markerMtimeMs === 1e12 && rpRead.codexJob === undefined && fs.statSync(rpSeat).mtimeMs === 2e12,
+  JSON.stringify([replaced, rpRead, rpRead?.markerMtimeMs]))
 clause('clause 1h8 — liveSeatsPartial gives each seat the modification time of the file it read, not enumerable, so a marker rewrite carries no copy of it (R-A2)',
   mtRead?.markerMtimeMs === 1e12 && !Object.keys(mtRead).includes('markerMtimeMs') && JSON.stringify(mtRead) === JSON.stringify({ agent: 'dctr-x-1', agent_id: 'm1' }),
   JSON.stringify([mtRead, mtRead?.markerMtimeMs]))
