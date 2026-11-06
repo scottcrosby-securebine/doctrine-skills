@@ -116,8 +116,9 @@ try {
   if (event === 'Stop') {
     // S4: what an idle_prompt later needs to know about this Stop, persisted by Stop alone, so a StopFailure or a
     // submitted prompt never replaces them with unknowns: the payload's two live-work lists (RB6-3) and its ready line.
-    // R-A2: the in-flight ids too, so the idle_prompt judges the markers against the list this Stop saw.
-    const inFlight = inFlightIds(payload.background_tasks)
+    // R-A2: the in-flight ids too, so the idle_prompt judges the markers against the list this Stop saw. Codex's list
+    // is built above from the process tree and names no seat, so on Codex the ids are unknown.
+    const inFlight = host === 'codex' ? null : inFlightIds(payload.background_tasks)
     writeMarker(stopFactsFile(sessionId), {
       backgroundEmpty: !backgroundLive(payload.background_tasks), cronsEmpty: !nonEmpty(payload.session_crons), ready: endsReady(payload.last_assistant_message),
       inFlight: inFlight && [...inFlight],

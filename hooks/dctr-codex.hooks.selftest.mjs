@@ -46,7 +46,7 @@ process.on('exit', () => {
 })
 process.env.TMPDIR = tmp
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE, codexBackground } = await import('./dctr-lib.mjs')
-const { stateDir, restoreFile, stopFactsFile, stopHeldFile, processListing } = await import('./dctr-state.mjs')
+const { stateDir, seatsDir, restoreFile, stopFactsFile, stopHeldFile, processListing } = await import('./dctr-state.mjs')
 
 const here = import.meta.dirname
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text) }
@@ -311,6 +311,19 @@ const ih1 = hook('dctr-cycle.mjs', ih, as(F.STOP_BG, ih, 'i1', rollout(ih, 'i1',
   { DCTR_TYPER_SCRIPT: stub, STUB_LOG: ihLog, CODEX_SESSION_ID: '01a0eb00-0000-7000-8000-0000000000aa' })
 clause('clause 1c9 — a Codex Stop whose hook inherited another CODEX_SESSION_ID from the environment Codex started in, with no work running, is not held by itself: it launches the typer (Standards R4-N2)',
   ih1.code === 0 && (ih1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && readJson(() => stopHeldFile('i1'))?.held === false, `${ih1.out} ${ih1.err} ${JSON.stringify(readJson(() => stopHeldFile('i1')))}`)
+// R-A2: a Codex Stop's background_tasks is built from the process tree and names no seat, so a seat marker on Codex
+// keeps the old rule and holds the Stop, where on Claude Code an unlisted one would not.
+const sk = project('seat-kept', { lines: ['- auto-cycle: warned k9 10000'] })
+write(path.join(stateDir('k9'), 'gauge.json'), JSON.stringify({ session_id: 'k9', warned: true, warnedAt: Date.now() - 60000 }))
+write(path.join(seatsDir('k9'), 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', agent_id: 'ag-k9', paneId: 'w9:pk9' }))
+shim(sk, { session: 'k9' })
+const skLog = path.join(sk.dir, 'typer.log')
+const sk1 = hook('dctr-cycle.mjs', sk, as(F.STOP_BG, sk, 'k9', rollout(sk, 'k9', [F.BG_RUNNING, F.BG_DONE]), { last_assistant_message: 'Handoff written.\nauto-cycle: ready' }),
+  { DCTR_TYPER_SCRIPT: stub, STUB_LOG: skLog })
+clause('clause 1c10 — a Codex Stop with a seat marker and no work running launches no typer and records the Stop held: the marker keeps the old rule on Codex (R-A2)',
+  sk1.code === 0 && !(sk1.j?.systemMessage || '').includes(LAUNCH_MESSAGE) && !fs.existsSync(skLog) && readJson(() => stopHeldFile('k9'))?.held === true &&
+  readJson(() => stopFactsFile('k9'))?.inFlight === null,
+  `${sk1.out} ${sk1.err} ${JSON.stringify(readJson(() => stopHeldFile('k9')))} ${JSON.stringify(readJson(() => stopFactsFile('k9')))}`)
 clause('clause 1c8 — a Codex Stop persists its own decision for its turn: held for the running work, then not held once the Stop launched (E10H-R2-B2)',
   held1?.turn === F.STOP_BG.turn_id && held1.held === true && Number.isFinite(held1.at) && held2?.turn === F.STOP_BG.turn_id && held2.held === false,
   `${JSON.stringify(held1)} ${JSON.stringify(held2)}`)
