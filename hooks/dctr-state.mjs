@@ -127,8 +127,15 @@ export function liveSeatsPartial(sessionId) {
   const seats = [], unreadable = []
   for (const f of names.filter((n) => n.endsWith('.json'))) {
     const file = path.join(seatsDir(sessionId), f)
-    // A marker removed between the listing and this read is gone, not unreadable (R-A2).
-    try { seats.push(JSON.parse(fs.readFileSync(file, 'utf8'))) } catch (e) { if (e.code !== 'ENOENT') unreadable.push(file) }
+    // A marker removed between the listing and this read is gone, not unreadable (R-A2). Its time comes from the file
+    // the contents came from, so a rename-replace between the two cannot pair old contents with a new time (R-A2).
+    let fd = null
+    try {
+      fd = fs.openSync(file, 'r')
+      const seat = JSON.parse(fs.readFileSync(fd, 'utf8'))
+      Object.defineProperty(seat, 'markerMtimeMs', { value: fs.fstatSync(fd).mtimeMs, enumerable: false })
+      seats.push(seat)
+    } catch (e) { if (e.code !== 'ENOENT') unreadable.push(file) } finally { if (fd !== null) fs.closeSync(fd) }
   }
   return { seats, unreadable }
 }
@@ -610,21 +617,25 @@ export function withDirLock(dir, fn, waitMs = PLACEMENT_WAIT_MS) {
  *  display and the plugin owns the file. Each record carries its own path as `file`. */
 export const codexStateDir = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'plugins', 'data', 'codex-openai-codex', 'state')
 
-export function codexJobRecords(cwd) {
+export const codexJobRecords = (cwd) => codexJobScan(cwd).records
+
+/** codexJobRecords with a count of what could not be read (R-A2): a directory or record that failed for any reason
+ *  but ENOENT, which is gone. A caller deciding liveness reads that count as unknown, never as no job. */
+export function codexJobScan(cwd) {
   const prefix = `${path.basename(cwd)}-`
-  let dirs
-  try { dirs = fs.readdirSync(codexStateDir()).filter((d) => d.startsWith(prefix)) } catch { return [] }
+  let dirs, unreadable = 0
+  try { dirs = fs.readdirSync(codexStateDir()).filter((d) => d.startsWith(prefix)) } catch (e) { return { records: [], unreadable: e.code === 'ENOENT' ? 0 : 1 } }
   const records = []
   for (const d of dirs) {
     const jobs = path.join(codexStateDir(), d, 'jobs')
     let names
-    try { names = fs.readdirSync(jobs).filter((f) => f.endsWith('.json')) } catch { continue }
+    try { names = fs.readdirSync(jobs).filter((f) => f.endsWith('.json')) } catch (e) { if (e.code !== 'ENOENT') unreadable++; continue }
     for (const f of names) {
       const file = path.join(jobs, f)
-      try { records.push({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file }) } catch { /* mid-write or not a record */ }
+      try { records.push({ ...JSON.parse(fs.readFileSync(file, 'utf8')), file }) } catch (e) { if (e.code !== 'ENOENT') unreadable++ /* mid-write or not a record */ }
     }
   }
-  return records
+  return { records, unreadable }
 }
 
 /** A seat's spawn metadata, read once more after `retryMs` when the first read fails for any
@@ -845,10 +856,10 @@ export function liveWork(sessionId, inFlight = null, cwd = null) {
     let jobStatus = null, jobMissing = false, foundJob = null
     if (s.codexJob) { try { jobStatus = JSON.parse(fs.readFileSync(s.codexJob, 'utf8')).status ?? null } catch (e) { jobMissing = e.code === 'ENOENT' } }
     else if (inFlight && s.role === CODEX_ROLE && !inFlight.has(String(s.agent_id))) {
-      // The stop path's own lookup (dctr-seat.mjs): the newest job since the seat started; no cwd to look in is unknown.
-      let notBefore = 0
-      try { notBefore = fs.statSync(path.join(seatsDir(sessionId), `${s.agent}.json`)).mtimeMs - 60000 } catch { /* the epoch, then */ }
-      foundJob = cwd ? codexJobMatch(codexJobRecords(cwd), cwd, notBefore) : {}
+      // The stop path's own lookup (dctr-seat.mjs): the newest job since the seat started. No cwd to look in, or a job
+      // record that could not be read, is unknown, and unknown holds.
+      const scan = cwd ? codexJobScan(cwd) : null
+      foundJob = !scan || scan.unreadable ? {} : codexJobMatch(scan.records, cwd, (s.markerMtimeMs ?? 0) - 60000)
     }
     if (seatLive(s, { resultExists: Boolean(s.file) && fs.existsSync(`${s.file}.result`), jobStatus, jobMissing, inFlight, foundJob })) return `${s.role === 'gate' ? 'gate' : 'seat'} ${s.agent || s.paneId || ''} is live`.trim()
   }

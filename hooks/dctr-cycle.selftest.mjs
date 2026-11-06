@@ -1038,6 +1038,10 @@ const ra2Job = (status) => (f) => {
   if (status) write(path.join(ra2Cc(f), 'plugins/data/codex-openai-codex/state', `${path.basename(f.proj)}-ra2/jobs/task-ra2.json`),
     JSON.stringify({ id: 'task-ra2', workspaceRoot: f.proj, createdAt: new Date().toISOString(), status }))
 }
+const ra2JobRaw = (text) => (f) => {
+  ra2Seat(lib.CODEX_ROLE)(f)
+  write(path.join(ra2Cc(f), 'plugins/data/codex-openai-codex/state', `${path.basename(f.proj)}-ra2/jobs/task-ra2.json`), text)
+}
 const ra2Link = (job) => (f) => {
   const file = path.join(f.dir, 'linked-job.json')
   if (job !== undefined) write(file, job)
@@ -1050,6 +1054,7 @@ const RA2 = [
   ['codex seat, no link, its job running', ra2Job('running'), {}, false],
   ['codex seat, no link, its job completed', ra2Job('completed'), {}, true],
   ['codex seat, no link, no job', ra2Job(null), {}, true],
+  ['codex seat, no link, an unreadable job record', ra2JobRaw('{'), {}, false],
   ['codex seat, its job file missing', ra2Link(undefined), {}, true],
   ['codex seat, its job file unparseable', ra2Link('{'), {}, false],
   ['a marker gone between listing and read', ra2Dangling, {}, true],
@@ -1061,7 +1066,7 @@ const ra2Bad = RA2.filter(({ r, want }) => launched(r) !== want || r.code !== 0)
 clause('clause 2s — R-A2: a seat marker the Stop does not list holds no cycle, a listed seat and a running codex job do, a missing job file is finished, an unparseable one holds, and a marker gone mid-read is gone',
   ra2Bad.length === 0, ra2Bad.map(({ name, f, r }) => `${name}: ${show(f, r)}`).join(' || '))
 
-const ra2Idle = [['stale', {}, true], ['listed', { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'running' }] }, false]].map(([n, more, r8], i) => {
+const ra2Idle = [['stale', {}, true], ['listed', { background_tasks: [{ id: RA2_ID, type: 'subagent', status: 'completed' }] }, false]].map(([n, more, r8], i) => {
   const f = fixture(`ra2-idle-${n}`); ra2Seat()(f); const env = { HERDR_PANE_ID: `w9:pra2i${i}` }
   run(f, { last_assistant_message: 'working', ...more }, env); note(f, 'idle_prompt', {}, env); return { n, f, r8 }
 })
@@ -1116,7 +1121,20 @@ clause('clause 3r — without the hook: each R-A2 fixture still holds the marker
   (() => { try { JSON.parse(fs.readFileSync(ra2Marker('codex seat, its job file unparseable').codexJob, 'utf8')); return false } catch (e) { return e instanceof SyntaxError } })() &&
   (() => { const m = path.join(seatsDir(ra2('a marker gone between listing and read').f.session), 'dctr-ra2-1.json'); return fs.lstatSync(m).isSymbolicLink() && !fs.existsSync(m) })(),
   JSON.stringify(RA2.map((x) => [x.name, ra2Marker(x.name)])))
-clause('clause 3a — without the hook:the tracked fixture\'s handoff is not ignored and has no commit, the tracked good one has one, the ignored one is ignored',
+const ra2Raw = ra2('codex seat, no link, an unreadable job record').f
+clause('clause 3r2 — without the hook: the listed idle fixture lists its seat with an ended status, so backgroundLive alone cannot hold it, and the unreadable-record fixture\'s job file does not parse',
+  !lib.backgroundLive([{ id: RA2_ID, type: 'subagent', status: 'completed' }]) && lib.inFlightIds([{ id: RA2_ID, status: 'completed' }]).has(RA2_ID) &&
+  (() => { try { JSON.parse(fs.readFileSync(path.join(ra2Cc(ra2Raw), 'plugins/data/codex-openai-codex/state', `${path.basename(ra2Raw.proj)}-ra2/jobs/task-ra2.json`), 'utf8')); return false } catch (e) { return e instanceof SyntaxError } })(),
+  'fixture')
+// R-A2 round 1, B2: the marker's time is read from the same open file as its contents, so a replacement between the
+// read and the time cannot pair the old contents with the new time.
+const mtSeat = path.join(seatsDir('ra2-mtime'), 'dctr-x-1.json')
+write(mtSeat, JSON.stringify({ agent: 'dctr-x-1', agent_id: 'm1' })); fs.utimesSync(mtSeat, new Date(1e12), new Date(1e12))
+const mtRead = state.liveSeatsPartial('ra2-mtime').seats[0]
+clause('clause 1h8 — liveSeatsPartial gives each seat the modification time of the file it read, not enumerable, so a marker rewrite carries no copy of it (R-A2)',
+  mtRead?.markerMtimeMs === 1e12 && !Object.keys(mtRead).includes('markerMtimeMs') && JSON.stringify(mtRead) === JSON.stringify({ agent: 'dctr-x-1', agent_id: 'm1' }),
+  JSON.stringify([mtRead, mtRead?.markerMtimeMs]))
+clause('clause 3a — without the hook: the tracked fixture\'s handoff is not ignored and has no commit, the tracked good one has one, the ignored one is ignored',
   gitQuiet(tracked.proj, 'check-ignore', 'docs/handoffs/h.md') === null && gitQuiet(tracked.proj, 'log', '--format=%H', '--', 'docs/handoffs/h.md') === '' &&
   /^[0-9a-f]{40}$/.test(gitQuiet(goodT.proj, 'log', '-1', '--format=%H', '--', 'docs/handoffs/h.md')) && gitQuiet(good.proj, 'check-ignore', 'docs/handoffs/h.md') === 'docs/handoffs/h.md',
   'git fixtures wrong')
