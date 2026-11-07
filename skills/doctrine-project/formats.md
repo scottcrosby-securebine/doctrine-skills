@@ -77,12 +77,16 @@ Combined check: <what runs> ; pass when <rule> | none
 - Coverage: <phase name>: satisfy | contribute | preserve[, <phase name>: <obligation>]
 
 ## Members
-- phase <phase name>[: <record path>]
+- phase <phase name>[: [<record path> ][after <phase> merged]]
 - issue <tracker id>
 
 ## Rulings and returns
 <entries, below>
 ```
+
+An ordering clause sits after the colon, behind the record path where the line has one: `- phase b: after a merged`, or `- phase b: b.md after a merged`. A line carries one clause, and the phase it names is a `- phase` member of the same epic. `check` reports a clause naming any other phase, a phase ordered after itself and a cycle of any length. A record path is one token and never the word `after` in any case, and `check` reports one that is, which catches a misspelt clause holding a space. A misspelling with no space, such as `after-a-merged`, reads as a record path and `check` does not catch it.
+
+`after <phase> merged` means the predecessor's branch is merged and the orchestrator's gate passed on the merged revision.
 
 `Combined check: none` is legal only while an epic is `Proposed`, `Dropped` or `Superseded`. What the line holds otherwise, and which ruling carries it, are under "Entries" below.
 

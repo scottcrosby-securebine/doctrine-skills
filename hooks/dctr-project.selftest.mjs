@@ -256,6 +256,10 @@ const mutate = (edits, base = GOOD) => {
     e.title.text === 'Epic E1: Export' && e.title.line === 1 &&
     e.phases.map((m) => m.name).join() === 'p1,p2' && e.phases[1].line === GOOD['docs/epics/E1.md'].split('\n').indexOf('- phase p2') + 1,
     JSON.stringify({ title: e.title, phases: e.phases }))
+  const ord = parseDoc('## Members\n- phase a\n- phase b: after a merged\n- phase c: c.md after b merged\n- phase d: d.md\n')
+  clause('T-parse 5b — an ordering clause is held apart from the record path, with and without one',
+    JSON.stringify(ord.phases.map(({ name, record, after }) => [name, record, after])) === JSON.stringify([['a', null, null], ['b', null, 'a'], ['c', 'c.md', 'b'], ['d', 'd.md', null]]) && !ord.malformed.length,
+    JSON.stringify(ord))
 }
 
 // ---------------------------------------------------------------- T-check, clause 2 (known good)
@@ -422,6 +426,10 @@ for (const [name, files, shape] of [
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### Y3 return, 2026-09-09T10:00:00Z\nBaseline: R1\nRevision: 000aaa\nSeat: reviewer-e\nCombined check result: FAIL, evidence: tests/seam.test.mjs:3\n- D1: PASS, evidence: tests/export.test.mjs:12\n']]),
     (f) => { const t = f[E1]; return /^State: Done$/m.test(t) && t.indexOf('### Y3 return') > t.indexOf('### Y1 return') && /^Combined check result: FAIL/m.test(t) && /^Certification target: def456$/m.test(t) && /### Y3 return[\s\S]*?^Revision: 000aaa$/m.test(t) }],
+  ['ordering clauses with and without a record path, and two phases after one predecessor', mutate([
+    [E1, '- Coverage: p1: satisfy, p2: preserve', '- Coverage: p1: satisfy, p2: preserve, p3: preserve'],
+    [E1, '- phase p1: docs/records/p1.md\n- phase p2\n', '- phase p1: docs/records/p1.md\n- phase p2: docs/records/p2.md after p1 merged\n- phase p3: after p1 merged\n']]),
+    (f) => /^- phase p2: \S+ after p1 merged$/m.test(f[E1]) && /^- phase p3: after p1 merged$/m.test(f[E1])],
   ['a note ruling whose Items name a live item', mutate([[E1,
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n',
     'Revision: def456\nSeat: reviewer-b\nCombined check result: PASS, evidence: tests/export.test.mjs:12\n- D1: PASS, evidence: tests/export.test.mjs:12\n\n### R5 ruling, 2026-09-06T13:00:00Z\nKind: note\nItems: D1\nBy: owner\n> the slow-path finding on D1 is closed\n']]),
@@ -657,6 +665,30 @@ const CASES = [
   { name: 'members — a line in ## Members that is not a phase or an issue', rule: 'members', frag: '## Members line "-phase p9"', at: E1,
     edits: [[E1, '- phase p2\n', '- phase p2\n-phase p9\n']],
     defect: (f) => /^-phase p9$/m.test(txt(f, E1)) },
+  { name: 'members — an ordering clause naming a phase that is not a member of the epic', rule: 'members', frag: 'phase p2 of epic E1 is ordered after zzz, which is not a - phase member', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2: after zzz merged\n']],
+    defect: (f) => /^- phase p2: after zzz merged$/m.test(txt(f, E1)) && !/^- phase zzz/m.test(txt(f, E1)) },
+  { name: 'members — a phase ordered after itself', rule: 'members', frag: 'phase p2 of epic E1 is ordered after itself, which closes a cycle', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2: after p2 merged\n']],
+    defect: (f) => /^- phase p2: after p2 merged$/m.test(txt(f, E1)) },
+  { name: 'members — a two-phase ordering cycle', rule: 'members', frag: 'phase p2 of epic E1 is ordered after p1, which closes a cycle', at: E1,
+    edits: [[E1, '- phase p1: docs/records/p1.md\n- phase p2\n', '- phase p1: docs/records/p1.md after p2 merged\n- phase p2: after p1 merged\n']],
+    defect: (f) => /^- phase p1: \S+ after p2 merged$/m.test(txt(f, E1)) && /^- phase p2: after p1 merged$/m.test(txt(f, E1)) },
+  { name: 'members — a three-phase ordering cycle', rule: 'members', frag: 'phase p3 of epic E1 is ordered after p1, which closes a cycle', at: E1,
+    edits: [[E1, '- phase p1: docs/records/p1.md\n- phase p2\n', '- phase p1: docs/records/p1.md after p2 merged\n- phase p2: after p3 merged\n- phase p3: after p1 merged\n']],
+    defect: (f) => /^- phase p1: \S+ after p2 merged$/m.test(txt(f, E1)) && /^- phase p2: after p3 merged$/m.test(txt(f, E1)) && /^- phase p3: after p1 merged$/m.test(txt(f, E1)) },
+  { name: 'members — an ordering clause with no merged', rule: 'members', frag: '## Members line "- phase p2: after p1"', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2: after p1\n']],
+    defect: (f) => /^- phase p2: after p1$/m.test(txt(f, E1)) },
+  { name: 'members — two ordering clauses on one line', rule: 'members', frag: '## Members line "- phase p2: after p1 merged after p3 merged"', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2: after p1 merged after p3 merged\n']],
+    defect: (f) => /^- phase p2: after p1 merged after p3 merged$/m.test(txt(f, E1)) },
+  ...['After p1 merged', 'afer p1 merged', 'after: p1 merged', 'x.md,after p1 merged', 'after', 'After', 'AFTER after p1 merged'].map((clause) => (
+    { name: `members — a misspelt ordering clause, ${clause}`, rule: 'members', frag: `## Members line "- phase p2: ${clause}"`, at: E1,
+      edits: [[E1, '- phase p2\n', `- phase p2: ${clause}\n`]], defect: (f) => txt(f, E1).split('\n').includes(`- phase p2: ${clause}`) })),
+  { name: 'id — an ordering clause with no colon is not an ordering clause', rule: 'id', frag: 'phase name', at: E1,
+    edits: [[E1, '- phase p2\n', '- phase p2 after p1 merged\n']],
+    defect: (f) => /^- phase p2 after p1 merged$/m.test(txt(f, E1)) },
   { name: 'entry — an indented result line in a return', rule: 'entry', frag: '## Rulings and returns line "  - D3: FAIL, evidence: x"', at: E3,
     edits: [[E3, '- D3: PASS, evidence: tests/import.test.mjs:4\n', '- D3: PASS, evidence: tests/import.test.mjs:4\n  - D3: FAIL, evidence: x\n']],
     defect: (f) => /^ {2}- D3: FAIL, evidence: x$/m.test(txt(f, E3)) },
@@ -971,6 +1003,16 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   const model = build(mutate([['docs/epics/E1.md', '- phase p1: docs/records/p1.md', '- phase p1: docs/records/x/y/p1.md\n- phase p9: docs/records/p1.md']]))
   clause('records [1: memberRecords returns every record path an epic Members line names, once each, and none for a phase with no path]',
     JSON.stringify(memberRecords(model).sort()) === JSON.stringify(['docs/records/p1.md', 'docs/records/p3.md', 'docs/records/x/y/p1.md']), JSON.stringify(memberRecords(model)))
+}
+
+{
+  const leadIn = run(mutate([[E1, '- phase p1: docs/records/p1.md\n- phase p2\n', '- phase p1: after p2 merged\n- phase p2: after p1 merged\n- phase p3: after p1 merged\n']]))
+  clause('members [1: every phase on a cycle is reported, and a phase only ordered after one is not]',
+    ['p1', 'p2'].every((n) => leadIn.some((f) => f.message.startsWith(`phase ${n} of epic E1 is ordered after`))) && !leadIn.some((f) => f.message.startsWith('phase p3 of epic E1 is ordered after')),
+    leadIn.map(formatFinding).join(' | '))
+  const joint = build(mutate([[E1, '- phase p2\n', '- phase p2: docs/records/p2.md after p1 merged\n- phase p4: after p1 merged\n- phase p5: after p1\n- phase p6: After p1 merged\n']]))
+  clause('members [1: memberRecords keeps a record path without its clause, and no clause reads as a path]',
+    JSON.stringify(memberRecords(joint).sort()) === JSON.stringify(['docs/records/p1.md', 'docs/records/p2.md', 'docs/records/p3.md']), JSON.stringify(memberRecords(joint)))
 }
 
 // ---------------------------------------------------------------- Tracks: seats and codex jobs are read for the repo the project tracks

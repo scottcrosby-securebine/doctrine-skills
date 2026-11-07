@@ -28,6 +28,8 @@
 //   - that an open issue or tracker item has a destination ruling, or where one sits: only the project
 //     file's destination rulings are compared with its ## Open issues rows;
 //   - a planned phase name on an epic that is not yet Open;
+//   - that an ordering clause's predecessor has merged, or that its gate passed;
+//   - that a one-token record path is a path: `after-a-merged` reads as one, ordering nothing;
 //   - where an impact ruling sits: one naming an ID that any done-means-change ruling names resolves,
 //     wherever it is written;
 //   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
@@ -66,7 +68,7 @@ const LINE_FORMS = {
   'Done means': ['item', '### <item ID> or, under an item, - <Outcome|Type|Check|Control|Evidence|Coverage>: <value>'],
   Epics: ['roster', 'a table row'],
   'Open issues': ['issues', 'a table row'],
-  Members: ['members', '- phase <phase name>[: <record path>] or - issue <tracker id>'],
+  Members: ['members', '- phase <phase name>[: [<record path> ][after <phase> merged]] or - issue <tracker id>'],
   'Rulings and returns': ['entry', 'an entry heading, or under one a <Key>: <value> field, a > quoted line or a return result'],
 }
 
@@ -114,8 +116,13 @@ export function parseDoc(text) {
     }
     if (section === 'Members') {
       const ph = /^- phase (.+?)(?::\s*(.*))?$/.exec(t)
-      if (ph) doc.phases.push({ name: ph[1].trim(), record: ph[2]?.trim() || null, line })
-      else if (!/^- issue \S/.test(t)) odd()
+      if (ph) {
+        const rest = ph[2]?.trim() ?? '', ord = /^(?:(.*\S)\s+)?after (\S+) merged$/.exec(rest), record = (ord ? ord[1] : rest) || null
+        // A record path is one token and never the word after, so a misspelt clause holding a space is reported.
+        const notPath = /\s|^after$/i.test(record ?? '')
+        if (notPath) odd()
+        doc.phases.push({ name: ph[1].trim(), record: notPath ? null : record, after: ord?.[2] ?? null, line })
+      } else if (!/^- issue \S/.test(t)) odd()
       return
     }
     if (section === 'Rulings and returns') {
@@ -419,6 +426,17 @@ export function check(model, exists) {
       if (!rosterIds.has(succ)) add(file, sl, 'evidence', `epic ${id} is Superseded without a supersede ruling naming a Successor on the roster`)
     }
     for (const m of doc.phases) idCheck(file, m.line, 'phase name', m.name)
+    for (const m of doc.phases.filter((p) => p.after)) {
+      if (!doc.phases.some((p) => p.name === m.after)) { add(file, m.line, 'members', `phase ${m.name} of epic ${id} is ordered after ${m.after}, which is not a - phase member of that epic`); continue }
+      const seen = new Set(), todo = [m.after]
+      while (todo.length) {
+        const n = todo.pop()
+        if (seen.has(n)) continue
+        seen.add(n)
+        todo.push(...doc.phases.filter((p) => p.name === n && p.after).map((p) => p.after))
+      }
+      if (seen.has(m.name)) add(file, m.line, 'members', `phase ${m.name} of epic ${id} is ordered after ${m.after === m.name ? 'itself' : m.after}, which closes a cycle`)
+    }
     // From the time an epic opens, the phases its Coverage lines name and its phase members are one set.
     if (['Open', 'Done'].includes(s)) {
       const members = new Set(doc.phases.map((m) => m.name)), named = new Set()
