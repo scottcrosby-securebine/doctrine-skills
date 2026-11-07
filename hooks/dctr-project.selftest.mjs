@@ -683,6 +683,9 @@ const CASES = [
   { name: 'members — two ordering clauses on one line', rule: 'members', frag: '## Members line "- phase p2: after p1 merged after p3 merged"', at: E1,
     edits: [[E1, '- phase p2\n', '- phase p2: after p1 merged after p3 merged\n']],
     defect: (f) => /^- phase p2: after p1 merged after p3 merged$/m.test(txt(f, E1)) },
+  ...['After p1 merged', 'afer p1 merged', 'after: p1 merged', 'x.md,after p1 merged', 'after'].map((clause) => (
+    { name: `members — a misspelt ordering clause, ${clause}`, rule: 'members', frag: `## Members line "- phase p2: ${clause}"`, at: E1,
+      edits: [[E1, '- phase p2\n', `- phase p2: ${clause}\n`]], defect: (f) => txt(f, E1).split('\n').includes(`- phase p2: ${clause}`) })),
   { name: 'id — an ordering clause with no colon is not an ordering clause', rule: 'id', frag: 'phase name', at: E1,
     edits: [[E1, '- phase p2\n', '- phase p2 after p1 merged\n']],
     defect: (f) => /^- phase p2 after p1 merged$/m.test(txt(f, E1)) },
@@ -1007,7 +1010,7 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('members [1: every phase on a cycle is reported, and a phase only ordered after one is not]',
     ['p1', 'p2'].every((n) => leadIn.some((f) => f.message.startsWith(`phase ${n} of epic E1 is ordered after`))) && !leadIn.some((f) => f.message.startsWith('phase p3 of epic E1 is ordered after')),
     leadIn.map(formatFinding).join(' | '))
-  const joint = build(mutate([[E1, '- phase p2\n', '- phase p2: docs/records/p2.md after p1 merged\n- phase p4: after p1 merged\n- phase p5: after p1\n']]))
+  const joint = build(mutate([[E1, '- phase p2\n', '- phase p2: docs/records/p2.md after p1 merged\n- phase p4: after p1 merged\n- phase p5: after p1\n- phase p6: After p1 merged\n']]))
   clause('members [1: memberRecords keeps a record path without its clause, and no clause reads as a path]',
     JSON.stringify(memberRecords(joint).sort()) === JSON.stringify(['docs/records/p1.md', 'docs/records/p2.md', 'docs/records/p3.md']), JSON.stringify(memberRecords(joint)))
 }

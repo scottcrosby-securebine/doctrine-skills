@@ -84,7 +84,7 @@ Combined check: <what runs> ; pass when <rule> | none
 <entries, below>
 ```
 
-An ordering clause sits after the colon, behind the record path where the line has one: `- phase b: after a merged`, or `- phase b: b.md after a merged`. A line carries one clause, and the phase it names is a `- phase` member of the same epic. `check` reports a clause naming any other phase, a phase ordered after itself, a cycle of any length, and any other text on the line using `after` as a word.
+An ordering clause sits after the colon, behind the record path where the line has one: `- phase b: after a merged`, or `- phase b: b.md after a merged`. A line carries one clause, and the phase it names is a `- phase` member of the same epic. `check` reports a clause naming any other phase, a phase ordered after itself, a cycle of any length, and a record path holding whitespace, which is how a misspelt clause reads.
 
 `after <phase> merged` means the predecessor's branch is merged and the orchestrator's gate passed on the merged revision.
 

@@ -28,6 +28,7 @@
 //   - that an open issue or tracker item has a destination ruling, or where one sits: only the project
 //     file's destination rulings are compared with its ## Open issues rows;
 //   - a planned phase name on an epic that is not yet Open;
+//   - that an ordering clause's predecessor has merged, or that its gate passed;
 //   - where an impact ruling sits: one naming an ID that any done-means-change ruling names resolves,
 //     wherever it is written;
 //   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
@@ -116,10 +117,10 @@ export function parseDoc(text) {
       const ph = /^- phase (.+?)(?::\s*(.*))?$/.exec(t)
       if (ph) {
         const rest = ph[2]?.trim() ?? '', ord = /^(?:(.*\S)\s+)?after (\S+) merged$/.exec(rest), record = (ord ? ord[1] : rest) || null
-        // A misspelt ordering clause must never reach memberRecords as a path.
-        const misspelt = /(^|\s)after(\s|$)/.test(record ?? '')
-        if (misspelt) odd()
-        doc.phases.push({ name: ph[1].trim(), record: misspelt ? null : record, after: misspelt ? null : ord?.[2] ?? null, line })
+        // A record path is one token, so a misspelt ordering clause never reaches memberRecords as a path.
+        const notPath = /\s|^after$/i.test(record ?? '')
+        if (notPath) odd()
+        doc.phases.push({ name: ph[1].trim(), record: notPath ? null : record, after: ord?.[2] ?? null, line })
       } else if (!/^- issue \S/.test(t)) odd()
       return
     }
