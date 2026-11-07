@@ -272,30 +272,35 @@ clause('clause 1r — a via token after the handle is read wherever it sits, wit
 
 // E14-D37..D39: a deadline clause is its own field wherever it sits after the handle, and the handle and via read as
 // they did without it. A deadline that is not a form time is prose, as the live line above shows.
-const D = '2026-11-07T01:00:00Z'
+const D = '2026-11-07T01:00:00Z', D2 = '2026-11-08T02:30:00Z'
 const DEADLINES = [
-  [`- wave: ${T} seat s handle job-1 deadline ${D}`, 'job-1', D, null],
-  [`wave: ${T} seat s handle job-1 via doctrine-handoff deadline ${D}`, 'job-1', D, 'doctrine-handoff'],
-  [`- wave: ${T} seat s handle job-1 deadline ${D} via doctrine-backup`, 'job-1', D, 'doctrine-backup'],
-  [`- wave: ${T} seat s handle agent b77 (worktree wt/b) deadline ${D}`, 'agent b77 (worktree wt/b)', D, null],
-  [`- wave: ${T} seat s handle job-1 via doctrine-backup; read-only; deadline ${D}.`, 'job-1', D, 'doctrine-backup'],
-  [`- wave: ${T} seat s handle job-1 deadline ${D}, a note via doctrine-backup`, 'job-1 a note', D, 'doctrine-backup'],
-  [`- wave: ${T} seat s handle job-1 DEADLINE ${D}`, 'job-1', D, null],
+  [`- wave: ${T} seat s1 handle job-1 deadline ${D}`, 's1', 'job-1', D, null],
+  [`wave: ${T} seat s2 handle job-1 via doctrine-handoff deadline ${D2}`, 's2', 'job-1', D2, 'doctrine-handoff'],
+  [`- wave: ${T} seat s3 handle job-1 deadline ${D} via doctrine-backup`, 's3', 'job-1', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s4 handle agent b77 (worktree wt/b) deadline ${D2}`, 's4', 'agent b77 (worktree wt/b)', D2, null],
+  [`- wave: ${T} seat s5 handle job-1 via doctrine-backup; read-only; deadline ${D}.`, 's5', 'job-1', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s6 handle job-1 deadline ${D}, a note via doctrine-backup`, 's6', 'job-1 a note', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s7 handle job-1 DEADLINE ${D2}`, 's7', 'job-1', D2, null],
+  [`- wave: ${T} seat s8 handle job-1\tdeadline\t${D}`, 's8', 'job-1', D, null],
+  [`- wave: ${T} seat s9 handle deadline ${D2} deadline ${D} via doctrine-backup`, 's9', `deadline ${D2}`, D, 'doctrine-backup'],
 ]
 const DEADLINE_PROSE = [
-  [LIVE_WAVE, '/root/backup_review', null, 'doctrine-backup'],
-  [`- wave: ${T} seat s handle job-1 deadline 5 minutes`, 'job-1 deadline 5 minutes', null, null],
-  [`- wave: ${T} seat s handle job-1 deadline 2026-11-07`, 'job-1 deadline 2026-11-07', null, null],
-  [`- wave: ${T} seat s handle job-1 deadline ${D}x`, `job-1 deadline ${D}x`, null, null],
+  [LIVE_WAVE, 'backup-review', '/root/backup_review', null, 'doctrine-backup'],
+  [`- wave: ${T} seat p2 handle job-1 deadline 5 minutes`, 'p2', 'job-1 deadline 5 minutes', null, null],
+  [`- wave: ${T} seat p3 handle job-1 deadline 2026-11-07`, 'p3', 'job-1 deadline 2026-11-07', null, null],
+  [`- wave: ${T} seat p4 handle job-1 deadline ${D}x`, 'p4', `job-1 deadline ${D}x`, null, null],
+  [`- wave: ${T} seat p5 handle job-1-deadline ${D}`, 'p5', `job-1-deadline ${D}`, null, null],
+  [`- wave: ${T} seat p6 handle deadline ${D}`, 'p6', `deadline ${D}`, null, null],
 ]
-const waveRead = (rows) => rows.flatMap(([l, ...want]) => {
-  const e = parseRecord(l).entries[0]
-  return JSON.stringify([e?.handle, e?.deadline, e?.via]) === JSON.stringify(want) ? [] : [[l, e]]
-})
-clause('clause 1t \u2014 a deadline clause is read as its own field after the handle, before or after via or in the prose after a via, and the handle and via read as they do without it (E14-D37 to D39)',
-  waveRead(DEADLINES).length === 0, JSON.stringify(waveRead(DEADLINES)))
-clause('clause 1u \u2014 a deadline that is not a form time is prose: the field is null and a handle with no via keeps it',
-  waveRead(DEADLINE_PROSE).length === 0, JSON.stringify(waveRead(DEADLINE_PROSE)))
+// Each table parsed as one record and compared whole at the agreed seam, the line number included.
+const waveMisread = (rows) => {
+  const want = rows.map(([l, seat, handle, deadline, via], i) => ({ kind: 'wave', time: /wave: (\S+)/.exec(l)[1], seat, handle, deadline, via, line: i + 1 }))
+  try { deepStrictEqual(parseRecord(rows.map(([l]) => l).join('\n')).entries, want); return '' } catch (e) { return String(e.message).slice(0, 600) }
+}
+clause('clause 1t \u2014 a deadline clause is read as its own field after the handle\'s first word, before or after via or in the prose after a via, and every other field of the entry reads as it does without it (E14-D37 to D39)',
+  waveMisread(DEADLINES) === '', waveMisread(DEADLINES))
+clause('clause 1u \u2014 a deadline that is not a form time clause is prose: the field is null, a handle with no via keeps it, and a handle that opens with one is a handle',
+  waveMisread(DEADLINE_PROSE) === '', waveMisread(DEADLINE_PROSE))
 
 // A number field followed straight by more digits or letters is a near miss, not a tail.
 const TAIL_NEAR = [`- round: 3 closed ${T} at abc blockers 2 alarm 1x`, `- alarm: round fired ${T} count 4.5`, '- auto-cycle: offline', '- auto-cycle: readying', '- auto-cycle: cycle 2 tree 9f2c1abz']
@@ -341,10 +346,15 @@ clause('clause 3h — without the parser: every trail opens with a space or a pu
   TRAILS.every((t) => /^[\s.,;:(]/.test(t) && /\w/.test(t)) && /via doctrine-backup; \S/.test(LIVE_WAVE) && / via doctrine-handoff, \S/.test(VIA_MID[1]) &&
   TAIL_NEAR.every((l) => /(\d x|1x|4\.5|offline|readying|abz)$/.test(l)), 'a trail that started with a word character would test a near miss, not a tail')
 
-clause('clause 3i \u2014 without the parser: each deadline fixture carries the clause, one after via and one before it, and no prose fixture carries a form time straight after the word',
-  DEADLINES.every(([l]) => new RegExp(`deadline ${D}`, 'i').test(l)) &&
+// Written out here rather than taken from D, so a fixture whose constant stopped being a time is caught.
+const CLAUSE = /\sdeadline\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z[.,;:]?(\s|$)/i
+clause('clause 3i \u2014 without the parser: each deadline fixture carries a time clause holding the deadline its row wants, one after via and one before it, each prose fixture carries none past the first word of its handle, and each table holds no two rows of one seat',
+  DEADLINES.every(([l, , , d]) => CLAUSE.test(l) && l.includes(d)) &&
   DEADLINES.some(([l]) => /via doctrine-\w+ deadline/.test(l)) && DEADLINES.some(([l]) => /deadline \S+ via/.test(l)) &&
-  DEADLINE_PROSE.every(([l]) => /deadline/.test(l) && !new RegExp(`deadline ${D}(\\s|$)`).test(l)), 'a prose fixture holding a real clause would make clause 1u a false failure, and a clause fixture without one would pass it by nothing')
+  new Set(DEADLINES.map(([, , , d]) => d)).size === 2 &&
+  DEADLINE_PROSE.every(([l, , , d]) => !CLAUSE.test(l.replace(/ handle \S+/, '')) && d === null) &&
+  [DEADLINES, DEADLINE_PROSE].every((t) => new Set(t.map((r) => r[1])).size === t.length),
+  'a clause fixture without a time, or a prose fixture holding a real clause, would blame a correct parser or pass by nothing')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),
