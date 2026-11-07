@@ -39,14 +39,18 @@ const num = Number
  *  unwrapLine; the hook-written forms (warned, cycle) and the rest are read only as written. */
 const AGENT = true
 
+/** A wave line's deadline clause, read from anywhere after the handle: either side of the via token or in the prose
+ *  after it. Not written as a form time (`deadline 5 minutes`), it is prose. */
+const DEADLINE = new RegExp(`\\s+deadline\\s+${TIME}[.,;:]?(?=\\s|$)`, 'i')
+
 /** Each form: its regex and how its captures become fields. The tier is kept as written, since judging a
  *  malformed tier is the gauge's job (E8-D11) and a parser that dropped the line would hide it. */
 const FORMS = [
   // The handle is the rest of the line, trimmed, up to the first via token, which may carry prose after it (E8-D24):
   // drives write `handle agent:<id> (worktree <path>, branch <name>)`, `handle worktree <path> branch <name>`
-  // and `handle <path> via doctrine-backup; <what the seat does>`. With no via the handle runs to the line end.
+  // and `handle <path> via doctrine-backup; <what the seat does>`. With no via the handle runs to the line end. A deadline clause (DEADLINE) comes out of the handle into its own field.
   [form(`wave:\\s+${TIME}\\s+seat\\s+(\\S+)\\s+handle\\s+(\\S.*?)(?:\\s+via\\s+(doctrine-handoff|doctrine-backup)${TAIL}|\\s*)`, ''),
-    (m) => ({ kind: 'wave', time: m[1], seat: m[2], handle: m[3], via: m[4] ? m[4].toLowerCase() : null })],
+    (m) => ({ kind: 'wave', time: m[1], seat: m[2], handle: m[3].replace(DEADLINE, ''), deadline: DEADLINE.exec(m.input)?.[1] ?? null, via: m[4] ? m[4].toLowerCase() : null })],
   [form(`round:\\s+(\\d+)\\s+closed\\s+${TIME}\\s+at\\s+(\\S+)\\s+blockers\\s+(\\d+)\\s+alarm\\s+(\\d+)`),
     (m) => ({ kind: 'round', n: num(m[1]), time: m[2], revision: m[3], blockers: num(m[4]), alarm: num(m[5]) })],
   [form(`finding:\\s+(\\S+)\\s+raised\\s+${TIME}\\s+(blocking|non-blocking)\\s+(\\S.*)`),

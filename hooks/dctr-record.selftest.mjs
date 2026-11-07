@@ -124,9 +124,9 @@ clause('clause 1g — ruling, alarm and question fields',
 // instance is a failure here, which the per-form clauses above cannot promise since each reads one instance.
 const E = (o) => o
 const EXPECTED = [
-  { kind: 'wave', time: T, seat: 'H', handle: 'none', via: null },
-  { kind: 'wave', time: T, seat: 'codex-1', handle: 'task-42', via: 'doctrine-handoff' },
-  { kind: 'wave', time: T, seat: 'backup-1', handle: 'a1b2', via: 'doctrine-backup' },
+  { kind: 'wave', time: T, seat: 'H', handle: 'none', deadline: null, via: null },
+  { kind: 'wave', time: T, seat: 'codex-1', handle: 'task-42', deadline: null, via: 'doctrine-handoff' },
+  { kind: 'wave', time: T, seat: 'backup-1', handle: 'a1b2', deadline: null, via: 'doctrine-backup' },
   { kind: 'round', n: 3, time: T, revision: '1fee265', blockers: 2, alarm: 1 },
   { kind: 'finding-raised', id: 'F1', time: T, blocking: true, text: 'the parser drops a form' },
   { kind: 'finding-raised', id: 'F2', time: T, blocking: false, text: 'the comment is vague' },
@@ -229,12 +229,12 @@ const DRIVE = [
   `  - wave: ${T} seat handoff-1 handle worktree wt/h branch h via doctrine-handoff`,
 ]
 const DRIVE_WANT = [
-  { kind: 'wave', time: '2026-09-25T06:47:05Z', seat: 'builder-limiter-reset', handle: 'agent:wave1-builder (worktree .doctrine/wt/wave1, branch wave1-limiter-reset)', via: null },
-  { kind: 'wave', time: '2026-09-25T07:27:00Z', seat: 'builder-w1', handle: 'worktree .worktrees/w1 branch phase/limiter-reset-w1', via: null },
-  { kind: 'wave', time: '2026-09-25T07:31:00Z', seat: 'simplify-reuse-simplification', handle: 'agent a85a6588ca552b170', via: null },
-  { kind: 'wave', time: '2026-09-25T07:33:00Z', seat: 'review-standards', handle: 'agent af1122132fc3e649c', via: null },
-  { kind: 'wave', time: T, seat: 'backup-2', handle: 'agent b77 (worktree wt/b)', via: 'doctrine-backup' },
-  { kind: 'wave', time: T, seat: 'handoff-1', handle: 'worktree wt/h branch h', via: 'doctrine-handoff' },
+  { kind: 'wave', time: '2026-09-25T06:47:05Z', seat: 'builder-limiter-reset', handle: 'agent:wave1-builder (worktree .doctrine/wt/wave1, branch wave1-limiter-reset)', deadline: null, via: null },
+  { kind: 'wave', time: '2026-09-25T07:27:00Z', seat: 'builder-w1', handle: 'worktree .worktrees/w1 branch phase/limiter-reset-w1', deadline: null, via: null },
+  { kind: 'wave', time: '2026-09-25T07:31:00Z', seat: 'simplify-reuse-simplification', handle: 'agent a85a6588ca552b170', deadline: null, via: null },
+  { kind: 'wave', time: '2026-09-25T07:33:00Z', seat: 'review-standards', handle: 'agent af1122132fc3e649c', deadline: null, via: null },
+  { kind: 'wave', time: T, seat: 'backup-2', handle: 'agent b77 (worktree wt/b)', deadline: null, via: 'doctrine-backup' },
+  { kind: 'wave', time: T, seat: 'handoff-1', handle: 'worktree wt/h branch h', deadline: null, via: 'doctrine-handoff' },
 ]
 const drive = parseRecord(['# drive record', ...DRIVE, 'prose after'].join('\n')).entries.map(({ line, ...e }) => e)
 let driveOk = true, driveWhy = ''
@@ -269,6 +269,33 @@ clause('clause 1r — a via token after the handle is read wherever it sits, wit
   JSON.stringify(viaMid) === JSON.stringify([['/root/backup_review', 'doctrine-backup'], ['agent x (wt/h)', 'doctrine-handoff']]) &&
   JSON.stringify(viaNot) === JSON.stringify([['x via doctrine-backups', null], ['x via doctrine-backup-old; prose', null]]),
   JSON.stringify([viaMid, viaNot]))
+
+// E14-D37..D39: a deadline clause is its own field wherever it sits after the handle, and the handle and via read as
+// they did without it. A deadline that is not a form time is prose, as the live line above shows.
+const D = '2026-11-07T01:00:00Z'
+const DEADLINES = [
+  [`- wave: ${T} seat s handle job-1 deadline ${D}`, 'job-1', D, null],
+  [`wave: ${T} seat s handle job-1 via doctrine-handoff deadline ${D}`, 'job-1', D, 'doctrine-handoff'],
+  [`- wave: ${T} seat s handle job-1 deadline ${D} via doctrine-backup`, 'job-1', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s handle agent b77 (worktree wt/b) deadline ${D}`, 'agent b77 (worktree wt/b)', D, null],
+  [`- wave: ${T} seat s handle job-1 via doctrine-backup; read-only; deadline ${D}.`, 'job-1', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s handle job-1 deadline ${D}, a note via doctrine-backup`, 'job-1 a note', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s handle job-1 DEADLINE ${D}`, 'job-1', D, null],
+]
+const DEADLINE_PROSE = [
+  [LIVE_WAVE, '/root/backup_review', null, 'doctrine-backup'],
+  [`- wave: ${T} seat s handle job-1 deadline 5 minutes`, 'job-1 deadline 5 minutes', null, null],
+  [`- wave: ${T} seat s handle job-1 deadline 2026-11-07`, 'job-1 deadline 2026-11-07', null, null],
+  [`- wave: ${T} seat s handle job-1 deadline ${D}x`, `job-1 deadline ${D}x`, null, null],
+]
+const waveRead = (rows) => rows.flatMap(([l, ...want]) => {
+  const e = parseRecord(l).entries[0]
+  return JSON.stringify([e?.handle, e?.deadline, e?.via]) === JSON.stringify(want) ? [] : [[l, e]]
+})
+clause('clause 1t \u2014 a deadline clause is read as its own field after the handle, before or after via or in the prose after a via, and the handle and via read as they do without it (E14-D37 to D39)',
+  waveRead(DEADLINES).length === 0, JSON.stringify(waveRead(DEADLINES)))
+clause('clause 1u \u2014 a deadline that is not a form time is prose: the field is null and a handle with no via keeps it',
+  waveRead(DEADLINE_PROSE).length === 0, JSON.stringify(waveRead(DEADLINE_PROSE)))
 
 // A number field followed straight by more digits or letters is a near miss, not a tail.
 const TAIL_NEAR = [`- round: 3 closed ${T} at abc blockers 2 alarm 1x`, `- alarm: round fired ${T} count 4.5`, '- auto-cycle: offline', '- auto-cycle: readying', '- auto-cycle: cycle 2 tree 9f2c1abz']
@@ -313,6 +340,11 @@ clause('clause 3g — without the parser: each drive wave line\'s handle holds a
 clause('clause 3h — without the parser: every trail opens with a space or a punctuation mark and holds a word, the live wave line has prose after its via, and each tail near miss runs a fixed part into a word character',
   TRAILS.every((t) => /^[\s.,;:(]/.test(t) && /\w/.test(t)) && /via doctrine-backup; \S/.test(LIVE_WAVE) && / via doctrine-handoff, \S/.test(VIA_MID[1]) &&
   TAIL_NEAR.every((l) => /(\d x|1x|4\.5|offline|readying|abz)$/.test(l)), 'a trail that started with a word character would test a near miss, not a tail')
+
+clause('clause 3i \u2014 without the parser: each deadline fixture carries the clause, one after via and one before it, and no prose fixture carries a form time straight after the word',
+  DEADLINES.every(([l]) => new RegExp(`deadline ${D}`, 'i').test(l)) &&
+  DEADLINES.some(([l]) => /via doctrine-\w+ deadline/.test(l)) && DEADLINES.some(([l]) => /deadline \S+ via/.test(l)) &&
+  DEADLINE_PROSE.every(([l]) => /deadline/.test(l) && !new RegExp(`deadline ${D}(\\s|$)`).test(l)), 'a prose fixture holding a real clause would make clause 1u a false failure, and a clause fixture without one would pass it by nothing')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),
