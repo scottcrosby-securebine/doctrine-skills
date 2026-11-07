@@ -283,6 +283,9 @@ const DEADLINES = [
   [`- wave: ${T} seat s7 handle job-1 DEADLINE ${D2}`, 's7', 'job-1', D2, null],
   [`- wave: ${T} seat s8 handle job-1\tdeadline\t${D}`, 's8', 'job-1', D, null],
   [`- wave: ${T} seat s9 handle deadline ${D2} deadline ${D} via doctrine-backup`, 's9', `deadline ${D2}`, D, 'doctrine-backup'],
+  [`- wave: ${T} seat s10 handle job-1 deadline ${D} via doctrine-backup deadline ${D2}`, 's10', 'job-1', D, 'doctrine-backup'],
+  [`- wave: ${T} seat s11 handle job-1 deadline ${D2}; a note`, 's11', 'job-1 a note', D2, null],
+  [`- wave: ${T} seat s12 handle job-1 deadline ${D}: a note`, 's12', 'job-1 a note', D, null],
 ]
 const DEADLINE_PROSE = [
   [LIVE_WAVE, 'backup-review', '/root/backup_review', null, 'doctrine-backup'],
@@ -297,10 +300,11 @@ const waveMisread = (rows) => {
   const want = rows.map(([l, seat, handle, deadline, via], i) => ({ kind: 'wave', time: /wave: (\S+)/.exec(l)[1], seat, handle, deadline, via, line: i + 1 }))
   try { deepStrictEqual(parseRecord(rows.map(([l]) => l).join('\n')).entries, want); return '' } catch (e) { return String(e.message).slice(0, 600) }
 }
+const deadlineMisread = waveMisread(DEADLINES), proseMisread = waveMisread(DEADLINE_PROSE)
 clause('clause 1t \u2014 a deadline clause is read as its own field after the handle\'s first word, before or after via or in the prose after a via, and every other field of the entry reads as it does without it (E14-D37 to D39)',
-  waveMisread(DEADLINES) === '', waveMisread(DEADLINES))
+  deadlineMisread === '', deadlineMisread)
 clause('clause 1u \u2014 a deadline that is not a form time clause is prose: the field is null, a handle with no via keeps it, and a handle that opens with one is a handle',
-  waveMisread(DEADLINE_PROSE) === '', waveMisread(DEADLINE_PROSE))
+  proseMisread === '', proseMisread)
 
 // A number field followed straight by more digits or letters is a near miss, not a tail.
 const TAIL_NEAR = [`- round: 3 closed ${T} at abc blockers 2 alarm 1x`, `- alarm: round fired ${T} count 4.5`, '- auto-cycle: offline', '- auto-cycle: readying', '- auto-cycle: cycle 2 tree 9f2c1abz']
@@ -347,12 +351,13 @@ clause('clause 3h — without the parser: every trail opens with a space or a pu
   TAIL_NEAR.every((l) => /(\d x|1x|4\.5|offline|readying|abz)$/.test(l)), 'a trail that started with a word character would test a near miss, not a tail')
 
 // Written out here rather than taken from D, so a fixture whose constant stopped being a time is caught.
-const CLAUSE = /\sdeadline\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z[.,;:]?(\s|$)/i
-clause('clause 3i \u2014 without the parser: each deadline fixture carries a time clause holding the deadline its row wants, one after via and one before it, each prose fixture carries none past the first word of its handle, and each table holds no two rows of one seat',
-  DEADLINES.every(([l, , , d]) => CLAUSE.test(l) && l.includes(d)) &&
+const CLAUSE = /\sdeadline\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)[.,;:]?(?:\s|$)/i
+const pastHandleWord = (l) => l.replace(/ handle \S+/, '')
+clause('clause 3i \u2014 without the parser: the first time clause past the first word of each deadline fixture\'s handle is the deadline its row wants, one after via and one before it, each prose fixture carries none past the first word of its handle, and each table holds no two rows of one seat',
+  DEADLINES.every(([l, , , d]) => CLAUSE.exec(pastHandleWord(l))?.[1] === d) &&
   DEADLINES.some(([l]) => /via doctrine-\w+ deadline/.test(l)) && DEADLINES.some(([l]) => /deadline \S+ via/.test(l)) &&
   new Set(DEADLINES.map(([, , , d]) => d)).size === 2 &&
-  DEADLINE_PROSE.every(([l, , , d]) => !CLAUSE.test(l.replace(/ handle \S+/, '')) && d === null) &&
+  DEADLINE_PROSE.every(([l, , , d]) => !CLAUSE.test(pastHandleWord(l)) && d === null) &&
   [DEADLINES, DEADLINE_PROSE].every((t) => new Set(t.map((r) => r[1])).size === t.length),
   'a clause fixture without a time, or a prose fixture holding a real clause, would blame a correct parser or pass by nothing')
 
