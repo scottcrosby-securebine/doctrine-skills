@@ -1067,6 +1067,8 @@ const MUTATIONS = [
     from: "record = (ord ? ord[1] : rest) || null", to: "record = rest || null" },
   { name: 'project: a misspelt ordering clause reads as a record path', file: 'dctr-project.mjs', clause: 'members — an ordering clause with no merged [1: trips]',
     from: "const notPath = /\\s|^after$/i.test(record ?? '')", to: "const notPath = false" },
+  { name: 'project: a capitalised bare after reads as a record path', file: 'dctr-project.mjs', clause: 'members — a misspelt ordering clause, After [1: trips]',
+    from: "const notPath = /\\s|^after$/i.test(record ?? '')", to: "const notPath = /\\s|^after$/.test(record ?? '')" },
   { name: 'project: a bare after reads as a record path', file: 'dctr-project.mjs', clause: 'members — a misspelt ordering clause, after [1: trips]',
     from: "const notPath = /\\s|^after$/i.test(record ?? '')", to: "const notPath = /\\s/.test(record ?? '')" },
   { name: 'project: a misspelt ordering clause still reaches memberRecords', file: 'dctr-project.mjs', clause: 'members [1: memberRecords keeps a record path without its clause, and no clause reads as a path]',

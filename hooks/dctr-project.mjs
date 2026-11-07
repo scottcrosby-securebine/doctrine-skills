@@ -29,6 +29,7 @@
 //     file's destination rulings are compared with its ## Open issues rows;
 //   - a planned phase name on an epic that is not yet Open;
 //   - that an ordering clause's predecessor has merged, or that its gate passed;
+//   - that a one-token record path is a path: `after-a-merged` reads as one, ordering nothing;
 //   - where an impact ruling sits: one naming an ID that any done-means-change ruling names resolves,
 //     wherever it is written;
 //   - that a changed end-state Coverage line has a coverage ruling, or that a coverage ruling's items had
@@ -117,7 +118,7 @@ export function parseDoc(text) {
       const ph = /^- phase (.+?)(?::\s*(.*))?$/.exec(t)
       if (ph) {
         const rest = ph[2]?.trim() ?? '', ord = /^(?:(.*\S)\s+)?after (\S+) merged$/.exec(rest), record = (ord ? ord[1] : rest) || null
-        // A record path is one token, so a misspelt ordering clause never reaches memberRecords as a path.
+        // A record path is one token and never the word after, so a misspelt clause holding a space is reported.
         const notPath = /\s|^after$/i.test(record ?? '')
         if (notPath) odd()
         doc.phases.push({ name: ph[1].trim(), record: notPath ? null : record, after: ord?.[2] ?? null, line })

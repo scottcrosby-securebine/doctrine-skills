@@ -683,7 +683,7 @@ const CASES = [
   { name: 'members — two ordering clauses on one line', rule: 'members', frag: '## Members line "- phase p2: after p1 merged after p3 merged"', at: E1,
     edits: [[E1, '- phase p2\n', '- phase p2: after p1 merged after p3 merged\n']],
     defect: (f) => /^- phase p2: after p1 merged after p3 merged$/m.test(txt(f, E1)) },
-  ...['After p1 merged', 'afer p1 merged', 'after: p1 merged', 'x.md,after p1 merged', 'after'].map((clause) => (
+  ...['After p1 merged', 'afer p1 merged', 'after: p1 merged', 'x.md,after p1 merged', 'after', 'After', 'AFTER after p1 merged'].map((clause) => (
     { name: `members — a misspelt ordering clause, ${clause}`, rule: 'members', frag: `## Members line "- phase p2: ${clause}"`, at: E1,
       edits: [[E1, '- phase p2\n', `- phase p2: ${clause}\n`]], defect: (f) => txt(f, E1).split('\n').includes(`- phase p2: ${clause}`) })),
   { name: 'id — an ordering clause with no colon is not an ordering clause', rule: 'id', frag: 'phase name', at: E1,
