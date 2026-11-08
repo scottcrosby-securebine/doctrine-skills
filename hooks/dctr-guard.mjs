@@ -4,7 +4,7 @@
 // DCTR_ROLE is `orchestrator` (runRole's reading, made here before the library loads), and it does not stand down on agent_id, so it covers the orchestrator's seats,
 // which inherit that environment wherever their working tree is. There it allows a Write, Edit, MultiEdit or NotebookEdit
 // only to a path guardAllowed in dctr-lib.mjs allows, judged where the path really lies (guardReal), against the context
-// guardContext reads from the run; it refuses every other one with the PreToolUse deny shape and, where the run resolved
+// guardContext reads from the run; it refuses every other one with the PreToolUse deny shape and, where the run resolves
 // (a context error after that included) and the call names its path, appends one line `<ISO 8601 UTC time> <tool> <path>` to <run>/guard.log, the path as the
 // call gave it, made absolute against its cwd and never normalized, a backslash written \\, LF \n and CR \r. It keeps no latch, so an identical retry is
 // refused again. Every other tool, Bash and every MCP tool among them, goes through.
@@ -16,10 +16,14 @@
 // The judgement runs in a child process, this file run with the argument `judge`, and this process waits for it no
 // longer than BOUND_MS: past that it kills the child and refuses, so a read that stalls cannot run the hook past the
 // host's timeout for it (30 s in hooks.json), which the host takes as no objection (GS-1(a)). The child never writes
-// guard.log: once the run is decided, and before the reads that can stall, it hands this process the line, and this
-// process appends it for every refusal, the child's own, one at the bound, a judgement that dies and one whose output
-// is neither empty nor the deny shape, through a second child run with the argument `log` and bounded the same way,
-// so a stalled append cannot hold the deny either. This process makes no filesystem call and loads no library, so
+// guard.log: once it has read the call, and before it reads the run or anything else on disk, it hands this process the
+// line and the session's directory, and for every refusal, the child's own, one at the bound, a judgement that dies
+// and one whose output is neither empty nor the deny shape, this process passes them to a second child run with the
+// argument `log` and bounded the same way, which decides the run by guardRun, the judgement's own rule, and appends.
+// So a stall in the judgement's reads, the run's own lstat or realpath among them, costs no line, and a stalled append
+// cannot hold the deny. Where DCTR_RUN is set the run is named with no read; where it is unset the log child makes
+// runRoot's reads, the .git walk and the project file, itself, so a stall there costs the line and never the deny,
+// as a stall on the log child's own reads of the run does. This process makes no filesystem call and loads no library, so
 // nothing it does can stall, and only the orchestrator's session pays for the children. Every decision is written
 // before exit through the write's own callback, since a pipe write past its buffer is otherwise cut off at exit.
 
@@ -53,11 +57,11 @@ try {
   const field = lib.GUARD_TOOLS[tool], written = payload.tool_input?.[field]
   if (typeof written !== 'string' || !written) throw new Error(`the ${tool} call carries no ${field}`)
   shown = path.isAbsolute(written) ? written : `${cwd}/${written}`
-  const dir = process.env.CLAUDE_PROJECT_DIR || process.cwd(), decided = lib.guardRun(process.env, dir)
+  const dir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
   const line = `${new Date().toISOString()} ${tool} ${shown.replace(/[\\\r\n]/g, (c) => ESC[c])}\n`
-  // Handed on before the reads that can stall, so a refusal at the bound still logs (E15-D24).
-  if (decided.run) await new Promise((sent) => process.send({ file: path.join(decided.run, 'guard.log'), line }, sent))
-  const ctx = lib.guardContext(process.env, dir, {}, decided)
+  // Handed on before any read of the run, so a refusal at the bound still logs; the log child decides the run (E15-D24).
+  await new Promise((sent) => process.send({ dir, line }, sent))
+  const ctx = lib.guardContext(process.env, dir)
   if (lib.guardAllowed(lib.guardReal(written, cwd), ctx)) process.exit(0)
   await deny(`doctrine guard: the orchestrator writes only its record, the Records path, docs/PROJECT.md, docs/epics/, its memory file, docs/handoffs/ and the .doctrine/auto-cycle files; this ${tool} of ${shown} is outside them, so it belongs to a lane.`)
 } catch (e) {
@@ -100,9 +104,13 @@ function bounded() {
   })
 }
 
-// The `log` child: append the line the parent read from the judgement. Any error is the parent's to ignore.
+// The `log` child: decide the run the judgement's directory names, by guardRun as guardContext does, and append the
+// line the parent read from the judgement to its guard.log. Any error is the parent's to ignore.
 async function append() {
   const fs = (await import('node:fs')).default
-  try { const { file, line } = JSON.parse(fs.readFileSync(0, 'utf8')); fs.appendFileSync(file, line) } catch { /* refused anyway */ }
+  try {
+    const { dir, line } = JSON.parse(fs.readFileSync(0, 'utf8')), { run } = (await import('./dctr-lib.mjs')).guardRun(process.env, dir)
+    if (run) fs.appendFileSync(`${run}/guard.log`, line)
+  } catch { /* refused anyway */ }
   process.exit(0)
 }

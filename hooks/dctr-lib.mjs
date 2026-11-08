@@ -14,9 +14,10 @@ export { kickoffHandoff, handoffHeader, restoreState }
 // filesystem outside the functions named here. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
 // fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is. The functions that read the
 // filesystem are runRoot, which looks for `.git` and reads the project file because callers must reach it with no
-// arguments (E15-D94), and the write guard's presentStrict, guardSpell, ignoresCase, guardReal and guardContext, which
-// test presence, walk a path's links, spell it through realpath, read the volume's case and read the run, its checkout
-// and the kickoff chain. None of them starts a process.
+// arguments (E15-D94), and the write guard's presentStrict, guardSpell, ignoresCase, guardReal, guardRun and
+// guardContext, which test presence, walk a path's links, spell it through realpath, read the volume's case, decide the
+// folder a refusal is logged in (through runRoot, lstat, realpath, ignoresCase and followLinks) and read the run, its
+// checkout and the kickoff chain. None of them starts a process.
 //
 // The I/O lives in `dctr-seat.mjs` (the hook), `dctr-render.mjs` (the pane renderer), `dctr-gate.mjs`
 // (the long-check launcher) and `dctr-state.mjs` (the markers, lock, log and herdr call they share).
@@ -1226,20 +1227,22 @@ export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics'
 
 /**
  * guardContext's run: `named`, runRoot's path, and `run`, the folder a refusal is logged in, decided as guardContext
- * says, apart from its other reads, so the hook can hand it on before any of them stalls. Throws only where runRoot
- * names no run or a read runRoot makes fails.
+ * says, apart from its other reads, so the hook's log child decides it apart from the judgement, by this function and
+ * no copy. Throws only where runRoot names no run or a read runRoot makes fails.
  */
 export function guardRun(env = process.env, cwd = process.cwd(), io = {}) {
   const named = runRoot(env, cwd, presentStrict)
   if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
-  const { lstat = fs.lstatSync, realpath = fs.realpathSync.native } = io, asked = path.resolve(cwd, named)
+  const { lstat = fs.lstatSync, readlink = fs.readlinkSync, realpath = fs.realpathSync.native } = io, asked = path.resolve(cwd, named)
   const answer = (q) => { try { return q() } catch { return false } }
   // Two reads of the case, either answering: the volume's own (ignoresCase on the parent), and whether the lower-case
   // name is this very folder, so one failed lstat cannot leave a valid run with no log.
   const same = (a, b) => { const x = lstat(a), y = lstat(b); return x.dev === y.dev && x.ino === y.ino }
   const reads = (p) => path.basename(p) === 'orchestrate' || (path.basename(p).toLowerCase() === 'orchestrate' &&
     (answer(() => ignoresCase(path.dirname(p), lstat)) || answer(() => same(p, path.join(path.dirname(p), 'orchestrate')))))
-  return { named, run: answer(() => !lstat(asked).isSymbolicLink() && reads(asked)) || answer(() => reads(realpath(asked))) ? asked : null }
+  // A link's target is read two ways too, realpath and the walk of its links, so an EIO on one leaves the other's answer.
+  const walked = () => followLinks(asked, { strict: true, lstat, readlink })
+  return { named, run: answer(() => !lstat(asked).isSymbolicLink() && reads(asked)) || answer(() => reads(realpath(asked))) || answer(() => reads(walked())) ? asked : null }
 }
 
 /**
@@ -1251,8 +1254,9 @@ export function guardRun(env = process.env, cwd = process.cwd(), io = {}) {
  * not there. Records, the checkout, the names and the record are as guardReal gives them. Every presence test is
  * strict, so any other error throws. The returned `run`, and the `run` every error thrown after runRoot carries, is the
  * folder a refusal is logged in (E15-D24): runRoot's path resolved as text, decided before and apart from the reads
- * above, so an error in any of them still logs. It is that path where its own name reads as orchestrate and either an
- * lstat shows it is no link or its realpath's name reads so too, and null otherwise, so a folder of another name, or a
+ * above, so an error in any of them still logs. It is that path where an lstat shows it is no link and its own
+ * name reads as orchestrate, where its realpath's name reads so, or where the walk of its links (followLinks) ends at a
+ * name that reads so, and null otherwise, so a folder of another name, or a
  * link to one, never gains a guard.log (N3). A name reads as orchestrate exactly, or in another case where ignoresCase
  * reads the volume as ignoring case or where the lower-case name lstats as the same folder. Each of those reads that
  * fails answers nothing. `io` is guardReal's, injected by

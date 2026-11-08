@@ -5,7 +5,7 @@
 // Clause 1 pins guardAllowed in dctr-lib.mjs, the one definition of the allowed paths, each allowed path beside a
 // refused twin, and the hooks.json reader this suite uses, on planted copies and on the real file. Clause 2 drives
 // hooks/dctr-guard.mjs end to end on a fixture run, spawning it with a JSON payload on stdin and a tripwire `herdr`
-// first on PATH, some runs under a preload that makes one fs operation throw EIO. Clause 3 proves the fixtures carry what each case needs without calling the guard.
+// first on PATH, some runs under a preload that makes one fs operation throw EIO or stall, or makes a judgement die or print garbage when it hits. Clause 3 proves the fixtures carry what each case needs without calling the guard.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -159,6 +159,9 @@ fs.mkdirSync(path.join(lc, 'docs/handoffs'), { recursive: true })
 // A misnamed run folder, and a link called orchestrate pointing at it.
 const misnamed = path.join(orch, 'misnamed'), linkRun = path.join(tmp, 'linkrun/orchestrate')
 fs.mkdirSync(misnamed, { recursive: true }); fs.mkdirSync(path.dirname(linkRun), { recursive: true }); fs.symlinkSync(misnamed, linkRun)
+// A link to the valid run, named orchestrate itself: the run reached through a link of its own (GT5).
+const linkValid = path.join(tmp, 'linkvalid/orchestrate')
+fs.mkdirSync(path.dirname(linkValid), { recursive: true }); fs.symlinkSync(run, linkValid)
 const uc = path.join(tmp, 'uc'), ucRun = path.join(uc, '.doctrine/records/Orchestrate')
 fs.mkdirSync(path.join(uc, '.git'), { recursive: true }); fs.mkdirSync(ucRun, { recursive: true })
 put(path.join(uc, 'docs/PROJECT.md'), '# Project\n\nRecords: .doctrine/records\n')
@@ -182,11 +185,16 @@ const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orc
 // A match starting with = names one path exactly. The op `print` makes a judgement print the match and exit 0.
 // The op `exit` instead ends, with exit 3, any process run with the argument `judge`, the hook's own judgement, and
 // `spawn` makes child_process.spawn behave as it does on EMFILE: a child with no stdio that emits 'error' on the next tick.
+// A fourth element `true` confines the fault to a judgement, leaving the log child's reads alone. A third element that
+// is a string acts in a judgement only, when the operation hits: `exit` ends it with 3, `kill` with SIGKILL, and
+// `print:<text>` prints the text and exits 0, so a judgement can die or print garbage after it has handed on its line.
 const inject = path.join(tmp, 'inject.mjs')
-put(inject, "import fs from 'node:fs'\nconst [op, match, stall] = JSON.parse(process.env.GUARD_FAULT)\n" +
+put(inject, "import fs from 'node:fs'\nconst [op, match, stall, only] = JSON.parse(process.env.GUARD_FAULT)\n" +
   "const [own, key] = op.includes('.') ? [fs[op.split('.')[0]], op.split('.')[1]] : [fs, op], orig = own[key]\n" +
   "const hit = (p) => match.startsWith('=') ? String(p) === match.slice(1) : String(p).includes(match)\n" +
-  "own[key] = function (p, ...a) { if (hit(p)) { if (!stall) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stall) } return orig.call(this, p, ...a) }\n" +
+  "const acts = typeof stall === 'string', scoped = !(only || acts) || process.argv.includes('judge')\n" +
+  "const act = (s) => s === 'kill' ? process.kill(process.pid, 'SIGKILL') : s === 'exit' ? process.exit(3) : (fs.writeSync(1, s.slice(6)), process.exit(0))\n" +
+  "own[key] = function (p, ...a) { if (scoped && hit(p)) { if (acts) act(stall); if (!stall) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stall) } return orig.call(this, p, ...a) }\n" +
   "if (key === 'realpathSync') own[key].native = orig.native\n" +
   "if (op === 'exit' && process.argv.includes('judge')) process.exit(3)\n" +
   "if (op === 'print' && process.argv.includes('judge')) { process.stdout.write(match, () => process.exit(0)); await new Promise(() => {}) }\n" +
@@ -481,8 +489,8 @@ clause('clause 2za — EIO on each filesystem call guardContext and the hook mak
 
 // A read or an append that stalls past the guard's internal bound still ends in a deny printed within it, with headroom
 // before the host's timeout for the guard's group in hooks.json (GS-1(a), GQ2). Both run at once, each stalling 20 s.
-const timed = (fault, file = 'src/a.txt') => new Promise((resolve) => {
-  const t0 = Date.now(), ch = spawn('node', ['--import', pathToFileURL(inject).href, hookSrc], { env: { ...BASE, ...ORCH, GUARD_FAULT: JSON.stringify(fault) }, cwd: orch })
+const timed = (fault, file = 'src/a.txt', env = {}) => new Promise((resolve) => {
+  const t0 = Date.now(), ch = spawn('node', ['--import', pathToFileURL(inject).href, hookSrc], { env: { ...BASE, ...ORCH, ...env, GUARD_FAULT: JSON.stringify(fault) }, cwd: orch })
   let out = ''
   ch.stdout.on('data', (b) => { out += b })
   const kill = setTimeout(() => ch.kill('SIGKILL'), 15000)
@@ -520,6 +528,29 @@ const printed = [['a truncated deny', '{"hookSpecificOutput":{"hookEventName":"P
 clause('clause 2zd — a refusal naming a path of over 64 KB prints the whole deny, which parses, and logs one line holding the path as given; a judgement that prints a truncated deny, an allow or other text refuses a write it would allow (E15-D24, GS-1(a), GT1)',
   long.verdict === 'deny' && long.out.length > 65536 && longLines.length === 1 && longLines[0].endsWith(` Write ${orch}/${longAsked}`) && printed.every((p) => p.verdict === 'deny'),
   `${long.verdict} exit ${long.code} ${long.out.length} bytes, lines ${longLines.length} ${JSON.stringify(printed)}`)
+
+// The judgement hands on its line before it reads the run, and the log child decides the run itself, so a stall on the
+// run's own lstat, or on the realpath of a link to the run, confined to the judgement, still ends in a deny at the bound
+// with one line; and a link to a valid run whose realpath throws EIO is still the run, read through its link (GT4, GT5).
+const lineOf = (f, from) => logLines().slice(from).filter((l) => l.endsWith(` Write ${orch}/${f}`)).length
+const runStallBefore = logLines().length
+const runStalls = await Promise.all([timed(['lstatSync', 'records/orchestrate', 20000, true], 'src/stall-lstat.txt'),
+  timed(['realpathSync.native', 'linkvalid/orchestrate', 20000, true], 'src/stall-realpath.txt', { DCTR_RUN: linkValid })])
+const runStallLines = { lstat: lineOf('src/stall-lstat.txt', runStallBefore), realpath: lineOf('src/stall-realpath.txt', runStallBefore) }
+const linkRows = [['the link, nothing faulted', null, 'src/link-ok.txt'], ['the link, its realpath EIO', ['realpathSync.native', 'linkvalid/orchestrate'], 'src/link-eio.txt']]
+  .map(([what, fault, f]) => { const before = logLines().length, c = hookRun({ ...ORCH, DCTR_RUN: linkValid }, W(f), fault ? { fault } : {}); return { what, verdict: c.verdict, lines: lineOf(f, before) } })
+clause('clause 2ze — the run\'s own lstat and the realpath of a link to the run, each stalled 20 s in the judgement alone, end in a deny with at least 5 s to spare before the guard\'s hooks.json timeout and one guard.log line each; a link named orchestrate to the valid run is refused with one line, its realpath EIO or not (E15-D24, GT4, GT5)',
+  runStalls.every((s) => s.deny && s.ms + 5000 <= hostMs) && runStallLines.lstat === 1 && runStallLines.realpath === 1 && linkRows.every((r) => r.verdict === 'deny' && r.lines === 1),
+  `${JSON.stringify(runStalls)} ${JSON.stringify(runStallLines)} ${JSON.stringify(linkRows)}`)
+
+// A judgement that dies or prints garbage after it has handed on its line is refused and still logged: each fault fires
+// on the kickoff read, which the judgement makes after the hand-off, on a write it would allow (E15-D24, GT7).
+const postRows = [['exit 3', 'exit'], ['SIGKILL', 'kill'], ['garbage', 'print:ok']].map(([what, a], i) => {
+  const f = `docs/handoffs/h-post${i}.md`, before = logLines().length, c = hookRun(ORCH, W(f), { fault: ['readFileSync', 'SESSION_MEMORY.md', a] })
+  return { what, verdict: c.verdict, lines: lineOf(f, before) }
+})
+clause('clause 2zf — a judgement that ends with exit 3, is killed with SIGKILL or prints text that is not the deny, each after it has handed on its line, refuses a write it would allow and appends exactly one guard.log line (E15-D24, GT7)',
+  postRows.every((r) => r.verdict === 'deny' && r.lines === 1), JSON.stringify(postRows))
 
 const caseAlias = insensitive ? cases([
   ['DOCS/PROJECT.md', ORCH, W('DOCS/PROJECT.md'), 'allow'], ['Docs/Handoffs/h10.md', ORCH, E('Docs/Handoffs/h10.md'), 'allow'],
@@ -611,6 +642,16 @@ const readStall = (() => { const t0 = Date.now(); preloadRun(['readFileSync', 'S
 clause('clause 3p — without the guard: the exact-match preload makes the lstat of the uc run\'s parent throw EIO and leaves the run\'s own lstat alone, its print op ends a judge with exit 0 having printed the text and nothing else and leaves any other process alone, its stall holds the kickoff read for its time, and the long path is over 64 KB and is src/a.txt by its text',
   exact.join() === 'EIO,none' && prints.join() === '0:ok,0:ran\n' && readStall >= 1500 && Buffer.byteLength(longAsked) > 65536 && path.resolve(orch, longAsked) === srcA,
   JSON.stringify({ exact, prints, readStall }))
+// The scoped stall and the after-hand-off actions, proved on their own: each fires in a process run with `judge` and
+// leaves any other alone, and the link to the valid run is a link whose realpath is the run and whose realpath faults.
+const mem = path.join(orch, 'SESSION_MEMORY.md'), readMem = `import fs from 'node:fs'; fs.readFileSync(${JSON.stringify(mem)}); console.log('ran')`
+const scopedMs = [['judge'], []].map((a) => { const t0 = Date.now(); const r = preloadRun(['lstatSync', 'records/orchestrate', 1500, true], lcode(run), ...a); return [Date.now() - t0, r.stdout.trim()] })
+const acted = ['exit', 'kill', 'print:ok'].map((a) => [['judge'], []].map((x) => { const r = preloadRun(['readFileSync', 'SESSION_MEMORY.md', a], readMem, ...x); return `${r.status}/${r.signal}/${r.stdout.trim()}` }).join(' '))
+clause('clause 3q — without the guard: the preload\'s scoped stall holds a judgement\'s lstat of the run for its time and leaves another process\'s alone, its exit, kill and print actions end a judgement on the kickoff read with exit 3, SIGKILL, or exit 0 having printed the text, and leave another process reading the file, and the link to the valid run is a link whose realpath is the run, a folder named orchestrate, and whose realpath the preload faults',
+  scopedMs[0][0] >= 1500 && scopedMs[1][0] < 1500 && scopedMs.every(([, o]) => o === 'none') &&
+  acted.join() === '3/null/ 0/null/ran,null/SIGKILL/ 0/null/ran,0/null/ok 0/null/ran' &&
+  fs.lstatSync(linkValid).isSymbolicLink() && fs.realpathSync.native(linkValid) === run && fs.statSync(run).isDirectory() && path.basename(run) === 'orchestrate' && preloadCode('realpathSync.native', linkValid) === 'EIO',
+  JSON.stringify({ scopedMs, acted }))
 const deepKernel = fs.realpathSync.native(`${orch}/docs/handoffs/deep/../../..`)
 clause('clause 3j — without the guard: deep/../../.. resolves (libc realpath) inside docs/handoffs while its text reading is the checkout, so src/a.txt\'s kernel and text readings differ; deep/x.md lies under docs/handoffs by both',
   deepKernel === path.join(orch, 'docs/handoffs') && path.resolve(orch, 'docs/handoffs/deep/../../../src/a.txt') === srcA &&
