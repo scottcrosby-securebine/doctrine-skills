@@ -134,6 +134,17 @@ fs.mkdirSync(outside, { recursive: true })
 fs.symlinkSync(outside, path.join(orch, 'docs/handoffs/out'))
 fs.symlinkSync(path.join(outside, 'new.txt'), path.join(orch, 'docs/handoffs/dangling'))
 fs.symlinkSync(records, path.join(orch, 'link-records'))
+// A link whose kernel reading of `deep/../../..` stays in docs/handoffs while its text reading climbs to the checkout.
+fs.mkdirSync(path.join(orch, 'docs/handoffs/d1/d2/d3'), { recursive: true })
+fs.symlinkSync('d1/d2/d3', path.join(orch, 'docs/handoffs/deep'))
+// A repo nested inside the orchestrator's checkout, with no project file of its own.
+const inner = path.join(orch, 'inner')
+fs.mkdirSync(path.join(inner, '.git'), { recursive: true })
+// A checkout whose project file and folders are stored in lower case, with a run of its own.
+const lc = path.join(tmp, 'lc'), lcRun = path.join(lc, '.doctrine/records/orchestrate')
+fs.mkdirSync(path.join(lc, '.git'), { recursive: true }); fs.mkdirSync(lcRun, { recursive: true })
+put(path.join(lc, 'docs/project.md'), '# Project\n\nRecords: .doctrine/records\n'); put(path.join(lc, 'session_memory.md'))
+fs.mkdirSync(path.join(lc, 'docs/handoffs'), { recursive: true })
 // A copy of the hook beside a dctr-lib.mjs that cannot load.
 const broken = path.join(tmp, 'broken/hooks')
 fs.mkdirSync(broken, { recursive: true })
@@ -150,7 +161,8 @@ const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orc
 // A preload that makes one fs operation throw EIO on any path containing a given string, the hook's real fs otherwise.
 const inject = path.join(tmp, 'inject.mjs')
 put(inject, "import fs from 'node:fs'\nconst [op, match] = JSON.parse(process.env.GUARD_FAULT)\nconst orig = fs[op]\n" +
-  "fs[op] = function (p, ...a) { if (String(p).includes(match)) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); return orig.call(this, p, ...a) }\n")
+  "fs[op] = function (p, ...a) { if (String(p).includes(match)) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); return orig.call(this, p, ...a) }\n" +
+  "if (op === 'statSync') { const ex = fs.existsSync; fs.existsSync = (p) => !String(p).includes(match) && ex(p) }\n")
 const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault } = {}) => {
   const args = fault ? ['--import', pathToFileURL(inject).href, hook] : [hook]
   const r = spawnSync('node', args, { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...BASE, ...env, ...(fault ? { GUARD_FAULT: JSON.stringify(fault) } : {}) }, cwd, encoding: 'utf8' })
@@ -243,11 +255,13 @@ const paths = cases([
   ['.. out of docs/handoffs', ORCH, W('docs/handoffs/../../src/a.txt'), 'deny'],
   ['.. staying in docs/handoffs', ORCH, W('docs/handoffs/../handoffs/h3.md'), 'allow'],
   ['through a link under docs/handoffs to a folder outside', ORCH, W('docs/handoffs/out/x.txt'), 'deny'],
-  ['.. after a link, lexically inside docs/handoffs', ORCH, W('docs/handoffs/out/../a.txt'), 'deny'],
+  ['.. after a link, judged as text: docs/handoffs/out/../a.txt is docs/handoffs/a.txt, where Claude Code writes it', ORCH, W('docs/handoffs/out/../a.txt'), 'allow'],
+  ['.. after a link, judged as text: deep/../../../src/a.txt is src/a.txt, though the kernel reading stays in docs/handoffs', ORCH, W('docs/handoffs/deep/../../../src/a.txt'), 'deny'],
+  ['a link followed after the text is normalized: deep/x.md lies in docs/handoffs/d1/d2/d3', ORCH, W('docs/handoffs/deep/x.md'), 'allow'],
   ['a dangling link under docs/handoffs to a file outside', ORCH, E(path.join(orch, 'docs/handoffs/dangling')), 'deny'],
   ['a link into the Records path', ORCH, W('link-records/x.md'), 'allow'],
 ])
-clause('clause 2k — a path is judged where it really lies: .. traversal, a link under an allowed folder to one outside, .. after a link, a dangling link, and a link into Records allowed',
+clause('clause 2k — a path is judged at the real target of its text-normalized form, where Claude Code writes it: .. traversal, a link under an allowed folder to one outside, .. after a link applied to the text before any link is followed (both directions), a dangling link, and a link into Records allowed (GP1)',
   wrong(paths).length === 0, show(paths))
 
 const errs = cases([
@@ -282,10 +296,10 @@ clause('clause 2n — the orchestrator\'s MultiEdit is judged by file_path as an
 // Each refusal's line names its own call's path as given, made absolute and never normalized, and a refused call that
 // names no path is refused with no line (E15-D24, D192).
 const ownBefore = logLines().length
-const own = cases([['.. after a link', ORCH, W('docs/handoffs/out/../a.txt'), 'deny'], ['a Write with no file_path', ORCH, P('Write', { content: 'x' }), 'deny'],
+const own = cases([['.. after a link', ORCH, W('docs/handoffs/deep/../../../src/a.txt'), 'deny'], ['a Write with no file_path', ORCH, P('Write', { content: 'x' }), 'deny'],
   ['through a folder link', ORCH, W(path.join(orch, 'docs/handoffs/out/x.txt')), 'deny']])
 const ownAdded = logLines().slice(ownBefore).map((l) => l.replace(/^\S+ /, ''))
-const ownWant = [`Write ${orch}/docs/handoffs/out/../a.txt`, `Write ${orch}/docs/handoffs/out/x.txt`]
+const ownWant = [`Write ${orch}/docs/handoffs/deep/../../../src/a.txt`, `Write ${orch}/docs/handoffs/out/x.txt`]
 clause('clause 2o — each refusal\'s line names that call\'s own path as given, absolute and not normalized, and a refused Write naming no path adds no line (E15-D24, D192)',
   wrong(own).length === 0 && JSON.stringify(ownAdded) === JSON.stringify(ownWant), `${show(own)} got ${JSON.stringify(ownAdded)} want ${JSON.stringify(ownWant)}`)
 
@@ -307,10 +321,50 @@ const faults = cases([
   ['EIO on the stat that finds the record', ORCH, W('docs/handoffs/h9.md'), 'deny', { fault: ['statSync', 'docs/epics/E1.md'] }],
   ['EIO on the stat that finds the checkout above the run', ORCH, W('docs/handoffs/h9.md'), 'deny', { fault: ['statSync', '.doctrine/records/.git'] }],
   ['a NUL byte in a path under docs/handoffs', ORCH, W('docs/handoffs/a\u0000b.md'), 'deny'],
+  ['EIO on the .git of a nested repo, the run unresolved, never an outer repo\'s', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: inner }, W(path.join(orch, 'docs/handoffs/h9.md'), { cwd: inner }), 'deny', { cwd: inner, fault: ['statSync', 'inner/.git'] }],
   ['the preload naming nothing the guard reads', ORCH, W('docs/handoffs/h9.md'), 'allow', { fault: ['lstatSync', 'no-such-component'] }],
 ])
-clause('clause 2s — an error that is not a missing file refuses: EIO on lstat or readlink while walking a path, on the kickoff read, on the stat finding the record or the checkout, and a NUL byte in the path; the same preload naming nothing the guard reads allows (E15-D183, G1)',
+clause('clause 2s — an error that is not a missing file refuses: EIO on lstat or readlink while walking a path, on the kickoff read, on the stat finding the record or the checkout, on the .git of the session\'s nested repo when the run is found from it (GR1), and a NUL byte in the path; the same preload naming nothing the guard reads allows (E15-D183, G1)',
   wrong(faults).length === 0, show(faults))
+
+// A context error after the run resolves still logs the refusal (E15-D24, GR3); a nested repo's run is not resolved, so nothing is logged for it.
+const lateBefore = logLines().length
+const late = cases([['EIO on the kickoff read, Write src/a.txt', ORCH, W('src/a.txt'), 'deny', { fault: ['readFileSync', 'SESSION_MEMORY.md'] }],
+  ['EIO on the stat that finds the record, Edit docs/handoffs/h11.md', ORCH, E('docs/handoffs/h11.md'), 'deny', { fault: ['statSync', 'docs/epics/E1.md'] }]])
+const lateAdded = logLines().slice(lateBefore).map((l) => l.replace(/^\S+ /, ''))
+const lateWant = [`Write ${orch}/src/a.txt`, `Edit ${orch}/docs/handoffs/h11.md`]
+clause('clause 2u — a context error after the run resolves still logs the refusal, one line per call naming its tool and path (E15-D24, GR3)',
+  wrong(late).length === 0 && JSON.stringify(lateAdded) === JSON.stringify(lateWant), `${show(late)} got ${JSON.stringify(lateAdded)} want ${JSON.stringify(lateWant)}`)
+
+// The record stays allowed whatever its last state line reads, outside Records in a sibling repo (GR4).
+const recordText = fs.readFileSync(record, 'utf8')
+const states = ['Open', 'Blocked', 'Exited', 'Shipped'].flatMap((s) => {
+  fs.writeFileSync(record, recordText.replace('- State: Open', `- State: ${s}`))
+  return cases([[`${s}: Write the record`, ORCH, W(record), 'allow'], [`${s}: Edit the record`, ORCH, E(record), 'allow'],
+    [`${s}: Write a neighbouring epic`, ORCH, W(path.join(proj, 'docs/epics/E9.md')), 'deny']])
+})
+fs.writeFileSync(record, recordText)
+clause('clause 2v — the record in a sibling repo, outside Records, is allowed whatever its state, Open, Blocked, Exited or Shipped, and its neighbouring epic is refused in each (GR4)',
+  wrong(states).length === 0, show(states))
+
+// A case-insensitive volume, emulated on the real fixture on any host: each component matched by name in either case,
+// as the volume spells it. guardContext canonicalizes the allowed names by it as guardReal does the target (GR2).
+const foldReal = (p) => p.split('/').filter(Boolean).reduce((d, c) => {
+  const hit = fs.readdirSync(d).find((n) => n.toLowerCase() === c.toLowerCase())
+  if (hit === undefined) throw err('ENOENT')
+  return fs.realpathSync.native(path.join(d, hit))
+}, '/')
+const FOLD = { realpath: foldReal }
+const folded = (() => {
+  try {
+    const ctx = lib.guardContext({ DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun }, lc, FOLD)
+    return Object.fromEntries(['DOCS/PROJECT.md', 'SESSION_MEMORY.md', 'Docs/Handoffs/h.md', 'DOCS/PROJECT.md.bak', 'src/a.txt']
+      .map((p) => [p, allowed(lib.guardReal(p, lc, FOLD), ctx)]))
+  } catch (e) { return `throws ${e.message}` }
+})()
+const foldWant = { 'DOCS/PROJECT.md': true, 'SESSION_MEMORY.md': true, 'Docs/Handoffs/h.md': true, 'DOCS/PROJECT.md.bak': false, 'src/a.txt': false }
+clause('clause 2w — on an injected case-insensitive volume, which runs on any host, a checkout storing docs/project.md, session_memory.md and docs/handoffs allows DOCS/PROJECT.md, SESSION_MEMORY.md and Docs/Handoffs/h.md, and refuses DOCS/PROJECT.md.bak and src/a.txt: the allowed names are canonicalized as the target is (GR2)',
+  JSON.stringify(folded) === JSON.stringify(foldWant), JSON.stringify(folded))
 
 // A case alias on a case-insensitive volume is the file it names; on a case-sensitive one it is another file.
 put(path.join(tmp, 'case-probe'))
@@ -319,10 +373,13 @@ const caseAlias = insensitive ? cases([
   ['DOCS/PROJECT.md', ORCH, W('DOCS/PROJECT.md'), 'allow'], ['Docs/Handoffs/h10.md', ORCH, E('Docs/Handoffs/h10.md'), 'allow'],
   ['session_memory.md', ORCH, W('session_memory.md'), 'allow'], ['.DOCTRINE/records/x.md', ORCH, W('.DOCTRINE/records/x.md'), 'allow'],
   ['DOCS/HANDOFFS/../../SRC/a.txt', ORCH, W('DOCS/HANDOFFS/../../SRC/a.txt'), 'deny'], ['Docs/PROJECT.md.bak', ORCH, W('Docs/PROJECT.md.bak'), 'deny'],
+  ['stored docs/project.md, asked DOCS/PROJECT.md', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('DOCS/PROJECT.md', { cwd: lc }), 'allow', { cwd: lc }],
+  ['stored session_memory.md, asked SESSION_MEMORY.md', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, E('SESSION_MEMORY.md', { cwd: lc }), 'allow', { cwd: lc }],
+  ['stored docs/project.md, asked DOCS/PROJECT.md.bak', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('DOCS/PROJECT.md.bak', { cwd: lc }), 'deny', { cwd: lc }],
 ]) : []
 clause(insensitive
-  ? 'clause 2t — on this case-insensitive temp volume a case alias of an allowed path is allowed (DOCS/PROJECT.md, Docs/Handoffs/, session_memory.md, .DOCTRINE/records/) and a case alias outside them is refused (E15-D22)'
-  : 'clause 2t — SKIPPED: the temp volume is case-sensitive, so a case alias names another file; clause 1g carries the canonical case on an injected volume',
+  ? 'clause 2t — on this case-insensitive temp volume a case alias of an allowed path is allowed (DOCS/PROJECT.md, Docs/Handoffs/, session_memory.md, .DOCTRINE/records/), a stored docs/project.md and session_memory.md are allowed asked in upper case, and a case alias outside them is refused (E15-D22, GR2)'
+  : 'clause 2t — SKIPPED: the temp volume is case-sensitive, so a case alias names another file; clauses 1g and 2w carry the canonical case on an injected volume',
   wrong(caseAlias).length === 0, show(caseAlias))
 
 // The log line escapes the path reversibly, so two refused paths never log alike (E15-D24).
@@ -335,7 +392,7 @@ clause('clause 2r — each refused path is logged on one line with backslash as 
   wrong(esc).length === 0 && JSON.stringify(escAdded) === JSON.stringify(escWant) && new Set(escAdded).size === ESC.length,
   `${show(esc)} got ${JSON.stringify(escAdded)} want ${JSON.stringify(escWant)}`)
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, caseAlias, esc].flat()
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc].flat()
 clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
@@ -379,6 +436,24 @@ try { fs.lstatSync(path.join(orch, 'docs/handoffs/a\u0000b.md')) } catch (e) { n
 clause('clause 3g — without the guard: the preload really makes lstat, readlink, readFileSync and stat throw EIO on the fixture paths, the dangling link, memory file and record otherwise read, and a NUL byte makes lstat throw an error that is not ENOENT',
   proved.every(([, c]) => c === 'EIO') && fs.readlinkSync(path.join(orch, 'docs/handoffs/dangling')) && fs.readFileSync(path.join(orch, 'SESSION_MEMORY.md'), 'utf8') &&
   fs.statSync(record).isFile() && fs.statSync(path.join(orch, '.git')).isDirectory() && nulCode && nulCode !== 'ENOENT', JSON.stringify({ proved, nulCode }))
+const deepKernel = fs.realpathSync.native(`${orch}/docs/handoffs/deep/../../..`)
+clause('clause 3j — without the guard: deep/../../.. resolves (libc realpath) inside docs/handoffs while its text reading is the checkout, so src/a.txt\'s kernel and text readings differ; deep/x.md lies under docs/handoffs by both',
+  deepKernel === path.join(orch, 'docs/handoffs') && path.resolve(orch, 'docs/handoffs/deep/../../../src/a.txt') === srcA &&
+  fs.realpathSync(path.join(orch, 'docs/handoffs/deep')) === path.join(orch, 'docs/handoffs/d1/d2/d3'), deepKernel)
+const innerProof = spawnSync('node', ['--import', pathToFileURL(inject).href, '-e',
+  `import('node:fs').then(({ default: fs }) => { let s; try { fs.statSync(${JSON.stringify(path.join(inner, '.git'))}); s = 'none' } catch (e) { s = e.code } console.log(s, fs.existsSync(${JSON.stringify(path.join(inner, '.git'))})) })`],
+{ env: { ...process.env, GUARD_FAULT: JSON.stringify(['statSync', 'inner/.git']) }, encoding: 'utf8' }).stdout.trim()
+clause('clause 3k — without the guard: the nested repo has a .git and no project file inside the checkout, whose run exists, and the preload makes its .git stat throw EIO and existsSync read it absent, as a real EIO does',
+  under(inner, orch) && fs.statSync(path.join(inner, '.git')).isDirectory() && !fs.existsSync(path.join(inner, 'docs/PROJECT.md')) &&
+  fs.statSync(run).isDirectory() && innerProof === 'EIO false', innerProof)
+const stateProof = ['Open', 'Blocked', 'Exited', 'Shipped'].map((s) => lib.restoreState(s))
+clause('clause 3l — without the guard: the record lies outside the checkout and Records, its state line is the one the per-state copies replace, Exited and Shipped are not Open or Blocked to the kickoff chain, and the neighbouring epic is no record',
+  !under(record, orch) && !under(record, records) && recordText.split('- State: Open').length === 2 && Boolean(stateProof[0]) && Boolean(stateProof[1]) && !stateProof[2] && !stateProof[3] &&
+  path.join(proj, 'docs/epics/E9.md') !== record, JSON.stringify(stateProof))
+const lcNames = ['docs/project.md', 'session_memory.md', 'docs/handoffs'].map((n) => fs.readdirSync(path.join(lc, path.dirname(n))).includes(path.basename(n)))
+clause('clause 3m — without the guard: the lower-case checkout stores docs/project.md, session_memory.md and docs/handoffs in lower case and holds its run, and the emulated volume spells DOCS/PROJECT.md as docs/project.md and finds no src',
+  lcNames.every(Boolean) && !fs.readdirSync(path.join(lc, 'docs')).includes('PROJECT.md') && fs.statSync(lcRun).isDirectory() &&
+  foldReal(path.join(lc, 'DOCS/PROJECT.md')) === path.join(lc, 'docs/project.md') && (() => { try { foldReal(path.join(lc, 'src')); return false } catch (e) { return e.code === 'ENOENT' } })(), JSON.stringify(lcNames))
 const fio = fakeIo()
 clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, and its faults throw their codes' +
   (insensitive ? '; on this temp volume the real DOCS/PROJECT.md resolves to docs/PROJECT.md' : ''),

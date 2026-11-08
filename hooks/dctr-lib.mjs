@@ -610,7 +610,8 @@ export function resolveRecordPath(ref, projectDir, exists) {
  * kickoff `handoff:` line, that handoff's `record:` header line, the record, and the record's last state line,
  * which must read Open or Blocked. `read(file)` returns a file's text or throws, `exists(file)` says whether a path
  * exists; both are injected so this stays pure. Returns `{ handoffPath, header, recordPath, record, state }`, or
- * `{ why }` naming where the chain stopped, which the caller reports as its stand-down reason.
+ * `{ why }` naming where the chain stopped, which the caller reports as its stand-down reason; a chain that stops only
+ * at the state line also carries `recordPath`, the record the handoff names whatever its state.
  */
 export function followKickoff({ projectDir, read, exists }) {
   const load = (file, what) => {
@@ -631,7 +632,7 @@ export function followKickoff({ projectDir, read, exists }) {
   if (loaded.why) return loaded
   const record = parseRecord(loaded.text)
   const state = restoreState(record.state?.value)
-  if (!state) return { why: `the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked` }
+  if (!state) return { why: `the record ${recordPath} last state line reads ${record.state ? `"${record.state.value}"` : 'nothing'}, not Open or Blocked`, recordPath }
   return { handoffPath, header, recordPath, record, state }
 }
 
@@ -1124,17 +1125,18 @@ export const runRole = (env = process.env) => env.DCTR_ROLE || null
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
  * under the directory holding `.git` at or above `cwd` (repoOf; a worktree's `.git` file counts), Records being that
  * repo's docs/PROJECT.md `Records:` header as docHeader reads it, the reader dctr-project.mjs uses; else null, as it is
- * when no `.git` is found at or above `cwd`, no project file, no or an empty Records value, or Records is `none`. The top level, not the
- * cwd, so a session started in a subdirectory resolves its own repo.
+ * when no `.git` is found at or above `cwd`, no project file, no or an empty Records value, or Records is `none`, or any
+ * read throws, `exists` among them. The top level, not the cwd, so a session started in a subdirectory resolves its own
+ * repo. `exists` tests each `.git`; the guard passes a strict one, so an unreadable `.git` never reads as absent.
  */
-export function runRoot(env = process.env, cwd = process.cwd()) {
+export function runRoot(env = process.env, cwd = process.cwd(), exists = fs.existsSync) {
   if (env.DCTR_RUN) return env.DCTR_RUN
   if (runRole(env) !== 'orchestrator') return null
   // repoOf starts at its argument's directory, so it is handed a path inside cwd; realpath as git's top level was.
   let top, text
   try {
-    top = fs.realpathSync(repoOf(path.join(cwd, '.git'), fs.existsSync))
-    if (!fs.existsSync(path.join(top, '.git'))) return null // repoOf falls back to its start directory
+    top = fs.realpathSync(repoOf(path.join(cwd, '.git'), exists))
+    if (!exists(path.join(top, '.git'))) return null // repoOf falls back to its start directory
     text = fs.readFileSync(path.join(top, 'docs/PROJECT.md'), 'utf8')
   } catch { return null }
   const records = docHeader(text).headers.Records?.value
@@ -1152,13 +1154,14 @@ const notThere = (e) => e?.code === 'ENOENT' || e?.code === 'ENOTDIR'
 /** Whether `f` exists, any error but notThere thrown, so the guard never reads an unreadable path as an absent one. */
 const presentStrict = (f) => { try { fs.statSync(f); return true } catch (e) { if (notThere(e)) return false; throw e } }
 
-/** `p` where it really lies: an absolute path, or one relative to `cwd`, walked component by component through every
- *  symlink by followLinks, strictly, a dangling one included. The two are joined as written, never normalized first,
- *  so a `..` after a link climbs out of the link's target as the kernel does. The longest existing prefix is then
+/** `p` where Claude Code writes it: an absolute path, or one relative to `cwd`, normalized as text first (path.resolve,
+ *  every `..` removed lexically), as Claude Code's file tools normalize it before the kernel sees it, then walked
+ *  component by component through every symlink by followLinks, strictly, a dangling one included. So a `..` after a
+ *  link cancels the link's name, never climbs out of its target. The longest existing prefix is then
  *  spelled as the volume spells it (realpath), so on a case-insensitive volume a case alias is the file it names.
  *  Any error but notThere, a NUL byte in the path among them, throws. `io` is injected by the selftest only. */
 export function guardReal(p, cwd, { lstat = fs.lstatSync, readlink = fs.readlinkSync, realpath = fs.realpathSync.native } = {}) {
-  let head = followLinks(path.isAbsolute(p) ? p : `${cwd}/${p}`, { lstat, readlink, strict: true }), rest = ''
+  let head = followLinks(path.resolve(cwd, p), { lstat, readlink, strict: true }), rest = ''
   for (;;) {
     try { return path.join(realpath(head), rest) } catch (e) { if (!notThere(e) || head === '/') throw e }
     rest = path.join(path.basename(head), rest)
@@ -1168,38 +1171,49 @@ export function guardReal(p, cwd, { lstat = fs.lstatSync, readlink = fs.readlink
 
 /**
  * The orchestrator's allowed paths (E15-D22), the one definition every phase imports. `p` and every path in `ctx`
- * are absolute real paths (guardReal). `ctx` is guardContext's `{ run, records, checkout, record }`: the run lies
- * under `records`, `checkout` is the orchestrator's checkout read from the run, and `record` its record or null. The
+ * are absolute real paths (guardReal). `ctx` is guardContext's `{ run, records, checkout, record, names }`: the run lies
+ * under `records`, `checkout` is the orchestrator's checkout read from the run, `record` its record or null, and `names`
+ * each of GUARD_NAMES as guardReal spells it in the checkout, so a stored `docs/project.md` matches a target asked as
+ * `DOCS/PROJECT.md` on a case-insensitive volume; without `names` each is joined to the checkout as written. The
  * auto-cycle files are the `.doctrine/auto-cycle*` glob treeExcludes uses, a `*` that crosses no `/`.
  */
-export function guardAllowed(p, { records, checkout, record }) {
+export function guardAllowed(p, { records, checkout, record, names }) {
+  const name = (rel) => names?.[rel] ?? path.join(checkout, rel)
   const under = (dir) => p.startsWith(dir + path.sep)
-  const at = (rel) => p === path.join(checkout, rel)
-  return p === record || under(records) || at('docs/PROJECT.md') || under(path.join(checkout, 'docs/epics')) ||
-    at('SESSION_MEMORY.md') || under(path.join(checkout, 'docs/handoffs')) ||
-    (path.dirname(p) === path.join(checkout, '.doctrine') && path.basename(p).startsWith('auto-cycle'))
+  const at = (rel) => p === name(rel)
+  return p === record || under(records) || at('docs/PROJECT.md') || under(name('docs/epics')) ||
+    at('SESSION_MEMORY.md') || under(name('docs/handoffs')) ||
+    (path.dirname(p) === name('.doctrine') && path.basename(p).startsWith('auto-cycle'))
 }
+
+/** The checkout's allowed names guardContext canonicalizes, each relative to the checkout. */
+export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics', 'docs/handoffs', '.doctrine']
 
 /**
  * The guard's context for a session whose project directory is `cwd`, or a throw naming what could not be read: the
  * run from runRoot, which must be an existing folder named `orchestrate` (Run layout); Records its parent; the
- * checkout the repo holding the run (repoOf, never the seat's cwd, E15-D119); and the record
- * the checkout's kickoff chain reaches (followKickoff), or null where the chain stops at a file that is not there.
- * Any other error reading the chain throws.
+ * checkout the repo holding the run (repoOf, never the seat's cwd, E15-D119); GUARD_NAMES as guardReal spells them
+ * there; and the record the handoff's `record:` line names, whatever its state line reads (followKickoff's
+ * `recordPath`), or null where the chain stops at a file that is not there. Every presence test is strict, so any
+ * other error throws. An error thrown once the run is known carries it as `run`, so the guard can still log the
+ * refusal there (E15-D24). `io` is guardReal's, injected by the selftest only.
  */
-export function guardContext(env = process.env, cwd = process.cwd()) {
-  const named = runRoot(env, cwd)
+export function guardContext(env = process.env, cwd = process.cwd(), io = {}) {
+  const named = runRoot(env, cwd, presentStrict)
   if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
-  const run = guardReal(named, cwd)
+  const run = guardReal(named, cwd, io)
   if (path.basename(run) !== 'orchestrate') throw new Error(`the run ${run} is not a folder named orchestrate`)
   if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
-  const checkout = repoOf(run, presentStrict)
-  // followKickoff reads a failed read as a chain that stops; only a file not there may, any other error refuses.
-  let failed = null
-  const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch (e) { if (!notThere(e)) failed = e; throw e } }
-  const k = followKickoff({ projectDir: checkout, read, exists: presentStrict })
-  if (failed) throw failed
-  return { run, records: path.dirname(run), checkout, record: k.recordPath ? guardReal(k.recordPath, checkout) : null }
+  try {
+    const checkout = repoOf(run, presentStrict)
+    const names = Object.fromEntries(GUARD_NAMES.map((rel) => [rel, guardReal(path.join(checkout, rel), checkout, io)]))
+    // followKickoff reads a failed read as a chain that stops; only a file not there may, any other error refuses.
+    let failed = null
+    const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch (e) { if (!notThere(e)) failed = e; throw e } }
+    const k = followKickoff({ projectDir: checkout, read, exists: presentStrict })
+    if (failed) throw failed
+    return { run, records: path.dirname(run), checkout, names, record: k.recordPath ? guardReal(k.recordPath, checkout, io) : null }
+  } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { run }) }
 }
 
 /**
