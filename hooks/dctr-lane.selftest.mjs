@@ -1023,6 +1023,28 @@ for (const [i, K] of UNTOUCHED.entries()) {
   clause(`clause 1bi${i} — reset of a lane holding an ${K.k} moves to t (LC11)`, r.code === 0 && head(s2.w) === t, `reset ${r.code} ${said(r)}`)
 }
 
+// A tracked link committed on the lane branch, marked skip-worktree or assume-unchanged, then pointed at another path
+// and still a link: git status hides it and the mode compare passes, so only the target tells the change apart.
+const RETARGETED = UNTOUCHED.filter((K) => K.mode === '120000')
+const retarget = (s, K) => { const p = path.join(s.w, K.file); fs.rmSync(p); fs.symlinkSync('other.txt', p) }
+const targetOf = (p) => { try { return fs.readlinkSync(p) } catch { return null } }
+for (const [i, K] of RETARGETED.entries()) {
+  const s = matrixLane()
+  twin(s, K)
+  // retargeted before the archive, so the archive copies the new target and only the hidden-change test can refuse
+  retarget(s, K)
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1bj${i} — after an archive, remove of a lane holding a ${K.flag.slice(2)} link retargeted to other.txt refuses, naming the link: the worktree kept and the link still other.txt (LC12)`,
+    ra.code === 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && rr.err.includes(JSON.stringify(K.file)) && exists(s.w) && targetOf(path.join(s.w, K.file)) === 'other.txt', `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}; target ${targetOf(path.join(s.w, K.file))}`)
+  const s2 = matrixLane()
+  const t = commitIn(s2.f.repo, 'at-t.txt', 't\n', 't')
+  twin(s2, K)
+  retarget(s2, K)
+  const old = head(s2.w), r = lane(s2.f, ['reset', 'a', t])
+  clause(`clause 1bk${i} — reset of a lane holding a ${K.flag.slice(2)} link retargeted to other.txt refuses: HEAD unmoved and the link still other.txt (LC12)`,
+    r.code !== 0 && /dctr-lane: refused/.test(r.err) && head(s2.w) === old && targetOf(path.join(s2.w, K.file)) === 'other.txt', `reset ${r.code} ${said(r)}; target ${targetOf(path.join(s2.w, K.file))}`)
+}
+
 // Through reset onto a revision t that adds one file: the kinds a move keeps are kept, the hidden ones refuse.
 for (const [i, K] of KINDS.entries()) {
   const s = matrixLane()
@@ -1214,13 +1236,25 @@ for (const [i, [k, env, prep]] of [
     const s = matrixLane()
     twin(s, K)
     const p = path.join(s.w, K.file), [tag, mode, blob] = git(s.w, 'ls-files', '-v', '-s', K.file).out.split(/\s+/)
-    const now = K.mode === '120000'
-      ? spawnSync('git', ['-C', s.w, 'hash-object', '--stdin'], { input: fs.readlinkSync(p), encoding: 'utf8' }).stdout.trim()
-      : git(s.w, 'hash-object', '--', K.file).out
+    // A link is read back against the index blob's own content, not hashed the way the command hashes it.
+    const link = K.mode === '120000', now = link ? fs.readlinkSync(p) : git(s.w, 'hash-object', '--', K.file).out
+    const want = link ? git(s.w, 'cat-file', '-p', blob).out : blob
     const st = git(s.w, 'status', '--porcelain', '--untracked-files=no').out
-    clause(`clause 3an${i} — on the ${K.k} twin, the index entry is tagged ${K.flag === '--skip-worktree' ? 'S' : 'h'} with mode ${K.mode} and the blob git computes from the worktree, and the status test prints nothing`,
-      tag === (K.flag === '--skip-worktree' ? 'S' : 'h') && mode === K.mode && modeOf(p) === { '100644': 'plain', '100755': 'exec', '120000': 'link' }[K.mode] && /^[0-9a-f]{40}$/.test(now) && now === blob && st === '',
-      JSON.stringify({ tag, mode, blob, now, st }))
+    clause(`clause 3an${i} — on the ${K.k} twin, the index entry is tagged ${K.flag === '--skip-worktree' ? 'S' : 'h'} with mode ${K.mode} and ${link ? 'the target the index blob holds' : 'the blob git computes from the worktree'}, and the status test prints nothing`,
+      tag === (K.flag === '--skip-worktree' ? 'S' : 'h') && mode === K.mode && modeOf(p) === { '100644': 'plain', '100755': 'exec', '120000': 'link' }[K.mode] && (link ? now === 'src.txt' : /^[0-9a-f]{40}$/.test(now)) && now === want && st === '',
+      JSON.stringify({ tag, mode, blob, now, want, st }))
+  }
+  // Clause 3 for LC12, without the command: each retargeted link's index entry is a 120000 link tagged by its flag,
+  // the worktree link's target differs from the target the index blob holds, and git status prints nothing.
+  for (const [i, K] of RETARGETED.entries()) {
+    const s = matrixLane()
+    twin(s, K)
+    retarget(s, K)
+    const p = path.join(s.w, K.file), [tag, mode, blob] = git(s.w, 'ls-files', '-v', '-s', K.file).out.split(/\s+/)
+    const now = fs.readlinkSync(p), was = git(s.w, 'cat-file', '-p', blob).out, st = git(s.w, 'status', '--porcelain', '--untracked-files=no').out
+    clause(`clause 3ao${i} — on the retargeted ${K.flag.slice(2)} link fixture, the index entry is tagged ${K.flag === '--skip-worktree' ? 'S' : 'h'} with mode 120000, the worktree link reads other.txt while the index blob holds src.txt, and the status test prints nothing`,
+      tag === (K.flag === '--skip-worktree' ? 'S' : 'h') && mode === '120000' && modeOf(p) === 'link' && now === 'other.txt' && was === 'src.txt' && st === '',
+      JSON.stringify({ tag, mode, blob, now, was, st }))
   }
   // Clause 3 for LC10: the shim answers a fresh pane in each discriminating mode as the clause names it.
   for (const [mode, status, session] of [['session-before', 'unknown', 'old'], ['idle-before', 'idle', null]]) {
