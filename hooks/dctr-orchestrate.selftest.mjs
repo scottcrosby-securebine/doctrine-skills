@@ -97,6 +97,14 @@ const show = (r) => `exit ${r.code}, stdout "${r.out}"${r.err ? `, stderr "${r.e
   clause('clause 2i — a missing argument: exit 2 and no verdict', r.code === 2 && r.out === '', show(r))
 }
 
+{
+  // 190,000 in 200,000: within the window and above the load plus margin, so only resolveTier's 90% rule refuses it.
+  const r = run('capacity', 'claude-opus-5-5', '190000', lowFirst)
+  const ok = run('capacity', 'claude-opus-5-5', '180000', lowFirst)
+  clause('clause 2j — a tier above 90% of the window but within it: refuse with the configuration error, and 90% itself accepts',
+    r.code === 1 && /^refuse\b/.test(r.out) && /configuration error/.test(r.out) && ok.code === 0 && /^accept window 200000 load 94999 tier 180000\b/.test(ok.out), `${show(r)}; ${show(ok)}`)
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures, without the command
 
 const readings = (f) => fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => {
@@ -110,5 +118,11 @@ clause('clause 3c — each fixture opens with a seat entry and a zero entry ahea
   [orch, lowFirst, highFirst].every((f) => { const ls = fs.readFileSync(f, 'utf8').split('\n'); return JSON.parse(ls[1]).isSidechain === true && JSON.parse(ls[2]).message.usage.input_tokens === 0 }), 'lead lines missing')
 clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage).length === 0, String(readings(noUsage)))
 
+{
+  // Literal 65,000 and 90%, so the proof uses neither the library nor the command.
+  const first = readings(lowFirst)[0], win = 200000
+  clause('clause 3e — 2j\'s tier 190,000 is above 90% of 200,000 while load plus 65,000 is below it and it fits the window; 180,000 is not above 90%',
+    190000 > win * 0.9 && first + 65000 < 190000 && 190000 <= win && !(180000 > win * 0.9) && first + 65000 < 180000, `first ${first}`)
+}
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

@@ -171,7 +171,9 @@ edits. Hand it, pasted in full, never as paths:
   step 4, whole, as this file reads, and, in a session under the orchestrator profile, that profile's
   paragraph, whole, with the run's `waiting-questions.md`
 - whenever the files include a handoff, the standard it is graded against: `doctrine-handoff`'s step 3
-  Sections list and the Rules list after it, whole, and its step 2, whole, with the `handoff/SKILL.md`
+  Sections list and the Rules list after it, whole, in a session under the orchestrator profile its
+  Orchestrator profile paragraph, whole, with the run's `waiting-questions.md`, and its step 2, whole,
+  with the `handoff/SKILL.md`
   that step 2 finds, whole, where it finds one (read from `../doctrine-handoff/SKILL.md` from this
   skill's base directory). Only that skill's content rules apply: say in the brief that its storage instruction, a
   scratch file in the OS temp directory, does not, since a handoff lives in `docs/handoffs/`.
@@ -189,7 +191,8 @@ work, or which context the previous memory file held that is still true and now 
 missing from the memory file? **Memory-file standard**: where does the memory file not conform to this
 skill's standard handed above? **Law**: where does either file break the project's documented law
 handed above? Whenever the files include a handoff, also: **Handoff standard**: where does the handoff
-not conform to `doctrine-handoff`'s Sections list and Rules list? **Header lines**: which of the
+not conform to `doctrine-handoff`'s Sections list and Rules list, and, for an orchestrator's handoff, its
+Orchestrator profile? **Header lines**: which of the
 handoff's header lines does not conform to doctrine step 5's header-line parse rule, or disagrees with
 the record lines handed above? **Content rules**: where does the handoff not conform to the content
 rules handed above? Require each finding to quote the line or name the gap and cite its evidence.
