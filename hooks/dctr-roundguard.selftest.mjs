@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { roundGuardDecision, followLinks } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -328,8 +329,15 @@ fs.writeFileSync(rec, '# r\n- gate: ~/gates/g.out exit=0\n')
 fs.writeFileSync(recTmp, `# r\n- gate: ${scratchTmp}/scratchpad/gate.out exit=0\n`)
 const IN = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: scratchTmp, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'p1' }
 delete IN.DCTR_VIEW_REQUEST_DIR
-const run = (stdin, env = {}) => {
-  const r = spawnSync('node', [hook], { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...IN, ...env }, encoding: 'utf8' })
+// A preload that writes to stdout as macOS does to a pipe: past 64 KB the rest goes out asynchronously, so a process
+// that exits before the write's callback loses it. On Linux a pipe write is synchronous and never cut short.
+const asyncPipe = path.join(tmp, 'async-pipe.mjs')
+fs.writeFileSync(asyncPipe, "const w = process.stdout.write.bind(process.stdout)\n" +
+  "process.stdout.write = (c, e, cb) => { if (typeof e === 'function') [cb, e] = [e, undefined]\n" +
+  "  const b = Buffer.from(c, e); if (b.length <= 65536) return w(b, cb)\n" +
+  "  w(b.subarray(0, 65536)); setImmediate(() => w(b.subarray(65536), cb)); return false }\n")
+const run = (stdin, env = {}, pipe = false) => {
+  const r = spawnSync('node', [...(pipe ? ['--import', pathToFileURL(asyncPipe).href] : []), hook], { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...IN, ...env }, encoding: 'utf8' })
   return { code: r.status, out: r.stdout, err: r.stderr }
 }
 const pay = (session, command, more = {}) => ({ hook_event_name: 'PreToolUse', session_id: session, cwd: durable, tool_name: 'Bash', tool_input: { command }, ...more })
@@ -481,6 +489,16 @@ Object.assign(D, { recUp, recBack, upLink: path.join(bGates, 'r1.out'), backLink
   clause('clause 2n — a link target\'s .. is taken after the link before it (R3-B): gates/r1.out -> hop/../r1.out with hop into TMPDIR is denied; a TMPDIR path whose target climbs out through a link to a durable dir goes through',
     denied(up, `gates/r1.out (resolves to ${scratchTmp}/r1.out) lies under`) && allowed(back), `${JSON.stringify(up)} ${JSON.stringify(back)}`)
 }
+// A deny longer than a pipe's buffer reaches the host whole: the reason names the plugin root, here over 64 KB.
+const longRoot = '/p' + '/x'.repeat(35000)
+{
+  const long = run(pay('s15', C.append(rec, 3)), { CLAUDE_PLUGIN_ROOT: longRoot })
+  // The same refusal written to its pipe as macOS does, so it is cut short on any host unless the hook waits for the write.
+  const longPipe = run(pay('s15p', C.append(rec, 3)), { CLAUDE_PLUGIN_ROOT: longRoot }, true)
+  clause('clause 2o — a refusal whose reason is over 64 KB prints the whole deny, which parses and names the plugin root in full, on this host and with its pipe written as on macOS',
+    denied(long, `node ${longRoot}/hooks/dctr-token.mjs`) && long.out.length > 65536 && denied(longPipe, `node ${longRoot}/hooks/dctr-token.mjs`),
+    `exit ${long.code}, ${long.out.length} bytes; as on macOS exit ${longPipe.code}, ${longPipe.out.length} bytes`)
+}
 clause('clause 2h — herdr was called zero times across every run (tripwire on PATH)', !fs.existsSync(tripwire), 'the tripwire herdr ran')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
@@ -501,6 +519,7 @@ const unproved = (tables, done) => Object.entries(tables).flatMap(([t, tab]) => 
 const isRound = (t) => String(t).split('\n').some((l) => parseRecord(l.trim()).entries.some((e) => e.kind === 'round'))
 const unquoted = (cmd) => cmd.replace(/'/g, '').replace(/"/g, '').replace(/\$\(date[^)]*\)/, '2026-10-14T10:00:00Z').replace(/\$\(git[^)]*\)/, 'abc1234')
 const lines = (cmd) => unquoted(cmd).split(/\n|\\n/).map((l) => l.replace(/^\s*echo /, '').replace(/\s*(>>|\|).*$/, ''))
+clause('clause 3r — without the hook: the long plugin root is over 64 KB', Buffer.byteLength(longRoot) > 65536, String(longRoot.length))
 clause('clause 3a — every refused fixture carries a round line the parser reads, the Bash ones once the shell has run, and the template fixture carries none',
   [prove('F', 'bashNoToken'), prove('F', 'bashDateNoToken'), prove('F', 'heredocNoToken'), prove('F', 'teeNoToken'), prove('F', 'mentionToken')].every(([, i]) => lines(i.command).some(isRound)) &&
   isRound(prove('F', 'writeMd')[1].content) && isRound(prove('F', 'writeMjs')[1].content) && isRound(prove('F', 'editMd')[1].new_string) && !isRound(prove('F', 'template')[1].content),
@@ -670,6 +689,14 @@ clause('clause 3c — each tmp-path record names a gate-shaped path that starts 
     .concat(glued.map(([k]) => [k, { decoded: false }]), escaped.map(([k]) => [k, { unescaped: false }]))
   clause('clause 3m — without the guard, under real bash with a stub node: each allowed twin (hereString, arith, dateQuotedToken, the delim*Token forms, printfToken, printfFmtToken, heredocDollarTToken with the publish on the <<EOF && line, heredocDollarTAfter with it after EOF) writes its round line and runs the publish, each refused one (hereStringNoToken, delimDash, delimDouble, delimTab, printfNoToken, printfFmtNoToken, printfFmtRev, heredocDollarT) writes it and runs none, orch and kit, run from another cwd, write the record under their cd target, printfTmpGate and echoTabTmpGate put /tmp/x/r2.out on a line of its own, and heredocEscTick and heredocEscTickHome carry \\` and write their gate path in plain backticks beside a round line',
     wrong.length === 0 && !fs.existsSync(path.join(away, '.doctrine')), wrong.map(([k, r]) => `${k}: ${JSON.stringify(r)}`).join('; '))
+}
+{
+  // The pipe preload emulates what it claims: past 64 KB, a write followed at once by exit is cut short and one that
+  // exits in its callback is whole, on any host.
+  const piped = (code) => spawnSync('node', ['--import', pathToFileURL(asyncPipe).href, '-e', code], { encoding: 'utf8' }).stdout.length
+  const p = { exitAtOnce: piped("process.stdout.write('x'.repeat(200000)); process.exit(0)"), exitInCallback: piped("process.stdout.write('x'.repeat(200000), () => process.exit(0))") }
+  clause('clause 3s — without the guard: under the pipe preload a 200,000-byte write followed at once by exit is cut short, and one that exits in its callback is whole',
+    p.exitAtOnce < 200000 && p.exitInCallback === 200000, JSON.stringify(p))
 }
 {
   // The meta-check, read at run time: every key of every table in TABLES that no clause-3 proof obtained.
