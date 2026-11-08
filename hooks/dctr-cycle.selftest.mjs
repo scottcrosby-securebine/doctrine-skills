@@ -469,6 +469,17 @@ fs.appendFileSync(path.join(outLinkC.proj, 'SESSION_MEMORY.md'), 'unlanded edit\
 const outLinkR = run(outLinkC)
 clause('clause 2b6 — all true but the memory file, modified and uncommitted in a project whose handoff is a committed link to a file outside every repository: paused R10, not launched (SR10)',
   !launched(outLinkR) && paused(outLinkC).some((l) => l.includes('handoff not written')), show(outLinkC, outLinkR))
+// The project's handoff a committed link to a link committed in repoB, which reached h1.md committed in repoC and is
+// retargeted to h2.md there without a commit.
+const chainC = fixture('chain', { tracked: true }), chainB = path.join(chainC.dir, 'repoB'), chainCC = path.join(chainC.dir, 'repoC'), chainH = path.join(chainC.proj, 'docs/handoffs/h.md')
+for (const d of [chainB, chainCC]) { fs.mkdirSync(d); git(d, 'init', '-q') }
+fs.renameSync(chainH, path.join(chainCC, 'h1.md')); fs.copyFileSync(path.join(chainCC, 'h1.md'), path.join(chainCC, 'h2.md')); git(chainCC, 'add', '-A'); git(chainCC, 'commit', '-q', '-m', 'files')
+fs.symlinkSync('../repoC/h1.md', path.join(chainB, 'h.md')); git(chainB, 'add', '-A'); git(chainB, 'commit', '-q', '-m', 'link')
+fs.symlinkSync(path.join(chainB, 'h.md'), chainH); git(chainC.proj, 'add', '-A'); git(chainC.proj, 'commit', '-q', '-m', 'link')
+fs.rmSync(path.join(chainB, 'h.md')); fs.symlinkSync('../repoC/h2.md', path.join(chainB, 'h.md'))
+const chainR = run(chainC)
+clause('clause 2b7 — all true but the middle link of a chain of committed links reaching the handoff, retargeted and uncommitted: paused R10, not launched (SR11)',
+  !launched(chainR) && paused(chainC).some((l) => l.includes('handoff not written')), show(chainC, chainR))
 
 // One fixture per E8-D7 precondition, that precondition alone false.
 const seatUp = (f) => write(path.join(seatsDir(f.session), 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', paneId: 'w9:p2' }))
@@ -1298,13 +1309,18 @@ clause('clause 1h8 — liveSeatsPartial gives each seat the modification time of
   const outSt = (p) => spawnSync('git', ['-C', outLinkC.proj, 'status', '--porcelain', '--', p], { encoding: 'utf8' }).stdout
   const outLinkOk = fs.lstatSync(outLinkH).isSymbolicLink() && above(outLinkTarget) && outSt('docs/handoffs/h.md') === '' && / M SESSION_MEMORY\.md/.test(outSt('SESSION_MEMORY.md')) &&
     Number(gitQuiet(outLinkC.proj, 'log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md')) * 1000 >= T0
+  // The chain project's handoff link and repoC clean with every file tracked (the hook's paused line is the project's
+  // only other change), and repoB alone calling its link, still a link, modified.
+  const stAll = (d, ...p) => gitQuiet(d, 'status', '--porcelain', '--untracked-files=all', '--', ...p), lsOk = (d, p) => gitQuiet(d, 'ls-files', '--error-unmatch', p) !== null
+  const chainOk = fs.lstatSync(chainH).isSymbolicLink() && fs.lstatSync(path.join(chainB, 'h.md')).isSymbolicLink() && fs.realpathSync(chainH) === fs.realpathSync(path.join(chainCC, 'h2.md')) &&
+    stAll(chainC.proj, 'docs/handoffs/h.md', 'SESSION_MEMORY.md') === '' && stAll(chainB) === 'M h.md' && stAll(chainCC) === '' && lsOk(chainC.proj, 'docs/handoffs/h.md') && lsOk(chainB, 'h.md') && lsOk(chainCC, 'h1.md') && lsOk(chainCC, 'h2.md')
   const real = spawnSync('git', ['-C', '/dev', 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
   const head = negs.find((n) => n.name === 'a .git directory missing HEAD').f.proj
   const hr = spawnSync('git', ['-C', head, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
   const form = 'fatal: not a git repository (or any parent up to mount point '
-  clause('clause 3a0 — without the hook: the no-git project has no .git above it, the boundary project\'s git shim prints the boundary stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set and git\'s answer when it is, the linked-docs lane has no .git above it as written while its handoff, in the repository the link reaches, is uncommitted with no commit, the linked-file lane\'s handoff is a link with no .git above it as written while the file it reaches is uncommitted with no commit, the outside-link project\'s handoff a link committed after the warning to a file with no .git above it while its memory file is modified, and the HEAD fixture\'s .git is a directory without HEAD that git rejects',
-    noGitAbove && linkedOk && linkedFileOk && outLinkOk && across.status === 0 && across.stdout.trim() === 'true' && b.status === 128 && real.status === 128 && b.stderr.startsWith(form) && real.stderr.startsWith(form) && /Stopping at filesystem boundary/.test(b.stderr) &&
-    hr.status === 128 && fs.statSync(path.join(head, '.git')).isDirectory() && !fs.existsSync(path.join(head, '.git', 'HEAD')), JSON.stringify({ noGitAbove, linkedOk, linkedFileOk, outLinkOk, linked: linkedSt.stdout, across: across.stdout, b: b.stderr, real: real.stderr, hr: hr.stderr }))
+  clause('clause 3a0 — without the hook: the no-git project has no .git above it, the boundary project\'s git shim prints the boundary stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set and git\'s answer when it is, the linked-docs lane has no .git above it as written while its handoff, in the repository the link reaches, is uncommitted with no commit, the linked-file lane\'s handoff is a link with no .git above it as written while the file it reaches is uncommitted with no commit, the outside-link project\'s handoff a link committed after the warning to a file with no .git above it while its memory file is modified, the chain project and its last repository clean with every file tracked while the middle repository alone calls its link modified, and the HEAD fixture\'s .git is a directory without HEAD that git rejects',
+    noGitAbove && linkedOk && linkedFileOk && outLinkOk && chainOk && across.status === 0 && across.stdout.trim() === 'true' && b.status === 128 && real.status === 128 && b.stderr.startsWith(form) && real.stderr.startsWith(form) && /Stopping at filesystem boundary/.test(b.stderr) &&
+    hr.status === 128 && fs.statSync(path.join(head, '.git')).isDirectory() && !fs.existsSync(path.join(head, '.git', 'HEAD')), JSON.stringify({ noGitAbove, linkedOk, linkedFileOk, outLinkOk, chainOk, linked: linkedSt.stdout, across: across.stdout, b: b.stderr, real: real.stderr, hr: hr.stderr }))
 }
 clause('clause 3a — without the hook: the tracked fixture\'s handoff is not ignored and has no commit, the tracked good one has one, the ignored one is ignored',
   gitQuiet(tracked.proj, 'check-ignore', 'docs/handoffs/h.md') === null && gitQuiet(tracked.proj, 'log', '--format=%H', '--', 'docs/handoffs/h.md') === '' &&

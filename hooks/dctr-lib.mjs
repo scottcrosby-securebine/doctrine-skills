@@ -2510,9 +2510,9 @@ export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, le
  *  the prefix walked so far is always real, `.` is skipped, `..` drops the real prefix's last component, a link's
  *  target is put back on the front of the queue (an absolute target restarts at `/`), and a component that does not
  *  exist is kept as written and the walk goes on, so a link whose target is gone (a wiped scratchpad) is still
- *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after 40
- *  links a link is kept as written, so a cycle ends. */
-export function followLinks(p, { lstat, readlink }) {
+ *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after `max`
+ *  links (40 by default) a link is kept as written, so a cycle ends. */
+export function followLinks(p, { lstat, readlink, max = 40 }) {
   const queue = String(p).split('/')
   let real = '/'
   for (let hops = 0; queue.length;) {
@@ -2521,7 +2521,7 @@ export function followLinks(p, { lstat, readlink }) {
     if (c === '..') { real = path.dirname(real); continue }
     const next = path.join(real, c)
     let target = null
-    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) } catch { /* missing: kept as written */ }
+    try { if (hops < max && lstat(next).isSymbolicLink()) target = readlink(next) } catch { /* missing: kept as written */ }
     if (target === null) { real = next; continue }
     hops++
     if (target.startsWith('/')) real = '/'

@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -966,8 +966,9 @@ export function treeHash(repos, excludes) {
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
  * or after `warnedAt` (the gauge's latch records when it warned), and every repository holding either file's own real
- * path or a link on the way to it reports that path landed there: the handoff's own file ignored by that repository
- * or committed at or after that second with no uncommitted change, and every other path with no uncommitted change.
+ * path or a link met at any hop on the way to it reports that path landed there: the handoff's own file ignored by
+ * that repository or tracked and committed at or after that second with no uncommitted change, and every other path
+ * ignored there, or tracked (or, for the memory file, absent) with no uncommitted change.
  * Only the repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
  * the user's, so a user-level rule can only ever require a commit. A path with no .git entry above it is landed by
  * the file alone; with one, git must answer from that repository's work tree, and any failure is not landed.
@@ -983,19 +984,22 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
   // counts as present, so git then decides, and its failure is not landed.
   const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
-  // A link lives in two places: the link itself, tracked where its directory is, and the file it reaches. So each
-  // path gives every link on the way to it, as the entry its directory tracks, and its own real path. A memory file
-  // not yet written is resolved by its directory; one that exists and cannot be resolved is not landed, since the
-  // link alone would then read clean. shortcut: components are read as path.resolve writes them, so a `..` after a
-  // link is taken lexically; resolve component by component if a kickoff ever names such a path.
+  // A link lives in two places: the link itself, tracked where its directory is, and the file it reaches, which may
+  // itself be a link. So each path gives every link met at every hop of the kernel's walk to it (a link inside a
+  // link's target and a directory link included), each as the entry its real directory tracks, and its own real path.
+  // followLinks keeps a component it cannot read and stops following after `max` links, so any read failure but a
+  // missing component, and a walk that met that many links, is not landed. A memory file not yet written is resolved
+  // by its directory; one that exists and cannot be resolved is not landed, since the link alone would then read clean.
   const forms = (p) => {
-    const parts = path.resolve(p).split(path.sep), links = []
-    for (let i = 2; i <= parts.length; i++) {
-      const c = parts.slice(0, i).join(path.sep)
-      let l
-      try { l = fs.lstatSync(c) } catch (e) { if (e.code === 'ENOENT' && i === parts.length) return { links, real: path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)) }; throw e }
-      if (l.isSymbolicLink()) links.push(path.join(fs.realpathSync.native(path.dirname(c)), path.basename(c)))
-    }
+    const links = []
+    let bad = null
+    const strict = (f) => (x) => { try { return f(x) } catch (e) { if (e.code !== 'ENOENT') bad = e; throw e } }
+    const lstat = strict((x) => { const s = fs.lstatSync(x); if (s.isSymbolicLink()) links.push(x); return s })
+    const max = 40
+    followLinks(path.isAbsolute(p) ? p : `${process.cwd()}/${p}`, { lstat, readlink: strict(fs.readlinkSync), max })
+    if (bad) throw bad
+    if (links.length >= max) throw new Error('too many links')
+    try { fs.lstatSync(p) } catch (e) { if (e.code === 'ENOENT') return { links, real: path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)) }; throw e }
     return { links, real: fs.realpathSync.native(p) }
   }
   // Any inherited GIT_ variable (GIT_DIR and its kin, a ceiling, a config entry naming an excludes file) can point
@@ -1004,8 +1008,8 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   const env = { ...process.env }
   for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
   Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null' })
-  // Whether `file` is landed in the repository holding it, if any: no uncommitted change, and with `handoff` also
-  // ignored there or committed at or after the warning.
+  // Whether `file` is landed in the repository holding it, if any: ignored there, or tracked (a memory file may be
+  // absent) with no uncommitted change, and with `handoff` committed at or after the warning.
   const landedIn = (file, handoff) => {
     const top = repoOf(file, dotGit)
     if (!dotGit(path.join(top, '.git'))) return true
@@ -1018,13 +1022,17 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
     }
     // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
     if (git(['rev-parse', '--show-toplevel']) !== fs.realpathSync.native(top)) return false
+    // Exit 0 is ignored, 1 is not ignored and needs its tracking; anything else is not landed.
+    try { git(['check-ignore', '-q', file]); return true } catch (e) { if (e.status !== 1) throw e }
+    // Tracked is asked, never read from a quiet status: the repository's own config can keep an untracked path out of one.
+    let present = true
+    try { fs.lstatSync(file) } catch (e) { if (e.code !== 'ENOENT') throw e; present = false }
+    if (handoff || present) try { git(['ls-files', '--error-unmatch', '--', file]) } catch (e) { if (e.status === 1) return false; throw e }
     if (handoff) {
-      // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
-      try { git(['check-ignore', '-q', file]); return true } catch (e) { if (e.status !== 1) throw e }
       const ct = Number(git(['log', '-1', '--format=%ct', '--', file]))
       if (!ct || ct < Math.floor(warnedAt / 1000)) return false
     }
-    return git(['status', '--porcelain', '--', file]) === ''
+    return git(['status', '--porcelain', '--untracked-files=all', '--ignored=no', '--', file]) === ''
   }
   try {
     // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.
