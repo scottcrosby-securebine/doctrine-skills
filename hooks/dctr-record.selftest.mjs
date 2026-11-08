@@ -312,6 +312,23 @@ const tailNear = parseRecord(TAIL_NEAR.join('\n')).entries
 clause('clause 1s — a fixed part run straight into more word characters (alarm 1x, count 4.5, offline, readying, a hash with a non-hex letter) is not a form (R2-B2)',
   tailNear.length === 0, JSON.stringify(tailNear))
 
+// E15-D1: a relay line, one entry with its time, sender, receiver and reference, as a list item or bare, key in any
+// case, with prose after the reference; a relay line missing a field, or with a near-miss time, is prose.
+const RELAYS = [
+  ['- relay: 2026-11-07T13:01:00Z lane-b to owner inbox/20261107T130001Z-lane-b.md', '2026-11-07T13:01:00Z', 'lane-b', 'owner', 'inbox/20261107T130001Z-lane-b.md'],
+  [`Relay: ${T} owner to lane-a inbox/a.md`, T, 'owner', 'lane-a', 'inbox/a.md'],
+  [`  - relay: ${T} lane-a to lane-b inbox/b.md; answered the question`, T, 'lane-a', 'lane-b', 'inbox/b.md'],
+]
+const RELAY_NEAR = [`- relay: ${T} lane-b to owner`, `- relay: ${T} lane-b owner inbox/x.md`, '- relay: yesterday lane-b to owner inbox/x.md', '- relay: 2026-11-07 lane-b to owner inbox/x.md']
+const relayWant = RELAYS.map(([, time, from, to, ref], i) => ({ kind: 'relay', time, from, to, ref, line: i + 1 }))
+let relayWhy = ''
+try { deepStrictEqual(parseRecord(RELAYS.map(([l]) => l).join('\n')).entries, relayWant) } catch (e) { relayWhy = String(e.message).slice(0, 600) }
+clause('clause 1v \u2014 a relay line is one entry of kind relay with its time, from, to and ref, as a list item or bare, in any key case, with prose after the ref (E15-D1)',
+  relayWhy === '', relayWhy)
+const relayNear = parseRecord(RELAY_NEAR.join('\n')).entries
+clause('clause 1w \u2014 a relay line missing its ref or its to, or with a time that is not a form time, is not an entry (E15-D1)',
+  relayNear.length === 0, JSON.stringify(relayNear))
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
@@ -360,6 +377,11 @@ clause('clause 3i \u2014 without the parser: the first time clause past the firs
   DEADLINE_PROSE.every(([l, , , d]) => !CLAUSE.test(pastHandleWord(l)) && d === null) &&
   [DEADLINES, DEADLINE_PROSE].every((t) => new Set(t.map((r) => r[1])).size === t.length),
   'a clause fixture without a time, or a prose fixture holding a real clause, would blame a correct parser or pass by nothing')
+
+clause('clause 3j \u2014 without the parser: each relay fixture holds its key, its want time, the word to between its sender and receiver, and its ref after that, and each near miss holds the key and lacks one of those parts',
+  RELAYS.every(([l, time, from, to, ref]) => /relay:/i.test(l) && l.includes(`${time} ${from} to ${to} ${ref}`)) &&
+  RELAY_NEAR.every((l) => /^- relay: /.test(l) && !/^- relay: \d{4}-\d{2}-\d{2}T\S+Z \S+ to \S+ \S+$/.test(l)),
+  'a relay fixture that did not carry its fields would let clause 1v pass against a parser that reads none')
 
 clause('clause 3c — without the parser: the kit wrapper line has text after its value, a prefix and a period',
   /^Wrapper: doctrine:doctrine-code\. \S/.test(KIT.split('\n')[1]),

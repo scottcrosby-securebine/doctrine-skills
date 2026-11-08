@@ -3,7 +3,7 @@
 // Pure: a string in, a value out. No filesystem, no clock, no herdr. The line forms are the ones hub step 5
 // (skills/doctrine/SKILL.md) defines, each read with prose allowed after its fixed part (TAIL), and the selftest's fixture
 // record holds every key and every auto-cycle sub-form as a list item and bare, and every parsed entry is compared whole
-// against a hand-written table, so a form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
+// against a hand-written table (the relay form in a table of its own), so a form or field this file loses is a selftest failure and never a silent miss. The selftest never reads the hub: a hub change to the forms is caught by review, not here.
 //
 // Every form may be a list item (`- `) or bare, its key in any case. The forms the agent writes (auto-cycle on, off,
 // ready and paused) are also read with one inline code, bold or italic span wrapping the whole line (unwrapLine); a
@@ -63,6 +63,9 @@ const FORMS = [
     (m) => ({ kind: 'alarm', which: m[1].toLowerCase(), time: m[2], count: num(m[3]) })],
   [form(`question:\\s+(\\S+)\\s+(opened|answered)\\s+${TIME}\\s+(\\S.*)`),
     (m) => ({ kind: `question-${m[2].toLowerCase()}`, id: m[1], time: m[3], text: m[4].trim() })],
+  // E15-D1: a relay between an orchestrator's lanes and its owner, the ref one token (an inbox file).
+  [form(`relay:\\s+${TIME}\\s+(\\S+)\\s+to\\s+(\\S+)\\s+(\\S+?)`),
+    (m) => ({ kind: 'relay', time: m[1], from: m[2], to: m[3], ref: m[4] })],
   [form('auto-cycle:\\s+on\\s+cap\\s+(\\d+)\\s+tier\\s+(\\S+?)'), (m) => ({ kind: 'auto-cycle', sub: 'on', cap: num(m[1]), tier: m[2] }), AGENT],
   [form('auto-cycle:\\s+off'), () => ({ kind: 'auto-cycle', sub: 'off' }), AGENT],
   [form('auto-cycle:\\s+warned\\s+(\\S+)\\s+(\\S+?)'), (m) => ({ kind: 'auto-cycle', sub: 'warned', session: m[1], tier: m[2] })],

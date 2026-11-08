@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { wrapperValue, parseRecord, unwrapLine, kickoffHandoff, handoffHeader, restoreState } from './dctr-record.mjs'
 import { RESUME_MARK, carriesMark } from './dctr-promptgate.mjs'
 
@@ -11,7 +13,8 @@ export { kickoffHandoff, handoffHeader, restoreState }
 //
 // Everything here is a pure function of a hook payload plus observed state. No herdr, no
 // filesystem, no clock. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
-// fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is.
+// fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is. The one exception is
+// runRoot, which reads git and the project file because callers must reach it with no arguments (E15-D94).
 //
 // The I/O lives in `dctr-seat.mjs` (the hook), `dctr-render.mjs` (the pane renderer), `dctr-gate.mjs`
 // (the long-check launcher) and `dctr-state.mjs` (the markers, lock, log and herdr call they share).
@@ -1097,9 +1100,9 @@ export function seatLive(seat, { resultExists = false, jobStatus = null, jobMiss
 export const inFlightIds = (tasks) => (Array.isArray(tasks)
   ? new Set(tasks.filter((t) => t && typeof t === 'object' && t.id != null).map((t) => String(t.id))) : null)
 
-/** A record line that counts as progress (B7, E8-R9): a wave, round, finding raised, finding cleared or ruling
- *  line, a wave the continuity skills dispatched excepted. */
-const isWork = (e) => ['wave', 'round', 'finding-raised', 'finding-cleared', 'ruling'].includes(e.kind) && !(e.kind === 'wave' && e.via)
+/** A record line that counts as progress (B7, E8-R9, E15-D2): a wave, round, finding raised, finding cleared, ruling
+ *  or relay line, a wave the continuity skills dispatched excepted. */
+const isWork = (e) => ['wave', 'round', 'finding-raised', 'finding-cleared', 'ruling', 'relay'].includes(e.kind) && !(e.kind === 'wave' && e.via)
 
 /**
  * The paths B7's tree hash leaves out of one repo (E8-D17), as pathspecs relative to it: the memory file, the
@@ -1112,6 +1115,27 @@ export function treeExcludes(recordPath, repo) {
   const inRepo = rel && !rel.startsWith('..') && !path.isAbsolute(rel)
   return ['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*',
     ...(inRepo ? [rel, `:(glob)${rel.replace(/\.md$/, '')}-run-state*`] : [])]
+}
+
+/** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
+export const runRole = (env = process.env) => env.DCTR_ROLE || null
+
+/**
+ * The run's root directory (E15-D94): DCTR_RUN when set; else, when the role is `orchestrator`, `<Records>/orchestrate`
+ * under the git top level holding `cwd`, Records being the last `Records:` header line above the first `##` section of
+ * that repo's docs/PROJECT.md; else null, as it is when there is no repo, no project file, no Records line or Records
+ * is `none`. The top level, not the cwd, so a session started in a subdirectory resolves its own repo.
+ */
+export function runRoot(env = process.env, cwd = process.cwd()) {
+  if (env.DCTR_RUN) return env.DCTR_RUN
+  if (runRole(env) !== 'orchestrator') return null
+  let top, text
+  try {
+    top = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    text = fs.readFileSync(path.join(top, 'docs/PROJECT.md'), 'utf8')
+  } catch { return null }
+  const records = ('\n' + text).split(/\n(?=## )/)[0].match(/^Records:\s?(.*)$/gm)?.at(-1).replace(/^Records:\s?/, '').trim()
+  return records && records !== 'none' ? path.resolve(top, records, 'orchestrate') : null
 }
 
 /**

@@ -136,6 +136,7 @@ const cyc = (n, h) => `- auto-cycle: cycle ${n} tree ${h}`
 const backupWave = '- wave: 2026-09-24T01:00:00Z seat r1 handle h1 via doctrine-backup'
 const backupWaveProse = '- wave: 2026-10-03T01:00:14Z seat backup-review handle /root/backup_review via doctrine-backup; read-only correctness/completeness review of memory and handoff; deadline 5 minutes.'
 const round = '- round: 2 closed 2026-09-24T01:00:00Z at abc blockers 0 alarm 0'
+const relay = (i) => `- relay: 2026-11-07T13:0${i}:00Z lane-b to owner inbox/20261107T13000${i}Z-lane-b.md`
 const P = [
   ['cycle 10 with cap 10', rec(on, cyc(10, 'aa')), 'aa', 'cap 10', 11],
   ['cycle 9 with cap 10', rec(on, cyc(9, 'aa')), 'bb', null, 10],
@@ -149,10 +150,21 @@ const P = [
   ['a counter across session ids', rec(on, '- auto-cycle: warned s1 60%', cyc(1, 'a1'), '- auto-cycle: warned s2 60%', cyc(2, 'a2'), '- auto-cycle: warned s3 60%'), 'a3', null, 3],
   ['a raised cap on a new on line', rec(on, cyc(10, 'aa'), '- auto-cycle: on cap 20 tier 60%'), 'bb', null, 11],
   ['a changed hash between the two cycles', rec(on, cyc(1, 'aa'), cyc(2, 'bb')), 'bb', null, 3],
+  // E15-D2: a relay line is work, between the two cycles or after the second.
+  ['only relay lines between and after the two cycles', rec(on, cyc(1, 'aa'), relay(1), '- auto-cycle: warned s1 60%', cyc(2, 'aa'), relay(2)), 'aa', null, 3],
+  ['only a relay line after the second cycle', rec(on, cyc(1, 'aa'), backupWave, cyc(2, 'aa'), relay(3)), 'aa', null, 3],
+  ['only a relay line between the two cycles', rec(on, cyc(1, 'aa'), relay(4), cyc(2, 'aa'), backupWave), 'aa', null, 3],
 ]
 const progBad = P.filter(([, es, h, pause, n]) => cycleProgress(es, h).pause !== pause || cycleProgress(es, h).n !== n)
 clause('clause 1h — cycleProgress: only the cap, the bookkeeping-only and the leftover-dirty fixtures pause, and the count continues across session ids (E8-D17, T3)',
   progBad.length === 0, JSON.stringify(progBad.map(([name, es, h]) => [name, cycleProgress(es, h)])))
+
+clause('clause 3h7 \u2014 without cycleProgress: each relay fixture line parses as a relay entry and as nothing the old work kinds name, and the relay fixtures hold no other work line and one tree hash',
+  [1, 2, 3, 4].every((i) => { const es = parseRecord(relay(i)).entries; return es.length === 1 && es[0].kind === 'relay' }) &&
+  P.filter(([name]) => name.includes('relay')).length === 3 &&
+  P.filter(([name]) => name.includes('relay')).every(([, es]) => es.every((e) => !['round', 'finding-raised', 'finding-cleared', 'ruling'].includes(e.kind) && !(e.kind === 'wave' && !e.via)) &&
+    new Set(es.filter((e) => e.sub === 'cycle').map((e) => e.hash)).size === 1),
+  'a relay fixture holding another work line, or a changed hash, would let clause 1h pass against a cycleProgress that ignores relays')
 
 clause('clause 1h4 — endsReady takes the ready line wrapped in inline code, bold or italics or behind a list marker, as the whole last line, and never inside a sentence (K4-RL)',
   endsReady('Done.\n\n`auto-cycle: ready`') && endsReady('x\n**auto-cycle: ready**\n') && endsReady('x\n- auto-cycle: ready') && endsReady('x\n  *auto-cycle: ready*  ') &&
@@ -216,6 +228,57 @@ function repo(dir, ignore = 'SESSION_MEMORY.md\ndocs/handoffs/\n') {
   git(dir, 'add', '-A'); git(dir, 'commit', '-q', '-m', 'init')
   return dir
 }
+// E15-D94: the run root and the role. One checkout whose project file names Records, read from a subdirectory so the
+// root is the git top level and not the cwd; another repo with no project file and a worktree of it; a checkout whose
+// Records is none; a directory in no repo.
+const rrOwn = repo(path.join(tmp, 'rr-own'), '')
+write(path.join(rrOwn, 'docs/PROJECT.md'), '# Project: rr\nState: Ruled\nRecords: .doctrine/records\n\n## End state\nRecords: elsewhere\n')
+fs.mkdirSync(path.join(rrOwn, 'src/deep'), { recursive: true })
+const rrOther = repo(path.join(tmp, 'rr-other'), '')
+const rrWt = path.join(rrOther, '.claude/worktrees/lane-a')
+git(rrOther, 'worktree', 'add', '-q', '-b', 'lane-a', rrWt)
+const rrNone = repo(path.join(tmp, 'rr-none'), '')
+write(path.join(rrNone, 'docs/PROJECT.md'), '# Project: rr\nRecords: none\n')
+const rrBare = path.join(tmp, 'rr-bare'); fs.mkdirSync(rrBare, { recursive: true })
+const rrRun = path.join(tmp, 'rr-run')
+const realOr = (p) => (typeof p === 'string' && fs.existsSync(p) ? fs.realpathSync(p) : p)
+const rrWant = path.join(fs.realpathSync(rrOwn), '.doctrine/records/orchestrate')
+const RR = typeof lib.runRoot === 'function' ? lib.runRoot : () => 'no runRoot export'
+const RL = typeof lib.runRole === 'function' ? lib.runRole : () => 'no runRole export'
+const RR_CASES = [
+  ['DCTR_RUN in a lane worktree of another repo', { DCTR_RUN: rrRun, DCTR_ROLE: 'lane-a' }, rrWt, rrRun],
+  ['DCTR_RUN wins over the orchestrator role', { DCTR_RUN: rrRun, DCTR_ROLE: 'orchestrator' }, rrOwn, rrRun],
+  ['orchestrator in its own checkout, from a subdirectory', { DCTR_ROLE: 'orchestrator' }, path.join(rrOwn, 'src/deep'), rrWant],
+  ['neither variable in that checkout', {}, rrOwn, null],
+  ['a lane role with no DCTR_RUN', { DCTR_ROLE: 'lane-a' }, rrOwn, null],
+  ['orchestrator in a repo with no project file', { DCTR_ROLE: 'orchestrator' }, rrWt, null],
+  ['orchestrator in a checkout whose Records is none', { DCTR_ROLE: 'orchestrator' }, rrNone, null],
+  ['orchestrator outside any repo', { DCTR_ROLE: 'orchestrator' }, rrBare, null],
+]
+// The ceiling keeps git from finding a repo above the suite's temp dir, so the bare case holds wherever TMPDIR is.
+const savedCeiling = process.env.GIT_CEILING_DIRECTORIES
+process.env.GIT_CEILING_DIRECTORIES = fs.realpathSync(tmp)
+const rrGot = RR_CASES.map(([, env, cwd]) => RR(env, cwd))
+if (savedCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES; else process.env.GIT_CEILING_DIRECTORIES = savedCeiling
+const rrBad = RR_CASES.filter(([, , , want], i) => realOr(rrGot[i]) !== realOr(want))
+clause('clause 1l5 \u2014 runRoot: DCTR_RUN when set; with no DCTR_RUN and the role orchestrator, <Records>/orchestrate of the git top level holding the cwd, Records from that repo\'s project file header; else null (E15-D94)',
+  rrBad.length === 0, JSON.stringify(rrBad.map(([name]) => [name, rrGot[RR_CASES.findIndex((c) => c[0] === name)]])))
+const savedEnv = { run: process.env.DCTR_RUN, role: process.env.DCTR_ROLE }
+const setEnv = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+setEnv('DCTR_RUN', rrRun); setEnv('DCTR_ROLE', 'lane-b')
+const rrNoArgs = [RR(), RL()]
+setEnv('DCTR_RUN', savedEnv.run); setEnv('DCTR_ROLE', savedEnv.role)
+clause('clause 1l6 \u2014 runRole: DCTR_ROLE, else null, and both read the process environment when called with no arguments (E15-D94)',
+  RL({ DCTR_ROLE: 'orchestrator' }) === 'orchestrator' && RL({}) === null && RL({ DCTR_ROLE: '' }) === null &&
+  JSON.stringify(rrNoArgs) === JSON.stringify([rrRun, 'lane-b']), JSON.stringify([RL({ DCTR_ROLE: 'orchestrator' }), RL({}), rrNoArgs]))
+const top = (d) => { try { return fs.realpathSync(execFileSync('git', ['-C', d, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', env: { ...genv, GIT_CEILING_DIRECTORIES: fs.realpathSync(tmp) }, stdio: ['ignore', 'pipe', 'ignore'] }).trim()) } catch { return null } }
+clause('clause 3l5 \u2014 without runRoot: the subdirectory\'s git top level is the own checkout and not the cwd, its project file\'s header names Records once above its first section, the worktree\'s top level holds no project file, the none checkout says none, and the bare directory is in no repo',
+  top(path.join(rrOwn, 'src/deep')) === fs.realpathSync(rrOwn) && fs.realpathSync(path.join(rrOwn, 'src/deep')) !== fs.realpathSync(rrOwn) &&
+  fs.readFileSync(path.join(rrOwn, 'docs/PROJECT.md'), 'utf8').split('\n## ')[0].match(/^Records: .doctrine\/records$/gm)?.length === 1 &&
+  top(rrWt) === fs.realpathSync(rrWt) && !fs.existsSync(path.join(rrWt, 'docs/PROJECT.md')) &&
+  /^Records: none$/m.test(fs.readFileSync(path.join(rrNone, 'docs/PROJECT.md'), 'utf8')) && top(rrBare) === null,
+  'a fixture whose cwd was its top level, or whose other repo carried a project file, would let clause 1l5 pass against a runRoot that resolves the cwd')
+
 const EX = (repo) => treeExcludes(path.join(repo, '.doctrine/records/r.md'), repo)
 clause('clause 1l2 — treeExcludes: the memory file, the handoffs and the auto-cycle files in every repo; the record and its own run-state sibling only in the repo holding it (B7, SP4)',
   JSON.stringify(treeExcludes('/w/p/.doctrine/records/r.md', '/w/p')) === JSON.stringify(['SESSION_MEMORY.md', 'docs/handoffs', ':(glob).doctrine/auto-cycle*', '.doctrine/records/r.md', ':(glob).doctrine/records/r-run-state*']) &&
