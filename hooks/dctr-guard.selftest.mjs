@@ -150,8 +150,10 @@ fs.symlinkSync('d1/d2/d3', path.join(orch, 'docs/handoffs/deep'))
 // A repo nested inside the orchestrator's checkout, with no project file of its own.
 const inner = path.join(orch, 'inner')
 fs.mkdirSync(path.join(inner, '.git'), { recursive: true })
-// A checkout whose project file and folders are stored in lower case, with a run of its own.
-const lc = path.join(tmp, 'lc'), lcRun = path.join(lc, '.doctrine/records/orchestrate')
+// A checkout whose project file and folders are stored in lower case, with a run of its own. Its own folder name holds
+// a capital so a name kept as stored differs from the folded one on any host: ignoresCase stops at a device, so where
+// the temp dir is a mount of its own (tmpfs on Linux) nothing above this folder is folded.
+const lc = path.join(tmp, 'Lc'), lcRun = path.join(lc, '.doctrine/records/orchestrate')
 fs.mkdirSync(path.join(lc, '.git'), { recursive: true }); fs.mkdirSync(lcRun, { recursive: true })
 put(path.join(lc, 'docs/project.md'), '# Project\n\nRecords: .doctrine/records\n'); put(path.join(lc, 'session_memory.md'))
 fs.mkdirSync(path.join(lc, 'docs/handoffs'), { recursive: true })
@@ -202,8 +204,15 @@ put(inject, "import fs from 'node:fs'\nconst [op, match, stall, only] = JSON.par
   "  cp.default.spawn = () => { const c = Object.assign(new EventEmitter(), { stdin: null, stdout: null, stderr: null, kill: () => false }); process.nextTick(() => c.emit('error', Object.assign(new Error('spawn EMFILE (injected)'), { code: 'EMFILE' }))); return c }\n" +
   "  syncBuiltinESMExports() }\n" +
   "if (op === 'statSync' && !stall) { const ex = fs.existsSync; fs.existsSync = (p) => !String(p).includes(match) && ex(p) }\n")
-const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault } = {}) => {
-  const args = fault ? ['--import', pathToFileURL(inject).href, hook] : [hook]
+// A preload that writes to stdout as macOS does to a pipe: past 64 KB the rest goes out asynchronously, so a process
+// that exits before the write's callback loses it. On Linux a pipe write is synchronous and never cut short.
+const asyncPipe = path.join(tmp, 'async-pipe.mjs')
+put(asyncPipe, "const w = process.stdout.write.bind(process.stdout)\n" +
+  "process.stdout.write = (c, e, cb) => { if (typeof e === 'function') [cb, e] = [e, undefined]\n" +
+  "  const b = Buffer.from(c, e); if (b.length <= 65536) return w(b, cb)\n" +
+  "  w(b.subarray(0, 65536)); setImmediate(() => w(b.subarray(65536), cb)); return false }\n")
+const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault, pipe } = {}) => {
+  const args = [...(fault ? ['--import', pathToFileURL(inject).href] : []), ...(pipe ? ['--import', pathToFileURL(asyncPipe).href] : []), hook]
   const r = spawnSync('node', args, { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...BASE, ...env, ...(fault ? { GUARD_FAULT: JSON.stringify(fault) } : {}) }, cwd, encoding: 'utf8' })
   let h = null
   try { h = JSON.parse(r.stdout).hookSpecificOutput } catch { /* no output */ }
@@ -522,12 +531,15 @@ clause('clause 2zc — a refusal at the bound appends one guard.log line where t
 const longAsked = 'src/' + 'x/../'.repeat(14000) + 'a.txt'
 const longBefore = logLines().length, long = hookRun(ORCH, W(longAsked))
 const longLines = logLines().slice(longBefore)
+// The same refusal with every process writing to its pipe as macOS does, so the deny is cut short on any host unless
+// each writer waits for its write to finish before it exits.
+const longPipe = hookRun(ORCH, W(longAsked), { pipe: true })
 const printed = [['a truncated deny', '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"de'],
   ['an allow', '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'], ['text', 'ok']]
   .map(([what, text], i) => ({ what, verdict: hookRun(ORCH, W(`docs/handoffs/h-print${i}.md`), { fault: ['print', text] }).verdict }))
-clause('clause 2zd — a refusal naming a path of over 64 KB prints the whole deny, which parses, and logs one line holding the path as given; a judgement that prints a truncated deny, an allow or other text refuses a write it would allow (E15-D24, GS-1(a), GT1)',
-  long.verdict === 'deny' && long.out.length > 65536 && longLines.length === 1 && longLines[0].endsWith(` Write ${orch}/${longAsked}`) && printed.every((p) => p.verdict === 'deny'),
-  `${long.verdict} exit ${long.code} ${long.out.length} bytes, lines ${longLines.length} ${JSON.stringify(printed)}`)
+clause('clause 2zd — a refusal naming a path of over 64 KB prints the whole deny, which parses, on this host and with pipes written as on macOS, and logs one line holding the path as given; a judgement that prints a truncated deny, an allow or other text refuses a write it would allow (E15-D24, GS-1(a), GT1)',
+  long.verdict === 'deny' && long.out.length > 65536 && longPipe.verdict === 'deny' && longPipe.out === long.out && longLines.length === 1 && longLines[0].endsWith(` Write ${orch}/${longAsked}`) && printed.every((p) => p.verdict === 'deny'),
+  `${long.verdict} exit ${long.code} ${long.out.length} bytes, as on macOS ${longPipe.verdict} ${longPipe.out.length} bytes, lines ${longLines.length} ${JSON.stringify(printed)}`)
 
 // The judgement hands on its line before it reads the run, and the log child decides the run itself, so a stall on the
 // run's own lstat, or on the realpath of a link to the run, confined to the judgement, still ends in a deny at the bound
@@ -679,6 +691,17 @@ clause('clause 3n — without the guard: uc stores its run as Orchestrate only, 
   (() => { try { SVOL.realpath(path.join(lc, 'DOCS')); return false } catch (e) { return e.code === 'ENOENT' } })() && swapLstat(SVOL, path.join(lc, 'docs')) === 'ENOENT' &&
   preloadCode('statSync', run) === 'EIO' && preloadCode('lstatSync', run) === 'EIO' && fs.statSync(run).isDirectory() &&
   fs.statSync(misnamed).isDirectory() && path.basename(misnamed) !== 'orchestrate' && fs.realpathSync(linkRun) === fs.realpathSync(misnamed), JSON.stringify(ucNames))
+// The pipe preload emulates what it claims: past 64 KB, a write followed at once by exit is cut short and one that
+// exits in its callback is whole, on any host.
+const piped = (code) => spawnSync('node', ['--import', pathToFileURL(asyncPipe).href, '-e', code], { encoding: 'utf8' }).stdout.length
+const pipeProof = { exitAtOnce: piped("process.stdout.write('x'.repeat(200000)); process.exit(0)"), exitInCallback: piped("process.stdout.write('x'.repeat(200000), () => process.exit(0))") }
+clause('clause 3r — without the guard: under the pipe preload a 200,000-byte write followed at once by exit is cut short, and one that exits in its callback is whole',
+  pipeProof.exitAtOnce < 200000 && pipeProof.exitInCallback === 200000, JSON.stringify(pipeProof))
+// Lc's own name holds a capital the emulated case-insensitive volume finds in lower case as the same folder, on the
+// device of the folder above it, so a Records path kept as stored and one folded differ on any host.
+const lcFold = (() => { try { const a = IVOL.lstat(lc), b = IVOL.lstat(path.join(tmp, 'lc')), up = IVOL.lstat(tmp); return a.ino === b.ino && a.dev === b.dev && a.dev === up.dev } catch (e) { return e.code } })()
+clause('clause 3s — without the guard: the lower-case checkout\'s own folder is named with a capital, and the emulated case-insensitive volume finds its lower-case name as the same folder on the device of the folder above it',
+  path.basename(lc) !== path.basename(lc).toLowerCase() && lcFold === true, `${path.basename(lc)} ${lcFold}`)
 const fio = fakeIo()
 clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, its case-sensitive twin holds /c/DOCS as a file other than /c/docs, its mount puts /c/docs on a device of its own, and its faults throw their codes' +
   (insensitive ? '; on this temp volume the real DOCS/PROJECT.md resolves to docs/PROJECT.md' : ''),
