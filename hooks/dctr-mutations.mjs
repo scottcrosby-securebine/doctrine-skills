@@ -56,7 +56,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The band's folder: the codex (install) suite changes a file inside it to prove the install reads every depth.
   'band/band.ts',
   // The round guard (visibility-62) and its suite.
-  'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs']
+  'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs',
+  // The orchestrator's capacity command (KS-1) and its suite.
+  'dctr-orchestrate.mjs', 'dctr-orchestrate.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -88,8 +90,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  6.8s, gate 7.4s, pane 16.6s, typer 22.2s, teardown 27.8s, codex.hooks 30.4s, cycle 50.1s. Doctor moved behind
  *  bridge, codex behind gauge, codex.hooks behind teardown, record ahead of seams and project ahead of notify.
  *  The round guard suite placed 2026-10-14, measured standalone on one host, three runs each: notify 0.61-0.71s,
- *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
+ *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore.
+ *  The orchestrate suite placed 2026-11-08, measured standalone on one host, three runs each: history 0.12s, orchestrate
+ *  0.59-0.61s; it goes after history and before project. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -2539,6 +2543,42 @@ const MUTATIONS = [
     clause: "clause 1m0",
     from: "export const HANDOFF_COST_TOKENS = 65000",
     to: "export const HANDOFF_COST_TOKENS = 24000" },
+  { name: "the capacity check compares load plus margin with the window instead of the tier (E15-D51)", file: "dctr-lib.mjs",
+    clause: "clause 1a",
+    from: "  const accept = need < tier && tier <= window",
+    to: "  const accept = need < window && tier <= window" },
+  { name: "the capacity check uses a 60,000 margin, not HANDOFF_COST_TOKENS (E15-D51)", file: "dctr-lib.mjs",
+    clause: "clause 1e",
+    from: "  const need = load + HANDOFF_COST_TOKENS",
+    to: "  const need = load + 60000" },
+  { name: "the capacity check accepts load plus margin equal to the tier (E15-D51)", file: "dctr-lib.mjs",
+    clause: "clause 1e",
+    from: "  const accept = need < tier && tier <= window",
+    to: "  const accept = need <= tier && tier <= window" },
+  { name: "the capacity check has no window bound, so a tier above the window is accepted (E15-D51)", file: "dctr-lib.mjs",
+    clause: "clause 1g",
+    from: "  const accept = need < tier && tier <= window",
+    to: "  const accept = need < tier" },
+  { name: "the capacity load is the transcript's last usage reading, as readUsage reads (E15-D209)", file: "dctr-lib.mjs",
+    clause: "clause 2d, 2e",
+    from: "  for (const l of String(transcriptText).split('\\n')) {",
+    to: "  for (const l of String(transcriptText).split('\\n').reverse()) {" },
+  { name: "the capacity command reads no usage and takes the load as zero (E15-D209)", file: "dctr-orchestrate.mjs",
+    clause: "clause 2e",
+    from: "  const load = reading.used",
+    to: "  const load = 0" },
+  { name: "every model id gets a 1,000,000 window (E15-D208)", file: "dctr-orchestrate.mjs",
+    clause: "clause 2b",
+    from: "  return String(id).endsWith('[1m]') ? 1000000 : 200000",
+    to: "  return 1000000" },
+  { name: "a [1m] id gets 250,000 and a known id 180,000 (E15-D208)", file: "dctr-orchestrate.mjs",
+    clause: "clause 2a, 2b",
+    from: "  return String(id).endsWith('[1m]') ? 1000000 : 200000",
+    to: "  return String(id).endsWith('[1m]') ? 250000 : 180000" },
+  { name: "an unknown model id gets a 200,000 window (E15-D208)", file: "dctr-orchestrate.mjs",
+    clause: "clause 2c",
+    from: "  if (!MODEL_IDS.includes(base)) return null",
+    to: "  if (!MODEL_IDS.includes(base)) return 200000" },
   { name: "only the restore file proves a /clear took, so herdr reporting the new session counts no cycle (E8-D17, E8-D28)", file: "dctr-lib.mjs",
     clause: "clause 1f3",
     from: "  const took = Boolean(o.restore) || (s !== null && s !== o.oldSession)",

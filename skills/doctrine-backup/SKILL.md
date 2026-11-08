@@ -13,6 +13,11 @@ repo, with or without a doctrine project file or an open doctrine phase.
 forward everything you cannot disprove. Target ≤400 words. The only edits you make are for
 correctness: a line the repo, the record or this session shows is wrong.
 
+**Orchestrator profile.** In a session whose `DCTR_ROLE` is `orchestrator` (a `doctrine-orchestrate`
+run), the memory file is held to 700 words instead of 400, and its Resume line also copies, word for
+word from the run's `waiting-questions.md`, every question waiting on the owner. Those copied
+questions do not count against the 700. Every other session keeps the 400-word target.
+
 **Under auto-cycle, a question pauses the run.** Doctrine step 5 defines when auto-cycle is on and
 which record is the phase's. With auto-cycle on, wherever a step below says to ask the user,
 append `- auto-cycle paused: question: <the question as that step words it>` as a list item at the end
@@ -201,7 +206,7 @@ available, say that one of your own family reviewed, and name it.
 
 ```bash
 root=$(git rev-parse --show-toplevel 2>/dev/null) && cd "$root" || { echo "NOT A GIT REPO — stop here"; exit 1; }
-wc -w SESSION_MEMORY.md                              # ≤400
+wc -w SESSION_MEMORY.md                              # ≤400; ≤700 under the orchestrator profile, less the copied questions
 grep -c "^## Next Session Kickoff$" SESSION_MEMORY.md || echo "MISSING — doctrine-primer will report a lost handoff"
 git status -sb | head -1                             # branch, ahead/behind
 git status --short | grep -v '^??' || true           # dirty tracked files; || true keeps a clean tree from exiting 1

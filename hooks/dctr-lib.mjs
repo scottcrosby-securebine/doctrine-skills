@@ -742,6 +742,31 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
   return { tier, tierText: label, errors }
 }
 
+/** The capacity check `doctrine-orchestrate` starts a role on (E15-D51, Q5): accept only when the role's resume
+ *  load plus the handoff cost is strictly below its tier, and the tier is at most its window. Pure: the caller
+ *  derives the window from the model id, reads the load from the transcript and refuses on any `resolveTier` error
+ *  first (`hooks/dctr-orchestrate.mjs`). */
+export function capacityDecision({ window, load, tier }) {
+  const need = load + HANDOFF_COST_TOKENS
+  const accept = need < tier && tier <= window
+  return { accept, window, load, tier, need, margin: HANDOFF_COST_TOKENS }
+}
+
+/** A transcript's FIRST main-thread usage reading (E15-D209), the resume load: the same entry test as `readUsage`,
+ *  read from the top, since the last reading is the session's use now and not what a resume cost. */
+export function firstUsage(transcriptText) {
+  if (transcriptText == null) return { unknown: 'missing' }
+  for (const l of String(transcriptText).split('\n')) {
+    let e
+    try { e = JSON.parse(l) } catch { continue }
+    const u = e?.message?.usage
+    if (e?.type !== 'assistant' || !u || e.isSidechain === true || e.isApiErrorMessage === true) continue
+    const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+    if (used > 0) return { used, uuid: e.uuid, at: e.timestamp || null }
+  }
+  return { unknown: 'unparseable' }
+}
+
 /** The latch as this session's own, or null: a latch left by another session id in the same directory is nobody's. */
 export const ownLatch = (latch, sessionId) => (latch && latch.session_id === sessionId ? latch : null)
 

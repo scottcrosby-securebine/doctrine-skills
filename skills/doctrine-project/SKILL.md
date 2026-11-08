@@ -39,6 +39,8 @@ The file formats, and the rule for when a return counts, are in `formats.md` bes
 
 This procedure applies to every phase in a repo that carries `docs/PROJECT.md`, whichever wrapper runs the phase.
 
+**In an orchestrated run** (a `doctrine-orchestrate` run, its sessions started with `DCTR_ROLE` set), only the orchestrator writes `docs/PROJECT.md` and the epic records. A lane that needs a lifecycle write, such as the epic leaving Not started, its own Members line or `Current epic:`, sends the orchestrator a `request` report naming it (`hooks/dctr-send.mjs report request <text>`), and takes no step that needs the write until the orchestrator's answer is in its held folder. The orchestrator makes the write, runs `check`, commits, and answers through that held folder. The lane keeps its own record and its review duties. Without an orchestrator session, this procedure is unchanged: each phase writes its own state moves, as below.
+
 ### The format check
 
 Run `node <plugin-root>/hooks/dctr-project.mjs check` as your first action in such a phase, and again after every write that changes a state, a ruling, a return, the roster, a membership or the pointer. Run it before committing that write. Exit 0 is clean. Exit 1 lists findings: fix them before any further state change. Exit 2 means the project file is absent or unreadable, or the arguments were malformed. This is the stated way the check runs in a target repo. Add no CI step to an adopted repo. A hand edit made between sessions is caught at the next session's first check, so far as the file as it stands shows it: check keeps no history of any line, so an edit to a Coverage or Combined check line is not among them, and that gap is ruled and known.

@@ -14,11 +14,13 @@ node node_modules/playwright-core/cli.js install chromium
 
 Not `npx playwright install`. That command belongs to the full `playwright` package, and with only `playwright-core` present it refuses and points you at `@playwright/test`. `playwright-core` ships its own CLI at the path above.
 
-## herdr, for `doctrine-pane`
+## herdr, for `doctrine-pane` and `doctrine-orchestrate`
 
 The README states the requirement. The detail it leaves out: inside a container a pane would be a
 process on the host, so a contained session refuses for the same reason a non-herdr one does. See
 [watching a run](watching-a-run.md).
+
+`doctrine-orchestrate` puts every session of a run, the orchestrator, each lane and the merge session, in its own herdr pane, and its sender and lane watcher type into those panes, so without herdr, or in a contained session, it refuses to start a run and says why. Install herdr's Claude integration (`herdr integration install claude`) so herdr reports which session each pane runs, and set up auto-cycle, below, since each session of the run cycles on its own.
 
 For everything else except auto-cycle, below, the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
 
