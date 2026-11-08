@@ -177,13 +177,17 @@ const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orc
 
 // A preload that makes one fs operation throw EIO on any path containing a given string, the hook's real fs otherwise;
 // `realpathSync.native` names the native realpath. With a third element it stalls that many ms instead, then runs it.
-// The op `exit` instead ends, with exit 3, any process run with the argument `judge`, the hook's own judgement.
+// The op `exit` instead ends, with exit 3, any process run with the argument `judge`, the hook's own judgement, and
+// `spawn` makes child_process.spawn behave as it does on EMFILE: a child with no stdio that emits 'error' on the next tick.
 const inject = path.join(tmp, 'inject.mjs')
 put(inject, "import fs from 'node:fs'\nconst [op, match, stall] = JSON.parse(process.env.GUARD_FAULT)\n" +
   "const [own, key] = op.includes('.') ? [fs[op.split('.')[0]], op.split('.')[1]] : [fs, op], orig = own[key]\n" +
   "own[key] = function (p, ...a) { if (String(p).includes(match)) { if (!stall) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stall) } return orig.call(this, p, ...a) }\n" +
   "if (key === 'realpathSync') own[key].native = orig.native\n" +
   "if (op === 'exit' && process.argv.includes('judge')) process.exit(3)\n" +
+  "if (op === 'spawn') { const cp = await import('node:child_process'), { EventEmitter } = await import('node:events'), { syncBuiltinESMExports } = await import('node:module')\n" +
+  "  cp.default.spawn = () => { const c = Object.assign(new EventEmitter(), { stdin: null, stdout: null, stderr: null, kill: () => false }); process.nextTick(() => c.emit('error', Object.assign(new Error('spawn EMFILE (injected)'), { code: 'EMFILE' }))); return c }\n" +
+  "  syncBuiltinESMExports() }\n" +
   "if (op === 'statSync' && !stall) { const ex = fs.existsSync; fs.existsSync = (p) => !String(p).includes(match) && ex(p) }\n")
 const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault } = {}) => {
   const args = fault ? ['--import', pathToFileURL(inject).href, hook] : [hook]
@@ -482,9 +486,11 @@ const timed = (fault) => new Promise((resolve) => {
 })
 const stalls = await Promise.all([timed(['statSync', 'records/orchestrate', 20000]), timed(['appendFileSync', 'guard.log', 20000])])
 const dies = hookRun(ORCH, W('docs/handoffs/h13.md'), { fault: ['exit', ''] })
+const emfile = hookRun(ORCH, W('docs/handoffs/h14.md'), { fault: ['spawn', ''] })
 const hostMs = 1000 * (hj.hooks.PreToolUse.find((g) => g.hooks.some((x) => /dctr-guard\.mjs/.test(x.command)))?.hooks[0].timeout ?? 0)
-clause('clause 2zb — a stat of the run and an append to guard.log, each stalled 20 s, end in a deny printed with at least 5 s to spare before the guard\'s hooks.json timeout, and a judgement that dies refuses a write it would allow (GS-1(a), GQ2)',
-  stalls.every((s) => s.deny && s.ms + 5000 <= hostMs) && dies.verdict === 'deny', `host timeout ${hostMs} ms ${JSON.stringify(stalls)} dies ${dies.verdict} ${dies.out.slice(0, 200)}`)
+clause('clause 2zb — a stat of the run and an append to guard.log, each stalled 20 s, end in a deny printed with at least 5 s to spare before the guard\'s hooks.json timeout, a judgement that dies refuses a write it would allow, and so does a spawn that fails as on EMFILE, exit 0 with the deny (GS-1(a), GQ2, GB1)',
+  stalls.every((s) => s.deny && s.ms + 5000 <= hostMs) && dies.verdict === 'deny' && emfile.verdict === 'deny',
+  `host timeout ${hostMs} ms ${JSON.stringify(stalls)} dies ${dies.verdict} ${dies.out.slice(0, 200)} emfile ${emfile.verdict} exit ${emfile.code} ${emfile.err.slice(0, 300)}`)
 
 put(path.join(tmp, 'case-probe'))
 const insensitive = fs.existsSync(path.join(tmp, 'CASE-PROBE'))
@@ -562,10 +568,13 @@ clause('clause 3g — without the guard: the preload really makes lstat, readlin
 const stallMs = (() => { const t0 = Date.now(); spawnSync('node', ['--import', pathToFileURL(inject).href, '-e', `require('node:fs').statSync(${JSON.stringify(run)})`],
   { env: { ...process.env, GUARD_FAULT: JSON.stringify(['statSync', 'records/orchestrate', 1500]) } }); return Date.now() - t0 })()
 const judgeExit = [['judge'], []].map((a) => spawnSync('node', ['--import', pathToFileURL(inject).href, '-e', '', ...a], { env: { ...process.env, GUARD_FAULT: JSON.stringify(['exit', '']) } }).status)
+const spawnFault = spawnSync('node', ['--import', pathToFileURL(inject).href, '--input-type=module', '-e',
+  "import { spawn } from 'node:child_process'; const c = spawn(process.execPath, ['-e', '']); console.log(c.stdout === null); c.on('error', (e) => console.log(e.code))"],
+{ env: { ...process.env, GUARD_FAULT: JSON.stringify(['spawn', '']) }, encoding: 'utf8' }).stdout.trim().split('\n').join()
 const moreProved = [['realpathSync.native', run], ['appendFileSync', logFile]].map(([op, t]) => [op, preloadCode(op, t)])
-clause('clause 3o — without the guard: the preload makes the native realpath and the append throw EIO, its stall holds a stat for its time, and its exit ends a judge with 3 and nothing else; the run reached through link-records is the run, and the link named orchestrate is a link whose target is named misnamed',
-  moreProved.every(([, c]) => c === 'EIO') && stallMs >= 1500 && judgeExit.join() === '3,0' && fs.realpathSync.native(viaLink) === run && fs.lstatSync(linkRun).isSymbolicLink() && path.basename(fs.realpathSync.native(linkRun)) === 'misnamed',
-  JSON.stringify({ moreProved, stallMs, judgeExit }))
+clause('clause 3o — without the guard: the preload makes the native realpath and the append throw EIO, its stall holds a stat for its time, its exit ends a judge with 3 and nothing else, and its spawn fault reaches a named ESM import, returning a child with no stdout that emits EMFILE; the run reached through link-records is the run, and the link named orchestrate is a link whose target is named misnamed',
+  moreProved.every(([, c]) => c === 'EIO') && stallMs >= 1500 && judgeExit.join() === '3,0' && spawnFault === 'true,EMFILE' && fs.realpathSync.native(viaLink) === run && fs.lstatSync(linkRun).isSymbolicLink() && path.basename(fs.realpathSync.native(linkRun)) === 'misnamed',
+  JSON.stringify({ moreProved, stallMs, judgeExit, spawnFault }))
 const deepKernel = fs.realpathSync.native(`${orch}/docs/handoffs/deep/../../..`)
 clause('clause 3j — without the guard: deep/../../.. resolves (libc realpath) inside docs/handoffs while its text reading is the checkout, so src/a.txt\'s kernel and text readings differ; deep/x.md lies under docs/handoffs by both',
   deepKernel === path.join(orch, 'docs/handoffs') && path.resolve(orch, 'docs/handoffs/deep/../../../src/a.txt') === srcA &&

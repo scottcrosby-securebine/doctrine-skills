@@ -21,6 +21,7 @@
 
 import { spawn } from 'node:child_process'
 const BOUND_MS = 5000
+const unjudged = (why) => `doctrine guard: refused, since the guard could not judge this call in the orchestrator's session (${why}).`
 const denial = (reason) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } })
 // bounded() never settles, since every path through it ends the process; this await keeps the judgement below from running here.
 if (process.argv[2] !== 'judge') await bounded()
@@ -52,7 +53,7 @@ try {
   deny(`doctrine guard: the orchestrator writes only its record, the Records path, docs/PROJECT.md, docs/epics/, its memory file, docs/handoffs/ and the .doctrine/auto-cycle files; this ${tool} of ${shown} is outside them, so it belongs to a lane.`)
 } catch (e) {
   run ??= e?.run ?? null // a context error after the run resolved still logs (E15-D24)
-  if (process.env.DCTR_ROLE === 'orchestrator') deny(`doctrine guard: refused, since the guard could not judge this call in the orchestrator's session (${e?.message ?? e}).`)
+  if (process.env.DCTR_ROLE === 'orchestrator') deny(unjudged(e?.message ?? e))
   process.exit(0)
 }
 
@@ -61,14 +62,17 @@ function bounded() {
     if (process.env.DCTR_ROLE !== 'orchestrator') process.exit(0)
     let over = false
     const end = (out) => { if (over) return; over = true; out ? process.stdout.write(out, () => process.exit(0)) : process.exit(0) }
-    const refuse = (why) => end(denial(`doctrine guard: refused, since the guard could not judge this call in the orchestrator's session (${why}).`))
+    const refuse = (why) => end(denial(unjudged(why)))
     try {
+      // stdout and stderr piped, never inherited: a child stuck where SIGKILL cannot end it must not hold the host's pipes open.
       const child = spawn(process.execPath, [...process.execArgv, import.meta.filename, 'judge'], { stdio: ['inherit', 'pipe', 'pipe'] })
+      // The listener first: on EMFILE spawn returns a child with no stdio and emits 'error' on the next tick, and an
+      // unheard 'error' would end this process with exit 1, which the host reads as no objection. A late one meets the latch.
+      child.on('error', (e) => refuse(e.message))
       const timer = setTimeout(() => { child.kill('SIGKILL'); refuse(`no judgement within ${BOUND_MS} ms`) }, BOUND_MS)
       let out = ''
       child.stdout.on('data', (b) => { out += b })
       child.stderr.pipe(process.stderr)
-      child.on('error', (e) => { clearTimeout(timer); refuse(e.message) })
       child.on('close', (code, signal) => { clearTimeout(timer); code === 0 ? end(out) : refuse(`the judgement ended with ${signal ?? `exit ${code}`}`) })
     } catch (e) { refuse(e?.message ?? e) }
   })

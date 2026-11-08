@@ -3615,6 +3615,9 @@ const MUTATIONS = [
   { name: 'the guard\'s hooks.json timeout leaves the judgement\'s bound no headroom (GQ2)', file: 'hooks.json',
     clause: 'clause 2zb — a deny with at least 5 s to spare before the guard\'s hooks.json timeout',
     from: '/hooks/dctr-guard.mjs\\"", "timeout": 30 }', to: '/hooks/dctr-guard.mjs\\"", "timeout": 10 }' },
+  { name: "the spawn's error listener is registered after its stdout is read, so a spawn that fails as on EMFILE ends the hook with exit 1 (GB1)", file: 'dctr-guard.mjs',
+    clause: "clause 2zb — a spawn that fails as on EMFILE refuses, exit 0 with the deny",
+    from: "      child.on('error', (e) => refuse(e.message))\n      const timer = setTimeout(() => { child.kill('SIGKILL'); refuse(`no judgement within ${BOUND_MS} ms`) }, BOUND_MS)\n      let out = ''\n      child.stdout.on('data', (b) => { out += b })\n", to: "      const timer = setTimeout(() => { child.kill('SIGKILL'); refuse(`no judgement within ${BOUND_MS} ms`) }, BOUND_MS)\n      let out = ''\n      child.stdout.on('data', (b) => { out += b })\n      child.on('error', (e) => refuse(e.message))\n" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
