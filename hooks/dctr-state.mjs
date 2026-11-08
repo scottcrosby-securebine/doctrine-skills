@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -963,14 +963,12 @@ export function treeHash(repos, excludes) {
   return ids.length === 1 ? ids[0] : crypto.createHash('sha1').update(ids.join('\n')).digest('hex')
 }
 
-// git's message, under LC_ALL=C, when no directory from the cwd up holds a repository.
-const NO_REPO = 'fatal: not a git repository (or any of the parent directories): .git'
-
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
  * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
- * touching it was made at or after that second and it and the memory file carry no uncommitted change. Outside a
- * git work tree the file and the kickoff line naming it are the landing. False when `warnedAt` is unknown.
+ * touching it was made at or after that second and it and the memory file carry no uncommitted change. With no .git
+ * entry on the path from the handoff's directory up, the file and the kickoff line naming it are the landing; with one,
+ * git must answer from that repository's work tree, and any failure is not landed. False when `warnedAt` is unknown.
  */
 export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
@@ -979,9 +977,15 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   if (st.mtimeMs < warnedAt) return false
   // Given `timeoutMs`, every git call shares that budget, and one that runs out of it means not landed.
   const end = Date.now() + timeoutMs, timedOut = new Error('git timed out')
-  // An inherited GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR or GIT_INDEX_FILE would point git away from the handoff's own repo.
-  const env = { ...process.env, LC_ALL: 'C' }
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE']) delete env[k]
+  // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
+  // counts as present, so git then decides, and its failure is not landed.
+  const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
+  const top = repoOf(handoffPath, dotGit)
+  if (!dotGit(path.join(top, '.git'))) return true
+  // An inherited GIT_DIR and its kin, or a ceiling, would point git away from that repository; a filesystem
+  // boundary under it would stop git short of the .git the walk found.
+  const env = { ...process.env, LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_CEILING_DIRECTORIES']) delete env[k]
   const git = (args) => {
     const left = end - Date.now()
     if (left <= 0) throw timedOut
@@ -990,11 +994,8 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
     } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
   }
   try {
-    // Outside a work tree only on git's own no-repository message, whole: a broken gitfile or a GIT_DIR naming nothing
-    // prints the same phrase with a path after it. Any other failure, or an answer other than true, is not landed.
-    let inside
-    try { inside = git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e.status === 128 && String(e.stderr).trim() === NO_REPO) return true; throw e }
-    if (inside !== 'true') return false
+    // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
+    if (git(['rev-parse', '--show-toplevel']) !== fs.realpathSync.native(top)) return false
     // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
     try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e.status !== 1) throw e }
     const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
