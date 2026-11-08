@@ -6,7 +6,8 @@
 // the pane before each send for an empty composer (E10H-R4-B1), and for nothing else. On Codex it also reads the pane's
 // gated marker, which the prompt gate writes when it blocks the resume line (E10 S1). It reserves the claim
 // `<autocycle dir>/<session>.<key>.claim` and writes its pid into it, ending with nothing sent when the claim is
-// already taken (one launch per record state, RB3-1). Then it loops: each poll it gathers what typerStep in
+// already taken (one launch per record state, RB3-1). It sends no /clear, and waits with no time limit, while any
+// other claim on its pane is held, a sender's or the lane watcher's (D148). Then it loops: each poll it gathers what typerStep in
 // dctr-lib.mjs needs (the record, the stop file, herdr's pane reading, the restore file, the transcripts) and does what
 // typerStep decides, which decides every step: wait, abort with nothing written, pause, send /clear, send the resume
 // line (RESUME_LINE, the /doctrine:doctrine-resume command) or confirm the new session's first turn. The typer itself
@@ -25,7 +26,7 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   herdr, herdrText, claimFile, restoreFile, gatedFile, reserveMarker, writeMarker, appendRecordLine, appendPaused, alertPaused,
-  hookLog, sleepMs,
+  hookLog, sleepMs, paneClaimHeld,
 } from './dctr-state.mjs'
 
 // Contained: never cycled, and not a stop of its own; the Stop hook already wrote R13 for this session.
@@ -132,8 +133,10 @@ try {
     const text = codex && pane ? paneText() : undefined
     // Codex: how long the pane has read with no composer line, from the first such read (E10-D28).
     absentSince = composerIdle(text) === 'absent' ? (absentSince ?? now) : null
+    // Before the /clear, a claim on this pane other than this typer's own holds it (D148): read after its own was taken.
+    const otherClaim = stage === 'clear' && paneClaimHeld(a.pane, claimFile(a.session, a.keyLine))
     const step = typerStep({
-      stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled,
+      stage, active, stopRepo, pausedSinceClaim, pane, oldSession: a.session, restore, resumes, times, cycled, otherClaim,
       midWrite: partialSince === null ? null : now - partialSince,
       grew: stage === 'clear' ? (old === null ? null : old.entries.some((e) => typedAfter(e, a.stopAt))) : false,
       typedNew: fresh === null ? null : fresh.entries.some(userTyped),

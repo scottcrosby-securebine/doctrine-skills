@@ -1117,6 +1117,25 @@ export function treeExcludes(recordPath, repo) {
     ...(inRepo ? [rel, `:(glob)${rel.replace(/\.md$/, '')}-run-state*`] : [])]
 }
 
+export const LANE_LINE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\S+) (create|reset|archive|remove) (.+)$/
+
+/**
+ * A role's current pane and worktree (L3): its LATEST `create` line in lane.log's text, whose args are
+ * `<role> <pane id> <worktree> <launch line>`, the launch line last since it holds spaces. Returns
+ * `{ time, caller, role, pane, worktree, launch }`, or null when no create line names the role. A line
+ * outside the grammar is no line.
+ */
+export function laneOf(laneLogText, role) {
+  let found = null
+  for (const l of String(laneLogText ?? '').split('\n')) {
+    const m = LANE_LINE.exec(l)
+    if (!m || m[3] !== 'create') continue
+    const [r, pane, worktree, ...launch] = m[4].split(' ')
+    if (r === role && pane && worktree && launch.length) found = { time: m[1], caller: m[2], role: r, pane, worktree, launch: launch.join(' ') }
+  }
+  return found
+}
+
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
@@ -1346,6 +1365,8 @@ function typerAct(o) {
     // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
     return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   }
+  // Another claim on the pane, a sender's or the lane watcher's, holds the /clear with no time limit (D148, SS-1).
+  if (o.stage === 'clear' && o.otherClaim) return { act: 'wait', reason: 'another claim on the pane is held' }
   const ready = typerReady(o, t, pause)
   if (ready) return ready
   if (o.stage === 'clear') {

@@ -767,13 +767,15 @@ export function claimHeld(file) {
   return pidAlive(String(c?.pid ?? ''))
 }
 
-/** Any held claim naming this pane, whatever session took it: the typer's claim is keyed by the old session id,
- *  and the Notification that asks comes from the new one (F9). */
-export function paneClaimHeld(paneId) {
+/** Any held claim naming this pane, whatever session or script took it: the typer's claim is keyed by the old
+ *  session id, and the Notification that asks comes from the new one (F9). `except` is the caller's own claim file,
+ *  which never counts, so the typer and the sender each ask about the others' claims only. */
+export function paneClaimHeld(paneId, except = null) {
   let names
   try { names = fs.readdirSync(autoCycleDir()) } catch { return false }
   return names.filter((f) => f.endsWith('.claim')).some((f) => {
     const file = path.join(autoCycleDir(), f)
+    if (except && file === path.resolve(except)) return false
     try { return JSON.parse(fs.readFileSync(file, 'utf8')).pane === paneId && claimHeld(file) } catch { return false }
   })
 }
