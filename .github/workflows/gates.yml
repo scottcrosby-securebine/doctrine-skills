@@ -125,7 +125,7 @@ jobs:
 
       - name: orchestrator write guard tamper test
         # Drives hooks/dctr-guard.mjs end to end on a fixture run with a tripwire herdr on PATH: the orchestrator's
-        # Write, Edit and NotebookEdit outside its allowed paths are denied and logged, inside them allowed, no other
+        # Write, Edit, MultiEdit and NotebookEdit outside its allowed paths are denied and logged, inside them allowed, no other
         # session and no other tool is refused, and any error in the orchestrator's session refuses. Pure node.
         run: node hooks/dctr-guard.selftest.mjs
 

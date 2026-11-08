@@ -43,10 +43,10 @@ clause('clause 1c — with no record resolved, the record\'s path is refused and
 // The reader: the guard's own PreToolUse group is the one whose command runs dctr-guard.mjs, never the first group,
 // and its matcher is read as Claude Code compares it, against the whole tool name.
 const whole = (m, name) => { try { return new RegExp(`^(?:${m})$`).test(name) } catch { return false } }
-const GUARDED = ['Write', 'Edit', 'NotebookEdit']
+const GUARDED = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
 // MCP tool names are built at run time: the doctor's scan flags a connector tool name written in any file under hooks/.
 const MCP = `mcp${'__'}`, MCP_WRITE = `${MCP}MCP_DOCKER__write_file`, MCP_READ = `${MCP}x__read_thing`
-const UNGUARDED = ['Bash', MCP_WRITE, MCP_READ, 'MultiEdit', 'Read']
+const UNGUARDED = ['Bash', MCP_WRITE, MCP_READ, 'Read']
 function readGuard(hj) {
   const groups = (hj?.hooks?.PreToolUse || []).filter((g) => (g.hooks || []).some((h) => /dctr-guard\.mjs/.test(h.command || '')))
   if (groups.length !== 1) return `${groups.length} PreToolUse groups run dctr-guard.mjs`
@@ -63,17 +63,18 @@ const guardIdx = (pre) => pre.findIndex((g) => (g.hooks || []).some((h) => /dctr
 const PLANTED = {
   removed: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre.splice(i, 1) }),
   writeEdit: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = 'Write|Edit' }),
+  noMulti: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = 'Write|Edit|NotebookEdit' }),
   writeBash: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = 'Write|Bash' }),
   bashWriteEdit: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = 'Bash|Write|Edit' }),
-  broad: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = `Bash|Write|Edit|NotebookEdit|${MCP}.*` }),
+  broad: plant((pre) => { const i = guardIdx(pre); if (i >= 0) pre[i].matcher = `Bash|Write|Edit|MultiEdit|NotebookEdit|${MCP}.*` }),
   merged: plant((pre) => { const i = guardIdx(pre); if (i >= 0) { const [g] = pre.splice(i, 1); pre[0].hooks.push(...g.hooks) } }),
 }
 const plantedOk = Object.entries(PLANTED).filter(([, c]) => readGuard(c) === 'ok').map(([k]) => k)
-clause('clause 1d — the hooks.json reader fails each planted copy: the guard entry removed, a matcher of Write|Edit, Write|Bash, Bash|Write|Edit or one that also takes Bash and every MCP tool, and the guard merged into the round guard\'s group (E15-D19, D20, D21, D118 controls)',
+clause('clause 1d — the hooks.json reader fails each planted copy: the guard entry removed, a matcher of Write|Edit, Write|Edit|NotebookEdit, Write|Bash, Bash|Write|Edit or one that also takes Bash and every MCP tool, and the guard merged into the round guard\'s group (E15-D19, D20, D21, D118, D223 controls)',
   plantedOk.length === 0, `read as ok: ${JSON.stringify(plantedOk)}`)
-clause('clause 1e — hooks.json has one PreToolUse group of its own running dctr-guard.mjs, its matcher matching Write, Edit and NotebookEdit as whole names and none of Bash, the MCP tools MCP_DOCKER write_file and x read_thing, MultiEdit and Read (E15-D19, D20, D21, D118)',
-  readGuard(hj) === 'ok' && (hj.hooks.PreToolUse.find((g) => /dctr-guard/.test(JSON.stringify(g)))?.hooks[0].timeout ?? 0) > 0, readGuard(hj))
-clause('clause 1f — the hooks.json description names the guard and its matcher', /dctr-guard\.mjs/.test(hj.description) && hj.description.includes('Write|Edit|NotebookEdit'),
+clause('clause 1e — hooks.json has one PreToolUse group of its own running dctr-guard.mjs, its matcher matching Write, Edit, MultiEdit and NotebookEdit as whole names and none of Bash, the MCP tools MCP_DOCKER write_file and x read_thing, and Read (E15-D19, D20, D21, D118, D223)',
+  readGuard(hj) === 'ok', readGuard(hj))
+clause('clause 1f — the hooks.json description names the guard and its matcher', /dctr-guard\.mjs/.test(hj.description) && hj.description.includes('Write|Edit|MultiEdit|NotebookEdit'),
   hj.description.slice(-600))
 
 // ---------------------------------------------------------------- clause 2: the hook end to end
@@ -114,7 +115,8 @@ const hookSrc = path.join(HERE, 'dctr-guard.mjs')
 if (fs.existsSync(hookSrc)) fs.copyFileSync(hookSrc, path.join(broken, 'dctr-guard.mjs'))
 put(path.join(broken, 'dctr-lib.mjs'), 'export const guardAllowed = ;\n')
 
-// The hook's environment: nothing of this session's own run, herdr reachable, a herdr pane named.
+// The hook's environment: nothing of this session's own run, herdr reachable, a herdr pane named. The filter strips
+// every DCTR_ variable and CLAUDE_PROJECT_DIR, so each case's env alone says whose session it is.
 const BASE = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DCTR_|CLAUDE_PROJECT_DIR$|HERDR_)/.test(k)))
 Object.assign(BASE, { PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', TMPDIR: tmp })
 const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orch }
@@ -131,6 +133,7 @@ const P = (tool, input, more = {}) => ({ hook_event_name: 'PreToolUse', session_
 const W = (fp, more) => P('Write', { file_path: fp, content: 'x\n' }, more)
 const E = (fp, more) => P('Edit', { file_path: fp, old_string: 'a', new_string: 'b' }, more)
 const N = (np, more) => P('NotebookEdit', { notebook_path: np, new_source: 'x' }, more)
+const ME = (fp, more) => P('MultiEdit', { file_path: fp, edits: [{ old_string: 'a', new_string: 'b' }] }, more)
 const SEAT = { agent_id: 'a1b2c3', agent_type: 'general-purpose' }
 const SEATENV = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run }
 const logFile = path.join(run, 'guard.log')
@@ -227,15 +230,45 @@ const errs = cases([
   ['a Write with no file_path', ORCH, P('Write', { content: 'x' }), 'deny'],
   ['a Write whose file_path is not a string', ORCH, P('Write', { file_path: 7, content: 'x' }), 'deny'],
   ['a NotebookEdit carrying file_path only', ORCH, P('NotebookEdit', { file_path: path.join(records, 'n.ipynb') }), 'deny'],
+  ['a MultiEdit with no file_path', ORCH, P('MultiEdit', { edits: [] }), 'deny'],
+  ['a MultiEdit with no tool_input', ORCH, { ...P('MultiEdit', {}), tool_input: undefined }, 'deny'],
+  ['a MultiEdit with no DCTR_RUN in a repo with no run', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: plain }, ME('src/a.txt', { cwd: plain }), 'deny', { cwd: plain }],
 ])
-clause('clause 2l — in the orchestrator\'s session every error refuses: a library that cannot load, no run resolved, a run folder missing or misnamed, unreadable stdin, a missing or non-string path; the same broken library refuses no lane and no session without a role (G1, G2)',
+clause('clause 2l — in the orchestrator\'s session every error refuses: a library that cannot load, no run resolved, a run folder missing or misnamed, unreadable stdin, a missing or non-string path, a MultiEdit with no path or no run (E15-D183); the same broken library refuses no lane and no session without a role (G1, G2)',
   wrong(errs).length === 0, show(errs))
 const noRunDir = cases([['no DCTR_RUN, the run resolved from the session\'s repo, Write src/a.txt', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: orch }, W('src/a.txt'), 'deny'],
   ['no DCTR_RUN, the run resolved from the session\'s repo, Write a handoff', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: orch }, W('docs/handoffs/h8.md'), 'allow']])
 clause('clause 2m — with DCTR_RUN unset the orchestrator\'s run is <Records>/orchestrate of its own repo, judged the same way', wrong(noRunDir).length === 0, show(noRunDir))
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir].flat()
-clause('clause 2n — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
+const multiBefore = logLines().length, mt0 = Date.now()
+const d223 = cases([['MultiEdit src/a.txt', ORCH, ME('src/a.txt'), 'deny'], ['MultiEdit docs/handoffs/h.md', ORCH, ME('docs/handoffs/h.md'), 'allow']])
+const mt1 = Date.now(), multiAdded = logLines().slice(multiBefore)
+const mm = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z) (\S+) (.+)$/.exec(multiAdded[0] || '')
+clause('clause 2n — the orchestrator\'s MultiEdit is judged by file_path as an Edit is: src/a.txt refused, docs/handoffs/h.md allowed, and guard.log gains one line, a time inside the calls, MultiEdit, the absolute path of src/a.txt (E15-D223, D224, D225, XS-12)',
+  wrong(d223).length === 0 && multiAdded.length === 1 && !!mm && Date.parse(mm[1]) >= Math.floor(mt0 / 1000) * 1000 && Date.parse(mm[1]) <= mt1 &&
+  mm[2] === 'MultiEdit' && mm[3] === path.join(orch, 'src/a.txt'), `${show(d223)} ${JSON.stringify(multiAdded)}`)
+
+// Each refusal's line names its own call's path as given, made absolute and never normalized, and a refused call that
+// names no path is refused with no line (E15-D24, D192).
+const ownBefore = logLines().length
+const own = cases([['.. after a link', ORCH, W('docs/handoffs/out/../a.txt'), 'deny'], ['a Write with no file_path', ORCH, P('Write', { content: 'x' }), 'deny'],
+  ['through a folder link', ORCH, W(path.join(orch, 'docs/handoffs/out/x.txt')), 'deny']])
+const ownAdded = logLines().slice(ownBefore).map((l) => l.replace(/^\S+ /, ''))
+const ownWant = [`Write ${orch}/docs/handoffs/out/../a.txt`, `Write ${orch}/docs/handoffs/out/x.txt`]
+clause('clause 2o — each refusal\'s line names that call\'s own path as given, absolute and not normalized, and a refused Write naming no path adds no line (E15-D24, D192)',
+  wrong(own).length === 0 && JSON.stringify(ownAdded) === JSON.stringify(ownWant), `${show(own)} got ${JSON.stringify(ownAdded)} want ${JSON.stringify(ownWant)}`)
+
+// guard.log a folder, so the append throws: the call is still refused (E15-D188).
+fs.renameSync(logFile, `${logFile}.kept`); fs.mkdirSync(logFile)
+const unwritable = cases([['Write src/a.txt with guard.log unwritable', ORCH, W('src/a.txt'), 'deny'], ['MultiEdit src/a.txt with guard.log unwritable', ORCH, ME('src/a.txt'), 'deny']])
+let appendThrows = false
+try { fs.appendFileSync(logFile, 'x\n') } catch { appendThrows = true }
+fs.rmdirSync(logFile); fs.renameSync(`${logFile}.kept`, logFile)
+clause('clause 2p — with guard.log unwritable the orchestrator\'s Write and MultiEdit outside the allowed paths are still refused, exit 0 with a deny (E15-D188)',
+  wrong(unwritable).length === 0, show(unwritable))
+
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable].flat()
+clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it, without the guard
@@ -261,13 +294,12 @@ clause('clause 3d — without the guard: the seat\'s worktree lies outside the c
   !under(seatwt, orch) && fs.statSync(path.join(seatwt, '.git')).isFile() && fs.existsSync(path.join(seatwt, 'docs/PROJECT.md')) &&
   fs.existsSync(path.join(plain, '.git')) && !fs.existsSync(path.join(plain, 'docs/PROJECT.md')) &&
   !fs.existsSync(path.join(orch, '.doctrine/gone')) && path.basename(records) !== 'orchestrate' && fs.statSync(records).isDirectory(), 'fixture tree')
-clause('clause 3e — without the reader: the planted copies carry their defects, split on |: the removed copy names no dctr-guard.mjs, Write|Edit lacks NotebookEdit, Write|Bash and Bash|Write|Edit name Bash, the broad one names every MCP tool, the merged copy\'s first group runs two commands',
+clause('clause 3e — without the reader: the planted copies carry their defects, split on |: the removed copy names no dctr-guard.mjs, Write|Edit lacks NotebookEdit, Write|Edit|NotebookEdit lacks MultiEdit, Write|Bash and Bash|Write|Edit name Bash, the broad one names every MCP tool, the merged copy\'s first group runs two commands',
   !JSON.stringify(PLANTED.removed.hooks.PreToolUse).includes('dctr-guard.mjs') &&
-  ['writeEdit', 'writeBash', 'bashWriteEdit', 'broad'].map((k) => PLANTED[k].hooks.PreToolUse[guardIdx(PLANTED[k].hooks.PreToolUse)]?.matcher.split('|')).every((ms, i) =>
-    [!ms?.includes('NotebookEdit'), ms?.includes('Bash'), ms?.includes('Bash'), ms?.some((x) => x.startsWith(MCP))][i]) &&
+  ['writeEdit', 'noMulti', 'writeBash', 'bashWriteEdit', 'broad'].map((k) => PLANTED[k].hooks.PreToolUse[guardIdx(PLANTED[k].hooks.PreToolUse)]?.matcher.split('|')).every((ms, i) =>
+    [!ms?.includes('NotebookEdit'), !ms?.includes('MultiEdit') && ms?.includes('Edit'), ms?.includes('Bash'), ms?.includes('Bash'), ms?.some((x) => x.startsWith(MCP))][i]) &&
   PLANTED.merged.hooks.PreToolUse[0].hooks.length === 2 && JSON.stringify(PLANTED.merged.hooks.PreToolUse[0]).includes('dctr-guard.mjs'), 'planted copies')
-clause('clause 3f — without the guard: the hook\'s environment carries no DCTR_ variable and no CLAUDE_PROJECT_DIR of this session\'s own',
-  !Object.keys(BASE).some((k) => k.startsWith('DCTR_') || k === 'CLAUDE_PROJECT_DIR'), JSON.stringify(Object.keys(BASE).filter((k) => k.startsWith('DCTR_'))))
+clause('clause 3f — without the guard: guard.log made a folder really cannot be appended to', appendThrows, 'appendFileSync on the folder did not throw')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) failed` : '\nall clauses passed')

@@ -1144,7 +1144,7 @@ export function runRoot(env = process.env, cwd = process.cwd()) {
 // ---------------------------------------------------------------- the orchestrator's write guard (E15 e15-guard)
 
 /** The tools the guard judges, each with the tool_input field that names its path (G6). */
-export const GUARD_TOOLS = { Write: 'file_path', Edit: 'file_path', NotebookEdit: 'notebook_path' }
+export const GUARD_TOOLS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
 /** `p` where it really lies: an absolute path, or one relative to `cwd`, walked component by component through every
  *  symlink by followLinks, a dangling one included. The two are joined as written, never normalized first, so a `..`
@@ -1160,7 +1160,7 @@ export const guardReal = (p, cwd) => followLinks(path.isAbsolute(p) ? p : `${cwd
 export function guardAllowed(p, { records, checkout, record }) {
   const under = (dir) => p.startsWith(dir + path.sep)
   const at = (rel) => p === path.join(checkout, rel)
-  return (!!record && p === record) || under(records) || at('docs/PROJECT.md') || under(path.join(checkout, 'docs/epics')) ||
+  return p === record || under(records) || at('docs/PROJECT.md') || under(path.join(checkout, 'docs/epics')) ||
     at('SESSION_MEMORY.md') || under(path.join(checkout, 'docs/handoffs')) ||
     (path.dirname(p) === path.join(checkout, '.doctrine') && path.basename(p).startsWith('auto-cycle'))
 }
