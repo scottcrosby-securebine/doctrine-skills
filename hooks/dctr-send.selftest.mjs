@@ -388,7 +388,7 @@ const a = process.argv.slice(2), sub = a[0] === '-C' ? a[2] : a[0]
 if (m.sub === sub) {
   if (m.mode === 'fail') { process.stderr.write('fatal: unable to read: Input/output error\\n'); process.exit(128) }
   if (m.mode === 'empty') process.exit(0)
-  if (m.mode === 'boundary') { process.stderr.write('fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n'); process.exit(128) }
+  if (m.mode === 'boundary' && !process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM) { process.stderr.write('fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n'); process.exit(128) }
   if (m.mode === 'slow') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000)
 }
 const r = cp.spawnSync(${JSON.stringify(realGit)}, a, { stdio: 'inherit' })
@@ -430,19 +430,40 @@ const CLASS = [
   ['a .git missing HEAD inside a repository holding the handoff clean', (fx) => {
     fs.rmSync(path.join(fx.lane, '.git', 'HEAD')); git(fx.dir, 'init', '-q'); git(fx.dir, 'add', '-A'); git(fx.dir, 'commit', '-qm', 'outer')
   }],
+  // The lane has no .git of its own, and its docs directory is a link into the repository where the handoff is uncommitted.
+  ['a handoff reached through a symlinked docs directory into a repository where it is uncommitted', (fx) => {
+    fx.repo = path.join(fx.dir, 'repo'); fs.renameSync(fx.lane, fx.repo); fs.appendFileSync(path.join(fx.repo, 'docs/handoffs/h.md'), 'unlanded edit\n')
+    fs.mkdirSync(fx.lane); fs.copyFileSync(path.join(fx.repo, 'SESSION_MEMORY.md'), path.join(fx.lane, 'SESSION_MEMORY.md')); fs.symlinkSync(path.join(fx.repo, 'docs'), path.join(fx.lane, 'docs'))
+  }],
+  // The lane path is a link to a subdirectory of a repository, with no .git in that subdirectory.
+  ['a handoff reached through a symlinked lane path into a repository where it is uncommitted', (fx) => {
+    fx.repo = path.join(fx.dir, 'repo'); fs.mkdirSync(fx.repo); fs.renameSync(fx.lane, path.join(fx.repo, 'lane')); fs.rmSync(path.join(fx.repo, 'lane/.git'), { recursive: true })
+    git(fx.repo, 'init', '-q'); git(fx.repo, 'add', '-A'); git(fx.repo, 'commit', '-qm', 'repo'); fs.appendFileSync(path.join(fx.repo, 'lane/docs/handoffs/h.md'), 'unlanded edit\n')
+    fs.symlinkSync(path.join(fx.repo, 'lane'), fx.lane)
+  }],
+  // An untracked handoff that only an inherited config entry's excludes file ignores.
+  ['an inherited GIT_CONFIG_* excludesFile ignoring the untracked handoff', (fx) => {
+    git(fx.lane, 'rm', '-q', '--cached', 'docs/handoffs/h.md'); git(fx.lane, 'commit', '-qm', 'untrack'); write(path.join(fx.dir, 'excludes'), 'docs/\n')
+    fx.env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: path.join(fx.dir, 'excludes') }
+  }],
 ]
 const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
 const controlFx = classFx()
 // A lane with no .git on the path from it upward: the handoff file is its landing, whatever git says there, a stop at a
 // filesystem boundary included.
 const noRepoFx = classFx(); fs.rmSync(path.join(noRepoFx.lane, '.git'), { recursive: true, force: true })
-const boundaryFx = classFx(); fs.rmSync(path.join(boundaryFx.lane, '.git'), { recursive: true, force: true }); gitMode('rev-parse', 'boundary')(boundaryFx)
+// The control again, its git stopping at a filesystem boundary unless told to cross one.
+const boundaryFx = classFx(); gitMode('rev-parse', 'boundary')(boundaryFx)
+// The control again, its lane path a link to a subdirectory of the repository holding the handoff committed and clean.
+const linkedFx = classFx(); linkedFx.repo = path.join(linkedFx.dir, 'repo'); fs.mkdirSync(linkedFx.repo); fs.renameSync(linkedFx.lane, path.join(linkedFx.repo, 'lane'))
+fs.rmSync(path.join(linkedFx.repo, 'lane/.git'), { recursive: true }); git(linkedFx.repo, 'init', '-q'); git(linkedFx.repo, 'add', '-A'); git(linkedFx.repo, 'commit', '-qm', 'repo')
+fs.symlinkSync(path.join(linkedFx.repo, 'lane'), linkedFx.lane)
 // The control again under an inherited ceiling at its repository root, which git must not see.
 const ceilingFx = classFx(); ceilingFx.env = { GIT_CEILING_DIRECTORIES: fs.realpathSync(ceilingFx.lane) }
-const CLEARS = ['control', 'no git repository', 'no git repository, git stopping at a filesystem boundary', 'the control under GIT_CEILING_DIRECTORIES at its root']
-const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
+const CLEARS = ['control', 'no git repository', 'the control, git stopping at a filesystem boundary unless told to cross one', 'the control under GIT_CEILING_DIRECTORIES at its root', 'the control reached through a symlinked lane path']
+const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
 const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== CLEARS.includes(label)).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
-clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean: no /clear typed; the healthy control, under a ceiling at its root or not, and a lane with no .git above it, git stopping at a filesystem boundary or not, clear (SR1, SR3, SR4, SR5, SR6, B1)',
+clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, and an inherited GIT_CONFIG_* excludes file ignoring the untracked handoff: no /clear typed; the healthy control, under a ceiling at its root, behind a git that stops at a filesystem boundary unless told to cross one, or reached through a symlinked lane path, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, B1)',
   classBad.length === 0, classBad.join(' || '))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
@@ -512,6 +533,8 @@ const nt0 = Date.now(); const nearRun = shimRun(nearShim, 'pane', 'run', PANE, '
 clause('clause 3k — without the sender: the slow-reply shim logs the line as typed and returns only after 1 s',
   nearRun.status === 0 && nearTook >= 1000 && typed(nearShim).length === 1, JSON.stringify({ nearTook, typed: typed(nearShim) }))
 const classProofBad = []
+// No .git entry on the path from the handoff's directory up, read lexically as the path is written, checked here by its own walk.
+const noGitAbove = (fx) => { for (let d = path.dirname(fx.handoff); ; d = path.dirname(d)) { try { fs.lstatSync(path.join(d, '.git')); return false } catch {} if (path.dirname(d) === d) return true } }
 const gitOf = (fx, args) => spawnSync(path.join(fx.gitBin, 'git'), ['-C', fx.lane, ...args], { encoding: 'utf8', timeout: 1500 })
 const SUBARGS = { 'rev-parse': ['rev-parse', '--is-inside-work-tree'], 'check-ignore': ['check-ignore', '-q', 'docs/handoffs/h.md'], log: ['log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md'], status: ['status', '--porcelain'] }
 for (const [label, fx] of classFxs) {
@@ -544,28 +567,40 @@ for (const [label, fx] of classFxs) {
     const top = spawnSync(realGit, ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', env }), st = spawnSync(realGit, ['-C', cwd, 'status', '--porcelain', '--', fx.handoff, memory(fx)], { encoding: 'utf8', env })
     ok = !fs.existsSync(path.join(fx.lane, '.git', 'HEAD')) && top.status === 0 && top.stdout.trim() === fs.realpathSync(fx.dir) && st.status === 0 && st.stdout === '' &&
       spawnSync(realGit, ['-C', fx.dir, 'ls-files', '--error-unmatch', fx.handoff], { env }).status === 0
+  } else if (/^a handoff reached through a symlinked (docs directory|lane path)/.test(label)) {
+    // The lane's own path has no .git above it, the handoff's physical directory does, and there the handoff is modified.
+    const st = spawnSync(realGit, ['-C', fx.repo, 'status', '--porcelain'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    ok = noGitAbove(fx) && fs.existsSync(path.join(fx.repo, '.git', 'HEAD')) && fs.realpathSync(path.dirname(fx.handoff)).startsWith(fs.realpathSync(fx.repo) + path.sep) &&
+      st.status === 0 && / M (lane\/)?docs\/handoffs\/h\.md/.test(st.stdout)
+  } else if (label === 'an inherited GIT_CONFIG_* excludesFile ignoring the untracked handoff') {
+    const ci = (env) => spawnSync(realGit, ['-C', fx.lane, ...SUBARGS['check-ignore']], { env: { ...process.env, ...env } }).status
+    ok = ci(fx.env) === 0 && ci({}) === 1 && spawnSync(realGit, ['-C', fx.lane, 'ls-files', '--error-unmatch', 'docs/handoffs/h.md']).status !== 0
   } else {
     const [, sub, how] = /^git (\S+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, SUBARGS[sub])
     ok = how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === ''
   }
   if (!ok) classProofBad.push(label)
 }
-// No .git entry on the path from the handoff's directory up, checked here by its own walk.
-const noGitAbove = (fx) => { for (let d = path.dirname(fx.handoff); ; d = path.dirname(d)) { try { fs.lstatSync(path.join(d, '.git')); return false } catch {} if (path.dirname(d) === d) return true } }
 if (!noGitAbove(noRepoFx)) classProofBad.push(CLEARS[1])
 // Under the ceiling the control's git prints the whole no-repository message from the handoff's directory.
 const underCeiling = spawnSync(realGit, ['-C', path.dirname(ceilingFx.handoff), ...SUBARGS['rev-parse']], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', ...ceilingFx.env } })
 if (!(underCeiling.status === 128 && underCeiling.stderr.trim() === 'fatal: not a git repository (or any of the parent directories): .git' &&
   handoffLanded({ handoffPath: ceilingFx.handoff, memoryPath: memory(ceilingFx), warnedAt: latchOf(ceilingFx, 'S') }))) classProofBad.push(CLEARS[3])
-// The shim's boundary message is the form real git prints, first line, at a mount point.
-const shimBoundary = spawnSync(path.join(boundaryFx.gitBin, 'git'), ['-C', path.dirname(boundaryFx.handoff), 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', timeout: 5000 })
+// The boundary control's .git is where the walk finds it, its shim prints the stop real git prints at a mount point,
+// first line, and only GIT_DISCOVERY_ACROSS_FILESYSTEM lets it through to git's answer.
+const shimRev = (env) => spawnSync(path.join(boundaryFx.gitBin, 'git'), ['-C', path.dirname(boundaryFx.handoff), 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', timeout: 5000, env: { ...process.env, GIT_DISCOVERY_ACROSS_FILESYSTEM: '', ...env } })
+const shimBoundary = shimRev({}), shimAcross = shimRev({ GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' })
 const realBoundary = spawnSync(realGit, ['-C', '/dev', 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-if (!(noGitAbove(boundaryFx) && shimBoundary.status === 128 && realBoundary.status === 128 && /Stopping at filesystem boundary/.test(shimBoundary.stderr) &&
-  shimBoundary.stderr.split('\n')[0].startsWith('fatal: not a git repository (or any parent up to mount point ') && realBoundary.stderr.split('\n')[0].startsWith('fatal: not a git repository (or any parent up to mount point '))) classProofBad.push(CLEARS[2])
+if (!(fs.existsSync(path.join(boundaryFx.lane, '.git', 'HEAD')) && shimBoundary.status === 128 && realBoundary.status === 128 && /Stopping at filesystem boundary/.test(shimBoundary.stderr) &&
+  shimBoundary.stderr.split('\n')[0].startsWith('fatal: not a git repository (or any parent up to mount point ') && realBoundary.stderr.split('\n')[0].startsWith('fatal: not a git repository (or any parent up to mount point ') &&
+  shimAcross.status === 0 && shimAcross.stdout.trim() === 'true')) classProofBad.push(CLEARS[2])
+// The linked control: no .git above the lane path as written, and its repository holds the handoff and memory file committed and clean.
+const linkedSt = spawnSync(realGit, ['-C', linkedFx.repo, 'status', '--porcelain'], { encoding: 'utf8' }), linkedLs = spawnSync(realGit, ['-C', linkedFx.repo, 'ls-files', 'lane/docs/handoffs/h.md', 'lane/SESSION_MEMORY.md'], { encoding: 'utf8' })
+if (!(noGitAbove(linkedFx) && fs.lstatSync(linkedFx.lane).isSymbolicLink() && linkedSt.status === 0 && linkedSt.stdout === '' && linkedLs.stdout.trim().split('\n').length === 2)) classProofBad.push(CLEARS[4])
 const cg = (args) => gitOf(controlFx, args)
 const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARGS['check-ignore']).status === 1 && Number(cg(SUBARGS.log).stdout.trim()) > 0 &&
   handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
-clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing and the removed gitdir each make git print the phrase with a path, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the ceiling row\'s git prints the whole no-repository message inside the lane with the handoff uncommitted, the HEAD row\'s .git a directory without HEAD that git rejects, the nested HEAD row\'s git answering from the enclosing repository with the handoff committed and clean, the ceiling control\'s git printing the whole no-repository message, both no-repository lanes have no .git above them and the boundary shim prints the stop real git prints at /dev, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
+clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing and the removed gitdir each make git print the phrase with a path, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the ceiling row\'s git prints the whole no-repository message inside the lane with the handoff uncommitted, the HEAD row\'s .git a directory without HEAD that git rejects, the nested HEAD row\'s git answering from the enclosing repository with the handoff committed and clean, the ceiling control\'s git printing the whole no-repository message, the no-repository lane has no .git above it, the boundary control\'s .git is in place and its shim prints the stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set, each symlink row\'s lane path has no .git above it while the handoff\'s physical directory sits in a repository where it is modified, the GIT_CONFIG row\'s handoff untracked and ignored only under the inherited entry, the linked control\'s lane path has no .git above it and its repository is clean with both files tracked, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
   classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
 
 process.exit(bad ? 1 : 0)

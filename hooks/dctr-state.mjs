@@ -967,8 +967,9 @@ export function treeHash(repos, excludes) {
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
  * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
  * touching it was made at or after that second and it and the memory file carry no uncommitted change. With no .git
- * entry on the path from the handoff's directory up, the file and the kickoff line naming it are the landing; with one,
- * git must answer from that repository's work tree, and any failure is not landed. False when `warnedAt` is unknown.
+ * entry on the path from the real path of the handoff's directory up, the file and the kickoff line naming it are the
+ * landing; with one, git must answer from that repository's work tree, and any failure is not landed. False when
+ * `warnedAt` is unknown or either file's directory has no real path.
  */
 export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
@@ -980,26 +981,31 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
   // counts as present, so git then decides, and its failure is not landed.
   const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
-  const top = repoOf(handoffPath, dotGit)
+  // git resolves its cwd physically, so the walk and every path git is given go through symlinks the same way.
+  const real = (p) => path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p))
+  let handoff, memory
+  try { handoff = real(handoffPath); memory = real(memoryPath) } catch { return false }
+  const top = repoOf(handoff, dotGit)
   if (!dotGit(path.join(top, '.git'))) return true
-  // An inherited GIT_DIR and its kin, or a ceiling, would point git away from that repository; a filesystem
-  // boundary under it would stop git short of the .git the walk found.
-  const env = { ...process.env, LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' }
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_CEILING_DIRECTORIES']) delete env[k]
+  // Any inherited GIT_ variable (GIT_DIR and its kin, a ceiling, a config entry naming an excludes file) can point
+  // git away from that repository or its rules; a filesystem boundary under it would stop git short of the .git found.
+  const env = { ...process.env }
+  for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
+  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' })
   const git = (args) => {
     const left = end - Date.now()
     if (left <= 0) throw timedOut
     try {
-      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
+      return execFileSync('git', ['-C', path.dirname(handoff), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
     } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
   }
   try {
     // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
     if (git(['rev-parse', '--show-toplevel']) !== fs.realpathSync.native(top)) return false
     // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
-    try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e.status !== 1) throw e }
-    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
+    try { git(['check-ignore', '-q', handoff]); return true } catch (e) { if (e.status !== 1) throw e }
+    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoff]))
     if (!ct || ct < Math.floor(warnedAt / 1000)) return false
-    return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''
+    return git(['status', '--porcelain', '--', handoff, memory]) === ''
   } catch { return false }
 }
