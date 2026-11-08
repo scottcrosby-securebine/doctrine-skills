@@ -75,9 +75,10 @@ function readPane(pane) {
   return { status: p.agent_status, session }
 }
 
-/** Type one fixed line; false when the call failed. */
+/** Type one fixed line; false when the call failed. A line already decided keeps the default bound of `herdr(`: the
+ *  window bounds the waiting, never a typing call that may deliver and then fail. */
 function type(pane, line) {
-  try { herdr(['pane', 'run', pane, line], bound()); return true } catch (e) { say(`could not type into ${pane} (${String(e.message).split('\n')[0]})`); return false }
+  try { herdr(['pane', 'run', pane, line]); return true } catch (e) { say(`could not type into ${pane} (${String(e.message).split('\n')[0]})`); return false }
 }
 
 /** Whether the session's transcript, as the pane's restore file names it, starts a turn at or after `since`: a `user`
@@ -88,7 +89,8 @@ function turnSince(pane, session, since) {
   if (r?.session_id !== session || !r.transcript_path) return true
   const text = readText(r.transcript_path)
   const read = text === null ? null : transcriptEntries(text)
-  if (!read || read.partial) return true
+  // A warned session's transcript is never empty, so an empty one is lost evidence and counts as a turn.
+  if (!read || read.partial || read.entries.length === 0) return true
   return read.entries.some((e) => {
     if (e?.type !== 'user' || e.isMeta) return false
     const c = e.message?.content

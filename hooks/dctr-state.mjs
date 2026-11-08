@@ -980,12 +980,16 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
     const left = end - Date.now()
     if (left <= 0) throw timedOut
     try {
-      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...(left === Infinity ? {} : { timeout: left }) }).trim()
+      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' }, ...(left === Infinity ? {} : { timeout: left }) }).trim()
     } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
   }
   try {
-    try { git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e === timedOut) throw e; return true }
-    try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e === timedOut) throw e /* else not ignored: it needs its commit */ }
+    // Outside a work tree only when git ran and said so; any other failure, or an answer other than true, is not landed.
+    let inside
+    try { inside = git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e.status > 0 && /not a git repository/.test(String(e.stderr))) return true; throw e }
+    if (inside !== 'true') return false
+    // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
+    try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e.status !== 1) throw e }
     const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
     if (!ct || ct < Math.floor(warnedAt / 1000)) return false
     return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''

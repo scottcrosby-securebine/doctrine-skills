@@ -57,6 +57,8 @@ if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send
   entry.typed = { pane: a[2], text: a.slice(3).join(' ') }
   const p = s.panes[a[2]]
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
+  // A slow reply: the line is delivered (logged) at once and the call returns only after runDelayMs.
+  if (s.runDelayMs) { fs.appendFileSync(lg, JSON.stringify(entry) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.runDelayMs); process.stdout.write('{"result":{}}\\n'); process.exit(0) }
 }
 out({ result: {} })
 `
@@ -367,6 +369,55 @@ const gitTook = Date.now() - gt0
 clause('clause 2u — handoffLanded given 1 s on that slow git: false within 2 s, a git call that times out never reading as landed (SC3)',
   gitLanded === false && gitTook < 2000, JSON.stringify({ gitLanded, gitTook }))
 
+// The pane reads ready only near the first window's end, and each typing call takes 1 s to return after the line is
+// delivered. A typing call bounded by the window's last few hundred ms fails after /clear is delivered.
+const nearEnd = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { busyAfterType: 2, clearSession: 'S-next', runDelayMs: 1000 } })
+handed(nearEnd, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+setShim(nearEnd, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0, busyUntil: Date.now() + 9300 } } })
+const rNearEnd = await sender(nearEnd, ['wake', 'a'])
+clause('clause 2v — a pane that reads ready near the end of the first wait, each typing call slow to return: the wake still types /clear, the resume line and the nudge, a decided line typed with the default bound of herdr( (SR2)',
+  rNearEnd.code === 0 && JSON.stringify(typed(nearEnd)) === JSON.stringify([`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`, `${PANE}|${NUDGE}`]), `${rNearEnd.took} ms; ${show(nearEnd, rNearEnd)}`)
+
+// The class check: every read handedOff makes, each absent, empty, unreadable or timed out where that applies, on a
+// handed-off lane whose handoff is tracked and committed (so every git call runs). No row may type /clear; the
+// healthy control row, through the same git shim, does.
+const MODE_GIT = `#!/usr/bin/env node
+const fs = require('fs'), path = require('path'), cp = require('child_process')
+let m = {}; try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'mode.json'), 'utf8')) } catch {}
+const a = process.argv.slice(2), sub = a[0] === '-C' ? a[2] : a[0]
+if (m.sub === sub) {
+  if (m.mode === 'fail') { process.stderr.write('fatal: unable to read: Input/output error\\n'); process.exit(128) }
+  if (m.mode === 'empty') process.exit(0)
+  if (m.mode === 'slow') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000)
+}
+const r = cp.spawnSync(${JSON.stringify(realGit)}, a, { stdio: 'inherit' })
+process.exit(r.status ?? 1)
+`
+const nodeBin = path.join(tmp, 'nodebin'); fs.mkdirSync(nodeBin, { recursive: true }); fs.symlinkSync(process.execPath, path.join(nodeBin, 'node'))
+function classFx() {
+  const fx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { busyAfterType: 2, clearSession: 'S-next' } })
+  fs.writeFileSync(path.join(fx.lane, '.gitignore'), ''); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'handoff')
+  handed(fx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+  fx.gitBin = path.join(fx.dir, 'gitbin'); write(path.join(fx.gitBin, 'git'), MODE_GIT); fs.chmodSync(path.join(fx.gitBin, 'git'), 0o755)
+  fx.path = `${fx.bin}:${fx.gitBin}:${process.env.PATH}`
+  fx.restore = at(fx, () => restoreFile(PANE)); fx.transcript = path.join(fx.dir, 'transcript.jsonl'); fx.latch = at(fx, () => path.join(stateDir('S'), 'gauge.json'))
+  return fx
+}
+const gitMode = (sub, mode) => (fx) => write(path.join(fx.gitBin, 'mode.json'), JSON.stringify({ sub, mode }))
+const fileRows = (label, key) => [[`${label} absent`, (fx) => fs.rmSync(fx[key])], [`${label} empty`, (fx) => fs.writeFileSync(fx[key], '')], [`${label} unreadable`, (fx) => fs.chmodSync(fx[key], 0)]]
+const CLASS = [
+  ...fileRows('the restore file', 'restore'), ...fileRows('the transcript', 'transcript'), ...fileRows('the latch', 'latch'), ...fileRows('the record', 'record'),
+  ['git absent', (fx) => { fx.path = `${fx.bin}:${nodeBin}` }],
+  ...['rev-parse', 'check-ignore', 'log', 'status'].flatMap((sub) => [[`git ${sub} fails`, gitMode(sub, 'fail')], [`git ${sub} times out`, gitMode(sub, 'slow')]]),
+  ['git rev-parse prints nothing', gitMode('rev-parse', 'empty')], ['git log prints nothing', gitMode('log', 'empty')],
+]
+const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
+const controlFx = classFx()
+const classRuns = await Promise.all([...classFxs, ['control', controlFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path } }).then((r) => [label, fx, r])))
+const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== (label === 'control')).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
+clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out: no /clear typed; the healthy control clears (SR1, SR3)',
+  classBad.length === 0, classBad.join(' || '))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const probe = fixture()
@@ -428,5 +479,34 @@ clause('clause 3i — without paneClaimHeld: the claim file parses on its first 
 const gitProbe = spawnSync(path.join(slowGitBin, 'git'), ['--version'], { timeout: 1500 })
 clause('clause 3j — without the sender: the slow git shim is still running after 1.5 s, and the slow-git fixture is handed off as the handed one is with the real git',
   gitProbe.error?.code === 'ETIMEDOUT' && handoffLanded({ handoffPath: slowGit.handoff, memoryPath: memory(slowGit), warnedAt: latchOf(slowGit, 'S') }), String(gitProbe.error?.code))
+
+const nearShim = fixture({ shim: { runDelayMs: 1000 } })
+const nt0 = Date.now(); const nearRun = shimRun(nearShim, 'pane', 'run', PANE, 'x'); const nearTook = Date.now() - nt0
+clause('clause 3k — without the sender: the slow-reply shim logs the line as typed and returns only after 1 s',
+  nearRun.status === 0 && nearTook >= 1000 && typed(nearShim).length === 1, JSON.stringify({ nearTook, typed: typed(nearShim) }))
+const classProofBad = []
+const gitOf = (fx, args) => spawnSync(path.join(fx.gitBin, 'git'), ['-C', fx.lane, ...args], { encoding: 'utf8', timeout: 1500 })
+const SUBARGS = { 'rev-parse': ['rev-parse', '--is-inside-work-tree'], 'check-ignore': ['check-ignore', '-q', 'docs/handoffs/h.md'], log: ['log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md'], status: ['status', '--porcelain'] }
+for (const [label, fx] of classFxs) {
+  let ok
+  const m = /^(the \w+(?: file)?) (absent|empty|unreadable)$/.exec(label)
+  if (m) {
+    const key = { 'the restore file': 'restore', 'the transcript': 'transcript', 'the latch': 'latch', 'the record': 'record' }[m[1]], f = fx[key]
+    if (m[2] === 'absent') ok = !fs.existsSync(f)
+    else if (m[2] === 'empty') ok = fs.statSync(f).size === 0
+    else { try { fs.readFileSync(f); ok = false } catch (e) { ok = e.code === 'EACCES' } }
+  } else if (label === 'git absent') {
+    ok = spawnSync('git', ['--version'], { env: { PATH: fx.path } }).error?.code === 'ENOENT'
+  } else {
+    const [, sub, how] = /^git (\S+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, SUBARGS[sub])
+    ok = how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === ''
+  }
+  if (!ok) classProofBad.push(label)
+}
+const cg = (args) => gitOf(controlFx, args)
+const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARGS['check-ignore']).status === 1 && Number(cg(SUBARGS.log).stdout.trim()) > 0 &&
+  handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
+clause('clause 3l — without the sender: each class row carries its one defect, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
+  classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
 
 process.exit(bad ? 1 : 0)
