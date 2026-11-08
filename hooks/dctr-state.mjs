@@ -965,13 +965,13 @@ export function treeHash(repos, excludes) {
 
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
- * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
- * touching it was made at or after that second and it and the memory file carry no uncommitted change. Only the
- * repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
- * the user's, so a user-level rule can only ever require a commit. With no .git entry on the path from the handoff's
- * real path up, the file and the kickoff line naming it are the landing; with one, git must answer from that
- * repository's work tree, and any failure is not landed. False when `warnedAt` is unknown, the handoff has no real
- * path, or the memory file has none and neither has its directory.
+ * or after `warnedAt` (the gauge's latch records when it warned), and every repository holding either file's own real
+ * path or a link on the way to it reports that path landed there: the handoff's own file ignored by that repository
+ * or committed at or after that second with no uncommitted change, and every other path with no uncommitted change.
+ * Only the repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
+ * the user's, so a user-level rule can only ever require a commit. A path with no .git entry above it is landed by
+ * the file alone; with one, git must answer from that repository's work tree, and any failure is not landed.
+ * False when `warnedAt` is unknown or either file's paths cannot be resolved.
  */
 export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
@@ -983,35 +983,52 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
   // counts as present, so git then decides, and its failure is not landed.
   const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
-  // git resolves its cwd physically and tracks a link as the link, so the walk and every path git is given are the
-  // files' own real paths; a memory file not yet written is resolved by its directory.
-  let handoff, memory
-  try {
-    handoff = fs.realpathSync.native(handoffPath)
-    try { memory = fs.realpathSync.native(memoryPath) } catch { memory = path.join(fs.realpathSync.native(path.dirname(memoryPath)), path.basename(memoryPath)) }
-  } catch { return false }
-  const top = repoOf(handoff, dotGit)
-  if (!dotGit(path.join(top, '.git'))) return true
+  // A link lives in two places: the link itself, tracked where its directory is, and the file it reaches. So each
+  // path gives every link on the way to it, as the entry its directory tracks, and its own real path. A memory file
+  // not yet written is resolved by its directory; one that exists and cannot be resolved is not landed, since the
+  // link alone would then read clean. shortcut: components are read as path.resolve writes them, so a `..` after a
+  // link is taken lexically; resolve component by component if a kickoff ever names such a path.
+  const forms = (p) => {
+    const parts = path.resolve(p).split(path.sep), links = []
+    for (let i = 2; i <= parts.length; i++) {
+      const c = parts.slice(0, i).join(path.sep)
+      let l
+      try { l = fs.lstatSync(c) } catch (e) { if (e.code === 'ENOENT' && i === parts.length) return { links, real: path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)) }; throw e }
+      if (l.isSymbolicLink()) links.push(path.join(fs.realpathSync.native(path.dirname(c)), path.basename(c)))
+    }
+    return { links, real: fs.realpathSync.native(p) }
+  }
   // Any inherited GIT_ variable (GIT_DIR and its kin, a ceiling, a config entry naming an excludes file) can point
   // git away from that repository or its rules; a filesystem boundary under it would stop git short of the .git found.
   // The system and global config and the default $XDG_CONFIG_HOME/git/ignore are the user's rules, not the repository's.
   const env = { ...process.env }
   for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
   Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null' })
-  const git = (args) => {
-    const left = end - Date.now()
-    if (left <= 0) throw timedOut
-    try {
-      return execFileSync('git', ['-C', path.dirname(handoff), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
-    } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
-  }
-  try {
+  // Whether `file` is landed in the repository holding it, if any: no uncommitted change, and with `handoff` also
+  // ignored there or committed at or after the warning.
+  const landedIn = (file, handoff) => {
+    const top = repoOf(file, dotGit)
+    if (!dotGit(path.join(top, '.git'))) return true
+    const git = (args) => {
+      const left = end - Date.now()
+      if (left <= 0) throw timedOut
+      try {
+        return execFileSync('git', ['-C', top, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
+      } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
+    }
     // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
     if (git(['rev-parse', '--show-toplevel']) !== fs.realpathSync.native(top)) return false
-    // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
-    try { git(['check-ignore', '-q', handoff]); return true } catch (e) { if (e.status !== 1) throw e }
-    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoff]))
-    if (!ct || ct < Math.floor(warnedAt / 1000)) return false
-    return git(['status', '--porcelain', '--', handoff, memory]) === ''
+    if (handoff) {
+      // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
+      try { git(['check-ignore', '-q', file]); return true } catch (e) { if (e.status !== 1) throw e }
+      const ct = Number(git(['log', '-1', '--format=%ct', '--', file]))
+      if (!ct || ct < Math.floor(warnedAt / 1000)) return false
+    }
+    return git(['status', '--porcelain', '--', file]) === ''
+  }
+  try {
+    // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.
+    const h = forms(handoffPath), m = forms(memoryPath)
+    return [...h.links, ...m.links, m.real].every((f) => landedIn(f, false)) && landedIn(h.real, true)
   } catch { return false }
 }
