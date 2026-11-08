@@ -912,13 +912,11 @@ const KINDS = [
   { k: 'untracked file', file: 'u/deep.txt', prep: (s) => write(path.join(s.w, 'u/deep.txt'), 'untracked\n') },
 ]
 const MATRIX = {}
-const sha256hex = (t) => crypto.createHash('sha256').update(t).digest('hex')
 for (const [i, K] of KINDS.entries()) {
   const s = matrixLane()
   K.prep(s)
   const before = kindOf(path.join(s.w, K.file))
   const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
-  MATRIX[K.k] = { s, before }
   const ok = K.refused
     ? rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && exists(s.w) && kindOf(path.join(s.w, K.file)) === before
     : ra.code === 0 && rr.code === 0 && !exists(s.w) && kindOf(path.join(s.lanes, K.file)) === before
@@ -948,7 +946,6 @@ for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored li
   const epic = read(path.join(s.f.repo, 'docs/epics/E1.md'))
   fs.renameSync(path.join(s.w, '.doctrine/records/a.md'), path.join(s.w, 'real-a.md'))
   fs.symlinkSync('../../real-a.md', path.join(s.w, '.doctrine/records/a.md'))
-  MATRIX.recordLink = s
   const ra = lane(s.f, ['archive', 'a'])
   clause('clause 1ar — archive refuses a lane whose record is a link: nothing archived, the epic unchanged, no lane.log line (LC2)',
     ra.code !== 0 && /is reached through a link/.test(ra.err) && !exists(s.lanes) && read(path.join(s.f.repo, 'docs/epics/E1.md')) === epic && laneLines(s.f).length === 1, `archive ${ra.code} ${said(ra)}`)
@@ -972,7 +969,7 @@ for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored li
   fs.rmSync(path.join(s.w, 'lf')); write(path.join(s.w, 'lf'), 'now a file\n')
   const r2 = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
   clause('clause 2ac — a second archive, after one link the first archived became a directory and another a file, writes nothing through either archived link, and remove then exits 0 with both archived (LC2)',
-    r1.code === 0 && r2.code === 0 && rr.code === 0 && treeOf(s.out) === s.outBefore && read(path.join(s.lanes, 'ld/x.txt')) === 'x\n' && kindOf(path.join(s.lanes, 'lf')) === `file ${sha256hex('now a file\n')}`,
+    r1.code === 0 && r2.code === 0 && rr.code === 0 && treeOf(s.out) === s.outBefore && read(path.join(s.lanes, 'ld/x.txt')) === 'x\n' && kindOf(path.join(s.lanes, 'lf')).startsWith('file ') && read(path.join(s.lanes, 'lf')) === 'now a file\n',
     `archive ${r1.code} ${said(r1)}; archive ${r2.code} ${said(r2)}; remove ${rr.code} ${said(rr)}; outside ${JSON.stringify(treeOf(s.out))}`)
 }
 

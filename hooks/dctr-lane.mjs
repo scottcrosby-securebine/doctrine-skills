@@ -71,6 +71,8 @@ const LISTING = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).trim()
 /** A git listing read NUL-separated: pass -z in `args`. */
 const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).split('\0').filter(Boolean)
+// A git or fs error's first line, for a refusal.
+const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
 const gitOk = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { stdio: 'ignore' }).status === 0
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 /** Whether `a` and `b` are both links with one target, or both files with one sha256; any failed read is not. */
@@ -181,7 +183,7 @@ function create() {
   const fail = (why) => { process.stderr.write(`dctr-lane: create failed, ${why}; made ${made.join(', ')}, left in place, and lane.log not written\n`); process.exit(1) }
   try {
     git(repo, 'worktree', 'add', '--quiet', ...(merge ? [wt, base] : ['-b', role, wt, base]))
-  } catch (e) { refuse(`git worktree add failed (${String(e.stderr || e.message).trim().split('\n')[0]})`) }
+  } catch (e) { refuse(`git worktree add failed (${why(e)})`) }
   let pane = null
   try {
     const real = fs.realpathSync(wt)
@@ -216,7 +218,7 @@ function create() {
       herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, so nothing follows it and nothing is closed
     }
     append(`${role} ${pane} ${wt} ${launch}`)
-  } catch (e) { fail(String(e?.stderr || e?.message || e).trim().split('\n')[0]) }
+  } catch (e) { fail(why(e)) }
 }
 
 /** Polls `pane get` until the pane reads ready (L7), or fails past the wait. `fresh`: before the launch line, ready is a
@@ -258,7 +260,6 @@ function reset() {
   let bytes = null
   try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== 'ENOENT') throw e }
   const tracked = gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)
-  const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
   let failed = null, pending = Boolean(bytes)
   // the bytes sit in `saved` until they are back in place, so a failure anywhere below loses none of them
   if (pending) try { fs.writeFileSync(saved, bytes, { flag: 'wx' }) } catch (e) { failed = `the memory bytes could not be saved to ${saved} (${e.code || e.message})`; pending = false }
