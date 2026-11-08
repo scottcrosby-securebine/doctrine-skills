@@ -4,8 +4,9 @@
 //
 // Clause 2 drives the sender end to end on fixture runs: an orchestrator repo whose project file names the Records
 // path, a lane worktree whose kickoff chain names its record, a lane.log, and a `herdr` PATH shim that logs every call
-// (argv, DCTR_CALLER, the claims it can see) and plays the lane's pane. Each defect case (a warned session, another
-// claim, a failed or empty reading, no create line, an unreadable record, containment, an unhanded wake, a pane never
+// (argv, DCTR_CALLER, the claims it can see) and plays the lane's pane, changing on a given pane read what that read
+// reports or a file it appends to, and taking a given time over each read where a case asks. Each defect case (a warned session, another
+// claim, a claim or claim directory that cannot be read, a failed or empty reading, no create line, an unreadable record, containment, an unhanded wake, a pane never
 // ready) sits beside its known-good twin, so a sender that types nothing passes none of them. TMPDIR is each fixture's
 // own directory, so the claims and restore files live there. Clause 3 proves the fixtures carry what the clauses rest
 // on without running the sender.
@@ -42,6 +43,9 @@ const fail = (m) => { fs.appendFileSync(lg, JSON.stringify({ ...entry, failed: m
 if (a[0] === 'pane' && a[1] === 'get') {
   if (s.listDir) entry.claims = fs.readdirSync(s.listDir).filter((f) => f.endsWith('.claim')).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(s.listDir, f), 'utf8')) } catch { return {} } })
   if (s.onFirstRead && !s.firstDone) { s.firstDone = true; fs.appendFileSync(s.onFirstRead.file, s.onFirstRead.line + '\\n'); entry.appended = true }
+  s.gets = (s.gets || 0) + 1
+  for (const x of s.events || []) if (x.n === s.gets) { if (x.file) fs.appendFileSync(x.file, x.line + '\\n'); if (x.session) s.panes[a[2]].session = x.session; entry.event = x.n }
+  if (s.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.delayMs)
   if (s.paneGet === 'fail') fail('{"error":{"code":"server_error"}}')
   if (s.paneGet === 'empty') out({})
   const p = s.panes[a[2]]; if (!p) fail('{"error":{"code":"pane_not_found"}}')
@@ -163,6 +167,22 @@ for (const live of [true, false]) {
 clause('clause 2d — another claim on the pane with a live pid: send and wake type nothing; the same claim whose pid is dead does not hold, and each nudges (D96)',
   claimBad.length === 0, claimBad.join(' || '))
 
+// A claim file that cannot be parsed, and a claim directory that can be written and not read: each counts as held.
+const unreadBad = []
+const corrupt = fixture()
+at(corrupt, () => write(path.join(autoCycleDir(), 'torn.claim'), '{"pid": '))
+const unlisted = fixture()
+const unlistedDir = at(unlisted, () => autoCycleDir())
+fs.chmodSync(unlistedDir, 0o300)
+try {
+  for (const [label, fx] of [['a torn claim', corrupt], ['an unreadable claim directory', unlisted]]) {
+    const r = await sender(fx, ['send', 'a', 'hello lane']), w = await sender(fx, ['wake', 'a'])
+    if (r.code !== 0 || w.code !== 0 || held(fx).length !== 1 || typed(fx).length !== 0) unreadBad.push(`${label}: ${show(fx, r)}`)
+  }
+} finally { fs.chmodSync(unlistedDir, 0o700) }
+clause('clause 2d2 — a claim file that cannot be parsed, or a claim directory that cannot be read: send and wake type nothing and the message is held (SS3)',
+  unreadBad.length === 0, unreadBad.join(' || '))
+
 const order = fixture()
 setShim(order, { listDir: at(order, () => autoCycleDir()) })
 const rOrder = await sender(order, ['send', 'a', 'hello lane'])
@@ -269,6 +289,35 @@ clause('clause 2o — wake on a pane that never reads ready: nothing typed, it g
   rSlow.code !== null && rSlow.took >= 9500 && rSlow.took <= 10800 && typed(slow).length === 0 && JSON.stringify(held(slow)) === JSON.stringify([seed]) && fs.readFileSync(seed, 'utf8') === 'seeded\n',
   `${rSlow.took} ms; ${show(slow, rSlow)}`)
 
+// Each wake reads the pane working three times, and on its second read something changes: the pane reports another
+// session, an R16 paused line follows the warning, or the transcript starts a turn. The control changes nothing.
+const NOW = Date.now()
+const DURING = [
+  ['nothing changes', () => [], [`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`, `${PANE}|${NUDGE}`]],
+  ['the pane reports another session', () => [{ n: 2, session: 'S2' }], []],
+  ['an R16 paused line follows the warning', (fx) => [{ n: 2, file: fx.record, line: R16 }], []],
+  ['the session starts a turn', (fx) => [{ n: 2, file: path.join(fx.dir, 'transcript.jsonl'), line: JSON.stringify(turn(NOW)) }], []],
+  ['an unhanded pane reports another session', () => [{ n: 2, session: 'S2' }], [], '- State: Open\n'],
+  ['an unhanded pane, nothing changes', () => [], nudged(), '- State: Open\n'],
+]
+const duringBad = [], duringFx = []
+for (const [label, events, want, laneRecord = '- State: Open\n- auto-cycle: warned S 20%\n'] of DURING) {
+  const fx = fixture({ laneRecord, shim: { busyAfterType: 2, clearSession: 'S-next' } })
+  handed(fx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+  setShim(fx, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 3 } }, events: events(fx) }); duringFx.push([label, fx])
+  const r = await sender(fx, ['wake', 'a'])
+  if (r.code !== 0 || JSON.stringify(typed(fx)) !== JSON.stringify(want) || held(fx).length !== 0) duringBad.push(`${label}: ${show(fx, r)}`)
+}
+clause('clause 2p — a wake reads again before each line: the pane reporting another session, an R16 line following the warning, or a turn started while it waits for a ready reading stops it typing; with nothing changed it types all its lines (SS4)',
+  duringBad.length === 0, duringBad.join(' || '))
+
+// Each pane read takes 6 s, so a wake whose reads are not bounded by its give-up runs past 12 s.
+const slowShim = fixture({ status: 'working', laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { delayMs: 6000 } })
+handed(slowShim, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+const rSlowShim = await sender(slowShim, ['wake', 'a'])
+clause('clause 2q — a wake whose every pane read takes 6 s ends by 10.8 s, typing nothing, its reads bounded by the time left (SS5)',
+  rSlowShim.code === 0 && rSlowShim.took <= 10800 && typed(slowShim).length === 0, `${rSlowShim.took} ms; ${show(slowShim, rSlowShim)}`)
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const probe = fixture()
@@ -303,5 +352,18 @@ clause('clause 3d — without the sender: the handed fixture\'s handoff landed a
   at(u7, () => JSON.parse(fs.readFileSync(restoreFile(PANE), 'utf8')).session_id) === 'OTHER', 'wake fixtures wrong')
 clause('clause 3e — without the sender: the never-ready fixture\'s shim reads the pane working, on a session warned and handed off as the handed one is',
   JSON.parse(shimRun(slow, 'pane', 'get', PANE).stdout).result.pane.agent_status === 'working' && handoffLanded({ handoffPath: slow.handoff, memoryPath: memory(slow), warnedAt: latchOf(slow, 'S') }), 'slow fixture wrong')
+
+const unreadProof = (() => { try { JSON.parse(at(corrupt, () => fs.readFileSync(path.join(autoCycleDir(), 'torn.claim'), 'utf8'))); return false } catch (e) { if (!(e instanceof SyntaxError)) return false } fs.chmodSync(unlistedDir, 0o300); try { fs.readdirSync(unlistedDir); return false } catch (e) { return e.code === 'EACCES' } finally { fs.chmodSync(unlistedDir, 0o700) } })()
+clause('clause 3f — without the sender: the torn claim does not parse, and the claim directory set write-only cannot be listed',
+  unreadProof, 'claim read fixtures wrong')
+const evProof = fixture({ shim: { events: [{ n: 2, session: 'S2' }] } }), rProof = fixture({ shim: { events: [] } })
+setShim(rProof, { events: [{ n: 2, file: rProof.record, line: R16 }] })
+const sessions = [1, 2].map(() => JSON.parse(shimRun(evProof, 'pane', 'get', PANE).stdout).result.pane.agent_session.value)
+shimRun(rProof, 'pane', 'get', PANE); const r16Before = fs.readFileSync(rProof.record, 'utf8'); shimRun(rProof, 'pane', 'get', PANE)
+const t0 = Date.now(); shimRun(slowShim, 'pane', 'get', PANE); const slowTook = Date.now() - t0
+clause('clause 3g — without the sender: the shim changes the reported session, or appends its line, on the second pane read and not the first, the busy fixtures read working three times, and the slow shim takes 6 s over a read',
+  JSON.stringify(sessions) === '["S","S2"]' && !r16Before.includes(R16) && pauseCode(parseRecord(fs.readFileSync(rProof.record, 'utf8')).entries.find((e) => e.sub === 'paused')?.reason) === 'R16' &&
+  duringFx.every(([, fx]) => shimLog(fx).filter((e) => e.argv[1] === 'get').slice(0, 3).every((e) => e.status === 'working')) && slowTook >= 6000,
+  JSON.stringify({ sessions, slowTook }))
 
 process.exit(bad ? 1 : 0)

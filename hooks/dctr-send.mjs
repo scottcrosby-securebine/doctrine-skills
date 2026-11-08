@@ -9,14 +9,17 @@
 // worktree. Every pane call carries DCTR_CALLER as `sender:` and the inherited value. A message file is written byte
 // for byte, under its final name only once complete. Before it reads the pane, the sender takes a claim on it, a claim
 // file in the auto-cycle directory of the kind the typer takes, and it removes the claim once it has typed or held.
-// It types nothing while any other claim on the pane is held, on a reading it cannot get or that comes back empty,
+// It types nothing while any other claim on the pane is held, a claim it cannot read counting as held, on a reading it cannot get or that comes back empty,
 // or when the role or its record cannot be found: the message stays held, and the lane reads its held folder at each
 // resume. `send` types the nudge only on a pane reading idle or done whose session no warned line in the role's
 // record names, that record read after the pane. `wake` types /clear, RESUME_LINE and the nudge, each after a fresh
 // reading shows the pane ready, only when a warned line names the pane's session, the handoff landed after it, no R16
 // paused line follows it, and the session's transcript holds no turn start at or after the handoff's modification
-// time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone. A wake gives up
-// after WAKE_GIVE_UP_MS on a pane that never reads ready and types nothing more. Each send or wake the orchestrator
+// time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone. Before each line it
+// reads again: the pane must report the session the line is for (the one it decided on, and after /clear the new
+// one the pane reports in its place), and before /clear the record, latch, handoff and transcript must still clear
+// that session; otherwise it stops typing. A wake gives up WAKE_GIVE_UP_MS after it starts, every herdr call in it
+// bounded by the time left and none started past it, and types nothing more. Each send or wake the orchestrator
 // makes appends one relay line to its own record. Contained (DCTR_VIEW_REQUEST_DIR set) it writes its files and
 // makes no pane call.
 
@@ -64,7 +67,7 @@ function relay(role, ref) {
 /** The pane's reading, `{ status, session }`, or null when it cannot be got, carries no pane or names no session. */
 function readPane(pane) {
   let reply
-  try { reply = herdr(['pane', 'get', pane]) } catch (e) { say(`the pane ${pane} could not be read (${String(e.message).split('\n')[0]})`); return null }
+  try { reply = herdr(['pane', 'get', pane], bound()) } catch (e) { say(`the pane ${pane} could not be read (${String(e.message).split('\n')[0]})`); return null }
   const p = reply?.result?.pane
   const session = p?.agent_session?.value
   if (!p || typeof session !== 'string' || session === '') { say(`the reading of ${pane} carried no pane or no session`); return null }
@@ -73,7 +76,7 @@ function readPane(pane) {
 
 /** Type one fixed line; false when the call failed. */
 function type(pane, line) {
-  try { herdr(['pane', 'run', pane, line]); return true } catch (e) { say(`could not type into ${pane} (${String(e.message).split('\n')[0]})`); return false }
+  try { herdr(['pane', 'run', pane, line], bound()); return true } catch (e) { say(`could not type into ${pane} (${String(e.message).split('\n')[0]})`); return false }
 }
 
 /** Whether the session's transcript, as the pane's restore file names it, starts a turn at or after `since`: a `user`
@@ -107,6 +110,10 @@ function handedOff(rec, pane, session) {
 }
 
 const [sub, ...args] = process.argv.slice(2)
+const deadline = Date.now() + WAKE_GIVE_UP_MS
+/** A wake's time left before its give-up; a send has no give-up, so its calls keep herdr's own bound. */
+const left = () => (sub === 'wake' ? deadline - Date.now() : Infinity)
+const bound = () => (sub === 'wake' ? Math.max(1, left()) : undefined)
 const run = runRoot()
 if (sub === 'report') {
   const [kind, text] = args, role = runRole()
@@ -138,7 +145,6 @@ const claim = path.join(autoCycleDir(), `sender-${process.pid}.${paneToken(pane)
 /** Everything after the claim is taken; the caller removes the claim whatever this returns. */
 function deliver() {
   if (paneClaimHeld(pane, claim)) return say(`another claim on ${pane} is held: nothing typed`)
-  let since = Date.now()
   const first = readPane(pane)
   if (!first) return
   const rec = recordOf(lane.worktree)
@@ -149,20 +155,28 @@ function deliver() {
     if (type(pane, NUDGE)) say(`nudged ${pane}`)
     return
   }
-  // wake: each line typed only after a fresh reading shows the pane ready, the first within the give-up of the first
-  // reading and each later one within the give-up of the line before it.
+  // wake: each line typed only after a fresh reading shows the pane ready on the session that line is for, all of
+  // it within the give-up of the wake's start.
   const lines = handedOff(rec, pane, first.session) ? ['/clear', RESUME_LINE, NUDGE] : [NUDGE]
+  let session = first.session
   for (const line of lines) {
+    let r
     for (;;) {
-      const r = readPane(pane)
+      if (left() <= 0) return say(`${pane} never read ready: gave up before ${line}`)
+      r = readPane(pane)
       if (!r) return
-      if (READY_STATUSES.includes(r.status)) break
-      const left = WAKE_GIVE_UP_MS - (Date.now() - since)
-      if (left <= 0) return say(`${pane} never read ready: gave up before ${line}`)
-      sleepMs(Math.min(POLL_MS, left))
+      // After /clear the pane is ready for the resume line once it reports a session other than the cleared one.
+      if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || r.session !== session)) break
+      sleepMs(Math.min(POLL_MS, Math.max(0, left())))
     }
+    if (line === RESUME_LINE) session = r.session
+    else if (r.session !== session) return say(`${pane} reports ${r.session}, not ${session}: ${line} not typed`)
+    if (line === '/clear') {
+      const now = recordOf(lane.worktree)
+      if (now.why || !handedOff(now, pane, session)) return say(`${session} is no longer cleared for a wake: /clear not typed`)
+    }
+    if (left() <= 0) return say(`${pane} read ready past the give-up: ${line} not typed`)
     if (!type(pane, line)) return
-    since = Date.now()
   }
   say(`woke ${pane}: ${lines.length === 1 ? 'nudged' : 'cleared, resumed and nudged'}`)
 }

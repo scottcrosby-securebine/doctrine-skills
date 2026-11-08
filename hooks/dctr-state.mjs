@@ -51,7 +51,8 @@ export const HERDR_TIMEOUT_MS = 30000
 export const PLACEMENT_STALE_MS = 10000
 // Every herdr call renews the locks this process holds first (renewHeldLocks), because a herdr call
 // is the one wait inside a lock section that can run to HERDR_TIMEOUT_MS.
-export const herdr = (args) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })) }
+// `timeout` lowers that bound for one call, as a caller with its own deadline needs (the sender's wake).
+export const herdr = (args, timeout = HERDR_TIMEOUT_MS) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout })) }
 /** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
 export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
 
@@ -769,14 +770,18 @@ export function claimHeld(file) {
 
 /** Any held claim naming this pane, whatever session or script took it: the typer's claim is keyed by the old
  *  session id, and the Notification that asks comes from the new one (F9). `except` is the caller's own claim file,
- *  which never counts, so the typer and the sender each ask about the others' claims only. */
+ *  which never counts, so the typer and the sender each ask about the others' claims only. A directory that cannot
+ *  be read, or a claim file that cannot be read or parsed, counts as held, so no caller types on a failed read; only
+ *  a directory or claim file that is absent counts as no claim. */
 export function paneClaimHeld(paneId, except = null) {
   let names
-  try { names = fs.readdirSync(autoCycleDir()) } catch { return false }
+  try { names = fs.readdirSync(autoCycleDir()) } catch (e) { return e.code !== 'ENOENT' }
   return names.filter((f) => f.endsWith('.claim')).some((f) => {
     const file = path.join(autoCycleDir(), f)
     if (except && file === path.resolve(except)) return false
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')).pane === paneId && claimHeld(file) } catch { return false }
+    let c
+    try { c = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) { return e.code !== 'ENOENT' }
+    return c?.pane === paneId && claimHeld(file)
   })
 }
 
