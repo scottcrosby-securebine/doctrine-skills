@@ -45,7 +45,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { herdr, codexStateDir } from './dctr-state.mjs'
 import { codexTerminal, ID_RE } from './dctr-lib.mjs'
-import { parseRecord, restoreState } from './dctr-record.mjs'
+import { parseRecord, restoreState, docHeader, SECTION_LINE } from './dctr-record.mjs'
 
 export const PROJECT_PATH = 'docs/PROJECT.md'
 const PROJECT_STATES = ['Proposed', 'Ruled', 'Done']
@@ -82,20 +82,17 @@ const cells = (t) => { const m = /^ {0,3}(?=\S)(.*\|.*)$/.exec(t); return m && m
 
 /** Markdown to a model. Every value carries the 1-based line it came from. */
 export function parseDoc(text) {
-  const doc = { title: null, headers: Object.create(null), items: [], roster: [], issues: [], phases: [], entries: [], malformed: [] }
+  const { title, headers } = docHeader(text)
+  const doc = { title, headers, items: [], roster: [], issues: [], phases: [], entries: [], malformed: [] }
   let section = null, item = null, entry = null, lastRow = null
   String(text).split('\n').forEach((raw, i) => {
     const line = i + 1, t = raw.trimEnd()
     // A non-blank line in a read section that takes none of that section's forms.
     const odd = () => { if (t) doc.malformed.push({ section, text: t, line }) }
-    const sec = /^## (.+)$/.exec(t)
+    const sec = SECTION_LINE.exec(t)
     if (sec) { section = sec[1].trim(); item = entry = null; return }
-    if (section === null) {
-      if (!doc.title && /^# /.test(t)) { doc.title = { text: t.slice(2).trim(), line }; return }
-      const h = /^([A-Za-z][A-Za-z ]*):\s?(.*)$/.exec(t)
-      if (h) doc.headers[h[1]] = { value: h[2].trim(), line }
-      return
-    }
+    // The header is docHeader's.
+    if (section === null) return
     if (section === 'End state' || section === 'Done means') {
       const hd = /^### ?(.*)$/.exec(t)
       if (hd) { item = { id: hd[1].trim(), line, fields: Object.create(null) }; doc.items.push(item); return }

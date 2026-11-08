@@ -157,3 +157,22 @@ export function handoffHeader(text) {
 /** The state the restore hook acts on: `Open` or `Blocked` as the first word of a state entry's value, else
  *  null (scope choice SC1: any other state injects nothing). */
 export const restoreState = (value) => /^(Open|Blocked)\b/i.exec(value || '')?.[1] || null
+
+/** A `## ` section heading, the line that ends a project or epic file's header (skills/doctrine-project/formats.md). */
+export const SECTION_LINE = /^## (.+)$/
+
+/** The header of a project or epic file: its `# ` title and the `<Key>: <value>` lines above the first `## ` section,
+ *  each with its 1-based line, a repeated key keeping its last. The one reader of those lines, used by
+ *  dctr-project.mjs's parseDoc and dctr-lib.mjs's runRoot, so the two never name different Records. */
+export function docHeader(text) {
+  const head = { title: null, headers: Object.create(null) }
+  const lines = String(text).split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = i + 1, t = lines[i].trimEnd()
+    if (SECTION_LINE.test(t)) break
+    if (!head.title && /^# /.test(t)) { head.title = { text: t.slice(2).trim(), line }; continue }
+    const h = /^([A-Za-z][A-Za-z ]*):\s?(.*)$/.exec(t)
+    if (h) head.headers[h[1]] = { value: h[2].trim(), line }
+  }
+  return head
+}
