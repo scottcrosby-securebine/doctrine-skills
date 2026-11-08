@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import * as lib from './dctr-lib.mjs'
 
@@ -175,11 +175,16 @@ const BASE = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(
 Object.assign(BASE, { PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', TMPDIR: tmp })
 const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orch }
 
-// A preload that makes one fs operation throw EIO on any path containing a given string, the hook's real fs otherwise.
+// A preload that makes one fs operation throw EIO on any path containing a given string, the hook's real fs otherwise;
+// `realpathSync.native` names the native realpath. With a third element it stalls that many ms instead, then runs it.
+// The op `exit` instead ends, with exit 3, any process run with the argument `judge`, the hook's own judgement.
 const inject = path.join(tmp, 'inject.mjs')
-put(inject, "import fs from 'node:fs'\nconst [op, match] = JSON.parse(process.env.GUARD_FAULT)\nconst orig = fs[op]\n" +
-  "fs[op] = function (p, ...a) { if (String(p).includes(match)) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); return orig.call(this, p, ...a) }\n" +
-  "if (op === 'statSync') { const ex = fs.existsSync; fs.existsSync = (p) => !String(p).includes(match) && ex(p) }\n")
+put(inject, "import fs from 'node:fs'\nconst [op, match, stall] = JSON.parse(process.env.GUARD_FAULT)\n" +
+  "const [own, key] = op.includes('.') ? [fs[op.split('.')[0]], op.split('.')[1]] : [fs, op], orig = own[key]\n" +
+  "own[key] = function (p, ...a) { if (String(p).includes(match)) { if (!stall) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stall) } return orig.call(this, p, ...a) }\n" +
+  "if (key === 'realpathSync') own[key].native = orig.native\n" +
+  "if (op === 'exit' && process.argv.includes('judge')) process.exit(3)\n" +
+  "if (op === 'statSync' && !stall) { const ex = fs.existsSync; fs.existsSync = (p) => !String(p).includes(match) && ex(p) }\n")
 const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault } = {}) => {
   const args = fault ? ['--import', pathToFileURL(inject).href, hook] : [hook]
   const r = spawnSync('node', args, { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...BASE, ...env, ...(fault ? { GUARD_FAULT: JSON.stringify(fault) } : {}) }, cwd, encoding: 'utf8' })
@@ -425,17 +430,61 @@ const runErrWant = [`Write ${orch}/src/a.txt`, `Edit ${orch}/docs/handoffs/h12.m
 clause('clause 2y — an error on the stat of the run folder, once its name is read as orchestrate, still logs the refusal, one line per call naming its tool and path (E15-D24, GS3a)',
   wrong(runErr).length === 0 && JSON.stringify(runErrAdded) === JSON.stringify(runErrWant), `${show(runErr)} got ${JSON.stringify(runErrAdded)} want ${JSON.stringify(runErrWant)}`)
 
-// guard.log is written only in a run whose name has been read as orchestrate: a misnamed run, a link named orchestrate
-// to a misnamed folder, and a run whose spelling cannot be read are refused with no guard.log anywhere (GS3a review).
+// guard.log is written only in a run whose name reads as orchestrate: a misnamed run, Records itself and a link named
+// orchestrate to a misnamed folder are refused with no guard.log anywhere (N3).
 const noLogRows = [['DCTR_RUN naming a folder called misnamed', misnamed, W('src/a.txt')],
   ['DCTR_RUN naming Records itself', records, W(path.join(orch, '.doctrine/x.md'))],
   ['DCTR_RUN naming a link called orchestrate to the misnamed folder', linkRun, W('src/a.txt')]]
 const noLog = cases(noLogRows.map(([name, r, pay]) => [name, { ...ORCH, DCTR_RUN: r }, pay, 'deny']))
-const lstatBefore = logLines().length
-const noLogEio = cases([['EIO on the lstat of the run, Write src/a.txt', ORCH, W('src/a.txt'), 'deny', { fault: ['lstatSync', 'records/orchestrate'] }]])
 const strayLogs = [misnamed, records, path.dirname(linkRun)].map((d) => path.join(d, 'guard.log')).filter((f) => fs.existsSync(f))
-clause('clause 2z — a run not read as orchestrate is refused and gains no guard.log: DCTR_RUN naming a folder called misnamed, Records itself, or a link called orchestrate to the misnamed folder; and EIO on the lstat of the run, its name unread, refuses with no line',
-  wrong([...noLog, ...noLogEio]).length === 0 && strayLogs.length === 0 && logLines().length === lstatBefore, `${show([...noLog, ...noLogEio])} stray ${JSON.stringify(strayLogs)} lines ${logLines().length - lstatBefore}`)
+clause('clause 2z — a run not read as orchestrate is refused and gains no guard.log: DCTR_RUN naming a folder called misnamed, Records itself, or a link called orchestrate to the misnamed folder (N3)',
+  wrong(noLog).length === 0 && strayLogs.length === 0, `${show(noLog)} stray ${JSON.stringify(strayLogs)}`)
+
+// Every filesystem call guardContext and the hook make on a valid run, each faulted with EIO in turn: the write is refused
+// and, wherever guard.log can be appended, logged exactly once; beside it misnamed runs, a read of the link faulted too,
+// that gain no guard.log (E15-D24, N3, GQ1). A run reached through a link to Records puts a readlink in the walk.
+const viaLink = path.join(orch, 'link-records/orchestrate')
+const FAULTED = [['stat of the run', 'statSync', 'records/orchestrate'], ['lstat of the run', 'lstatSync', 'records/orchestrate'],
+  ['realpath of the run', 'realpathSync.native', 'records/orchestrate'], ['readlink of a link on the way to the run', 'readlinkSync', 'link-records', viaLink],
+  ['readFile of the kickoff', 'readFileSync', 'SESSION_MEMORY.md'], ['presence test of the record', 'statSync', 'docs/epics/E1.md'],
+  ['presence test of the checkout\'s .git', 'statSync', '.doctrine/records/.git'], ['append to guard.log', 'appendFileSync', 'guard.log', run, 0]]
+const faultTable = FAULTED.map(([what, op, match, r = run, want = 1]) => {
+  const before = logLines().length, c = hookRun({ ...ORCH, DCTR_RUN: r }, W('src/a.txt'), { fault: [op, match] })
+  return { what, verdict: c.verdict, lines: logLines().length - before, want }
+})
+const misCtl = [['misnamed', misnamed, ['lstatSync', 'no-such-component']], ['link named orchestrate, its lstat faulted', linkRun, ['lstatSync', 'linkrun/orchestrate']],
+  ['link named orchestrate, its realpath faulted', linkRun, ['realpathSync.native', 'linkrun/orchestrate']]]
+  .map(([what, r, fault]) => ({ what, verdict: hookRun({ ...ORCH, DCTR_RUN: r }, W('src/a.txt'), { fault }).verdict }))
+const faultWrong = faultTable.filter((c) => c.verdict !== 'deny' || c.lines !== c.want)
+const misWrong = misCtl.filter((c) => c.verdict !== 'deny')
+const misStray = [misnamed, path.dirname(linkRun)].map((d) => path.join(d, 'guard.log')).filter((f) => fs.existsSync(f))
+// The same decision on emulated volumes: a run stored as Orchestrate is logged in on a case-insensitive one and not on a case-sensitive one.
+const logRunOf = (io) => { try { return lib.guardContext({ DCTR_ROLE: 'orchestrator', DCTR_RUN: ucRun }, uc, io).run } catch (e) { return e.run } }
+const volRuns = { insensitive: logRunOf(IVOL), sensitive: logRunOf(SVOL) }
+clause('clause 2za — EIO on each filesystem call guardContext and the hook make on a valid run (stat, lstat, realpath, readlink, readFile, the presence tests, the append) refuses, with exactly one guard.log line wherever it can be appended; a misnamed run and a link named orchestrate to it, its lstat or its realpath faulted, are refused and gain no guard.log; on emulated volumes a run stored as Orchestrate is the folder logged in where the volume ignores case and is not where it does not (E15-D24, N3, GQ1)',
+  faultWrong.length === 0 && misWrong.length === 0 && misStray.length === 0 && volRuns.insensitive === ucRun && volRuns.sensitive === null,
+  `${JSON.stringify(faultWrong)} ${JSON.stringify(misWrong)} stray ${JSON.stringify(misStray)} ${JSON.stringify(volRuns)}`)
+
+// A read or an append that stalls past the guard's internal bound still ends in a deny printed within it, with headroom
+// before the host's timeout for the guard's group in hooks.json (GS-1(a), GQ2). Both run at once, each stalling 20 s.
+const timed = (fault) => new Promise((resolve) => {
+  const t0 = Date.now(), ch = spawn('node', ['--import', pathToFileURL(inject).href, hookSrc], { env: { ...BASE, ...ORCH, GUARD_FAULT: JSON.stringify(fault) }, cwd: orch })
+  let out = ''
+  ch.stdout.on('data', (b) => { out += b })
+  const kill = setTimeout(() => ch.kill('SIGKILL'), 15000)
+  ch.on('close', (code) => {
+    clearTimeout(kill)
+    let h = null
+    try { h = JSON.parse(out).hookSpecificOutput } catch { /* no output */ }
+    resolve({ fault: fault.slice(0, 2), ms: Date.now() - t0, code, deny: code === 0 && h?.permissionDecision === 'deny' })
+  })
+  ch.stdin.end(JSON.stringify(W('src/a.txt')))
+})
+const stalls = await Promise.all([timed(['statSync', 'records/orchestrate', 20000]), timed(['appendFileSync', 'guard.log', 20000])])
+const dies = hookRun(ORCH, W('docs/handoffs/h13.md'), { fault: ['exit', ''] })
+const hostMs = 1000 * (hj.hooks.PreToolUse.find((g) => g.hooks.some((x) => /dctr-guard\.mjs/.test(x.command)))?.hooks[0].timeout ?? 0)
+clause('clause 2zb — a stat of the run and an append to guard.log, each stalled 20 s, end in a deny printed with at least 5 s to spare before the guard\'s hooks.json timeout, and a judgement that dies refuses a write it would allow (GS-1(a), GQ2)',
+  stalls.every((s) => s.deny && s.ms + 5000 <= hostMs) && dies.verdict === 'deny', `host timeout ${hostMs} ms ${JSON.stringify(stalls)} dies ${dies.verdict} ${dies.out.slice(0, 200)}`)
 
 put(path.join(tmp, 'case-probe'))
 const insensitive = fs.existsSync(path.join(tmp, 'CASE-PROBE'))
@@ -466,7 +515,7 @@ clause('clause 2r — each refused path is logged on one line with backslash as 
   wrong(esc).length === 0 && JSON.stringify(escAdded) === JSON.stringify(escWant) && new Set(escAdded).size === ESC.length,
   `${show(esc)} got ${JSON.stringify(escAdded)} want ${JSON.stringify(escWant)}`)
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc, runErr, noLog, noLogEio].flat()
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc, runErr, noLog].flat()
 clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
@@ -510,6 +559,13 @@ try { fs.lstatSync(path.join(orch, 'docs/handoffs/a\u0000b.md')) } catch (e) { n
 clause('clause 3g — without the guard: the preload really makes lstat, readlink, readFileSync and stat throw EIO on the fixture paths, the dangling link, memory file and record otherwise read, and a NUL byte makes lstat throw an error that is not ENOENT',
   proved.every(([, c]) => c === 'EIO') && fs.readlinkSync(path.join(orch, 'docs/handoffs/dangling')) && fs.readFileSync(path.join(orch, 'SESSION_MEMORY.md'), 'utf8') &&
   fs.statSync(record).isFile() && fs.statSync(path.join(orch, '.git')).isDirectory() && nulCode && nulCode !== 'ENOENT', JSON.stringify({ proved, nulCode }))
+const stallMs = (() => { const t0 = Date.now(); spawnSync('node', ['--import', pathToFileURL(inject).href, '-e', `require('node:fs').statSync(${JSON.stringify(run)})`],
+  { env: { ...process.env, GUARD_FAULT: JSON.stringify(['statSync', 'records/orchestrate', 1500]) } }); return Date.now() - t0 })()
+const judgeExit = [['judge'], []].map((a) => spawnSync('node', ['--import', pathToFileURL(inject).href, '-e', '', ...a], { env: { ...process.env, GUARD_FAULT: JSON.stringify(['exit', '']) } }).status)
+const moreProved = [['realpathSync.native', run], ['appendFileSync', logFile]].map(([op, t]) => [op, preloadCode(op, t)])
+clause('clause 3o — without the guard: the preload makes the native realpath and the append throw EIO, its stall holds a stat for its time, and its exit ends a judge with 3 and nothing else; the run reached through link-records is the run, and the link named orchestrate is a link whose target is named misnamed',
+  moreProved.every(([, c]) => c === 'EIO') && stallMs >= 1500 && judgeExit.join() === '3,0' && fs.realpathSync.native(viaLink) === run && fs.lstatSync(linkRun).isSymbolicLink() && path.basename(fs.realpathSync.native(linkRun)) === 'misnamed',
+  JSON.stringify({ moreProved, stallMs, judgeExit }))
 const deepKernel = fs.realpathSync.native(`${orch}/docs/handoffs/deep/../../..`)
 clause('clause 3j — without the guard: deep/../../.. resolves (libc realpath) inside docs/handoffs while its text reading is the checkout, so src/a.txt\'s kernel and text readings differ; deep/x.md lies under docs/handoffs by both',
   deepKernel === path.join(orch, 'docs/handoffs') && path.resolve(orch, 'docs/handoffs/deep/../../../src/a.txt') === srcA &&

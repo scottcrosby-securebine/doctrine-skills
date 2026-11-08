@@ -10,11 +10,13 @@ export { kickoffHandoff, handoffHeader, restoreState }
 // Shared decisions for doctrine's hooks: the herdr seat visibility (issue #17), the restore hook's kickoff chain
 // (E8-D1) and the context gauge (E8-D4, E8-D10, E8-D11).
 //
-// Everything here is a pure function of a hook payload plus observed state. No herdr, no
-// filesystem, no clock. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
-// fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is. The one exception is
-// runRoot, which looks for `.git` and reads the project file because callers must reach it with no arguments (E15-D94);
-// it starts no process.
+// Everything here is a pure function of a hook payload plus observed state. No herdr, no clock, and no
+// filesystem outside the functions named here. That is what lets `dctr-seat.selftest.mjs` cover the whole of it with
+// fixtures on a machine that has neither herdr nor a codex plugin, which is what CI is. The functions that read the
+// filesystem are runRoot, which looks for `.git` and reads the project file because callers must reach it with no
+// arguments (E15-D94), and the write guard's presentStrict, guardSpell, ignoresCase, guardReal and guardContext, which
+// test presence, walk a path's links, spell it through realpath, read the volume's case and read the run, its checkout
+// and the kickoff chain. None of them starts a process.
 //
 // The I/O lives in `dctr-seat.mjs` (the hook), `dctr-render.mjs` (the pane renderer), `dctr-gate.mjs`
 // (the long-check launcher) and `dctr-state.mjs` (the markers, lock, log and herdr call they share).
@@ -1229,27 +1231,33 @@ export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics'
  * the run (repoOf, never the seat's cwd, E15-D119); GUARD_NAMES there; and the record the handoff's `record:` line
  * names, whatever its state line reads (followKickoff's `recordPath`), or null where the chain stops at a file that is
  * not there. Records, the checkout, the names and the record are as guardReal gives them. Every presence test is
- * strict, so any other error throws. Every error thrown once the run's name has been read as `orchestrate` carries the
- * run as the volume spells it as `run`, so the guard can still log the refusal there (E15-D24); an error before that
- * carries null, so no guard.log is written in a folder that is not a run. `io` is guardReal's, injected by the selftest only.
+ * strict, so any other error throws. The returned `run`, and the `run` every error thrown after runRoot carries, is the
+ * folder a refusal is logged in (E15-D24): runRoot's path resolved as text, decided before and apart from the reads
+ * above, so an error in any of them still logs. It is that path where its own name reads as orchestrate and either an
+ * lstat shows it is no link or its realpath's name reads so too, and null otherwise, so a folder of another name, or a
+ * link to one, never gains a guard.log (N3). A name reads as orchestrate exactly, or in another case where ignoresCase
+ * reads the volume as ignoring case. Each of those reads that fails answers nothing. `io` is guardReal's, injected by
+ * the selftest only.
  */
 export function guardContext(env = process.env, cwd = process.cwd(), io = {}) {
   const named = runRoot(env, cwd, presentStrict)
   if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
-  let run = null
+  const { lstat = fs.lstatSync, realpath = fs.realpathSync.native } = io, asked = path.resolve(cwd, named)
+  const reads = (p) => path.basename(p) === 'orchestrate' || (path.basename(p).toLowerCase() === 'orchestrate' && ignoresCase(path.dirname(p), lstat))
+  const answer = (q) => { try { return q() } catch { return false } }
+  const run = answer(() => !lstat(asked).isSymbolicLink() && reads(asked)) || answer(() => reads(realpath(asked))) ? asked : null
   try {
     const spelled = path.join(...guardSpell(named, cwd, io))
     if (path.basename(guardReal(spelled, cwd, io)) !== 'orchestrate') throw new Error(`the run ${spelled} is not a folder named orchestrate`)
-    run = spelled
-    if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
-    const checkout = repoOf(run, presentStrict)
+    if (!fs.statSync(spelled).isDirectory()) throw new Error(`the run ${spelled} is not a folder`)
+    const checkout = repoOf(spelled, presentStrict)
     const names = Object.fromEntries(GUARD_NAMES.map((rel) => [rel, guardReal(path.join(checkout, rel), checkout, io)]))
     // followKickoff reads a failed read as a chain that stops; only a file not there may, any other error refuses.
     let failed = null
     const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch (e) { if (!notThere(e)) failed = e; throw e } }
     const k = followKickoff({ projectDir: checkout, read, exists: presentStrict })
     if (failed) throw failed
-    return { run, records: guardReal(path.dirname(run), cwd, io), checkout: guardReal(checkout, cwd, io), names, record: k.recordPath ? guardReal(k.recordPath, checkout, io) : null }
+    return { run, records: guardReal(path.dirname(spelled), cwd, io), checkout: guardReal(checkout, cwd, io), names, record: k.recordPath ? guardReal(k.recordPath, checkout, io) : null }
   } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { run }) }
 }
 
