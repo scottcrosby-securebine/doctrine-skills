@@ -99,10 +99,11 @@ codex exec --sandbox read-only --skip-git-repo-check "<what to attack>" \
   -i contact-sheet-dark.png -i contact-sheet-light.png < /dev/null
 ```
 
-`-i` is **variadic**: put the prompt *before* the flags, after a `--` separator, or on
-stdin. A prompt trailing after `-i` is swallowed as another filename and the run dies
-asking for input. The first two forms also need stdin closed with `< /dev/null` (above),
-and the third is a pipe into `codex exec`, which closes it: an open stdin hangs all three.
+`-i` is **variadic**: put the prompt *before* the flags; or every flag first, `-i` included,
+then `--`, then the prompt last (`… -i a.png -i b.png -- "<what to attack>"`), since codex
+reads nothing after `--` as a flag; or on stdin. A prompt trailing after `-i` is swallowed
+as another filename and the run dies asking for input. The first two forms also need stdin
+closed with `< /dev/null` (above), and the third is a pipe into `codex exec`, which closes it: an open stdin hangs all three.
 
 Attach **every render the round produced**, not a token pair. Nothing in this skill
 composites a contact sheet and nothing needs to: the harness writes discrete PNGs at
