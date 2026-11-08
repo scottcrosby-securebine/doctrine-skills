@@ -23,23 +23,30 @@
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
 // to the revision with `git reset --hard`, refusing while `git status --porcelain --untracked-files=no` prints
-// anything, while a file other than the memory file differs from the index under skip-worktree or assume-unchanged,
-// which that test cannot see, and while the revision tracks a path where the worktree holds an untracked or ignored
-// file other than the memory file, since the move would overwrite it. The memory file's bytes are carried across the
-// move whether it is tracked or not, and its skip-worktree bit is set again wherever the revision tracks it.
+// anything, while a file other than the memory file is absent or differs from the index under skip-worktree or
+// assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
+// while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
+// since the move would overwrite it, and while the revision tracks the memory file as a link. The memory file's bytes
+// are carried across the move whether it is tracked or not, saved first to `SESSION_MEMORY.md.was`, which is removed
+// once they are back in place and which a reset that fails after saving them names; reset refuses while that file
+// exists. Its skip-worktree bit is set again wherever the revision tracks it.
 //
-// archive copies every file of the worktree other than .git, listed by find, its memory file, docs/handoffs/ and
-// record's directory among them, into `<Records>/lanes/<role>/` at their worktree paths, and repoints the epic's
+// archive copies every file and link of the worktree other than .git, listed by find, its memory file, docs/handoffs/
+// and record's directory among them, into `<Records>/lanes/<role>/` at their worktree paths, a link as a link, never
+// writing through an entry an earlier archive left there, and repoints the epic's
 // `- phase` member whose path names the lane's record, whatever its phase name, at the archived record, saying so
 // when no member line names it. It refuses, copying nothing, when the project file or an epic it names cannot be
-// read. remove lists the files by find again and refuses unless each one is archived with an equal sha256, then
-// removes the worktree and keeps its branch. Both refuse a lane whose record does not exist.
+// read, a record reached through a link, and an entry that is neither a file nor a link. It appends its lane.log line
+// last, and remove refuses unless lane.log holds an archive line for the role since its latest create, so an archive
+// that failed at any write authorizes nothing. remove lists the files by find again and refuses unless each file is
+// archived with an equal sha256 and each link with the same target, then removes the worktree and keeps its branch.
+// Both refuse a lane whose record does not exist.
 //
 // Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output, and no listing has a
 // size limit.
 //
 // remove also refuses while a tracked file other than the memory file has an uncommitted change, a deletion or one
-// skip-worktree or assume-unchanged hides among them, since the kept branch would lack it.
+// skip-worktree or assume-unchanged hides among them, a deletion it hides included, since the kept branch would lack it.
 //
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
@@ -49,7 +56,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
+  runRole, runRoot, laneOf, LANE_LINE, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
 } from './dctr-lib.mjs'
 import { herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -66,17 +73,26 @@ const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING)
 const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).split('\0').filter(Boolean)
 const gitOk = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { stdio: 'ignore' }).status === 0
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
-/** Every file of the worktree `root` other than its .git, by find, relative to `root`. */
-const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '-type', 'f', '-print0'], LISTING)
+/** Whether `a` and `b` are both links with one target, or both files with one sha256; any failed read is not. */
+const same = (a, b) => {
+  try {
+    const x = fs.lstatSync(a), y = fs.lstatSync(b)
+    if (x.isSymbolicLink()) return y.isSymbolicLink() && fs.readlinkSync(a) === fs.readlinkSync(b)
+    return x.isFile() && y.isFile() && sha256(a) === sha256(b)
+  } catch { return false }
+}
+/** Every entry of the worktree `root` but its directories and its .git, links among them, by find, relative to `root`. */
+const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'], LISTING)
   .split('\0').filter(Boolean).map((f) => path.relative(root, f))
 const inside = (root, p) => { const r = path.relative(root, p); return Boolean(r) && !r.startsWith('..') && !path.isAbsolute(r) }
 /** `p` with the links in its existing prefix resolved, the rest as written; a dangling link throws. */
 const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry: false })) { rest = path.join(path.basename(p), rest); p = path.dirname(p) } return path.join(fs.realpathSync(p), rest) }
 /** `f`'s ancestor directories, nearest last: a/b/c gives a, a/b. */
 /** The tracked files of `wt` other than the memory file whose change skip-worktree or assume-unchanged (a lower-case
- *  tag) hides from git status: their bytes differ from the index. */
+ *  tag) hides from git status: absent, or bytes that differ from the index. A sparse checkout's absent files carry the
+ *  same tag and are counted too, since nothing in the index tells the two apart. */
 const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
-  .filter((f) => f !== MEMORY && fs.existsSync(path.join(wt, f)) && git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`))
+  .filter((f) => f !== MEMORY && (!fs.lstatSync(path.join(wt, f), { throwIfNoEntry: false }) || git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`)))
 const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
 
 const [sub, ...args] = process.argv.slice(2)
@@ -99,6 +115,15 @@ function laneWorktree() {
   if (!fs.existsSync(l.worktree)) refuse(`the worktree ${l.worktree} of ${role} does not exist`)
   return l.worktree
 }
+/** Whether lane.log holds an archive line for the role after its latest create line: archive appends it last. */
+function archivedSinceCreate() {
+  let done = false
+  for (const l of readLog().split('\n')) {
+    const m = LANE_LINE.exec(l)
+    if (m && m[4].split(' ')[0] === role && (m[3] === 'create' || m[3] === 'archive')) done = m[3] === 'archive'
+  }
+  return done
+}
 /** `<Records>`, the directory holding the run: `<Records>/orchestrate/`. */
 function recordsDir() {
   if (path.basename(run) !== 'orchestrate') refuse(`the run ${run} is not <Records>/orchestrate`)
@@ -113,7 +138,12 @@ function laneFiles(wt) {
   const rec = handoff && fs.existsSync(path.join(wt, handoff)) ? handoffHeader(fs.readFileSync(path.join(wt, handoff), 'utf8')).record : null
   if (!rec || !inside(wt, path.resolve(wt, rec))) refuse(`the memory file of ${wt} leads to no record inside it`)
   if (!fs.existsSync(path.resolve(wt, rec))) refuse(`the record ${rec} of ${wt} does not exist`)
-  return { files: findFiles(wt).sort(), record: rec }
+  const real = fs.realpathSync(wt)
+  if (realish(path.resolve(real, rec)) !== path.resolve(real, rec)) refuse(`the record ${rec} of ${wt} is reached through a link`)
+  const files = findFiles(wt).sort()
+  const odd = files.filter((f) => { const st = fs.lstatSync(path.join(wt, f)); return !st.isFile() && !st.isSymbolicLink() })
+  if (odd.length) refuse(`${odd.map((f) => JSON.stringify(f)).join(', ')} of ${wt} is neither a file nor a link, so archive cannot copy it`)
+  return { files, record: rec }
 }
 
 // ---------------------------------------------------------------- create
@@ -217,6 +247,9 @@ function reset() {
   const dirs = new Set([...target].flatMap(ancestors))
   const clobbered = [...others].filter((f) => target.has(f) || dirs.has(f) || ancestors(f).some((d) => target.has(d)))
   if (clobbered.length) refuse(`${revision} tracks paths where ${wt} holds untracked or ignored files a move would overwrite: ${clobbered.map((f) => JSON.stringify(f)).join(', ')}`)
+  if (gitZ(wt, 'ls-tree', '-z', revision, '--', MEMORY).some((l) => l.startsWith('120000 '))) refuse(`${revision} tracks ${MEMORY} as a link, so its bytes cannot be carried across the move`)
+  const saved = path.join(wt, `${MEMORY}.was`)
+  if (fs.lstatSync(saved, { throwIfNoEntry: false })) refuse(`${saved} holds the memory bytes of an earlier reset that did not finish`)
   const old = git(wt, 'rev-parse', 'HEAD')
   const side = `${role}-was-${old.slice(0, 12)}`
   if (!gitOk(wt, 'show-ref', '--verify', '--quiet', `refs/heads/${side}`)) git(wt, 'branch', side, old)
@@ -225,13 +258,24 @@ function reset() {
   let bytes = null
   try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== 'ENOENT') throw e }
   const tracked = gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)
-  try {
-    if (tracked) git(wt, 'update-index', '--no-skip-worktree', MEMORY)
-    git(wt, 'reset', '--quiet', '--hard', revision)
-  } finally {
-    if (bytes) fs.writeFileSync(memory, bytes)
-    // asked again after the move: the revision may track a path the old HEAD did not
-    if (gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)) git(wt, 'update-index', '--skip-worktree', MEMORY)
+  const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
+  let failed = null, pending = Boolean(bytes)
+  // the bytes sit in `saved` until they are back in place, so a failure anywhere below loses none of them
+  if (pending) try { fs.writeFileSync(saved, bytes, { flag: 'wx' }) } catch (e) { failed = `the memory bytes could not be saved to ${saved} (${e.code || e.message})`; pending = false }
+  if (!failed) {
+    try {
+      if (tracked) git(wt, 'update-index', '--no-skip-worktree', MEMORY)
+      git(wt, 'reset', '--quiet', '--hard', revision)
+    } catch (e) { failed = why(e) }
+    try {
+      if (pending) { fs.writeFileSync(memory, bytes); pending = false; fs.rmSync(saved) }
+      // asked again after the move: the revision may track a path the old HEAD did not
+      if (gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)) git(wt, 'update-index', '--skip-worktree', MEMORY)
+    } catch (e) { failed ??= why(e) }
+  }
+  if (failed) {
+    process.stderr.write(`dctr-lane: reset failed, ${failed}; the old HEAD is on ${side}${pending ? `, and the memory file's bytes are in ${saved}` : ''}\n`)
+    process.exit(1)
   }
   append(`${role} ${revision}`)
   process.stdout.write(`${side}\n`)
@@ -246,8 +290,12 @@ function archive() {
   const live = path.join(wt, record)
   const edits = memberEdits(live, path.join(dest, record))
   for (const f of files) {
+    // an earlier archive's entry where this one needs a directory, or at the file itself, is replaced, never written through
+    for (const d of ancestors(f)) if (fs.lstatSync(path.join(dest, d), { throwIfNoEntry: false })?.isDirectory() === false) fs.rmSync(path.join(dest, d))
     fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true })
-    fs.copyFileSync(path.join(wt, f), path.join(dest, f))
+    fs.rmSync(path.join(dest, f), { recursive: true, force: true })
+    if (fs.lstatSync(path.join(wt, f)).isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(path.join(wt, f)), path.join(dest, f))
+    else fs.copyFileSync(path.join(wt, f), path.join(dest, f))
   }
   for (const e of edits) {
     fs.writeFileSync(e.file, e.text)
@@ -289,10 +337,11 @@ function remove() {
   const wt = laneWorktree()
   const dest = path.join(recordsDir(), 'lanes', role)
   const { files } = laneFiles(wt)
+  if (!archivedSinceCreate()) refuse(`lane.log holds no archive line for ${role} since its create, so no archive of it finished`)
   const changed = [...gitZ(wt, 'diff', '--name-only', '-z', 'HEAD'), ...hiddenChanges(wt)].filter((f) => f !== MEMORY)
   if (changed.length) refuse(`${wt} has uncommitted changes to tracked files its kept branch would lack: ${changed.map((f) => JSON.stringify(f)).join(', ')}`)
-  const differ = files.filter((f) => !fs.existsSync(path.join(dest, f)) || sha256(path.join(dest, f)) !== sha256(path.join(wt, f)))
-  if (differ.length) refuse(`these files of ${wt} are not in ${dest} with an equal sha256: ${differ.join(', ')}`)
+  const differ = files.filter((f) => !same(path.join(wt, f), path.join(dest, f)))
+  if (differ.length) refuse(`these files of ${wt} are not in ${dest} with an equal sha256, or as a link to the same target: ${differ.join(', ')}`)
   const common = git(wt, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   git(path.dirname(common), 'worktree', 'remove', '--force', wt)
   append(role)

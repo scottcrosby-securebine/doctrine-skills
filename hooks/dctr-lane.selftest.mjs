@@ -137,6 +137,8 @@ By: owner
 > approved
 `
 
+/** Every stderr dctr-lane.mjs printed to a clause, which the refusal-coverage clause reads. */
+const SAID = []
 let fixtureN = 0
 /** An orchestrator repo: tracked memory file (unless `memory` is 'untracked' or 'ignored'), a .gitignore excluding
  *  its Records path, a tracked source file, a project file and epic, the first handoffs under docs/handoffs/ (not
@@ -171,6 +173,7 @@ const lane = (f, args, { cwd = f.repo, env = {}, unset = [] } = {}) => {
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
   const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8', maxBuffer: Infinity })
+  SAID.push(r.stderr || '')
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', env: e }
 }
 const shimLog = (f) => (read(path.join(f.shim, 'log.jsonl')) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -862,6 +865,231 @@ for (const [n, gone, why] of [['1ao', 'docs/epics/E1.md', 'the epic'], ['1ap', '
     r.code === 0 && /no - phase member line names/.test(r.out) && read(epicFile) === EPIC('docs/other/b.md'), `exit ${r.code} ${said(r)}`)
 }
 
+// ---------------------------------------------------------------- the file-kind matrix (LC1-LC4)
+
+// Each kind of file a lane can hold, run through archive then remove and through reset. A row either completes with
+// every byte kept, in the archive or in the worktree, or refuses with the worktree and the file kept; and no row
+// writes anything under the fixture's outside directory.
+const REALGIT = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim()
+const gbin = path.join(tmp, 'gbin'); fs.mkdirSync(gbin)
+// The git shim for the fault rows: DCTR_GIT_FAULT fails the call whose argv holds it; DCTR_GIT_LOCK_AFTER_RESET makes
+// the named file read-only once a reset has run, so the next write to it fails.
+fs.writeFileSync(path.join(gbin, 'git'), `#!/bin/sh
+if [ -n "$DCTR_GIT_FAULT" ]; then case " $* " in *"$DCTR_GIT_FAULT"*) echo "git fault: $*" >&2; exit 1 ;; esac; fi
+if [ -n "$DCTR_GIT_LOCK_AFTER_RESET" ]; then case " $* " in *" reset "*) ${JSON.stringify(REALGIT)} "$@"; rc=$?; chmod 0444 "$DCTR_GIT_LOCK_AFTER_RESET"; exit $rc ;; esac; fi
+exec ${JSON.stringify(REALGIT)} "$@"
+`)
+fs.chmodSync(path.join(gbin, 'git'), 0o755)
+const GPATH = `${gbin}:${bin}:${process.env.PATH}`
+/** A path's kind and content: a link's target text, a file's sha256, or absent. */
+const kindOf = (p) => { const st = fs.lstatSync(p, { throwIfNoEntry: false }); return !st ? 'absent' : st.isSymbolicLink() ? `link ${fs.readlinkSync(p)}` : st.isFile() ? `file ${sha(p)}` : st.isDirectory() ? 'dir' : 'other' }
+/** Every entry under `dir` with its kindOf, as one string. */
+const treeOf = (dir) => {
+  const out = []
+  const walk = (d) => { for (const e of fs.readdirSync(d).sort()) { const p = path.join(d, e); out.push(`${path.relative(dir, p)} ${kindOf(p)}`); if (kindOf(p) === 'dir') walk(p) } }
+  if (exists(dir)) walk(dir)
+  return out.join('\n')
+}
+/** A seeded lane with an outside directory beside its repo holding one file. */
+function matrixLane() {
+  const s = seeded()
+  s.out = path.join(s.f.root, 'outside')
+  write(path.join(s.out, 'outside.txt'), 'outside\n')
+  s.outBefore = treeOf(s.out)
+  return s
+}
+const hide = (flag, del) => (s) => { git(s.w, 'update-index', flag, 'src.txt'); if (del) fs.rmSync(path.join(s.w, 'src.txt')); else append(path.join(s.w, 'src.txt'), 'hidden\n') }
+const KINDS = [
+  { k: 'regular file committed on the lane branch', file: 'reg.txt', prep: (s) => commitIn(s.w, 'reg.txt', 'regular\n', 'reg') },
+  { k: 'symlink to a file inside', file: 'lnk-in', prep: (s) => fs.symlinkSync('src.txt', path.join(s.w, 'lnk-in')) },
+  { k: 'symlink to a file outside', file: 'lnk-out', prep: (s) => fs.symlinkSync(path.join(s.out, 'outside.txt'), path.join(s.w, 'lnk-out')) },
+  { k: 'symlink to a directory outside', file: 'lnk-dir', prep: (s) => fs.symlinkSync(s.out, path.join(s.w, 'lnk-dir')) },
+  { k: 'dangling link', file: 'lnk-gone', prep: (s) => fs.symlinkSync('nowhere', path.join(s.w, 'lnk-gone')) },
+  { k: 'skip-worktree modified file', file: 'src.txt', prep: hide('--skip-worktree', false), refused: true },
+  { k: 'skip-worktree deleted file', file: 'src.txt', prep: hide('--skip-worktree', true), refused: true },
+  { k: 'assume-unchanged deleted file', file: 'src.txt', prep: hide('--assume-unchanged', true), refused: true },
+  { k: 'ignored file', file: '.claude/ign.txt', prep: (s) => write(path.join(s.w, '.claude/ign.txt'), 'ignored\n') },
+  { k: 'untracked file', file: 'u/deep.txt', prep: (s) => write(path.join(s.w, 'u/deep.txt'), 'untracked\n') },
+]
+const MATRIX = {}
+const sha256hex = (t) => crypto.createHash('sha256').update(t).digest('hex')
+for (const [i, K] of KINDS.entries()) {
+  const s = matrixLane()
+  K.prep(s)
+  const before = kindOf(path.join(s.w, K.file))
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  MATRIX[K.k] = { s, before }
+  const ok = K.refused
+    ? rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && exists(s.w) && kindOf(path.join(s.w, K.file)) === before
+    : ra.code === 0 && rr.code === 0 && !exists(s.w) && kindOf(path.join(s.lanes, K.file)) === before
+  clause(`clause 2ab${i} — archive then remove of a lane holding a ${K.k}: ${K.refused ? 'remove refuses, the worktree and the file as they were' : 'both exit 0 and the archive holds it as the worktree did, link as link'}; nothing written outside (LC1, LC2)`,
+    ok && treeOf(s.out) === s.outBefore, `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}; before ${before}; archived ${kindOf(path.join(s.lanes, K.file))}; outside ${JSON.stringify(treeOf(s.out))}`)
+}
+for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored link', '.claude/late-lnk']].entries()) {
+  const s = matrixLane()
+  const ra = lane(s.f, ['archive', 'a'])
+  fs.mkdirSync(path.dirname(path.join(s.w, file)), { recursive: true }); fs.symlinkSync('src.txt', path.join(s.w, file))
+  const rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1aq${i} — remove refuses a lane holding ${k} written after its archive, the worktree and the link kept (LC2)`,
+    ra.code === 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && kindOf(path.join(s.w, file)) === 'link src.txt', `archive ${ra.code}; remove ${rr.code} ${said(rr)}`)
+}
+{
+  const s = matrixLane()
+  fs.symlinkSync('src.txt', path.join(s.w, 'moved-lnk'))
+  const ra = lane(s.f, ['archive', 'a'])
+  fs.rmSync(path.join(s.w, 'moved-lnk')); fs.symlinkSync('SESSION_MEMORY.md', path.join(s.w, 'moved-lnk'))
+  const rr = lane(s.f, ['remove', 'a'])
+  clause('clause 1aq2 — remove refuses a lane whose link was pointed elsewhere after its archive, the worktree and the new link kept (LC2)',
+    ra.code === 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && kindOf(path.join(s.w, 'moved-lnk')) === 'link SESSION_MEMORY.md', `archive ${ra.code}; remove ${rr.code} ${said(rr)}`)
+}
+{
+  // A record reached through a link: the archive would hold the link and the epic would name it.
+  const s = matrixLane()
+  const epic = read(path.join(s.f.repo, 'docs/epics/E1.md'))
+  fs.renameSync(path.join(s.w, '.doctrine/records/a.md'), path.join(s.w, 'real-a.md'))
+  fs.symlinkSync('../../real-a.md', path.join(s.w, '.doctrine/records/a.md'))
+  MATRIX.recordLink = s
+  const ra = lane(s.f, ['archive', 'a'])
+  clause('clause 1ar — archive refuses a lane whose record is a link: nothing archived, the epic unchanged, no lane.log line (LC2)',
+    ra.code !== 0 && /is reached through a link/.test(ra.err) && !exists(s.lanes) && read(path.join(s.f.repo, 'docs/epics/E1.md')) === epic && laneLines(s.f).length === 1, `archive ${ra.code} ${said(ra)}`)
+}
+{
+  const s = matrixLane()
+  // bound by a relative name from the worktree, since a socket path is capped near 104 bytes
+  spawnSync('python3', ['-c', 'import socket; socket.socket(socket.AF_UNIX).bind("sock")'], { cwd: s.w })
+  MATRIX.sock = s
+  const ra = lane(s.f, ['archive', 'a'])
+  clause('clause 1as — archive refuses a lane holding a socket, which it cannot copy: nothing archived, no lane.log line (LC2)',
+    ra.code !== 0 && /neither a file nor a link/.test(ra.err) && !exists(s.lanes) && laneLines(s.f).length === 1, `archive ${ra.code} ${said(ra)}`)
+}
+{
+  // An archived link superseded by a directory: a second archive must not write through the archived link.
+  const s = matrixLane()
+  fs.symlinkSync(s.out, path.join(s.w, 'ld'))
+  fs.symlinkSync(path.join(s.out, 'outside.txt'), path.join(s.w, 'lf'))
+  const r1 = lane(s.f, ['archive', 'a'])
+  fs.rmSync(path.join(s.w, 'ld')); write(path.join(s.w, 'ld/x.txt'), 'x\n')
+  fs.rmSync(path.join(s.w, 'lf')); write(path.join(s.w, 'lf'), 'now a file\n')
+  const r2 = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause('clause 2ac — a second archive, after one link the first archived became a directory and another a file, writes nothing through either archived link, and remove then exits 0 with both archived (LC2)',
+    r1.code === 0 && r2.code === 0 && rr.code === 0 && treeOf(s.out) === s.outBefore && read(path.join(s.lanes, 'ld/x.txt')) === 'x\n' && kindOf(path.join(s.lanes, 'lf')) === `file ${sha256hex('now a file\n')}`,
+    `archive ${r1.code} ${said(r1)}; archive ${r2.code} ${said(r2)}; remove ${rr.code} ${said(rr)}; outside ${JSON.stringify(treeOf(s.out))}`)
+}
+
+// Through reset onto a revision t that adds one file: the kinds a move keeps are kept, the hidden ones refuse.
+for (const [i, K] of KINDS.entries()) {
+  const s = matrixLane()
+  const t = commitIn(s.f.repo, 'at-t.txt', 't\n', 't')
+  K.prep(s)
+  const old = head(s.w), before = kindOf(path.join(s.w, K.file))
+  const r = lane(s.f, ['reset', 'a', t])
+  const side = `a-was-${old.slice(0, 12)}`
+  const kept = K.file === 'reg.txt' ? git(s.w, 'show', `${side}:reg.txt`).out === 'regular' : kindOf(path.join(s.w, K.file)) === before
+  const ok = K.refused ? r.code !== 0 && /dctr-lane: refused/.test(r.err) && head(s.w) === old && kindOf(path.join(s.w, K.file)) === before : r.code === 0 && head(s.w) === t && kept
+  clause(`clause 2ad${i} — reset of a lane holding a ${K.k}: ${K.refused ? 'refuses, HEAD unmoved and the file as it was' : 'moves to t and the file is kept, a committed one on the side branch'}; nothing written outside (LC1, LC2)`,
+    ok && treeOf(s.out) === s.outBefore, `reset ${r.code} ${said(r)}; before ${before}; after ${kindOf(path.join(s.w, K.file))}`)
+}
+let MEMLINK
+{
+  // A revision that tracks the memory file as a link out of the worktree (LC3).
+  const s = matrixLane()
+  const target = path.join(s.out, 'mem-target.md'); write(target, 'target\n'); s.outBefore = treeOf(s.out)
+  git(s.f.repo, 'checkout', '-q', '-b', 'memlink')
+  fs.rmSync(path.join(s.f.repo, 'SESSION_MEMORY.md')); fs.symlinkSync(target, path.join(s.f.repo, 'SESSION_MEMORY.md'))
+  git(s.f.repo, 'add', 'SESSION_MEMORY.md'); git(s.f.repo, 'commit', '-qm', 'memory as a link')
+  const t = head(s.f.repo)
+  git(s.f.repo, 'checkout', '-q', 'main')
+  MEMLINK = { s, t, target }
+  const old = head(s.w), mem = read(path.join(s.w, 'SESSION_MEMORY.md'))
+  const r = lane(s.f, ['reset', 'a', t])
+  clause('clause 1at — reset refuses a revision that tracks the memory file as a link: nothing written outside, HEAD unmoved, the memory file\'s bytes kept, no lane.log line (LC3)',
+    r.code !== 0 && /as a link/.test(r.err) && treeOf(s.out) === s.outBefore && head(s.w) === old && read(path.join(s.w, 'SESSION_MEMORY.md')) === mem && laneLines(s.f).length === 1,
+    `reset ${r.code} ${said(r)}; outside ${JSON.stringify(treeOf(s.out))}`)
+}
+{
+  const s = matrixLane()
+  const t = commitIn(s.f.repo, 'at-t.txt', 't\n', 't')
+  write(path.join(s.w, 'SESSION_MEMORY.md.was'), 'an earlier reset\'s bytes\n')
+  const old = head(s.w)
+  const r = lane(s.f, ['reset', 'a', t])
+  clause('clause 1au — reset refuses while the memory bytes an earlier reset saved are still in the worktree: that file unchanged, HEAD unmoved',
+    r.code !== 0 && /an earlier reset that did not finish/.test(r.err) && read(path.join(s.w, 'SESSION_MEMORY.md.was')) === 'an earlier reset\'s bytes\n' && head(s.w) === old, `reset ${r.code} ${said(r)}`)
+}
+
+// A fault in each write archive makes: remove refuses after any archive that did not finish (LC4).
+for (const [i, [k, inject]] of [
+  ['its lanes directory is a file', (s) => write(s.lanes, 'in the way\n')],
+  ['a copy fails', (s) => { fs.mkdirSync(path.join(s.lanes, '.doctrine/records'), { recursive: true }); fs.chmodSync(path.join(s.lanes, '.doctrine/records'), 0o555) }],
+  ['a link copy fails', (s) => { fs.mkdirSync(path.join(s.w, 'ld2')); fs.symlinkSync('../src.txt', path.join(s.w, 'ld2/lnk')); fs.mkdirSync(path.join(s.lanes, 'ld2'), { recursive: true }); fs.chmodSync(path.join(s.lanes, 'ld2'), 0o555) }],
+  ['the epic write fails', (s) => fs.chmodSync(path.join(s.f.repo, 'docs/epics/E1.md'), 0o444)],
+  ['the lane.log append fails', (s) => fs.chmodSync(s.f.laneLog, 0o444)],
+].entries()) {
+  const s = matrixLane()
+  inject(s)
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1av${i} — archive whose ${k} exits non-zero, and remove after it refuses with the worktree kept (LC4)`,
+    ra.code !== 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && exists(s.w) && kindOf(path.join(s.w, '.doctrine/records/a.md')).startsWith('file '), `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+}
+// A fault in each write reset makes: the memory file's bytes, an untracked file and the old HEAD all survive.
+for (const [i, [k, env, prep]] of [
+  ['the side branch', { DCTR_GIT_FAULT: ' branch a-was-' }],
+  ['clearing skip-worktree', { DCTR_GIT_FAULT: ' update-index --no-skip-worktree ' }],
+  ['the move', { DCTR_GIT_FAULT: ' reset --quiet --hard ' }],
+  ['the memory file restore', null, (s) => ({ DCTR_GIT_LOCK_AFTER_RESET: path.join(s.w, 'SESSION_MEMORY.md') })],
+  ['setting skip-worktree again', { DCTR_GIT_FAULT: ' update-index --skip-worktree ' }],
+  ['the lane.log append', {}, (s) => { fs.chmodSync(s.f.laneLog, 0o444); return {} }],
+  ['saving the memory bytes', {}, (s) => { fs.chmodSync(s.w, 0o555); return {} }],
+].entries()) {
+  const s = matrixLane()
+  const t = commitIn(s.f.repo, 'at-t.txt', 't\n', 't')
+  write(path.join(s.w, 'notes.txt'), 'own\n')
+  const old = head(s.w), mem = readBuf(path.join(s.w, 'SESSION_MEMORY.md'))
+  const extra = prep ? prep(s) : {}
+  const r = lane(s.f, ['reset', 'a', t], { env: { PATH: GPATH, ...env, ...extra } })
+  fs.chmodSync(s.w, 0o755)
+  const memNow = readBuf(path.join(s.w, 'SESSION_MEMORY.md')), saved = readBuf(path.join(s.w, 'SESSION_MEMORY.md.was'))
+  const kept = memNow.equals(mem) || (saved.equals(mem) && r.err.includes(path.join(s.w, 'SESSION_MEMORY.md.was')))
+  const reachable = head(s.w) === old || git(s.w, 'rev-parse', `a-was-${old.slice(0, 12)}`).out === old
+  clause(`clause 1aw${i} — reset whose ${k} fails exits non-zero, and the memory file's bytes (in place, or in a file its output names), the untracked file and the old HEAD all survive`,
+    r.code !== 0 && kept && read(path.join(s.w, 'notes.txt')) === 'own\n' && reachable, `reset ${r.code} ${said(r)}; memory kept ${memNow.equals(mem)}; saved ${saved.length}`)
+}
+{
+  // LC5: a run whose Records sits in no git repo.
+  const s = matrixLane()
+  const outRun = path.join(s.f.root, 'loose-records/orchestrate')
+  fs.cpSync(s.f.run, outRun, { recursive: true })
+  const lines = laneLines({ laneLog: path.join(outRun, 'lane.log') }).length
+  MATRIX.loose = outRun
+  const ra = lane(s.f, ['archive', 'a'], { env: { DCTR_RUN: outRun } })
+  clause('clause 1ax — archive refuses a run whose Records directory is in no git repo: nothing archived, the epic unchanged, no lane.log line (LC5)',
+    ra.code !== 0 && /is in no git repo/.test(ra.err) && !exists(path.join(s.f.root, 'loose-records/lanes')) && laneLines({ laneLog: path.join(outRun, 'lane.log') }).length === lines,
+    `archive ${ra.code} ${said(ra)}`)
+}
+{
+  // Clause 3 for the matrix, without the command: each hidden deletion is invisible to git diff HEAD and git status,
+  // find -type f misses every link, the memlink revision tracks the memory file as a link out, the loose run's
+  // Records is in no repo, and a read-only epic refuses a write.
+  for (const [n, K] of [['3ac', KINDS[6]], ['3ad', KINDS[7]]]) {
+    const s = matrixLane()
+    K.prep(s)
+    const diff = git(s.w, 'diff', '--name-only', 'HEAD').out, st = git(s.w, 'status', '--porcelain', '--untracked-files=no').out, v = git(s.w, 'ls-files', '-v', 'src.txt').out
+    clause(`clause ${n} — on the ${K.k} fixture, src.txt is absent, tagged ${v.slice(0, 1)} by ls-files -v, and neither git diff HEAD nor the status test names it`,
+      !exists(path.join(s.w, 'src.txt')) && /^(S|h) src\.txt$/.test(v) && !diff.includes('src.txt') && !st.includes('src.txt'), JSON.stringify({ diff, st, v }))
+  }
+  const s = matrixLane()
+  for (const K of KINDS.slice(1, 5)) K.prep(s)
+  const found = spawnSync('find', [s.w, '-type', 'f'], { encoding: 'utf8' }).stdout.split('\n').map((x) => path.relative(s.w, x))
+  clause('clause 3ae — find -type f lists none of the four link kinds the matrix holds', ['lnk-in', 'lnk-out', 'lnk-dir', 'lnk-gone'].every((x) => !found.includes(x) && fs.lstatSync(path.join(s.w, x)).isSymbolicLink()), JSON.stringify(found.filter((x) => x.startsWith('lnk'))))
+  const ls = git(MEMLINK.s.f.repo, 'ls-tree', MEMLINK.t, 'SESSION_MEMORY.md').out
+  clause('clause 3af — the memlink revision tracks SESSION_MEMORY.md as a link to a file outside the worktree',
+    ls.startsWith('120000 ') && git(MEMLINK.s.f.repo, 'cat-file', '-p', `${MEMLINK.t}:SESSION_MEMORY.md`).out === MEMLINK.target && path.relative(MEMLINK.s.w, MEMLINK.target).startsWith('..'), ls)
+  clause('clause 3ai — the socket fixture\'s sock is a socket, neither a file nor a link', fs.lstatSync(path.join(MATRIX.sock.w, 'sock'), { throwIfNoEntry: false })?.isSocket() === true, String(kindOf(path.join(MATRIX.sock.w, 'sock'))))
+  clause('clause 3ag — the loose run\'s Records directory is in no git repo', git(path.dirname(MATRIX.loose), 'rev-parse', '--show-toplevel').code !== 0, MATRIX.loose)
+  const ro = path.join(s.f.root, 'ro.md'); write(ro, 'x\n'); fs.chmodSync(ro, 0o444)
+  let code = null; try { fs.writeFileSync(ro, 'y\n') } catch (e) { code = e.code }
+  clause('clause 3ah — a file made 0444, as the epic and lane.log fault rows make them, refuses a write here (EACCES)', code === 'EACCES', String(code))
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
 
 {
@@ -1053,6 +1281,67 @@ for (const name of ['a b.md', 'a|b.md']) {
     ls.startsWith('120000 ') && fs.realpathSync(path.join(LINKED.repo, 'evil')) === outside && path.relative(LINKED.wt('a'), lexical) === 'evil/a.md', ls)
 }
 
+// The refusals no other clause reaches, one fixture each.
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { DCTR_RUN: path.join(f.root, 'no-such-run') } })
+  clause('clause 1az0 — create refuses a run directory that does not exist, making nothing', madeNothing(f, 'a', r) && /the run directory .* does not exist/.test(r.err), `exit ${r.code} ${said(r)}`)
+  const rn = lane(f, ['create', 'a', f.root, f.base, handoffOf(f)])
+  clause('clause 1az1 — create refuses a repo argument that is no git repo, making nothing', madeNothing(f, 'a', rn) && /is not a git repo/.test(rn.err), `exit ${rn.code} ${said(rn)}`)
+  git(f.repo, 'branch', 'a', f.base)
+  const rb = create(f)
+  clause('clause 1az2 — create refuses when git worktree add fails, here on a branch a that already exists: no worktree, no herdr call, no lane.log line',
+    rb.code !== 0 && /git worktree add failed/.test(rb.err) && !exists(f.wt('a')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${rb.code} ${said(rb)}`)
+}
+{
+  const s = seeded()
+  write(path.join(s.w, 'SESSION_MEMORY.md'), MEMORY)
+  const ra = lane(s.f, ['archive', 'a'])
+  clause('clause 1az3 — archive refuses a lane whose memory file kickoff leads to no record: nothing archived, no lane.log line', ra.code !== 0 && /leads to no record inside it/.test(ra.err) && !exists(s.lanes) && laneLines(s.f).length === 1, `exit ${ra.code} ${said(ra)}`)
+  const t = seeded()
+  fs.rmSync(t.w, { recursive: true, force: true })
+  const rr = lane(t.f, ['remove', 'a'])
+  clause('clause 1az4 — remove refuses a lane whose worktree no longer exists, no lane.log line', rr.code !== 0 && /the worktree .* of a does not exist/.test(rr.err) && laneLines(t.f).length === 1, `exit ${rr.code} ${said(rr)}`)
+}
+
+// ---------------------------------------------------------------- every refusal is reached (LC5's class)
+
+/** The message templates of every refuse( call in `src`, each as a regex over the stderr it prints: a `${...}` part
+ *  matches anything, the rest literally. */
+function refusals(src) {
+  const out = []
+  for (let i = src.indexOf('refuse('); i >= 0; i = src.indexOf('refuse(', i + 1)) {
+    const q = src[i + 7]
+    if (q !== '`' && q !== "'") continue
+    let j = i + 8, body = '', depth = 0
+    for (; j < src.length; j++) {
+      const c = src[j]
+      if (depth === 0 && c === q) break
+      if (q === '`' && depth === 0 && c === '$' && src[j + 1] === '{') { depth = 1; body += '\u0000'; j++; continue }
+      if (depth > 0) { if (c === '{') depth++; else if (c === '}') depth--; continue }
+      if (c === '\\') { body += src[j + 1] === 'n' ? '\n' : src[j + 1]; j++; continue }
+      body += c
+    }
+    const line = src.slice(0, i).split('\n').length
+    out.push({ line, text: body.replaceAll('\u0000', '…'), re: new RegExp('dctr-lane: refused, ' + body.split('\u0000').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*?')) })
+  }
+  return out
+}
+const unreached = (src, said) => refusals(src).filter((r) => !said.some((e) => r.re.test(e)))
+{
+  const src = fs.readFileSync(LANE, 'utf8')
+  const missed = unreached(src, SAID)
+  clause('clause 1ay — every refuse( message in dctr-lane.mjs is printed by some clause\'s run of it (LC5)',
+    refusals(src).length > 0 && missed.length === 0, `no clause reaches: ${missed.map((r) => `:${r.line} ${JSON.stringify(r.text)}`).join('; ')}`)
+  const tampered = src.replace("const run = runRoot()\n", "const run = runRoot()\nif (process.env.NEVER_SET) refuse(`a refusal ${'no'} clause reaches`)\n")
+  const added = unreached(tampered, SAID).map((r) => r.text).filter((t) => !missed.some((m) => m.text === t))
+  clause('clause 1ay2 — the coverage check names a refusal added where no clause reaches it, and only that one',
+    tampered !== src && added.join() === 'a refusal … clause reaches', JSON.stringify(added))
+  clause('clause 3ab — the tampered source carries one refuse( call more than dctr-lane.mjs, without the coverage check',
+    tampered.split('refuse(`').length === src.split('refuse(`').length + 1, '')
+}
+
+spawnSync('chmod', ['-R', 'u+rwx', tmp])
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) failed` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
