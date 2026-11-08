@@ -1032,7 +1032,7 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
       const ct = Number(git(['log', '-1', '--format=%ct', '--', file]))
       if (!ct || ct < Math.floor(warnedAt / 1000)) return false
     }
-    return git(['status', '--porcelain', '--untracked-files=all', '--ignored=no', '--', file]) === ''
+    return git(['status', '--porcelain', '--ignored=no', '--', file]) === ''
   }
   try {
     // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.
