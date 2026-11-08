@@ -170,7 +170,7 @@ const lane = (f, args, { cwd = f.repo, env = {}, unset = [] } = {}) => {
     DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
-  const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8' })
+  const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8', maxBuffer: Infinity })
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', env: e }
 }
 const shimLog = (f) => (read(path.join(f.shim, 'log.jsonl')) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -614,6 +614,31 @@ for (const [n, file, why, prep] of [['1y2', '.claude/scratch.txt', 'an ignored f
     r.code !== 0 && exists(path.join(s.w, file)) && laneLines(s.f).length === 2, `exit ${r.code} ${said(r)}`)
 }
 
+// Uncommitted changes to tracked files, made before the archive, which a merge of the kept branch would lack (L1).
+for (const [n, why, change, kept] of [
+  ['1y5', 'a modified tracked src.txt', (w) => append(path.join(w, 'src.txt'), 'uncommitted\n'), (w) => read(path.join(w, 'src.txt')) === 'source\nuncommitted\n'],
+  ['1y6', 'a deleted tracked src.txt', (w) => fs.rmSync(path.join(w, 'src.txt')), (w) => !exists(path.join(w, 'src.txt'))],
+  ['1y7', 'a src.txt change skip-worktree hides', (w) => { git(w, 'update-index', '--skip-worktree', 'src.txt'); append(path.join(w, 'src.txt'), 'hidden\n') }, (w) => read(path.join(w, 'src.txt')) === 'source\nhidden\n']]) {
+  const s = seeded()
+  change(s.w)
+  const ra = lane(s.f, ['archive', 'a'])
+  const r = lane(s.f, ['remove', 'a'])
+  clause(`clause ${n} — remove refuses a lane holding ${why}, uncommitted before its archive, the worktree and the change kept (L1)`,
+    ra.code === 0 && r.code !== 0 && /dctr-lane: refused/.test(r.err) && exists(s.w) && kept(s.w) && laneLines(s.f).length === 2, `archive ${ra.code}; remove ${r.code} ${said(r)}`)
+}
+
+// A lane whose listings run past execFileSync's default 1 MB buffer (S3): 6000 untracked files with 200-character names.
+const BULK = Array.from({ length: 6000 }, (_, i) => `bulk/${'x'.repeat(190)}${String(i).padStart(5, '0')}.txt`)
+{
+  const f = fixture()
+  create(f)
+  const w = f.wt('a')
+  for (const b of BULK) write(path.join(w, b), 'bulk\n')
+  const rs = lane(f, ['reset', 'a', f.base]), ra = lane(f, ['archive', 'a']), rr = lane(f, ['remove', 'a'])
+  clause('clause 2z — reset, archive and remove of a lane listing more than 1 MB of names each exit 0, every file archived (S3)',
+    rs.code === 0 && ra.code === 0 && rr.code === 0 && !exists(w) && BULK.every((b) => read(path.join(f.repo, '.doctrine/records/lanes/a', b)) === 'bulk\n'),
+    `reset ${rs.code} ${said(rs)}; archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+}
 
 // Refused calls write no lane.log line (E15-D207), on one lane.
 {
@@ -698,16 +723,17 @@ const RUN2 = fixture({ runName: 'run2' })
 // untracked, lane h holds a file named as that directory, and lane d holds only a file t does not track.
 const WEIRD = 'we\nird.txt'
 const WEIRD_DIR = 'we\nird.d'
-const CLOB = fixture({ handoffs: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'g', 'h'].map((r) => [r, `.doctrine/records/${r}.md`])) })
+const CLOB = fixture({ handoffs: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'g', 'h', 'i'].map((r) => [r, `.doctrine/records/${r}.md`])) })
 git(CLOB.repo, 'checkout', '-q', '-b', 'revt')
-for (const x of ['notes.txt', '.doctrine/records/keep.txt', WEIRD, `${WEIRD_DIR}/inner.txt`]) { write(path.join(CLOB.repo, x), `${x} at t\n`); git(CLOB.repo, 'add', '-f', x) }
+for (const x of ['notes.txt', '.doctrine/records/keep.txt', WEIRD, `${WEIRD_DIR}/inner.txt`, 'nd']) { write(path.join(CLOB.repo, x), `${x} at t\n`); git(CLOB.repo, 'add', '-f', x) }
 git(CLOB.repo, 'commit', '-qm', 't')
 const clobT = head(CLOB.repo)
 git(CLOB.repo, 'checkout', '-q', '-b', 'revs', 'main')
 const clobS = commitIn(CLOB.repo, 'src.txt', 'source at s\n', 's')
 git(CLOB.repo, 'checkout', '-q', 'main')
 for (const [role, file, why] of [['a', 'notes.txt', 'an untracked file'], ['b', '.doctrine/records/keep.txt', 'an ignored file'], ['c', WEIRD, 'an untracked file whose name holds a newline'],
-  ['h', WEIRD_DIR, 'an untracked file whose newline name t tracks as a directory']]) {
+  ['h', WEIRD_DIR, 'an untracked file whose newline name t tracks as a directory'],
+  ['i', 'nd/f', 'an untracked file under a path t tracks as a file']]) {
   create(CLOB, role)
   const w = CLOB.wt(role)
   write(path.join(w, file), 'the lane\'s own bytes\n')
@@ -744,6 +770,19 @@ const goneMem = path.join(DLINK.root, 'gone-memory.md')
 fs.symlinkSync(goneMem, path.join(DLINK.repo, 'SESSION_MEMORY.md'))
 git(DLINK.repo, 'add', 'SESSION_MEMORY.md'); git(DLINK.repo, 'commit', '-qm', 'dangling memory link')
 const dlinkBase = head(DLINK.repo)
+
+// A base tracking docs/handoffs as a link to a directory outside the worktree (LR6); the handoff itself lives outside the repo.
+const HLINK = fixture({ handoffs: {} })
+const outsideH = path.join(HLINK.root, 'outside-handoffs'); fs.mkdirSync(outsideH)
+fs.symlinkSync(outsideH, path.join(HLINK.repo, 'docs/handoffs'))
+git(HLINK.repo, 'add', 'docs/handoffs'); git(HLINK.repo, 'commit', '-qm', 'handoffs link')
+const hlinkBase = head(HLINK.repo)
+const hlinkSrc = path.join(HLINK.root, 'src-handoffs/a.md'); write(hlinkSrc, handoffText('.doctrine/records/a.md'))
+{
+  const r = create(HLINK, 'a', { base: hlinkBase, handoff: hlinkSrc })
+  clause('clause 1ak4 — create refuses a handoff copy whose real path leaves the worktree through a tracked docs/handoffs link: nothing written outside, no herdr call, no lane.log line (LR6)',
+    r.code !== 0 && fs.readdirSync(outsideH).length === 0 && shimLog(HLINK).length === 0 && laneLines(HLINK).length === 0, `exit ${r.code} ${said(r)}; outside ${JSON.stringify(fs.readdirSync(outsideH))}`)
+}
 
 // Handoff names the kickoff line cannot carry (LR5).
 for (const name of ['a b.md', 'a|b.md']) {
@@ -943,6 +982,35 @@ for (const [n, { s, file }] of Object.entries(TWINS)) {
   const m = path.join(DLINK.repo, 'SESSION_MEMORY.md')
   clause('clause 3x — the dangling base tracks SESSION_MEMORY.md as a link: existsSync calls it absent, lstat finds it, and its target does not exist',
     ls.startsWith('120000 ') && !fs.existsSync(m) && Boolean(fs.lstatSync(m, { throwIfNoEntry: false })) && !exists(goneMem), ls)
+}
+{
+  // LR6: the docs/handoffs link base: cat-file does not resolve a path through a tree link, so only the escape test stops the copy.
+  const ls = git(HLINK.repo, 'ls-tree', hlinkBase, 'docs/handoffs').out
+  const cat = git(HLINK.repo, 'cat-file', '-e', `${hlinkBase}:docs/handoffs/a.md`)
+  clause('clause 3y — the handoffs-link base tracks docs/handoffs as a link to the outside directory, and cat-file -e of docs/handoffs/a.md at it fails',
+    ls.startsWith('120000 ') && cat.code !== 0 && fs.realpathSync(path.join(HLINK.repo, 'docs/handoffs')) === fs.realpathSync(outsideH), ls)
+}
+{
+  // LR1: without the command, a hand-made worktree holding nd/f untracked, where t tracks nd as a file: a plain
+  // reset --hard exits 0 and nd/f is gone.
+  const z = path.join(CLOB.repo, '.claude/worktrees/zn')
+  git(CLOB.repo, 'worktree', 'add', '-q', '-b', 'zn', z, CLOB.base)
+  write(path.join(z, 'nd/f'), 'own\n')
+  const all = git(z, 'ls-files', '-z', '--others').out.split('\0')
+  const plain = git(z, 'reset', '-q', '--hard', clobT)
+  clause('clause 3z — held untracked, nd/f is listed by ls-files --others, t tracks nd as a file, and a plain reset --hard exits 0 and leaves nd a file with nd/f gone',
+    all.includes('nd/f') && git(CLOB.repo, 'cat-file', '-t', `${clobT}:nd`).out === 'blob' && plain.code === 0 && fs.statSync(path.join(z, 'nd')).isFile() && read(path.join(z, 'nd/f')) === null,
+    JSON.stringify({ all, plain: plain.code }))
+}
+{
+  // S3: the bulk lane's names, listed by find and by ls-files --others -z, each run past 1 MB.
+  const z = path.join(tmp, 'bulkproof')
+  for (const b of BULK) write(path.join(z, b), 'bulk\n')
+  git(z, 'init', '-q')
+  const big = { encoding: 'utf8', maxBuffer: Infinity }
+  const found = spawnSync('find', [z, '-type', 'f', '-print0'], big).stdout.length
+  const others = spawnSync('git', ['-C', z, 'ls-files', '-z', '--others'], big).stdout.length
+  clause('clause 3aa — 6000 bulk names list past 1 MB by find and by ls-files --others -z', found > 1 << 20 && others > 1 << 20, JSON.stringify({ found, others }))
 }
 for (const [n, { s, file, st }] of Object.entries(HIDDEN)) {
   if (n === '1y4') {

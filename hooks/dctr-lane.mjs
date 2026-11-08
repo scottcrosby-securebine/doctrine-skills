@@ -35,7 +35,11 @@
 // read. remove lists the files by find again and refuses unless each one is archived with an equal sha256, then
 // removes the worktree and keeps its branch. Both refuse a lane whose record does not exist.
 //
-// Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output.
+// Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output, and no listing has a
+// size limit.
+//
+// remove also refuses while a tracked file other than the memory file has an uncommitted change, a deletion or one
+// skip-worktree or assume-unchanged hides among them, since the kept branch would lack it.
 //
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
@@ -56,18 +60,23 @@ let times = { poll: 1000, ready: 300000 }
 try { times = { ...times, ...JSON.parse(process.env.DCTR_LANE_TIMES || '{}') } } catch { /* the defaults */ }
 
 const refuse = (why) => { process.stderr.write(`dctr-lane: refused, ${why}\n`); process.exit(1) }
-const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const LISTING = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: Infinity }
+const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).trim()
 /** A git listing read NUL-separated: pass -z in `args`. */
-const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split('\0').filter(Boolean)
+const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).split('\0').filter(Boolean)
 const gitOk = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { stdio: 'ignore' }).status === 0
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 /** Every file of the worktree `root` other than its .git, by find, relative to `root`. */
-const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '-type', 'f', '-print0'], { encoding: 'utf8' })
+const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '-type', 'f', '-print0'], LISTING)
   .split('\0').filter(Boolean).map((f) => path.relative(root, f))
 const inside = (root, p) => { const r = path.relative(root, p); return Boolean(r) && !r.startsWith('..') && !path.isAbsolute(r) }
 /** `p` with the links in its existing prefix resolved, the rest as written; a dangling link throws. */
 const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry: false })) { rest = path.join(path.basename(p), rest); p = path.dirname(p) } return path.join(fs.realpathSync(p), rest) }
 /** `f`'s ancestor directories, nearest last: a/b/c gives a, a/b. */
+/** The tracked files of `wt` other than the memory file whose change skip-worktree or assume-unchanged (a lower-case
+ *  tag) hides from git status: their bytes differ from the index. */
+const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
+  .filter((f) => f !== MEMORY && fs.existsSync(path.join(wt, f)) && git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`))
 const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
 
 const [sub, ...args] = process.argv.slice(2)
@@ -200,9 +209,7 @@ function reset() {
   if (!gitOk(wt, 'rev-parse', '--verify', '--quiet', `${revision}^{commit}`)) refuse(`${revision} is not a commit`)
   const dirty = git(wt, 'status', '--porcelain', '--untracked-files=no')
   if (dirty) refuse(`${wt} has uncommitted changes a move would discard:\n${dirty}`)
-  // S is skip-worktree and a lower-case tag assume-unchanged: both hide a change from the status test above
-  const hidden = gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
-    .filter((f) => f !== MEMORY && fs.existsSync(path.join(wt, f)) && git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`))
+  const hidden = hiddenChanges(wt)
   if (hidden.length) refuse(`${wt} has changes skip-worktree or assume-unchanged hides from git status: ${hidden.map((f) => JSON.stringify(f)).join(', ')}`)
   const others = new Set([...gitZ(wt, 'ls-files', '-z', '--others'), ...gitZ(wt, 'ls-files', '-z', '--others', '--exclude-standard')])
   others.delete(MEMORY) // its bytes are carried across the move below
@@ -282,6 +289,8 @@ function remove() {
   const wt = laneWorktree()
   const dest = path.join(recordsDir(), 'lanes', role)
   const { files } = laneFiles(wt)
+  const changed = [...gitZ(wt, 'diff', '--name-only', '-z', 'HEAD'), ...hiddenChanges(wt)].filter((f) => f !== MEMORY)
+  if (changed.length) refuse(`${wt} has uncommitted changes to tracked files its kept branch would lack: ${changed.map((f) => JSON.stringify(f)).join(', ')}`)
   const differ = files.filter((f) => !fs.existsSync(path.join(dest, f)) || sha256(path.join(dest, f)) !== sha256(path.join(wt, f)))
   if (differ.length) refuse(`these files of ${wt} are not in ${dest} with an equal sha256: ${differ.join(', ')}`)
   const common = git(wt, 'rev-parse', '--path-format=absolute', '--git-common-dir')
