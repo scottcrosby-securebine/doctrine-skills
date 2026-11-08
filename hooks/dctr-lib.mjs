@@ -1141,6 +1141,47 @@ export function runRoot(env = process.env, cwd = process.cwd()) {
   return records && records !== 'none' ? path.resolve(top, records, 'orchestrate') : null
 }
 
+// ---------------------------------------------------------------- the orchestrator's write guard (E15 e15-guard)
+
+/** The tools the guard judges, each with the tool_input field that names its path (G6). */
+export const GUARD_TOOLS = { Write: 'file_path', Edit: 'file_path', NotebookEdit: 'notebook_path' }
+
+/** `p` where it really lies: an absolute path, or one relative to `cwd`, walked component by component through every
+ *  symlink by followLinks, a dangling one included. The two are joined as written, never normalized first, so a `..`
+ *  after a link climbs out of the link's target as the kernel does. */
+export const guardReal = (p, cwd) => followLinks(path.isAbsolute(p) ? p : `${cwd}/${p}`, { lstat: fs.lstatSync, readlink: fs.readlinkSync })
+
+/**
+ * The orchestrator's allowed paths (E15-D22), the one definition every phase imports. `p` and every path in `ctx`
+ * are absolute real paths (guardReal). `ctx` is guardContext's `{ run, records, checkout, record }`: the run lies
+ * under `records`, `checkout` is the orchestrator's checkout read from the run, and `record` its record or null. The
+ * auto-cycle files are the `.doctrine/auto-cycle*` glob treeExcludes uses, a `*` that crosses no `/`.
+ */
+export function guardAllowed(p, { records, checkout, record }) {
+  const under = (dir) => p.startsWith(dir + path.sep)
+  const at = (rel) => p === path.join(checkout, rel)
+  return (!!record && p === record) || under(records) || at('docs/PROJECT.md') || under(path.join(checkout, 'docs/epics')) ||
+    at('SESSION_MEMORY.md') || under(path.join(checkout, 'docs/handoffs')) ||
+    (path.dirname(p) === path.join(checkout, '.doctrine') && path.basename(p).startsWith('auto-cycle'))
+}
+
+/**
+ * The guard's context for a session whose project directory is `cwd`, or a throw naming what could not be read: the
+ * run from runRoot, which must be an existing folder named `orchestrate` (Run layout); Records its parent; the
+ * checkout the repo holding the run (repoOf, never the seat's cwd, E15-D119); and the record
+ * the checkout's kickoff chain reaches (followKickoff), or null where the chain stops.
+ */
+export function guardContext(env = process.env, cwd = process.cwd()) {
+  const named = runRoot(env, cwd)
+  if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
+  const run = guardReal(named, cwd)
+  if (path.basename(run) !== 'orchestrate') throw new Error(`the run ${run} is not a folder named orchestrate`)
+  if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
+  const checkout = repoOf(run, fs.existsSync)
+  const k = followKickoff({ projectDir: checkout, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
+  return { run, records: path.dirname(run), checkout, record: k.recordPath ? guardReal(k.recordPath, checkout) : null }
+}
+
 /**
  * B7's count and pause (E8-D17): `n` is the next cycle's number, the last cycle line's plus one wherever it sits,
  * so the count continues across session ids and across on lines; `cap` is the last on line's. It pauses with

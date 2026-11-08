@@ -123,6 +123,12 @@ jobs:
         # fixtures under real bash with a stub node on PATH.
         run: node hooks/dctr-roundguard.selftest.mjs
 
+      - name: orchestrator write guard tamper test
+        # Drives hooks/dctr-guard.mjs end to end on a fixture run with a tripwire herdr on PATH: the orchestrator's
+        # Write, Edit and NotebookEdit outside its allowed paths are denied and logged, inside them allowed, no other
+        # session and no other tool is refused, and any error in the orchestrator's session refuses. Pure node.
+        run: node hooks/dctr-guard.selftest.mjs
+
       - name: auto-cycle hook tamper test
         # Drives hooks/dctr-cycle.mjs end to end over git fixture repos with a logging herdr shim on PATH: one
         # fixture per Stop precondition, every pause reason verbatim, each paused line alerted once, the

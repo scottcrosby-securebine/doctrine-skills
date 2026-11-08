@@ -56,7 +56,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The band's folder: the codex (install) suite changes a file inside it to prove the install reads every depth.
   'band/band.ts',
   // The round guard (visibility-62) and its suite.
-  'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs']
+  'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs',
+  // The orchestrator's write guard and its suite.
+  'dctr-guard.mjs', 'dctr-guard.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -88,8 +90,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  6.8s, gate 7.4s, pane 16.6s, typer 22.2s, teardown 27.8s, codex.hooks 30.4s, cycle 50.1s. Doctor moved behind
  *  bridge, codex behind gauge, codex.hooks behind teardown, record ahead of seams and project ahead of notify.
  *  The round guard suite placed 2026-10-14, measured standalone on one host, three runs each: notify 0.61-0.71s,
- *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
+ *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore.
+ *  The guard suite, measured standalone on one host, three runs: guard 2.28-2.32s; it goes after seat and before gauge. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -3430,6 +3433,70 @@ const MUTATIONS = [
   { name: 'the round guard follows a link cycle without a hop cap', file: 'dctr-lib.mjs',
     clause: 'clause 1v — a link cycle is followed for at most 40 links and then kept as written',
     from: '    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) }', to: '    try { if (lstat(next).isSymbolicLink()) target = readlink(next) }' },
+  // The orchestrator's write guard (E15 e15-guard): one entry per repair, each pinned by dctr-guard.selftest.mjs.
+  { name: 'the guard acts in every session, not only the orchestrator\'s', file: 'dctr-guard.mjs',
+    clause: 'clause 2e — nothing is refused outside the orchestrator\'s session',
+    from: "if (lib.runRole(process.env) !== 'orchestrator') process.exit(0)", to: 'if (false) process.exit(0)' },
+  { name: 'the guard acts whenever DCTR_RUN is set', file: 'dctr-guard.mjs',
+    clause: 'clause 2e — nothing is refused outside the orchestrator\'s session (a lane, the merge session)',
+    from: "if (lib.runRole(process.env) !== 'orchestrator') process.exit(0)", to: 'if (!process.env.DCTR_RUN) process.exit(0)' },
+  { name: 'the guard stands down on agent_id, as the round guard does', file: 'dctr-guard.mjs',
+    clause: 'clause 2j — a seat of the orchestrator\'s session is refused outside the allowed paths',
+    from: "  const payload = JSON.parse(fs.readFileSync(0, 'utf8'))\n", to: "  const payload = JSON.parse(fs.readFileSync(0, 'utf8'))\n  if (payload.agent_id) process.exit(0)\n" },
+  { name: 'the guard\'s catch allows in the orchestrator\'s session', file: 'dctr-guard.mjs',
+    clause: 'clause 2l — in the orchestrator\'s session every error refuses',
+    from: "  if (process.env.DCTR_ROLE === 'orchestrator') deny(", to: '  if (false) deny(' },
+  { name: 'the guard refuses without logging', file: 'dctr-guard.mjs',
+    clause: 'clause 2f — one refused Write appends exactly one line to <run>/guard.log',
+    from: '  if (run) try { fs.appendFileSync(', to: '  if (false) try { fs.appendFileSync(' },
+  { name: 'the guard logs no time', file: 'dctr-guard.mjs',
+    clause: 'clause 2f — the line opens with an ISO 8601 UTC time ending Z',
+    from: "`${new Date().toISOString()} ${tool ?? '-'}", to: "`${tool ?? '-'}" },
+  { name: 'the guard judges every tool, Bash and MCP among them', file: 'dctr-guard.mjs',
+    clause: 'clause 2c — no orchestrator call of Bash or an MCP tool is refused',
+    from: '  if (!Object.hasOwn(lib.GUARD_TOOLS, tool)) process.exit(0)\n', to: '' },
+  { name: 'the guard reads a tool named like an Object property as a guarded tool', file: 'dctr-guard.mjs',
+    clause: 'clause 2c — nor of a tool named like an Object property',
+    from: '!Object.hasOwn(lib.GUARD_TOOLS, tool)', to: '!lib.GUARD_TOOLS[tool]' },
+  { name: 'the guard reads the orchestrator\'s checkout from the session\'s working tree, not from the run', file: 'dctr-lib.mjs',
+    clause: 'clause 2j — from a worktree of its own, the checkout read from the run and never the seat\'s cwd',
+    from: '  const checkout = repoOf(run, fs.existsSync)\n', to: "  const checkout = repoOf(path.join(cwd, '.git'), fs.existsSync)\n" },
+  { name: 'the guard reads a NotebookEdit\'s path from file_path', file: 'dctr-lib.mjs',
+    clause: 'clause 2i — a notebook under the Records path allowed',
+    from: "NotebookEdit: 'notebook_path'", to: "NotebookEdit: 'file_path'" },
+  { name: 'the guard normalizes a relative path before following its links', file: 'dctr-lib.mjs',
+    clause: 'clause 2k — .. after a link, lexically inside docs/handoffs, is refused',
+    from: 'path.isAbsolute(p) ? p : `${cwd}/${p}`', to: 'path.resolve(cwd, p)' },
+  { name: 'the guard judges a path as written, never through its links', file: 'dctr-lib.mjs',
+    clause: 'clause 2k — a link under docs/handoffs to a folder outside is refused',
+    from: '=> followLinks(path.isAbsolute(p)', to: '=> ((x) => x)(path.isAbsolute(p)' },
+  { name: 'the guard no longer allows the record', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — guardAllowed allows the record',
+    from: '(!!record && p === record) || ', to: '' },
+  { name: 'the guard no longer allows docs/handoffs/', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — guardAllowed allows every file under docs/handoffs/',
+    from: " || under(path.join(checkout, 'docs/handoffs'))", to: '' },
+  { name: 'the guard no longer allows the memory file', file: 'dctr-lib.mjs',
+    clause: 'clause 1a — guardAllowed allows the memory file',
+    from: "at('SESSION_MEMORY.md') || ", to: '' },
+  { name: 'the guard allows a name that only starts like an allowed folder', file: 'dctr-lib.mjs',
+    clause: 'clause 1b — guardAllowed refuses a neighbouring name (docs/epicsX, records2)',
+    from: 'const under = (dir) => p.startsWith(dir + path.sep)', to: 'const under = (dir) => p.startsWith(dir)' },
+  { name: 'the guard allows an auto-cycle name at any depth under .doctrine', file: 'dctr-lib.mjs',
+    clause: 'clause 1b — guardAllowed refuses a file inside a folder named like an auto-cycle file',
+    from: "(path.dirname(p) === path.join(checkout, '.doctrine') && ", to: "(p.startsWith(path.join(checkout, '.doctrine') + path.sep) && " },
+  { name: 'the guard accepts a run that is not a folder named orchestrate', file: 'dctr-lib.mjs',
+    clause: 'clause 2l — a run folder misnamed refuses',
+    from: "  if (path.basename(run) !== 'orchestrate') throw", to: '  if (false) throw' },
+  { name: 'the guard accepts a run folder that does not exist', file: 'dctr-lib.mjs',
+    clause: 'clause 2l — a run folder missing refuses',
+    from: '  if (!fs.statSync(run).isDirectory()) throw', to: '  if (false) throw' },
+  { name: 'the guard\'s hooks.json matcher drops NotebookEdit', file: 'hooks.json',
+    clause: 'clause 1e — its matcher matching Write, Edit and NotebookEdit as whole names',
+    from: '"matcher": "Write|Edit|NotebookEdit"', to: '"matcher": "Write|Edit"' },
+  { name: 'hooks.json loses the guard\'s PreToolUse group', file: 'hooks.json',
+    clause: 'clause 1e — hooks.json has one PreToolUse group of its own running dctr-guard.mjs',
+    from: ',\n      { "matcher": "Write|Edit|NotebookEdit", "hooks": [ { "type": "command", "command": "node \\"${CLAUDE_PLUGIN_ROOT}/hooks/dctr-guard.mjs\\"", "timeout": 10 } ] }', to: '' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
