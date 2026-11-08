@@ -172,7 +172,7 @@ edits. Hand it, pasted in full, never as paths:
   paragraph, whole, with the run's `waiting-questions.md`
 - whenever the files include a handoff, the standard it is graded against: `doctrine-handoff`'s step 3
   Sections list and the Rules list after it, whole, in a session under the orchestrator profile its
-  Orchestrator profile paragraph, whole, with the run's `waiting-questions.md`, and its step 2, whole,
+  Orchestrator profile paragraph, whole, and its step 2, whole,
   with the `handoff/SKILL.md`
   that step 2 finds, whole, where it finds one (read from `../doctrine-handoff/SKILL.md` from this
   skill's base directory). Only that skill's content rules apply: say in the brief that its storage instruction, a
