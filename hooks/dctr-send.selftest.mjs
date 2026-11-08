@@ -410,6 +410,18 @@ const CLASS = [
   ['git absent', (fx) => { fx.path = `${fx.bin}:${nodeBin}` }],
   ...['rev-parse', 'check-ignore', 'log', 'status'].flatMap((sub) => [[`git ${sub} fails`, gitMode(sub, 'fail')], [`git ${sub} times out`, gitMode(sub, 'slow')]]),
   ['git rev-parse prints nothing', gitMode('rev-parse', 'empty')], ['git log prints nothing', gitMode('log', 'empty')],
+  // Two git failures that print the no-repository phrase with a path after it, inside a real repository.
+  ['GIT_DIR names nothing', (fx) => { fs.appendFileSync(fx.handoff, 'unlanded edit\n'); fx.env = { GIT_DIR: '/dev/null' } }],
+  // A GIT_DIR (with its GIT_WORK_TREE) naming another repository whose commit carries the lane's unlanded handoff, which only the lane's own repo shows as unlanded.
+  ['GIT_DIR names another repository', (fx) => {
+    fs.appendFileSync(fx.handoff, 'unlanded edit\n'); fx.other = path.join(fx.dir, 'other')
+    git(fx.dir, 'clone', '-q', fx.lane, fx.other); fs.copyFileSync(fx.handoff, path.join(fx.other, 'docs/handoffs/h.md')); git(fx.other, 'commit', '-qam', 'other')
+    fx.env = { GIT_DIR: path.join(fx.other, '.git'), GIT_WORK_TREE: fx.lane }
+  }],
+  ['a gitfile names a removed gitdir', (fx) => {
+    fx.gitdir = path.join(fx.dir, 'moved-gitdir'); fs.renameSync(path.join(fx.lane, '.git'), fx.gitdir)
+    fs.writeFileSync(path.join(fx.lane, '.git'), `gitdir: ${fx.gitdir}\n`); fs.rmSync(fx.gitdir, { recursive: true })
+  }],
 ]
 const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
 const controlFx = classFx()
@@ -417,9 +429,9 @@ const controlFx = classFx()
 const noRepoFx = classFx(); fs.rmSync(path.join(noRepoFx.lane, '.git'), { recursive: true, force: true })
 const ceiling = (fx) => ({ GIT_CEILING_DIRECTORIES: fs.realpathSync(fx.dir) })
 const CLEARS = ['control', 'no git repository']
-const classRuns = await Promise.all([...classFxs, ['control', controlFx], ['no git repository', noRepoFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...ceiling(fx) } }).then((r) => [label, fx, r])))
+const classRuns = await Promise.all([...classFxs, ['control', controlFx], ['no git repository', noRepoFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...ceiling(fx), ...fx.env } }).then((r) => [label, fx, r])))
 const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== CLEARS.includes(label)).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
-clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out: no /clear typed; the healthy control, and a lane in no git repository, clear (SR1, SR3, B1)',
+clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository, and a gitfile naming a removed gitdir: no /clear typed; the healthy control, and a lane in no git repository, clear (SR1, SR3, SR4, B1)',
   classBad.length === 0, classBad.join(' || '))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
@@ -501,6 +513,15 @@ for (const [label, fx] of classFxs) {
     else { try { fs.readFileSync(f); ok = false } catch (e) { ok = e.code === 'EACCES' } }
   } else if (label === 'git absent') {
     ok = spawnSync('git', ['--version'], { env: { PATH: fx.path } }).error?.code === 'ENOENT'
+  } else if (label === 'GIT_DIR names nothing') {
+    const r = spawnSync(realGit, ['-C', fx.lane, ...SUBARGS['rev-parse']], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', GIT_DIR: '/dev/null' } })
+    ok = r.status === 128 && r.stderr.trim() === "fatal: not a git repository: '/dev/null'" && gitOf(fx, ['status', '--porcelain', '--', 'docs/handoffs/h.md']).stdout.trim() !== ''
+  } else if (label === 'GIT_DIR names another repository') {
+    const r = spawnSync(realGit, ['-C', path.dirname(fx.handoff), 'status', '--porcelain', '--', fx.handoff, memory(fx)], { encoding: 'utf8', env: { ...process.env, ...fx.env } })
+    ok = r.status === 0 && r.stdout === '' && gitOf(fx, ['status', '--porcelain', '--', 'docs/handoffs/h.md']).stdout.trim() !== ''
+  } else if (label === 'a gitfile names a removed gitdir') {
+    const r = spawnSync(realGit, ['-C', fx.lane, ...SUBARGS['rev-parse']], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    ok = r.status === 128 && r.stderr.startsWith('fatal: not a git repository: ') && !r.stderr.includes('parent directories') && fs.statSync(path.join(fx.lane, '.git')).isFile() && !fs.existsSync(fx.gitdir)
   } else {
     const [, sub, how] = /^git (\S+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, SUBARGS[sub])
     ok = how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === ''
@@ -508,11 +529,11 @@ for (const [label, fx] of classFxs) {
   if (!ok) classProofBad.push(label)
 }
 const noRepoGit = spawnSync(path.join(noRepoFx.gitBin, 'git'), ['-C', path.dirname(noRepoFx.handoff), 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', timeout: 5000, env: { ...process.env, LC_ALL: 'C', ...ceiling(noRepoFx) } })
-if (!(noRepoGit.status === 128 && /not a git repository/.test(noRepoGit.stderr) && !fs.existsSync(path.join(noRepoFx.lane, '.git')))) classProofBad.push('no git repository')
+if (!(noRepoGit.status === 128 && noRepoGit.stderr.trim() === 'fatal: not a git repository (or any of the parent directories): .git' && !fs.existsSync(path.join(noRepoFx.lane, '.git')))) classProofBad.push('no git repository')
 const cg = (args) => gitOf(controlFx, args)
 const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARGS['check-ignore']).status === 1 && Number(cg(SUBARGS.log).stdout.trim()) > 0 &&
   handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
-clause('clause 3l — without the sender: each class row carries its one defect, the no-repository lane\'s git says it is not a git repository with the ceiling at the fixture, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
+clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing and the removed gitdir each make git print the phrase with a path, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the no-repository lane\'s git prints the parent-directories message with the ceiling at the fixture, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
   classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
 
 process.exit(bad ? 1 : 0)

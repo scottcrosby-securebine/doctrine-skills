@@ -963,6 +963,9 @@ export function treeHash(repos, excludes) {
   return ids.length === 1 ? ids[0] : crypto.createHash('sha1').update(ids.join('\n')).digest('hex')
 }
 
+// git's message, under LC_ALL=C, when no directory from the cwd up holds a repository.
+const NO_REPO = 'fatal: not a git repository (or any of the parent directories): .git'
+
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
  * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
@@ -976,17 +979,21 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   if (st.mtimeMs < warnedAt) return false
   // Given `timeoutMs`, every git call shares that budget, and one that runs out of it means not landed.
   const end = Date.now() + timeoutMs, timedOut = new Error('git timed out')
+  // An inherited GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR or GIT_INDEX_FILE would point git away from the handoff's own repo.
+  const env = { ...process.env, LC_ALL: 'C' }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE']) delete env[k]
   const git = (args) => {
     const left = end - Date.now()
     if (left <= 0) throw timedOut
     try {
-      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' }, ...(left === Infinity ? {} : { timeout: left }) }).trim()
+      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
     } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
   }
   try {
-    // Outside a work tree only when git ran and said so; any other failure, or an answer other than true, is not landed.
+    // Outside a work tree only on git's own no-repository message, whole: a broken gitfile or a GIT_DIR naming nothing
+    // prints the same phrase with a path after it. Any other failure, or an answer other than true, is not landed.
     let inside
-    try { inside = git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e.status > 0 && /not a git repository/.test(String(e.stderr))) return true; throw e }
+    try { inside = git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e.status === 128 && String(e.stderr).trim() === NO_REPO) return true; throw e }
     if (inside !== 'true') return false
     // Exit 0 is ignored, 1 is not ignored and needs its commit; anything else is not landed.
     try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e.status !== 1) throw e }
