@@ -966,10 +966,12 @@ export function treeHash(repos, excludes) {
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
  * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
- * touching it was made at or after that second and it and the memory file carry no uncommitted change. With no .git
- * entry on the path from the real path of the handoff's directory up, the file and the kickoff line naming it are the
- * landing; with one, git must answer from that repository's work tree, and any failure is not landed. False when
- * `warnedAt` is unknown or either file's directory has no real path.
+ * touching it was made at or after that second and it and the memory file carry no uncommitted change. Only the
+ * repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
+ * the user's, so a user-level rule can only ever require a commit. With no .git entry on the path from the handoff's
+ * real path up, the file and the kickoff line naming it are the landing; with one, git must answer from that
+ * repository's work tree, and any failure is not landed. False when `warnedAt` is unknown, the handoff has no real
+ * path, or the memory file has none and neither has its directory.
  */
 export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
@@ -981,17 +983,21 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
   // counts as present, so git then decides, and its failure is not landed.
   const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
-  // git resolves its cwd physically, so the walk and every path git is given go through symlinks the same way.
-  const real = (p) => path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p))
+  // git resolves its cwd physically and tracks a link as the link, so the walk and every path git is given are the
+  // files' own real paths; a memory file not yet written is resolved by its directory.
   let handoff, memory
-  try { handoff = real(handoffPath); memory = real(memoryPath) } catch { return false }
+  try {
+    handoff = fs.realpathSync.native(handoffPath)
+    try { memory = fs.realpathSync.native(memoryPath) } catch { memory = path.join(fs.realpathSync.native(path.dirname(memoryPath)), path.basename(memoryPath)) }
+  } catch { return false }
   const top = repoOf(handoff, dotGit)
   if (!dotGit(path.join(top, '.git'))) return true
   // Any inherited GIT_ variable (GIT_DIR and its kin, a ceiling, a config entry naming an excludes file) can point
   // git away from that repository or its rules; a filesystem boundary under it would stop git short of the .git found.
+  // The system and global config and the default $XDG_CONFIG_HOME/git/ignore are the user's rules, not the repository's.
   const env = { ...process.env }
   for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
-  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' })
+  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null' })
   const git = (args) => {
     const left = end - Date.now()
     if (left <= 0) throw timedOut

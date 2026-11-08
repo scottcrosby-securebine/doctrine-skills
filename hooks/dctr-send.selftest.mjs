@@ -446,6 +446,27 @@ const CLASS = [
     git(fx.lane, 'rm', '-q', '--cached', 'docs/handoffs/h.md'); git(fx.lane, 'commit', '-qm', 'untrack'); write(path.join(fx.dir, 'excludes'), 'docs/\n')
     fx.env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: path.join(fx.dir, 'excludes') }
   }],
+  // The lane has no .git, and its handoff file is itself a link to a repository's copy, which has an uncommitted edit.
+  ['a handoff file that is a link into a repository where it is uncommitted', (fx) => {
+    fx.repo = path.join(fx.dir, 'repo'); git(fx.dir, 'clone', '-q', fx.lane, fx.repo); fs.appendFileSync(path.join(fx.repo, 'docs/handoffs/h.md'), 'unlanded edit\n')
+    fs.rmSync(path.join(fx.lane, '.git'), { recursive: true }); fs.rmSync(fx.handoff); fs.symlinkSync(path.join(fx.repo, 'docs/handoffs/h.md'), fx.handoff)
+  }],
+  // The memory file a link to a tracked file in the handoff's repository, the link clean and the file it reaches modified.
+  ['a memory file that is a link to a file modified in the handoff\'s repository', (fx) => {
+    const m = path.join(fx.lane, 'SESSION_MEMORY.md'); fs.mkdirSync(path.join(fx.lane, 'docs/store')); fs.renameSync(m, path.join(fx.lane, 'docs/store/m.md')); fs.symlinkSync('docs/store/m.md', m)
+    git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'link memory'); fs.appendFileSync(path.join(fx.lane, 'docs/store/m.md'), 'unlanded edit\n')
+  }],
+  // An untracked handoff that only the user's ~/.gitconfig excludes file ignores, in a session whose git reads no global config.
+  ['a ~/.gitconfig excludesFile ignoring the untracked handoff, the session under GIT_CONFIG_GLOBAL=/dev/null', (fx) => {
+    git(fx.lane, 'rm', '-q', '--cached', 'docs/handoffs/h.md'); git(fx.lane, 'commit', '-qm', 'untrack'); fx.home = path.join(fx.dir, 'home')
+    write(path.join(fx.home, 'ex'), 'docs/\n'); write(path.join(fx.home, '.gitconfig'), `[core]\n\texcludesFile = ${path.join(fx.home, 'ex')}\n`)
+    fx.env = { HOME: fx.home, XDG_CONFIG_HOME: undefined, GIT_CONFIG_GLOBAL: '/dev/null' }
+  }],
+  // An untracked handoff that only the user's default excludes file, $XDG_CONFIG_HOME/git/ignore, ignores.
+  ['the user\'s default git/ignore under XDG_CONFIG_HOME ignoring the untracked handoff', (fx) => {
+    git(fx.lane, 'rm', '-q', '--cached', 'docs/handoffs/h.md'); git(fx.lane, 'commit', '-qm', 'untrack'); fx.home = path.join(fx.dir, 'home')
+    write(path.join(fx.home, '.config/git/ignore'), 'docs/\n'); fx.env = { HOME: fx.home, XDG_CONFIG_HOME: path.join(fx.home, '.config') }
+  }],
 ]
 const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
 const controlFx = classFx()
@@ -460,10 +481,17 @@ fs.rmSync(path.join(linkedFx.repo, 'lane/.git'), { recursive: true }); git(linke
 fs.symlinkSync(path.join(linkedFx.repo, 'lane'), linkedFx.lane)
 // The control again under an inherited ceiling at its repository root, which git must not see.
 const ceilingFx = classFx(); ceilingFx.env = { GIT_CEILING_DIRECTORIES: fs.realpathSync(ceilingFx.lane) }
-const CLEARS = ['control', 'no git repository', 'the control, git stopping at a filesystem boundary unless told to cross one', 'the control under GIT_CEILING_DIRECTORIES at its root', 'the control reached through a symlinked lane path']
-const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
+// The repository's own .gitignore ignoring docs/handoffs/, the handoff untracked: the ignore is the landing.
+const repoIgnoreFx = classFx(); fs.writeFileSync(path.join(repoIgnoreFx.lane, '.gitignore'), 'docs/handoffs/\n')
+git(repoIgnoreFx.lane, 'rm', '-q', '--cached', 'docs/handoffs/h.md'); git(repoIgnoreFx.lane, 'add', '-A'); git(repoIgnoreFx.lane, 'commit', '-qm', 'ignore handoffs')
+// The handoff file a link to a committed file in the same repository as the memory file, both committed.
+const fileLinkFx = classFx(); fs.mkdirSync(path.join(fileLinkFx.lane, 'docs/store')); fs.renameSync(fileLinkFx.handoff, path.join(fileLinkFx.lane, 'docs/store/h.md'))
+fs.symlinkSync('../store/h.md', fileLinkFx.handoff); git(fileLinkFx.lane, 'add', '-A'); git(fileLinkFx.lane, 'commit', '-qm', 'link handoff')
+const CLEARS = ['control', 'no git repository', 'the control, git stopping at a filesystem boundary unless told to cross one', 'the control under GIT_CEILING_DIRECTORIES at its root', 'the control reached through a symlinked lane path',
+  'the repository\'s own .gitignore ignoring docs/handoffs/, the handoff untracked', 'the control with its handoff file a link to a committed file in the same repository']
+const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx], [CLEARS[5], repoIgnoreFx], [CLEARS[6], fileLinkFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
 const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== CLEARS.includes(label)).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
-clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, and an inherited GIT_CONFIG_* excludes file ignoring the untracked handoff: no /clear typed; the healthy control, under a ceiling at its root, behind a git that stops at a filesystem boundary unless told to cross one, or reached through a symlinked lane path, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, B1)',
+clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, an inherited GIT_CONFIG_* excludes file, a ~/.gitconfig one under a session GIT_CONFIG_GLOBAL=/dev/null, or the user\'s default git/ignore ignoring the untracked handoff, a handoff file that is a link into a repository where it is uncommitted, and a memory file that is a link to a file modified in the handoff\'s repository: no /clear typed; the healthy control, under a ceiling at its root, behind a git that stops at a filesystem boundary unless told to cross one, reached through a symlinked lane path, or with its handoff file a link to a committed file in the same repository, the repository\'s own .gitignore ignoring docs/handoffs/ with the handoff untracked, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, SR8, SR9, B1)',
   classBad.length === 0, classBad.join(' || '))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
@@ -575,6 +603,20 @@ for (const [label, fx] of classFxs) {
   } else if (label === 'an inherited GIT_CONFIG_* excludesFile ignoring the untracked handoff') {
     const ci = (env) => spawnSync(realGit, ['-C', fx.lane, ...SUBARGS['check-ignore']], { env: { ...process.env, ...env } }).status
     ok = ci(fx.env) === 0 && ci({}) === 1 && spawnSync(realGit, ['-C', fx.lane, 'ls-files', '--error-unmatch', 'docs/handoffs/h.md']).status !== 0
+  } else if (label === 'a handoff file that is a link into a repository where it is uncommitted') {
+    // The lane path has no .git above it, the handoff is a link, and the file it reaches is modified in its repository.
+    const st = spawnSync(realGit, ['-C', fx.repo, 'status', '--porcelain'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    ok = noGitAbove(fx) && fs.lstatSync(fx.handoff).isSymbolicLink() && fs.realpathSync(fx.handoff) === fs.realpathSync(path.join(fx.repo, 'docs/handoffs/h.md')) &&
+      st.status === 0 && / M docs\/handoffs\/h\.md/.test(st.stdout)
+  } else if (label === 'a memory file that is a link to a file modified in the handoff\'s repository') {
+    // git calls the link clean and the file it reaches modified.
+    const st = (p) => spawnSync(realGit, ['-C', fx.lane, 'status', '--porcelain', '--', p], { encoding: 'utf8' })
+    ok = fs.lstatSync(memory(fx)).isSymbolicLink() && st('SESSION_MEMORY.md').stdout === '' && / M docs\/store\/m\.md/.test(st('docs/store/m.md').stdout) && st('docs/handoffs/h.md').stdout === ''
+  } else if (/ignoring the untracked handoff, the session under GIT_CONFIG_GLOBAL|default git\/ignore under XDG_CONFIG_HOME/.test(label)) {
+    // Ignored by the user's rule as git reads it under HOME alone, and not ignored once only the repository's rules count.
+    const ci = (env) => spawnSync(realGit, ['-C', fx.lane, ...SUBARGS['check-ignore']], { env: { ...process.env, XDG_CONFIG_HOME: undefined, GIT_CONFIG_GLOBAL: undefined, ...env } }).status
+    const session = ci(fx.env), userRule = ci({ HOME: fx.home, XDG_CONFIG_HOME: fx.env.XDG_CONFIG_HOME }), repoOnly = ci({ HOME: fx.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', XDG_CONFIG_HOME: '/dev/null' })
+    ok = userRule === 0 && repoOnly === 1 && session === (fx.env.GIT_CONFIG_GLOBAL ? 1 : 0) && spawnSync(realGit, ['-C', fx.lane, 'ls-files', '--error-unmatch', 'docs/handoffs/h.md']).status !== 0
   } else {
     const [, sub, how] = /^git (\S+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, SUBARGS[sub])
     ok = how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === ''
@@ -597,10 +639,18 @@ if (!(fs.existsSync(path.join(boundaryFx.lane, '.git', 'HEAD')) && shimBoundary.
 // The linked control: no .git above the lane path as written, and its repository holds the handoff and memory file committed and clean.
 const linkedSt = spawnSync(realGit, ['-C', linkedFx.repo, 'status', '--porcelain'], { encoding: 'utf8' }), linkedLs = spawnSync(realGit, ['-C', linkedFx.repo, 'ls-files', 'lane/docs/handoffs/h.md', 'lane/SESSION_MEMORY.md'], { encoding: 'utf8' })
 if (!(noGitAbove(linkedFx) && fs.lstatSync(linkedFx.lane).isSymbolicLink() && linkedSt.status === 0 && linkedSt.stdout === '' && linkedLs.stdout.trim().split('\n').length === 2)) classProofBad.push(CLEARS[4])
+// The repository-ignore control: its own .gitignore ignores the untracked handoff with only the repository's rules read.
+const repoOnlyEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', XDG_CONFIG_HOME: '/dev/null' }
+if (!(spawnSync(realGit, ['-C', repoIgnoreFx.lane, ...SUBARGS['check-ignore']], { env: repoOnlyEnv }).status === 0 &&
+  spawnSync(realGit, ['-C', repoIgnoreFx.lane, 'ls-files', '--error-unmatch', 'docs/handoffs/h.md'], { env: repoOnlyEnv }).status !== 0)) classProofBad.push(CLEARS[5])
+// The file-link control: the handoff is a link into the same repository, where the link, its target and the memory file are tracked and clean.
+const fileLinkSt = spawnSync(realGit, ['-C', fileLinkFx.lane, 'status', '--porcelain'], { encoding: 'utf8' }), fileLinkLs = spawnSync(realGit, ['-C', fileLinkFx.lane, 'ls-files', 'docs/handoffs/h.md', 'docs/store/h.md', 'SESSION_MEMORY.md'], { encoding: 'utf8' })
+if (!(fs.lstatSync(fileLinkFx.handoff).isSymbolicLink() && fs.realpathSync(fileLinkFx.handoff) === fs.realpathSync(path.join(fileLinkFx.lane, 'docs/store/h.md')) &&
+  fileLinkSt.status === 0 && fileLinkSt.stdout === '' && fileLinkLs.stdout.trim().split('\n').length === 3)) classProofBad.push(CLEARS[6])
 const cg = (args) => gitOf(controlFx, args)
 const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARGS['check-ignore']).status === 1 && Number(cg(SUBARGS.log).stdout.trim()) > 0 &&
   handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
-clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing and the removed gitdir each make git print the phrase with a path, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the ceiling row\'s git prints the whole no-repository message inside the lane with the handoff uncommitted, the HEAD row\'s .git a directory without HEAD that git rejects, the nested HEAD row\'s git answering from the enclosing repository with the handoff committed and clean, the ceiling control\'s git printing the whole no-repository message, the no-repository lane has no .git above it, the boundary control\'s .git is in place and its shim prints the stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set, each symlink row\'s lane path has no .git above it while the handoff\'s physical directory sits in a repository where it is modified, the GIT_CONFIG row\'s handoff untracked and ignored only under the inherited entry, the linked control\'s lane path has no .git above it and its repository is clean with both files tracked, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
+clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing and the removed gitdir each make git print the phrase with a path, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the ceiling row\'s git prints the whole no-repository message inside the lane with the handoff uncommitted, the HEAD row\'s .git a directory without HEAD that git rejects, the nested HEAD row\'s git answering from the enclosing repository with the handoff committed and clean, the ceiling control\'s git printing the whole no-repository message, the no-repository lane has no .git above it, the boundary control\'s .git is in place and its shim prints the stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set, each symlink row\'s lane path has no .git above it while the handoff\'s physical directory sits in a repository where it is modified, the GIT_CONFIG row\'s handoff untracked and ignored only under the inherited entry, the memory-link row\'s memory file a link git calls clean to a file it calls modified, the file-link row\'s lane path has no .git above it while its handoff is a link to a file modified in its repository, each user-rule row\'s handoff untracked, ignored under that user\'s HOME and not under the repository\'s rules alone, the repository-ignore control\'s handoff untracked and ignored by the repository\'s rules alone, the file-link control\'s handoff a link into its own repository with link, target and memory file tracked and clean, the linked control\'s lane path has no .git above it and its repository is clean with both files tracked, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
   classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
 
 process.exit(bad ? 1 : 0)
