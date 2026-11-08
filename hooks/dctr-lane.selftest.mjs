@@ -15,6 +15,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff } from './dctr-lib.mjs'
+import { parseDoc } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -953,7 +954,8 @@ for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored li
 {
   const s = matrixLane()
   // bound by a relative name from the worktree, since a socket path is capped near 104 bytes
-  spawnSync('python3', ['-c', 'import socket; socket.socket(socket.AF_UNIX).bind("sock")'], { cwd: s.w })
+  // the child exits from inside listen's callback, which leaves the socket file bound and the server closed by exit
+  s.made = spawnSync(process.execPath, ['-e', "require('net').createServer().listen('sock', () => process.exit(0))"], { cwd: s.w, encoding: 'utf8' })
   MATRIX.sock = s
   const ra = lane(s.f, ['archive', 'a'])
   clause('clause 1as — archive refuses a lane holding a socket, which it cannot copy: nothing archived, no lane.log line (LC2)',
@@ -1003,14 +1005,60 @@ let MEMLINK
     r.code !== 0 && /as a link/.test(r.err) && treeOf(s.out) === s.outBefore && head(s.w) === old && read(path.join(s.w, 'SESSION_MEMORY.md')) === mem && laneLines(s.f).length === 1,
     `reset ${r.code} ${said(r)}; outside ${JSON.stringify(treeOf(s.out))}`)
 }
+/** Where reset saves the memory bytes: the worktree's own git dir, which no checkout or reset of the worktree writes. */
+const savedOf = (w) => git(w, 'rev-parse', '--path-format=absolute', '--git-path', 'SESSION_MEMORY.md.was').out
+/** The file a failed reset's output says holds the memory bytes, or null. */
+const namedSaved = (r) => /the memory file's bytes are in (.+)$/m.exec(r.err)?.[1] ?? null
 {
   const s = matrixLane()
   const t = commitIn(s.f.repo, 'at-t.txt', 't\n', 't')
-  write(path.join(s.w, 'SESSION_MEMORY.md.was'), 'an earlier reset\'s bytes\n')
+  write(savedOf(s.w), 'an earlier reset\'s bytes\n')
   const old = head(s.w)
   const r = lane(s.f, ['reset', 'a', t])
-  clause('clause 1au — reset refuses while the memory bytes an earlier reset saved are still in the worktree: that file unchanged, HEAD unmoved',
-    r.code !== 0 && /an earlier reset that did not finish/.test(r.err) && read(path.join(s.w, 'SESSION_MEMORY.md.was')) === 'an earlier reset\'s bytes\n' && head(s.w) === old, `reset ${r.code} ${said(r)}`)
+  clause('clause 1au — reset refuses while the memory bytes an earlier reset saved are still in the worktree\'s git dir: that file unchanged, HEAD unmoved',
+    r.code !== 0 && /an earlier reset that did not finish/.test(r.err) && read(savedOf(s.w)) === 'an earlier reset\'s bytes\n' && head(s.w) === old, `reset ${r.code} ${said(r)}`)
+}
+// LC7: a revision tracking the path reset once saved the memory bytes at, inside the worktree.
+let WASREV
+for (const fault of [false, true]) {
+  const s = matrixLane()
+  const t = commitIn(s.f.repo, 'SESSION_MEMORY.md.was', 'tracked was\n', 'tracks .was')
+  const old = head(s.w), mem = readBuf(path.join(s.w, 'SESSION_MEMORY.md'))
+  WASREV = { s, t, old, mem }
+  const r = lane(s.f, ['reset', 'a', t], { env: { PATH: GPATH, ...(fault ? { DCTR_GIT_LOCK_AFTER_RESET: path.join(s.w, 'SESSION_MEMORY.md') } : {}) } })
+  const memNow = readBuf(path.join(s.w, 'SESSION_MEMORY.md')), named = namedSaved(r), tracked = read(path.join(s.w, 'SESSION_MEMORY.md.was'))
+  if (!fault) {
+    clause('clause 2ae — reset to a revision tracking SESSION_MEMORY.md.was exits 0 at that revision, the memory file byte for byte, and the tracked SESSION_MEMORY.md.was still in place with the revision\'s bytes (LC7)',
+      r.code === 0 && head(s.w) === t && memNow.equals(mem) && tracked === 'tracked was\n' && !exists(savedOf(s.w)), `reset ${r.code} ${said(r)}; .was ${JSON.stringify(tracked)}; memory kept ${memNow.equals(mem)}`)
+    continue
+  }
+  clause('clause 1ba — the same reset with the memory file restore faulted exits non-zero, and the memory file\'s bytes are in the file its output names, the tracked SESSION_MEMORY.md.was holding the revision\'s bytes (LC7)',
+    r.code !== 0 && named !== null && readBuf(named).equals(mem) && tracked === 'tracked was\n', `reset ${r.code} ${said(r)}; named ${named} holds ${JSON.stringify(named && read(named))}`)
+  // the session goes on from its own bytes, edited since, so the saved file is then the only copy of them; the
+  // handoff the lane committed, which t does not track, is put back so the kickoff still reaches the record
+  fs.chmodSync(path.join(s.w, 'SESSION_MEMORY.md'), 0o644)
+  write(path.join(s.w, 'docs/handoffs/a.md'), git(s.w, 'show', `${old}:docs/handoffs/a.md`).out + '\n')
+  fs.writeFileSync(path.join(s.w, 'SESSION_MEMORY.md'), Buffer.concat([mem, Buffer.from('\nedited after the failed reset\n')]))
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause('clause 1bb — archive then remove after that reset, the memory file edited since: archive exits 0 and remove refuses while the saved memory bytes are there, the worktree kept and the saved bytes intact (LC7)',
+    ra.code === 0 && rr.code !== 0 && /an earlier reset that did not finish/.test(rr.err) && exists(s.w) && named !== null && readBuf(named).equals(mem), `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+}
+// LC6: archive A succeeds while no member names the live record, one is added, archive B fails on the epic write.
+let LC6
+{
+  const s = matrixLane()
+  const epicFile = path.join(s.f.repo, 'docs/epics/E1.md'), memberLine = '- phase build-a: .claude/worktrees/a/.doctrine/records/a.md\n'
+  const epic = read(epicFile)
+  write(epicFile, epic.replace(memberLine, ''))
+  const r1 = lane(s.f, ['archive', 'a'])
+  write(epicFile, epic)
+  fs.chmodSync(epicFile, 0o444)
+  const r2 = lane(s.f, ['archive', 'a'])
+  LC6 = { s, epicFile, log: laneLines(s.f), epicNow: read(epicFile) }
+  const rr = lane(s.f, ['remove', 'a'])
+  clause('clause 1bc — after an archive that finished, a member naming the live record added, and an archive that failed on the epic write, remove refuses: the worktree kept and the epic still naming the live record (LC6)',
+    r1.code === 0 && r2.code !== 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && exists(path.join(s.w, '.doctrine/records/a.md')) && read(epicFile) === epic,
+    `archive ${r1.code} ${said(r1)}; archive ${r2.code} ${said(r2)}; remove ${rr.code} ${said(rr)}`)
 }
 
 // A fault in each write archive makes: remove refuses after any archive that did not finish (LC4).
@@ -1035,7 +1083,7 @@ for (const [i, [k, env, prep]] of [
   ['the memory file restore', null, (s) => ({ DCTR_GIT_LOCK_AFTER_RESET: path.join(s.w, 'SESSION_MEMORY.md') })],
   ['setting skip-worktree again', { DCTR_GIT_FAULT: ' update-index --skip-worktree ' }],
   ['the lane.log append', {}, (s) => { fs.chmodSync(s.f.laneLog, 0o444); return {} }],
-  ['saving the memory bytes', {}, (s) => { fs.chmodSync(s.w, 0o555); return {} }],
+  ['saving the memory bytes', {}, (s) => { fs.chmodSync(path.dirname(savedOf(s.w)), 0o555); return {} }],
 ].entries()) {
   const s = matrixLane()
   const t = commitIn(s.f.repo, 'at-t.txt', 't\n', 't')
@@ -1043,9 +1091,9 @@ for (const [i, [k, env, prep]] of [
   const old = head(s.w), mem = readBuf(path.join(s.w, 'SESSION_MEMORY.md'))
   const extra = prep ? prep(s) : {}
   const r = lane(s.f, ['reset', 'a', t], { env: { PATH: GPATH, ...env, ...extra } })
-  fs.chmodSync(s.w, 0o755)
-  const memNow = readBuf(path.join(s.w, 'SESSION_MEMORY.md')), saved = readBuf(path.join(s.w, 'SESSION_MEMORY.md.was'))
-  const kept = memNow.equals(mem) || (saved.equals(mem) && r.err.includes(path.join(s.w, 'SESSION_MEMORY.md.was')))
+  fs.chmodSync(path.dirname(savedOf(s.w)), 0o755)
+  const memNow = readBuf(path.join(s.w, 'SESSION_MEMORY.md')), named = namedSaved(r), saved = named ? readBuf(named) : Buffer.alloc(0)
+  const kept = memNow.equals(mem) || saved.equals(mem)
   const reachable = head(s.w) === old || git(s.w, 'rev-parse', `a-was-${old.slice(0, 12)}`).out === old
   clause(`clause 1aw${i} — reset whose ${k} fails exits non-zero, and the memory file's bytes (in place, or in a file its output names), the untracked file and the old HEAD all survive`,
     r.code !== 0 && kept && read(path.join(s.w, 'notes.txt')) === 'own\n' && reachable, `reset ${r.code} ${said(r)}; memory kept ${memNow.equals(mem)}; saved ${saved.length}`)
@@ -1075,16 +1123,31 @@ for (const [i, [k, env, prep]] of [
   }
   const s = matrixLane()
   for (const K of KINDS.slice(1, 5)) K.prep(s)
-  const found = spawnSync('find', [s.w, '-type', 'f'], { encoding: 'utf8' }).stdout.split('\n').map((x) => path.relative(s.w, x))
-  clause('clause 3ae — find -type f lists none of the four link kinds the matrix holds', ['lnk-in', 'lnk-out', 'lnk-dir', 'lnk-gone'].every((x) => !found.includes(x) && fs.lstatSync(path.join(s.w, x)).isSymbolicLink()), JSON.stringify(found.filter((x) => x.startsWith('lnk'))))
+  const fr = spawnSync('find', [s.w, '-type', 'f'], { encoding: 'utf8' })
+  const found = fr.stdout.split('\n').map((x) => path.relative(s.w, x))
+  clause('clause 3ae — find -type f exits 0 listing src.txt and none of the four link kinds the matrix holds', fr.status === 0 && found.includes('src.txt') && ['lnk-in', 'lnk-out', 'lnk-dir', 'lnk-gone'].every((x) => !found.includes(x) && fs.lstatSync(path.join(s.w, x)).isSymbolicLink()), `find ${fr.status}; ${JSON.stringify(found.filter((x) => x.startsWith('lnk')))}`)
   const ls = git(MEMLINK.s.f.repo, 'ls-tree', MEMLINK.t, 'SESSION_MEMORY.md').out
   clause('clause 3af — the memlink revision tracks SESSION_MEMORY.md as a link to a file outside the worktree',
     ls.startsWith('120000 ') && git(MEMLINK.s.f.repo, 'cat-file', '-p', `${MEMLINK.t}:SESSION_MEMORY.md`).out === MEMLINK.target && path.relative(MEMLINK.s.w, MEMLINK.target).startsWith('..'), ls)
-  clause('clause 3ai — the socket fixture\'s sock is a socket, neither a file nor a link', fs.lstatSync(path.join(MATRIX.sock.w, 'sock'), { throwIfNoEntry: false })?.isSocket() === true, String(kindOf(path.join(MATRIX.sock.w, 'sock'))))
+  clause('clause 3ai — the socket fixture\'s node child exited 0 and its sock is a socket, neither a file nor a link',
+    MATRIX.sock.made.status === 0 && fs.lstatSync(path.join(MATRIX.sock.w, 'sock'), { throwIfNoEntry: false })?.isSocket() === true, `child ${MATRIX.sock.made.status} ${JSON.stringify(MATRIX.sock.made.stderr)}; ${kindOf(path.join(MATRIX.sock.w, 'sock'))}`)
   clause('clause 3ag — the loose run\'s Records directory is in no git repo', git(path.dirname(MATRIX.loose), 'rev-parse', '--show-toplevel').code !== 0, MATRIX.loose)
   const ro = path.join(s.f.root, 'ro.md'); write(ro, 'x\n'); fs.chmodSync(ro, 0o444)
   let code = null; try { fs.writeFileSync(ro, 'y\n') } catch (e) { code = e.code }
   clause('clause 3ah — a file made 0444, as the epic and lane.log fault rows make them, refuses a write here (EACCES)', code === 'EACCES', String(code))
+  const live = path.join(LC6.s.w, '.doctrine/records/a.md')
+  const names = parseDoc(LC6.epicNow).phases.filter((p) => p.record && path.resolve(LC6.s.f.repo, p.record) === live)
+  const ops = LC6.log.map((l) => LANE_LINE.exec(l)?.[3])
+  clause('clause 3aj — before the LC6 remove, the epic is read-only and a member line resolves to the live record, and lane.log holds an archive line after the create',
+    names.length === 1 && (fs.statSync(LC6.epicFile).mode & 0o222) === 0 && ops.lastIndexOf('archive') > ops.lastIndexOf('create') && ops.includes('create'), JSON.stringify({ names, ops }))
+  const p = path.join(WASREV.s.f.root, 'p7')
+  git(WASREV.s.f.repo, 'worktree', 'add', '-q', '--detach', p, WASREV.old)
+  write(path.join(p, 'SESSION_MEMORY.md.was'), 'saved\n'); write(savedOf(p), 'saved\n')
+  const mv = git(p, 'reset', '-q', '--hard', WASREV.t)
+  clause('clause 3ak — the .was revision tracks SESSION_MEMORY.md.was with bytes other than the memory file\'s, the old HEAD does not, and a plain reset --hard onto it overwrites an untracked SESSION_MEMORY.md.was while a file at the worktree\'s --git-path is untouched',
+    git(WASREV.s.f.repo, 'cat-file', '-p', `${WASREV.t}:SESSION_MEMORY.md.was`).out === 'tracked was' && !WASREV.mem.equals(Buffer.from('tracked was\n')) &&
+    git(WASREV.s.f.repo, 'cat-file', '-e', `${WASREV.old}:SESSION_MEMORY.md.was`).code !== 0 && mv.code === 0 &&
+    read(path.join(p, 'SESSION_MEMORY.md.was')) === 'tracked was\n' && read(savedOf(p)) === 'saved\n', JSON.stringify({ mv, was: read(path.join(p, 'SESSION_MEMORY.md.was')) }))
 }
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects

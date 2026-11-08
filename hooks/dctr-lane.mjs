@@ -27,9 +27,10 @@
 // assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
 // while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
 // since the move would overwrite it, and while the revision tracks the memory file as a link. The memory file's bytes
-// are carried across the move whether it is tracked or not, saved first to `SESSION_MEMORY.md.was`, which is removed
-// once they are back in place and which a reset that fails after saving them names; reset refuses while that file
-// exists. Its skip-worktree bit is set again wherever the revision tracks it.
+// are carried across the move whether it is tracked or not, saved first to `SESSION_MEMORY.md.was` in the worktree's
+// git dir (`git rev-parse --git-path`), outside the work tree so no path the revision tracks can replace it, which is
+// removed once they are back in place and which a reset that fails after saving them names; reset and remove refuse
+// while that file exists. Its skip-worktree bit is set again wherever the revision tracks it.
 //
 // archive copies every file and link of the worktree other than .git, listed by find, its memory file, docs/handoffs/
 // and record's directory among them, into `<Records>/lanes/<role>/` at their worktree paths, a link as a link, never
@@ -37,9 +38,11 @@
 // `- phase` member whose path names the lane's record, whatever its phase name, at the archived record, saying so
 // when no member line names it. It refuses, copying nothing, when the project file or an epic it names cannot be
 // read, a record reached through a link, and an entry that is neither a file nor a link. It appends its lane.log line
-// last, and remove refuses unless lane.log holds an archive line for the role since its latest create, so an archive
-// that failed at any write authorizes nothing. remove lists the files by find again and refuses unless each file is
-// archived with an equal sha256 and each link with the same target, then removes the worktree and keeps its branch.
+// last. remove refuses while a `- phase` member line of a roster epic still names the live record, read as archive
+// reads it, since an earlier archive's lane.log line outlives a later archive that failed on the epic; and unless
+// lane.log holds an archive line for the role since its latest create. remove lists the files by find again and
+// refuses unless each file is archived with an equal sha256 and each link with the same target, then removes the
+// worktree and keeps its branch.
 // Both refuse a lane whose record does not exist.
 //
 // Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output, and no listing has a
@@ -96,6 +99,10 @@ const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry
 const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
   .filter((f) => f !== MEMORY && (!fs.lstatSync(path.join(wt, f), { throwIfNoEntry: false }) || git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`)))
 const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
+/** Where reset keeps the memory bytes across its move: in the worktree's own git dir, which no checkout or reset of
+ *  the worktree writes, whatever paths the revision tracks. */
+const savedOf = (wt) => git(wt, 'rev-parse', '--path-format=absolute', '--git-path', `${MEMORY}.was`)
+const UNFINISHED = 'holds the memory bytes of an earlier reset that did not finish'
 
 const [sub, ...args] = process.argv.slice(2)
 const ARITY = { create: 4, reset: 2, archive: 1, remove: 1 }
@@ -250,8 +257,8 @@ function reset() {
   const clobbered = [...others].filter((f) => target.has(f) || dirs.has(f) || ancestors(f).some((d) => target.has(d)))
   if (clobbered.length) refuse(`${revision} tracks paths where ${wt} holds untracked or ignored files a move would overwrite: ${clobbered.map((f) => JSON.stringify(f)).join(', ')}`)
   if (gitZ(wt, 'ls-tree', '-z', revision, '--', MEMORY).some((l) => l.startsWith('120000 '))) refuse(`${revision} tracks ${MEMORY} as a link, so its bytes cannot be carried across the move`)
-  const saved = path.join(wt, `${MEMORY}.was`)
-  if (fs.lstatSync(saved, { throwIfNoEntry: false })) refuse(`${saved} holds the memory bytes of an earlier reset that did not finish`)
+  const saved = savedOf(wt)
+  if (fs.lstatSync(saved, { throwIfNoEntry: false })) refuse(`${saved} ${UNFINISHED}`)
   const old = git(wt, 'rev-parse', 'HEAD')
   const side = `${role}-was-${old.slice(0, 12)}`
   if (!gitOk(wt, 'show-ref', '--verify', '--quiet', `refs/heads/${side}`)) git(wt, 'branch', side, old)
@@ -337,7 +344,12 @@ function memberEdits(live, archived) {
 function remove() {
   const wt = laneWorktree()
   const dest = path.join(recordsDir(), 'lanes', role)
-  const { files } = laneFiles(wt)
+  const { files, record } = laneFiles(wt)
+  // the bytes sit outside the worktree, so neither archive nor the sha check below sees them, and removal deletes them
+  if (fs.lstatSync(savedOf(wt), { throwIfNoEntry: false })) refuse(`${savedOf(wt)} ${UNFINISHED}`)
+  // a log line since the create cannot say the epic was written: an earlier archive's line outlives a later failed one
+  const naming = memberEdits(path.join(wt, record), path.join(dest, record))
+  if (naming.length) refuse(`${naming.map((e) => `${e.file}:${e.lines.join(',')}`).join(', ')} still names the live record of ${role}, so no archive repointed it`)
   if (!archivedSinceCreate()) refuse(`lane.log holds no archive line for ${role} since its create, so no archive of it finished`)
   const changed = [...gitZ(wt, 'diff', '--name-only', '-z', 'HEAD'), ...hiddenChanges(wt)].filter((f) => f !== MEMORY)
   if (changed.length) refuse(`${wt} has uncommitted changes to tracked files its kept branch would lack: ${changed.map((f) => JSON.stringify(f)).join(', ')}`)
