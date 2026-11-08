@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff } from './dctr-lib.mjs'
+import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq } from './dctr-lib.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 let bad = 0
@@ -1502,6 +1502,72 @@ for (const name of ['a b.md', 'a|b.md']) {
   fs.rmSync(t.w, { recursive: true, force: true })
   const rr = lane(t.f, ['remove', 'a'])
   clause('clause 1az4 — remove refuses a lane whose worktree no longer exists, no lane.log line', rr.code !== 0 && /the worktree .* of a does not exist/.test(rr.err) && laneLines(t.f).length === 1, `exit ${rr.code} ${said(rr)}`)
+}
+
+// ---------------------------------------------------------------- names that are not UTF-8 (LC14)
+
+// t\xff decodes to t�, the name of another real file, so a listing decoded as text names one file twice and the
+// other never. A filesystem that refuses such a name (APFS: EILSEQ) cannot hold the fixture, and its clauses skip.
+const BADNAME = Buffer.from([0x74, 0xff]), REPLACED = 't�', CAFE = 'café.txt'
+const roundTrips = (b) => Buffer.from(b.toString()).equals(b)
+const hasBytes = (dir, bytes) => fs.readdirSync(dir, { encoding: 'buffer' }).some((n) => n.equals(bytes))
+const badPath = (w) => Buffer.concat([Buffer.from(w + '/'), BADNAME])
+/** Writes t\xff into `w`: null, or EILSEQ where the filesystem refuses the name. */
+const writeBad = (w) => { try { fs.writeFileSync(badPath(w), 'invalid name\n'); return null } catch (e) { if (e.code === 'EILSEQ') return e.code; throw e } }
+const skip = (n, code) => console.log(`SKIP  ${n} — this filesystem refuses a name that is not UTF-8 (${code}); a filesystem that accepts one (Linux ext4) runs it`)
+const NAMED = /dctr-lane: refused, .*t\\xff/
+{
+  const s = seeded()
+  write(path.join(s.w, REPLACED), 'the valid name\n')
+  const code = writeBad(s.w)
+  if (code) skip('clause 1bl, 3aq0 — archive refuses a lane holding t\\xff beside t\\ufffd', code)
+  else {
+    const ra = lane(s.f, ['archive', 'a'])
+    clause('clause 1bl — archive refuses a lane holding t\\xff beside t\\ufffd, naming the bytes: nothing archived, the worktree and both files kept, no lane.log line (LC14)',
+      ra.code !== 0 && NAMED.test(ra.err) && !exists(s.lanes) && hasBytes(s.w, BADNAME) && exists(path.join(s.w, REPLACED)) && laneLines(s.f).length === 1, `exit ${ra.code} ${said(ra)}`)
+    clause('clause 3aq0 — the archive fixture\'s worktree, read by readdirSync as buffers, holds the bytes 74 ff, which do not survive a UTF-8 decode and re-encode, and t\\ufffd, which does',
+      hasBytes(s.w, BADNAME) && !roundTrips(BADNAME) && hasBytes(s.w, Buffer.from(REPLACED)) && roundTrips(Buffer.from(REPLACED)), JSON.stringify(fs.readdirSync(s.w, { encoding: 'buffer' }).map((n) => n.toString('hex'))))
+  }
+  const t = seeded()
+  write(path.join(t.w, REPLACED), 'the valid name\n')
+  const archived = lane(t.f, ['archive', 'a'])
+  const code2 = writeBad(t.w)
+  if (code2) skip('clause 1bm, 3aq1 — remove refuses a lane given t\\xff after its archive', code2)
+  else {
+    const before = hasBytes(t.lanes, BADNAME), copy = exists(path.join(t.lanes, REPLACED))
+    const rr = lane(t.f, ['remove', 'a'])
+    clause('clause 1bm — remove refuses a lane given t\\xff after an archive that held t\\ufffd, naming the bytes: the worktree kept, t\\xff intact, no lane.log line (LC14)',
+      archived.code === 0 && rr.code !== 0 && NAMED.test(rr.err) && exists(t.w) && read(badPath(t.w)) === 'invalid name\n' && laneLines(t.f).length === 2,
+      `archive ${archived.code}; remove ${rr.code} ${said(rr)}`)
+    clause('clause 3aq1 — before that remove, the archive holds t\\ufffd and no entry named 74 ff, and the worktree holds both',
+      copy && !before && hasBytes(t.w, Buffer.from(REPLACED)), `${copy} ${before}`)
+  }
+}
+{
+  // Every filesystem: a find on PATH that lists the real worktree and then one name ending in 74 ff.
+  const fbin = path.join(tmp, 'findbin'); fs.mkdirSync(fbin)
+  const realFind = spawnSync('sh', ['-c', 'command -v find'], { encoding: 'utf8' }).stdout.trim()
+  fs.writeFileSync(path.join(fbin, 'find'), `#!/bin/sh\n${shq(realFind)} "$@" || exit\nprintf '%s/t\\377\\000' "$1"\n`)
+  fs.chmodSync(path.join(fbin, 'find'), 0o755)
+  const s = seeded()
+  const ra = lane(s.f, ['archive', 'a'], { env: { PATH: `${fbin}:${bin}:${process.env.PATH}` } })
+  clause('clause 1bn — archive refuses, naming the bytes, when find lists a name ending in 74 ff: nothing archived, no lane.log line (LC14)',
+    ra.code !== 0 && NAMED.test(ra.err) && !exists(s.lanes) && laneLines(s.f).length === 1, `exit ${ra.code} ${said(ra)}`)
+  const listed = spawnSync(path.join(fbin, 'find'), [s.w, '-path', path.join(s.w, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'])
+  const names = listed.stdout.toString('latin1').split('\0').filter(Boolean).map((n) => Buffer.from(n, 'latin1'))
+  clause('clause 3aq2 — without the command, the find shim exits 0 listing the worktree\'s files and last the bytes <worktree>/t ff, which do not survive a UTF-8 decode and re-encode',
+    listed.status === 0 && names.at(-1)?.equals(badPath(s.w)) === true && !roundTrips(names.at(-1)) && names.some((n) => n.toString().endsWith('/src.txt')), `${listed.status} ${JSON.stringify(names.map((n) => n.toString('hex')))}`)
+}
+{
+  // The known-good twin: a valid non-ASCII name archives and removes.
+  const s = seeded()
+  write(path.join(s.w, CAFE), 'accented\n')
+  const ra = lane(s.f, ['archive', 'a'])
+  const copied = sha(path.join(s.lanes, CAFE)) === sha(path.join(s.w, CAFE)) && sha(path.join(s.lanes, CAFE)) !== null
+  const rr = lane(s.f, ['remove', 'a'])
+  clause('clause 2ag — archive then remove of a lane holding café.txt: archive exits 0 with an equal sha256 copy, and remove exits 0 with the worktree gone (LC14)',
+    ra.code === 0 && copied && rr.code === 0 && !exists(s.w), `archive ${ra.code} ${said(ra)}; copied ${copied}; remove ${rr.code} ${said(rr)}`)
+  clause('clause 3aq3 — café.txt\'s name bytes survive a UTF-8 decode and re-encode', roundTrips(Buffer.from(CAFE)) && Buffer.from(CAFE).length === CAFE.length + 1, Buffer.from(CAFE).toString('hex'))
 }
 
 // ---------------------------------------------------------------- every refusal is reached (LC5's class)

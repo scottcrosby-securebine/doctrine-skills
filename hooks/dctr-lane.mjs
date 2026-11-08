@@ -37,7 +37,8 @@
 // writing through an entry an earlier archive left there, and repoints the epic's
 // `- phase` member whose path names the lane's record, whatever its phase name, at the archived record, saying so
 // when no member line names it. It refuses, copying nothing, when the project file or an epic it names cannot be
-// read, a record reached through a link, and an entry that is neither a file nor a link. It appends its lane.log line
+// read, a record reached through a link, an entry that is neither a file nor a link, and a name find lists that is not
+// UTF-8, which remove refuses too. It appends its lane.log line
 // last. remove refuses while a `- phase` member line of a roster epic still names the live record, read as archive
 // reads it, since an earlier archive's lane.log line outlives a later archive that failed on the epic; and unless
 // lane.log holds an archive line for the role since its latest create. remove lists the files by find again and
@@ -86,9 +87,19 @@ const same = (a, b) => {
     return x.isFile() && y.isFile() && sha256(a) === sha256(b)
   } catch { return false }
 }
-/** Every entry of the worktree `root` but its directories and its .git, links among them, by find, relative to `root`. */
-const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'], LISTING)
-  .split('\0').filter(Boolean).map((f) => path.relative(root, f))
+/** Every entry of the worktree `root` but its directories and its .git, links among them, by find, relative to `root`.
+ *  The listing is read as bytes and a name that does not survive a UTF-8 decode and re-encode is refused: decoded, it
+ *  can read as another file's name, which is then handled twice and it never. */
+const findFiles = (root) => {
+  const out = execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'], { ...LISTING, encoding: 'buffer' })
+  const names = []
+  for (let at = 0, end; (end = out.indexOf(0, at)) >= 0; at = end + 1) if (end > at) names.push(out.subarray(at, end))
+  const lossy = names.filter((b) => !Buffer.from(b.toString()).equals(b))
+  if (lossy.length) refuse(`${lossy.map(escaped).join(', ')} is not a UTF-8 name, so archive and remove cannot name it`)
+  return names.map((b) => path.relative(root, b.toString()))
+}
+/** `b` as text, a byte outside printable ASCII, and the backslash, as \xHH. */
+const escaped = (b) => [...b].map((c) => (c >= 0x20 && c < 0x7f && c !== 0x5c ? String.fromCharCode(c) : `\\x${c.toString(16).padStart(2, '0')}`)).join('')
 const inside = (root, p) => { const r = path.relative(root, p); return Boolean(r) && !r.startsWith('..') && !path.isAbsolute(r) }
 /** `p` with the links in its existing prefix resolved, the rest as written; a dangling link throws. */
 const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry: false })) { rest = path.join(path.basename(p), rest); p = path.dirname(p) } return path.join(fs.realpathSync(p), rest) }
