@@ -22,7 +22,7 @@ Run every check here before anything else, and stop at the first that fails, say
 
 ## Roles and the run
 
-A run has three kinds of session, each a Claude Code session in its own herdr pane: you; one lane session per phase; and the merge session. The lane watcher and the sender are scripts, not sessions, and the owner answers questions. A lane is not a seat: you never wait on one, and you cycle on your own schedule (doctrine step 5's warning waits only on your seats).
+A run has three kinds of session, each a Claude Code session in its own herdr pane: you; one lane session per phase; and the merge session. The lane watcher and the sender are scripts, not sessions, and the owner answers questions. A lane is not a seat (doctrine step 5): you never wait on one, and you cycle on your own schedule.
 
 Every session reads its role and its run from its own environment, set by its launch line, so a `/clear`, a restart or a seat keeps them. `<run>` holds `inbox/`, `held/<role>/`, `model/<role>`, `waiting-questions.md`, `reset.txt`, `events.log`, `guard.log` and `lane.log`. `node hooks/dctr-project.mjs board` writes `board.md`, one row per lane phase, into the Records path, and is how you read the run at a glance.
 
@@ -38,7 +38,7 @@ In this order:
 4. Write each role's model id to `<run>/model/<role>` before that role starts, since its launch line reads the file.
 5. Write each lane's tier and cycle cap into that lane's first handoff, from which the lane writes its own `auto-cycle: on` line. Never write a lane's auto-cycle line into its record yourself.
 6. Start the lane watcher with `node hooks/dctr-lanewatch.mjs start`.
-7. **The merge session, before any lane**: `node hooks/dctr-lane.mjs create merge <repo> <integration branch> <handoff>`. When `create merge` refuses because a worktree of that repo, your own checkout or the repo's primary checkout among them, holds the integration branch, stop the run and say why. Create no lane after that refusal.
+7. **The merge session, before any lane**: `node hooks/dctr-lane.mjs create merge <repo> <integration branch> <handoff>`. When `create merge` refuses, stop the run and say why. Create no lane after that refusal.
 8. **The guard probe.** Attempt one Write to `<checkout>/guard-probe.txt`, which is outside every path the guard allows you. Then read `<run>/guard.log`. When it has gained no line `<ISO time> Write <checkout>/guard-probe.txt` (the absolute path), stop the run and say the guard is not on. Judge by that line, never by the Write's error alone, since a guard failing open gives an error from nothing and no line.
 9. Create each lane with `node hooks/dctr-lane.mjs create <role> <repo> <base> <handoff>`, its first handoff written under your own `docs/handoffs/`.
 
@@ -48,7 +48,7 @@ In this order:
 - **Overlapping lanes run in separate worktrees with disjoint files**, each with its own record and its own auto-cycle line.
 - **Every worktree transition is `dctr-lane.mjs`'s**: `create`, `reset`, `archive` and `remove`, for every lane and for the merge worktree, never a `git worktree` or `git reset` by hand, and no lane makes one. `archive` before `remove`, and never `remove` a lane whose session still runs.
 - **A lane knows it is a lane from its first handoff**, whose first action is its brief. The brief you write for each lane, and for the merge session, says:
-  - Read `<run>/reset.txt` before acting, and when the session started before the time it names, log a hold in the record and do no work until that time has passed.
+  - Read `<run>/reset.txt` before acting, and when the session started before the time it names, log the hold only as the one line of your reply `doctrine-resume`'s first step gives, and do no work until that time has passed.
   - Read your held folder at each resume, and act on what is there.
   - Send every question for the owner to the orchestrator as a `question` report (`node hooks/dctr-send.mjs report question <text>`), never to the owner directly.
   - Ask the orchestrator for each lifecycle write by a `request` report, and take no step that needs it until the answer is in your held folder (`doctrine-project`, its orchestrated-run rule).
@@ -63,7 +63,7 @@ In this order:
 
 ## Questions and alarms
 
-- **A waiting question lives in `<run>/waiting-questions.md`**, the one source for it, and never as a `question:` line in your record, which would pause your cycle. At each context warning write every unanswered question, word for word, into your memory file's Resume line and beside the lane that asked in your handoff (`doctrine-handoff`'s orchestrator profile).
+- **A waiting question lives in `<run>/waiting-questions.md`**, the one source for it, and never as a `question:` line in your record, which would pause your cycle. At each context warning copy every unanswered question as `doctrine-backup`'s and `doctrine-handoff`'s orchestrator profiles say.
 - **One question to the owner at a time.**
 - **At an alarm, yours or a lane's**, write doctrine step 5's diagnosis with a recommended option and the options beside it, for the owner to answer in one word. Never rule on an alarm yourself.
 - **A per-model usage limit**: put a `/model` switch for that role's running session to the owner as one question naming the role and the model id you recommend. The owner types `/model` in that role's pane himself, after answering: no session, seat or script of the run types it, since only the fixed lines are ever typed there. Record his answer as a `note` ruling in the epic record whose quote holds his own words (`formats.md`, Entries), never as a `ruling:` line in a session's record, since any later `ruling:` line clears a fired alarm there (`pausingStates` in `hooks/dctr-lib.mjs`). Then write the new model id to `<run>/model/<role>`, so a later restart starts that role on it.
@@ -83,7 +83,7 @@ After a usage-limit stop, the cycle hook writes the reset time to `<run>/reset.t
 
 ## The no-code boundary
 
-You and your seats change no tracked file in any checkout or worktree outside your allowed paths, by any tool, Bash and MCP tools included, and a file you commit counts as tracked. Your allowed paths are your record and every file under the Records path, `docs/PROJECT.md`, every file under `docs/epics/`, your memory file, every file under `docs/handoffs/`, and the `.doctrine/auto-cycle` files. `hooks/dctr-guard.mjs` refuses your Write, Edit and NotebookEdit calls anywhere else and logs each to `<run>/guard.log`. It does not see Bash or MCP writes, so this rule is what holds them. Keeping working state in claude-mem or graft, and research by you or your seats, are not work in this sense. Only you write `docs/PROJECT.md` and the epic records in a run: you make each write a lane requests, run `doctrine-project`'s `check`, commit, and answer through the lane's held folder.
+You and your seats change no tracked file in any checkout or worktree outside your allowed paths, by any tool, Bash and MCP tools included, and a file you commit counts as tracked. Your allowed paths are your record and every file under the Records path, `docs/PROJECT.md`, every file under `docs/epics/`, your memory file, every file under `docs/handoffs/`, and the `.doctrine/auto-cycle` files. `hooks/dctr-guard.mjs` refuses your Write, Edit and NotebookEdit calls anywhere else and logs each to `<run>/guard.log`. It does not see Bash or MCP writes, so this rule is what holds them. Keeping working state in claude-mem or graft, and research by you or your seats, are not work in this sense. Only you write `docs/PROJECT.md` and the epic records (`doctrine-project`, its orchestrated-run rule).
 
 ## Ending the run
 

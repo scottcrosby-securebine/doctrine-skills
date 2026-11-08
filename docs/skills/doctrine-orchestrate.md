@@ -52,6 +52,8 @@ Claude Code, a repo carrying `docs/PROJECT.md`, and [herdr](https://herdr.dev) w
 - A lane started before the merge session, or after the merge worktree could not be created.
 - A line typed into a lane's pane by hand, or `/model` typed by anything but you.
 - A worktree moved by hand instead of by `dctr-lane.mjs`.
-- A lane counted as landed before its merged-revision gate read `exit=0`.
+- A lane counted as landed before its merged-revision gate read `exit=0` with no `capture=incomplete` line.
 - An alarm ruled by the orchestrator instead of put to you.
 - A file outside the orchestrator's allowed paths changed by the orchestrator or its seats through Bash.
+
+The specification is [`skills/doctrine-orchestrate/SKILL.md`](../../skills/doctrine-orchestrate/SKILL.md); trust it over this page wherever the two disagree.

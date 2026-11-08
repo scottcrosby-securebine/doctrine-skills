@@ -688,16 +688,24 @@ export function readUsage(transcriptText, lastUuid, host = 'claude') {
   if (host === 'codex') return readCodexUsage(transcriptText, lastUuid)
   const ls = String(transcriptText).split('\n')
   for (let i = ls.length - 1; i >= 0; i--) {
-    let e
-    try { e = JSON.parse(ls[i]) } catch { continue }
-    const u = e?.message?.usage
-    if (e?.type !== 'assistant' || !u || e.isSidechain === true || e.isApiErrorMessage) continue
-    const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
-    if (used <= 0) continue
+    const e = usageEntry(ls[i])
+    if (!e) continue
     if (lastUuid && e.uuid === lastUuid) return { unknown: 'stale' }
-    return { used, uuid: e.uuid, at: e.timestamp || null }
+    return e
   }
   return { unknown: 'unparseable' }
+}
+
+/** One transcript line as a main-thread reading `{ used, uuid, at }`, or null: the entry test `readUsage` and
+ *  `firstUsage` share, so a skip rule reaches both. */
+function usageEntry(line) {
+  let e
+  try { e = JSON.parse(line) } catch { return null }
+  const u = e?.message?.usage
+  if (e?.type !== 'assistant' || !u || e.isSidechain === true || e.isApiErrorMessage) return null
+  const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+  if (used <= 0) return null
+  return { used, uuid: e.uuid, at: e.timestamp || null }
 }
 
 /** The handoff cost the floor adds to a session's first reading (SC5): the tokens from the gauge's warning to the
@@ -752,17 +760,13 @@ export function capacityDecision({ window, load, tier }) {
   return { accept, window, load, tier, need, margin: HANDOFF_COST_TOKENS }
 }
 
-/** A transcript's FIRST main-thread usage reading (E15-D209), the resume load: the same entry test as `readUsage`,
+/** A transcript's FIRST main-thread usage reading (E15-D209), the resume load: `readUsage`'s entry test,
  *  read from the top, since the last reading is the session's use now and not what a resume cost. */
 export function firstUsage(transcriptText) {
   if (transcriptText == null) return { unknown: 'missing' }
   for (const l of String(transcriptText).split('\n')) {
-    let e
-    try { e = JSON.parse(l) } catch { continue }
-    const u = e?.message?.usage
-    if (e?.type !== 'assistant' || !u || e.isSidechain === true || e.isApiErrorMessage === true) continue
-    const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
-    if (used > 0) return { used, uuid: e.uuid, at: e.timestamp || null }
+    const e = usageEntry(l)
+    if (e) return e
   }
   return { unknown: 'unparseable' }
 }

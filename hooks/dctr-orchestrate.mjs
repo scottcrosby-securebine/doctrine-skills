@@ -38,8 +38,8 @@ export function capacity(modelId, tierText, transcriptText) {
   const d = capacityDecision({ window, load, tier: resolved.tier })
   const facts = `window ${d.window} load ${d.load} tier ${d.tier} margin ${d.margin}`
   if (d.accept) return { accept: true, line: `accept ${facts}` }
-  const why = [d.need < d.tier ? null : `load plus margin ${d.need} is not below the tier`, d.tier <= d.window ? null : 'the tier is above the window']
-  return { accept: false, line: `refuse ${facts}: ${why.filter(Boolean).join('; ')}` }
+  // resolveTier has already refused a tier above 90% of the window, so only the margin can refuse here.
+  return { accept: false, line: `refuse ${facts}: load plus margin ${d.need} is not below the tier` }
 }
 
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(import.meta.filename) } catch { return false } })()
