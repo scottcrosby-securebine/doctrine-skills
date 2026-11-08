@@ -13,7 +13,8 @@ codebase tour. Use `doctrine-primer` when the agent needs the project explained.
 In a session whose `DCTR_ROLE` is set (a `doctrine-orchestrate` run), this is the first step, before
 step 1's reads, step 1b's skill loads, its interrupted-backup check, the handoff's first action and
 every other step that could start work. Read `$DCTR_ROLE` and `$DCTR_RUN` from your environment, then
-read `<run>/reset.txt`, `<run>` being the directory `DCTR_RUN` names. While the time it names has not
+read `<run>/reset.txt`, `<run>` being the directory `DCTR_RUN` names, which only an account-wide
+usage limit writes: a per-model limit writes none and holds nothing. While the time it names has not
 passed, log the hold as one line of your reply, `reset hold: <role> until <time>`, and take no other
 action until it has: wait for that time as your host reference says to wait, then go on to step 1. A
 missing file is no hold. A file that names no time you can read holds nothing, and step 4's report
