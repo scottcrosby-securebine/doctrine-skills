@@ -45,13 +45,13 @@ use doctrine-orchestrate to run epic E15's open phases at once
 
 ## Requirements
 
-Claude Code, a repo carrying `docs/PROJECT.md`, and [herdr](https://herdr.dev) with each session in a herdr pane and herdr's Claude integration installed. Without herdr the skill refuses to start a run and says why. Auto-cycle's setup applies to every session of the run, since each one cycles on its own. [docs/requirements.md](../requirements.md) has the install commands.
+Claude Code, a repo carrying `docs/PROJECT.md`, and [herdr](https://herdr.dev) with each session in a herdr pane and herdr's Claude integration installed. Without herdr the skill refuses to start a run and says why. In a public repo, or one an installer's tooling copies whole, `docs/handoffs/` must already be in `.gitignore`, since the orchestrator never edits that file and stops the run, naming the line to add, when it is missing. Auto-cycle's setup applies to every session of the run, since each one cycles on its own. [docs/requirements.md](../requirements.md) has the install commands.
 
 ## Red flags
 
 - A lane started before the merge session, or after the merge worktree could not be created.
 - A line typed into a lane's pane by hand, or `/model` typed by anything but you.
-- A worktree moved by hand instead of by `dctr-lane.mjs`.
+- A worktree moved by hand instead of by `dctr-lane.mjs`, other than the merge session rolling the integration branch back after a failed gate.
 - A lane counted as landed before its merged-revision gate read `exit=0` with no `capture=incomplete` line.
 - An alarm ruled by the orchestrator instead of put to you.
 - A file outside the orchestrator's allowed paths changed by the orchestrator or its seats through Bash.

@@ -168,7 +168,8 @@ edits. Hand it, pasted in full, never as paths:
 - the project's documented law: `CLAUDE.md`, `AGENTS.md` and the review checklist (CONTRIBUTING, a PR
   template), each whole, or that the repo has none of them
 - the standard the memory file is graded against: this skill's step 2 `Runtime` bullet, step 3 and
-  step 4, whole, as this file reads
+  step 4, whole, as this file reads, and, in a session under the orchestrator profile, that profile's
+  paragraph, whole, with the run's `waiting-questions.md`
 - whenever the files include a handoff, the standard it is graded against: `doctrine-handoff`'s step 3
   Sections list and the Rules list after it, whole, and its step 2, whole, with the `handoff/SKILL.md`
   that step 2 finds, whole, where it finds one (read from `../doctrine-handoff/SKILL.md` from this

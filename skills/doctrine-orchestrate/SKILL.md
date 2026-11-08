@@ -33,20 +33,21 @@ The only text any session or script types into a run session's pane is one of fo
 In this order:
 
 1. Your checkout holds a branch of its own, never the integration branch.
-2. **One question to the owner**, in one message: the full model id, the tier and the cycle cap for each role (yourself, the merge session and every lane), and your own time budget. Write the time budget into your anchor (doctrine step 1).
-3. **Capacity.** For each role run `node hooks/dctr-orchestrate.mjs capacity <model id> <tier> <transcript path>`, the transcript path being your own session's transcript for every role, since a role not yet started has none and each role's resume load was measured alike. Refuse to start a role it prints `refuse` for, and put the refusal to the owner. Decide capacity by that command alone: compute no window, load or margin yourself.
-4. Write each role's model id to `<run>/model/<role>` before that role starts, since its launch line reads the file.
-5. Write each lane's tier and cycle cap into that lane's first handoff, from which the lane writes its own `auto-cycle: on` line. Never write a lane's auto-cycle line into its record yourself.
-6. Start the lane watcher with `node hooks/dctr-lanewatch.mjs start`.
-7. **The merge session, before any lane**: `node hooks/dctr-lane.mjs create merge <repo> <integration branch> <handoff>`. When `create merge` refuses, stop the run and say why. Create no lane after that refusal.
-8. **The guard probe.** Attempt one Write to `<checkout>/guard-probe.txt`, which is outside every path the guard allows you. Then read `<run>/guard.log`. When it has gained no line `<ISO time> Write <checkout>/guard-probe.txt` (the absolute path), stop the run and say the guard is not on. Judge by that line, never by the Write's error alone, since a guard failing open gives an error from nothing and no line.
-9. Create each lane with `node hooks/dctr-lane.mjs create <role> <repo> <base> <handoff>`, its first handoff written under your own `docs/handoffs/`.
+2. **Ignored handoffs.** You never edit `.gitignore`, so check before the run starts that your repo already ignores what `doctrine-backup`'s step 0 would otherwise add there. Where that step's "Ignore first" bullet judges the repo public or copied whole, and `git check-ignore docs/handoffs/` in your checkout exits 1, stop the run and tell the owner to add the line `docs/handoffs/` to that repo's `.gitignore`.
+3. **One question to the owner**, in one message: the full model id, the tier and the cycle cap for each role (yourself, the merge session and every lane), and your own time budget. Write the time budget into your anchor (doctrine step 1).
+4. **Capacity.** For each role run `node hooks/dctr-orchestrate.mjs capacity <model id> <tier> <transcript path>`, the transcript path being your own session's transcript for every role, since a role not yet started has none and each role's resume load was measured alike. Refuse to start a role it prints `refuse` for, and put the refusal to the owner. Decide capacity by that command alone: compute no window, load or margin yourself.
+5. Write each role's model id to `<run>/model/<role>` before that role starts, since its launch line reads the file.
+6. Write the tier and cycle cap of each lane, and of the merge session, into that session's first handoff, from which it writes its own `auto-cycle: on` line. Never write a lane's or the merge session's auto-cycle line into its record yourself.
+7. Start the lane watcher with `node hooks/dctr-lanewatch.mjs start`.
+8. **The merge session, before any lane**: `node hooks/dctr-lane.mjs create merge <repo> <integration branch> <handoff>`. When `create merge` refuses, stop the run and say why. Create no lane after that refusal.
+9. **The guard probe.** Attempt one Write to `<checkout>/guard-probe.txt`, which is outside every path the guard allows you. Then read `<run>/guard.log`. When it has gained no line `<ISO time> Write <checkout>/guard-probe.txt` (the absolute path), stop the run and say the guard is not on. Judge by that line, never by the Write's error alone, since a guard failing open gives an error from nothing and no line.
+10. Create each lane with `node hooks/dctr-lane.mjs create <role> <repo> <base> <handoff>`, its first handoff written under your own `docs/handoffs/`.
 
 ## Lanes
 
 - **Each lane is its own doctrine phase**, never a sub-record of yours: its own `- phase` line under the epic's `## Members`, its own Coverage line on the items it serves, its own record and its own wrapper and gate.
 - **Overlapping lanes run in separate worktrees with disjoint files**, each with its own record and its own auto-cycle line.
-- **Every worktree transition is `dctr-lane.mjs`'s**: `create`, `reset`, `archive` and `remove`, for every lane and for the merge worktree, never a `git worktree` or `git reset` by hand, and no lane makes one. `archive` before `remove`, and never `remove` a lane whose session still runs.
+- **Every worktree transition is `dctr-lane.mjs`'s**: `create`, `reset`, `archive` and `remove`, for every lane and for the merge worktree, never a `git worktree` or `git reset` by hand, and no lane makes one. The one exception is the merge session's rollback under Merges and ordering: resetting the integration branch, inside the merge worktree, to the commit before a merge whose merged-revision gate did not pass is that session's own step and not a worktree transition. `archive` before `remove`, and never `remove` a lane whose session still runs.
 - **A lane knows it is a lane from its first handoff**, whose first action is its brief. The brief you write for each lane, and for the merge session, says:
   - Read `<run>/reset.txt` before acting, and when the session started before the time it names, log the hold only as the one line of your reply `doctrine-resume`'s first step gives, and do no work until that time has passed.
   - Read your held folder at each resume, and act on what is there.
@@ -66,7 +67,7 @@ In this order:
 - **A waiting question lives in `<run>/waiting-questions.md`**, the one source for it, and never as a `question:` line in your record, which would pause your cycle. At each context warning copy every unanswered question as `doctrine-backup`'s and `doctrine-handoff`'s orchestrator profiles say.
 - **One question to the owner at a time.**
 - **At an alarm, yours or a lane's**, write doctrine step 5's diagnosis with a recommended option and the options beside it, for the owner to answer in one word. Never rule on an alarm yourself.
-- **A per-model usage limit**: put a `/model` switch for that role's running session to the owner as one question naming the role and the model id you recommend. The owner types `/model` in that role's pane himself, after answering: no session, seat or script of the run types it, since only the fixed lines are ever typed there. Record his answer as a `note` ruling in the epic record whose quote holds his own words (`formats.md`, Entries), never as a `ruling:` line in a session's record, since any later `ruling:` line clears a fired alarm there (`pausingStates` in `hooks/dctr-lib.mjs`). Then write the new model id to `<run>/model/<role>`, so a later restart starts that role on it.
+- **A per-model usage limit**: put a `/model` switch for that role's running session to the owner as one question naming the role and the model id you recommend. Before you recommend a model, run `node hooks/dctr-orchestrate.mjs capacity <new model id> <the role's tier> <your own transcript>`, and recommend only a model it prints `accept` for. Where it prints `refuse`, the question names that refusal and a tier at which the same command prints `accept` for that model. The owner types `/model` in that role's pane himself, after answering: no session, seat or script of the run types it, since only the fixed lines are ever typed there. Record his answer as a `note` ruling in the epic record whose quote holds his own words (`formats.md`, Entries), never as a `ruling:` line in a session's record, since any later `ruling:` line clears a fired alarm there (`pausingStates` in `hooks/dctr-lib.mjs`). Then write the new model id to `<run>/model/<role>`, so a later restart starts that role on it, after the same command has printed `accept` for the model and tier he chose.
 - **An account-wide usage limit**: wait for the reset and switch no model.
 
 ## Recovery
@@ -93,13 +94,13 @@ After the last lane has landed and the epic's state is written, run `node hooks/
 
 - A refusal skipped because the run "obviously" has herdr, or a project file judged present because `runRoot` returned a run.
 - A lane created before the merge session, or after `create merge` refused.
-- A capacity verdict worked out in prose, or a role started on a `refuse`.
+- A capacity verdict worked out in prose, a role started on a `refuse`, or a `/model` switch recommended or written with no `accept` from the capacity command.
 - A guard probe judged by the Write's error with no `guard.log` line read.
 - Text typed into a lane's pane that is not one of the four fixed lines: a message, a hand-typed wake, or `/model`.
 - A waiting question written as a `question:` line in your record, or quoted from memory rather than word for word.
 - A `/model` answer recorded as a `ruling:` line, or a model switched on an account-wide limit.
 - An alarm ruled by you because the diagnosis seemed clear.
-- A worktree reset by hand, or a lane reset before its HEAD report is in.
+- A worktree reset by hand, other than the merge session's rollback after a failed gate, or a lane reset before its HEAD report is in.
 - A checked-in line written on the merge session's word alone, before its gate reads `exit=0`.
 - A Monitor still armed at your ready line, so your Stop is held and the cycle never comes.
 - A fix to a lane's code made by you or your seat through Bash, because the guard did not stop it.
