@@ -36,18 +36,18 @@ const args = process.argv.slice(2)
 const stFile = path.join(dir, 'state.json')
 let st = { n: 0, panes: {} }
 try { st = JSON.parse(fs.readFileSync(stFile, 'utf8')) } catch {}
-let out = '', err = '', code = 0, read = null
+let out = '', err = '', code = 0, read = null, session = null, made = null
 const watch = JSON.parse(process.env.HERDR_SHIM_WATCH || '[]').map((f) => fs.existsSync(f))
 if (args[0] === 'tab' && args[1] === 'create') {
   if (mode === 'tab-fail') { code = 1; err = 'transport down' }
-  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0 }; out = JSON.stringify({ result: { tab: { tab_id: 't' + st.n }, root_pane: { pane_id: id } } }) }
+  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0 }; made = { tab: 't' + st.n, pane: id }; out = JSON.stringify({ result: { tab: { tab_id: made.tab }, root_pane: { pane_id: id } } }) }
 } else if (args[0] === 'pane' && args[1] === 'get') {
   const p = st.panes[args[2]]
   if (mode === 'get-fail') { code = 1; err = 'transport down' }
   else if (mode === 'get-empty') out = ''
   else if (!p) { code = 1; err = JSON.stringify({ error: { code: 'pane_not_found' } }) }
   else {
-    let status, session
+    let status
     if (p.typed === 0) { status = mode === 'agent-before' ? 'idle' : 'unknown'; session = mode === 'agent-before' ? 'old' : null }
     else if (p.busy > 0) { p.busy--; status = 'working'; session = 's1' }
     else { status = mode === 'stuck-after' ? 'working' : 'idle'; session = 's1' }
@@ -60,7 +60,7 @@ if (args[0] === 'tab' && args[1] === 'create') {
   out = JSON.stringify({ result: {} })
 } else out = JSON.stringify({ result: {} })
 fs.writeFileSync(stFile, JSON.stringify(st))
-fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
+fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
 if (err) process.stderr.write(err + '\\n')
 process.stdout.write(out)
 process.exit(code)
@@ -108,6 +108,7 @@ Records: .doctrine/records
 
 ## Rulings and returns
 `
+const OTHER = 'docs/other/a.md'
 const EPIC = (member) => `# Epic E1: Lanes
 State: Not started
 Combined check: node run-all.mjs ; pass when it exits 0
@@ -122,10 +123,11 @@ The lanes.
 - Check: run lane a
 - Control: a lane that does not land fails it
 - Evidence: none yet
-- Coverage: a: satisfy
+- Coverage: build-a: satisfy
 
 ## Members
-- phase a: ${member}
+- phase build-a: ${member}
+- phase a: ${OTHER}
 
 ## Rulings and returns
 ### R1 ruling, 2026-11-08T00:00:00Z
@@ -139,13 +141,14 @@ let fixtureN = 0
 /** An orchestrator repo: tracked memory file (unless `memory` is 'untracked' or 'ignored'), a .gitignore excluding
  *  its Records path, a tracked source file, a project file and epic, the first handoffs under docs/handoffs/ (not
  *  tracked), a run under Records with a model file per role. `branch` is the checkout's branch after the base. */
-function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctrine/records/a.md' }, orchRecord = false } = {}) {
-  const root = path.join(tmp, `f${++fixtureN}`)
+function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctrine/records/a.md' }, orchRecord = false, rootName = '', runName = 'orchestrate' } = {}) {
+  const root = path.join(tmp, `f${++fixtureN}${rootName}`)
   const repo = path.join(root, 'orch')
   fs.mkdirSync(repo, { recursive: true })
   git(repo, 'init', '-q', '-b', 'main')
   write(path.join(repo, '.gitignore'), '.doctrine/records/\n.claude/\n' + (memory === 'ignored' ? 'SESSION_MEMORY.md\n' : ''))
   write(path.join(repo, 'src.txt'), 'source\n')
+  write(path.join(repo, OTHER), '# another phase\n\n- State: Open\n')
   write(path.join(repo, 'docs/PROJECT.md'), PROJECT)
   write(path.join(repo, 'docs/epics/E1.md'), EPIC('.claude/worktrees/a/.doctrine/records/a.md'))
   if (memory === 'tracked') write(path.join(repo, 'SESSION_MEMORY.md'), MEMORY)
@@ -154,7 +157,7 @@ function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctri
   if (branch !== 'main') git(repo, 'checkout', '-q', '-b', branch)
   for (const [role, rec] of Object.entries(handoffs)) write(path.join(repo, 'docs/handoffs', `${role}.md`), handoffText(rec, role))
   if (orchRecord) write(path.join(repo, '.doctrine/records/a.md'), '# the orchestrator\'s own a.md\n\n- State: Exited.\n')
-  const run = path.join(repo, '.doctrine/records/orchestrate')
+  const run = path.join(repo, '.doctrine/records', runName)
   for (const role of ['a', 'b', 'c', 'merge']) write(path.join(run, 'model', role), 'claude-opus-5-5\n')
   const shim = path.join(root, 'shim'); fs.mkdirSync(shim)
   return { root, repo, base, run, shim, wt: (role) => path.join(repo, '.claude/worktrees', role), laneLog: path.join(run, 'lane.log') }
@@ -213,9 +216,10 @@ clause('clause 2e — create makes one pane in its own tab with the worktree as 
   runs.length === 3 && runs.every((e) => e.args[2] === 'p1') &&
   JSON.stringify(runs.map((e) => e.args[3])) === JSON.stringify([launchA?.launch, '/clear', RESUME_LINE]),
   JSON.stringify(logA.map((e) => e.args)))
-clause('clause 2f — each typing call follows a pane get of that pane reading it ready: unknown with no session before the launch line, idle after it (L7)',
-  runs.length === 3 && runs.map((e) => lastGet(e.i)).every((g, k) => g && g.args[2] === 'p1' && g.read === (k === 0 ? 'unknown' : 'idle')),
-  JSON.stringify(runs.map((e) => lastGet(e.i)?.read)))
+clause('clause 2f — each typing call follows a pane get of that pane reading it ready: unknown with no agent session before the launch line, idle after it, the pane having read working between (E15-D152, L7)',
+  runs.length === 3 && runs.map((e) => lastGet(e.i)).every((g, k) => g && g.args[2] === 'p1' && (k === 0 ? g.read === 'unknown' && g.session === null : g.read === 'idle')) &&
+  logA.some((e) => e.read === 'working'),
+  JSON.stringify(runs.map((e) => [lastGet(e.i)?.read, lastGet(e.i)?.session])))
 clause('clause 2g — no herdr call is made before the worktree, handoff copy, record and kickoff exist, and lane.log is appended only after the last typing call (L8)',
   logA.length > 0 && logA.every((e) => e.watch.length === 0 || e.watch.every(Boolean)) && logA.every((e) => e.laneLog === false) && laneLines(A).length === 1,
   JSON.stringify(logA.map((e) => [e.watch, e.laneLog])))
@@ -247,11 +251,13 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   const entries = (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   const [e1, e2] = entries
   const argv = (e) => JSON.stringify(e?.argv)
-  clause('clause 2j — the recorded launch line, run under env -i, starts claude in the worktree with its role, caller, run, config dir, PATH and TMPDIR, on the model the model file names when the line runs (E15-D126)',
-    r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && fs.realpathSync(e1.cwd) === L.wt('a') &&
+  const shown = `exit ${r.code} ${said(r)}; line ${JSON.stringify(line)}; entries ${JSON.stringify(entries.map((e) => [e.argv, e.cwd, e.env.DCTR_ROLE, e.env.DCTR_CALLER, e.env.DCTR_RUN, e.env.CLAUDE_CONFIG_DIR, e.env.TMPDIR]))}`
+  clause('clause 2j — the recorded launch line, run under env -i, starts claude in the worktree with its role, caller, run, config dir /x, and the create call\'s PATH and TMPDIR (E15-D126)',
+    r.code === 0 && entries.length >= 1 && fs.realpathSync(e1.cwd) === L.wt('a') &&
     e1.env.DCTR_ROLE === 'a' && e1.env.DCTR_CALLER === 'a' && e1.env.DCTR_RUN === L.run && e1.env.CLAUDE_CONFIG_DIR === '/x' &&
-    e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']),
-    `exit ${r.code} ${said(r)}; line ${JSON.stringify(line)}; entries ${JSON.stringify(entries.map((e) => [e.argv, e.cwd, e.env.DCTR_ROLE, e.env.DCTR_CALLER, e.env.DCTR_RUN, e.env.CLAUDE_CONFIG_DIR, e.env.TMPDIR]))}`)
+    e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp, shown)
+  clause('clause 2j2 — the same line, run again after the model file changes, starts claude on the model the file names when the line runs: claude-opus-5-5 first, claude-sonnet-5 second (E15-D219)',
+    r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']), shown)
 }
 
 // ---------------------------------------------------------------- clause 2: the first resume (E15-D160)
@@ -336,17 +342,19 @@ for (const kind of ['untracked', 'ignored']) {
   write(path.join(U.repo, 'SESSION_MEMORY.md'), '# memory tracked at u\n')
   git(U.repo, 'add', '-f', 'SESSION_MEMORY.md'); git(U.repo, 'commit', '-qm', 'u')
   const u = head(U.repo)
+  const u2 = commitIn(U.repo, 'SESSION_MEMORY.md', '# memory tracked at u2\n', 'u2')
   git(U.repo, 'checkout', '-q', 'main')
   const rc = create(U, 'c')
   const w = U.wt('c')
-  append(path.join(w, 'SESSION_MEMORY.md'), '\nlane c line\n')
-  const copy = readBuf(path.join(w, "SESSION_MEMORY.md"))
-  UNT[kind] = { U, u, w }
-  for (const [k, target] of [['first', u], ['second', U.base]]) {
+  UNT[kind] = { U, u, u2, w }
+  for (const [k, target] of [['first', u], ['second', u2], ['third', U.base]]) {
+    append(path.join(w, 'SESSION_MEMORY.md'), `\nlane c line before the ${k} reset\n`)
+    const copy = readBuf(path.join(w, 'SESSION_MEMORY.md'))
     const r = lane(U, ['reset', 'c', target])
     const lsv = git(w, 'ls-files', '-v', 'SESSION_MEMORY.md').out
-    clause(`clause 2p — ${k} reset of a lane whose memory file is ${kind} at the base, to ${k === 'first' ? 'u, which tracks that path' : 'the base again'}: exit 0, HEAD there, the memory file byte for byte${k === 'first' ? ', marked S' : ''} (E15-D165, L9)`,
-      rc.code === 0 && r.code === 0 && head(w) === target && Buffer.compare(readBuf(path.join(w, "SESSION_MEMORY.md")), copy) === 0 && (k === 'first' ? lsv === 'S SESSION_MEMORY.md' : lsv === ''),
+    const to = { first: 'u, which tracks that path', second: 'u2, which changes the tracked file', third: 'the base again' }[k]
+    clause(`clause 2p — ${k} reset of a lane whose memory file is ${kind} at the base, to ${to}: exit 0, HEAD there, the memory file byte for byte${k === 'third' ? '' : ', marked S'} (E15-D165, E15-D215, L9)`,
+      rc.code === 0 && r.code === 0 && head(w) === target && Buffer.compare(readBuf(path.join(w, 'SESSION_MEMORY.md')), copy) === 0 && (k === 'third' ? lsv === '' : lsv === 'S SESSION_MEMORY.md'),
       `create ${rc.code} ${said(rc)}; exit ${r.code} ${said(r)}; head ${head(w)}; memory ${JSON.stringify(read(path.join(w, 'SESSION_MEMORY.md')))}; ls ${lsv}`)
   }
 }
@@ -373,12 +381,13 @@ clause('clause 2q — archive copies the record, the tracked unchanged handoff, 
   rar.code === 0 && missing.length === 0, `exit ${rar.code} ${said(rar)}; missing ${JSON.stringify(missing)}`)
 const epicAfterArchive = read(path.join(AR.f.repo, 'docs/epics/E1.md'))
 const rrm = lane(AR.f, ['remove', 'a'])
-const member = /^- phase a: (\S+)$/m.exec(read(path.join(AR.f.repo, 'docs/epics/E1.md')) || '')?.[1]
+const epicAfter = read(path.join(AR.f.repo, 'docs/epics/E1.md')) || ''
+const member = /^- phase build-a: (\S+)$/m.exec(epicAfter)?.[1]
 const chk = spawnSync('node', [path.join(HERE, 'dctr-project.mjs'), 'check', AR.f.repo], { encoding: 'utf8' })
-clause('clause 2r — archive repoints the epic\'s - phase member at the archived record: after remove, the line names a record under lanes/a/, the file exists, and dctr-project.mjs check exits 0 (E15-D124)',
+clause('clause 2r — archive repoints the member whose path names the lane\'s record, phase build-a for lane a, at the archived record: after remove, that line names the record under lanes/a/, the file exists, the - phase a line is unchanged, and dctr-project.mjs check exits 0 (E15-D124)',
   epicAfterArchive !== EPIC('.claude/worktrees/a/.doctrine/records/a.md') && member === '.doctrine/records/lanes/a/.doctrine/records/a.md' &&
-  exists(path.join(AR.f.repo, member)) && chk.status === 0,
-  `member ${member}; check ${chk.status} ${JSON.stringify(chk.stdout + chk.stderr)}`)
+  exists(path.join(AR.f.repo, member)) && epicAfter.split('\n').includes(`- phase a: ${OTHER}`) && chk.status === 0,
+  `member ${member}; epic ${JSON.stringify(epicAfter.split('\n').filter((l) => l.startsWith('- phase')))}; check ${chk.status} ${JSON.stringify(chk.stdout + chk.stderr)}`)
 clause('clause 2s — remove of a lane unchanged since its archive exits 0 and the worktree is gone, its branch kept (E15-D125)',
   rrm.code === 0 && !exists(AR.w) && !git(AR.f.repo, 'worktree', 'list', '--porcelain').out.includes(AR.w) && branches(AR.f.repo).some((b) => b.startsWith('a ')),
   `exit ${rrm.code} ${said(rrm)}`)
@@ -390,16 +399,18 @@ clause('clause 2t — archive and remove each append their own line to lane.log'
 // ---------------------------------------------------------------- clause 2: laneOf (L3)
 
 {
-  const t = ['2026-11-08T01:00:00Z orchestrator create a p1 /r/.claude/worktrees/a cd /r/.claude/worktrees/a && env X=1 claude',
-    '2026-11-08T02:00:00Z orchestrator reset a abc',
-    'not a line create a p9 /nowhere cd x',
-    '2026-11-08T03:00:00Z orchestrator create b p2 /r/.claude/worktrees/b cd b',
-    '2026-11-08T04:00:00Z orchestrator create a p3 /r/.claude/worktrees/a2 cd /r/.claude/worktrees/a2 && claude'].join('\n')
-  const got = laneOf(t, 'a')
-  clause('clause 2u — laneOf returns the LATEST create line for the role, with the launch line whole, and null for a role with none (L3)',
-    JSON.stringify(got) === JSON.stringify({ time: '2026-11-08T04:00:00Z', caller: 'orchestrator', role: 'a', pane: 'p3', worktree: '/r/.claude/worktrees/a2', launch: 'cd /r/.claude/worktrees/a2 && claude' }) &&
-    laneOf(t, 'b')?.pane === 'p2' && laneOf(t, 'c') === null && laneOf('', 'a') === null && laneOf(t.split('\n').slice(1, 3).join('\n'), 'a') === null,
-    JSON.stringify(got))
+  const t = ['2026-11-08T01:00:00Z orchestrator create a w1:p0 /r/.claude/worktrees/a cd /r/.claude/worktrees/a && env X=1 claude',
+    '2026-11-08T02:00:00Z orchestrator remove a',
+    '2026-11-08T03:00:00Z orchestrator create a w1:p1 /r/.claude/worktrees/a2 cd /r/.claude/worktrees/a2 && claude',
+    '2026-11-08T04:00:00Z orchestrator reset a abc',
+    '2026-11-08T05:00:00Z orchestrator archive a',
+    '2026-11-08T06:00:00Z orchestrator create b w1:p2 /r/.claude/worktrees/b cd /r/.claude/worktrees/b && claude --b'].join('\n')
+  const got = laneOf(t, 'a'), gotB = laneOf(t, 'b')
+  clause('clause 2u — laneOf returns the role\'s LATEST create line whatever lines for it follow, with the launch line whole, another role\'s own fields, and null for a role with none (E15-D187, L3)',
+    JSON.stringify(got) === JSON.stringify({ time: '2026-11-08T03:00:00Z', caller: 'orchestrator', role: 'a', pane: 'w1:p1', worktree: '/r/.claude/worktrees/a2', launch: 'cd /r/.claude/worktrees/a2 && claude' }) &&
+    JSON.stringify(gotB) === JSON.stringify({ time: '2026-11-08T06:00:00Z', caller: 'orchestrator', role: 'b', pane: 'w1:p2', worktree: '/r/.claude/worktrees/b', launch: 'cd /r/.claude/worktrees/b && claude --b' }) &&
+    laneOf(t, 'c') === null && laneOf('', 'a') === null,
+    JSON.stringify([got, gotB, laneOf(t, 'c')]))
 }
 
 // ---------------------------------------------------------------- clause 1: refusals make nothing
@@ -413,8 +424,51 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   const f = fixture()
   const r = create(f, 'a', { env: { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } })
   clause('clause 1d — contained (DCTR_VIEW_REQUEST_DIR set), create refuses, making nothing and calling herdr zero times (L5)', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
-  const rr = lane(f, ['reset', 'a', f.base], { env: { DCTR_ROLE: 'a' } })
-  clause('clause 1e — reset refuses outside the orchestrator role', rr.code !== 0 && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${rr.code}`)
+}
+
+// The caller's role (E15-D201) and the lane.log grammar (E15-D186), on one lane: after a real create, each of reset,
+// archive and remove is run as role a and with no role, which must refuse, and then as the orchestrator, which must
+// complete, so the role is the only thing that can have refused it.
+{
+  const f = fixture()
+  const t0 = new Date().toISOString()
+  const rc = lane(f, ['create', 'a', f.repo, f.base, handoffOf(f)], { env: { DCTR_CALLER: 'orchestrator' } })
+  const refused = [], completed = []
+  for (const args of [['reset', 'a', f.base], ['archive', 'a'], ['remove', 'a']]) {
+    for (const [env, unset] of [[{ DCTR_ROLE: 'a' }, []], [{}, ['DCTR_ROLE']]]) {
+      const ls = git(f.repo, 'worktree', 'list', '--porcelain').out, lines = laneLines(f).length, calls = shimLog(f).length
+      const r = lane(f, args, { env, unset })
+      refused.push({ args: args.join(' '), role: env.DCTR_ROLE ?? 'unset', ok: r.code !== 0 && git(f.repo, 'worktree', 'list', '--porcelain').out === ls && laneLines(f).length === lines && shimLog(f).length === calls })
+    }
+    const r = lane(f, args, { env: { DCTR_CALLER: 'orchestrator' } })
+    completed.push({ args: args.join(' '), code: r.code })
+  }
+  for (const [env, unset] of [[{ DCTR_ROLE: 'a' }, []], [{}, ['DCTR_ROLE']]]) {
+    const r = create(f, 'b', { env, unset })
+    refused.push({ args: 'create b', role: env.DCTR_ROLE ?? 'unset', ok: r.code !== 0 && !exists(f.wt('b')) && laneLines(f).length === 4 })
+  }
+  const t1 = new Date().toISOString()
+  clause('clause 1e — create, reset, archive and remove each refuse as role a and with no role, worktrees, lane.log and the herdr log unchanged, where each completes as the orchestrator (E15-D201)',
+    rc.code === 0 && refused.every((x) => x.ok) && completed.every((x) => x.code === 0), JSON.stringify({ create: rc.code, refused, completed }))
+  const lines = laneLines(f), pane = shimLog(f).find((e) => e.made)?.made.pane
+  const fields = lines.map((l) => LANE_LINE.exec(l))
+  const launch = lines[0]?.split(' ').slice(6).join(' ')
+  clause('clause 2v — create, reset, archive and remove for lane a with DCTR_CALLER=orchestrator append exactly four lines in that order, each a UTC time ending Z inside the clause\'s run, orchestrator, its subcommand and a; the create line\'s next fields are the pane the shim made and the worktree, and the rest is the launch line (E15-D186, E15-D126)',
+    lines.length === 4 && fields.every((m, k) => m && m[1] >= t0 && m[1] <= t1 && m[2] === 'orchestrator' && m[3] === ['create', 'reset', 'archive', 'remove'][k] && m[4].split(' ')[0] === 'a') &&
+    lines[0].split(' ')[4] === pane && lines[0].split(' ')[5] === f.wt('a') && launch.startsWith(`cd '${f.wt('a')}' && env DCTR_ROLE='a' `) && launch.includes(' claude --model ') &&
+    lines[1].endsWith(` reset a ${f.base}`) && lines[2].endsWith(' archive a') && lines[3].endsWith(' remove a'),
+    JSON.stringify({ t0, t1, lines }))
+}
+
+// The contained posture (E15-D202): each subcommand with DCTR_VIEW_REQUEST_DIR set calls herdr zero times.
+{
+  const f = fixture({ handoffs: { a: '.doctrine/records/a.md', b: '.doctrine/records/b.md' } })
+  create(f)
+  const calls = shimLog(f).length
+  const views = { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') }
+  const rs = [create(f, 'b', { env: views }), lane(f, ['reset', 'a', f.base], { env: views }), lane(f, ['archive', 'a'], { env: views }), lane(f, ['remove', 'a'], { env: views })]
+  clause('clause 1d2 — contained, create, reset, archive and remove call herdr zero times (E15-D202)',
+    calls > 0 && shimLog(f).length === calls, `codes ${rs.map((r) => r.code)}; calls ${calls} -> ${shimLog(f).length}`)
 }
 for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE', 'names it by an absolute path, one inside the worktree'], ['1h', '../outside/a.md', 'names a path outside the worktree']]) {
   const f = fixture({ handoffs: { a: rec } })
@@ -461,8 +515,7 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
 
 // The failed-create partial (L6) and readiness (L7): each leaves the worktree, names it, writes no lane.log line.
 for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every read'], ['1o', 'get-empty', 0, 'pane get answers nothing'],
-  ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line'],
-  ['1r', 'tab-fail', 0, 'the pane cannot be made']]) {
+  ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line']]) {
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode } })
   const t = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run').length
@@ -471,6 +524,33 @@ for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every
   const again = create(f, 'a')
   clause(`clause ${n}2 — a second create of that role then refuses`, again.code !== 0 && laneLines(f).length === 0, `exit ${again.code} ${said(again)}`)
 }
+// The failed create (E15-D203 to D206, D220): herdr fails tab create after the worktree is made; a second create of
+// the role, with tab create answering, then refuses.
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'tab-fail' } })
+  const listed = git(f.repo, 'worktree', 'list', '--porcelain').out
+  clause('clause 1r — a create whose tab create fails after the worktree is made appends no line to lane.log (E15-D203)', laneLines(f).length === 0 && !exists(f.laneLog), JSON.stringify(read(f.laneLog)))
+  clause('clause 1r2 — it leaves the worktree, which git worktree list still lists (E15-D204)', exists(f.wt('a')) && listed.includes(`worktree ${f.wt('a')}\n`), listed)
+  clause('clause 1r3 — it exits non-zero (E15-D205)', r.code !== 0, `exit ${r.code}`)
+  clause('clause 1r4 — its output names the worktree by its absolute path (E15-D220)', (r.out + r.err).includes(f.wt('a')), said(r))
+  const calls = shimLog(f).length
+  const again = create(f, 'a')
+  clause('clause 1r5 — a second create of the role, tab create answering, refuses: no herdr call, no lane.log line, worktrees unchanged (E15-D206)',
+    again.code !== 0 && shimLog(f).length === calls && laneLines(f).length === 0 && git(f.repo, 'worktree', 'list', '--porcelain').out === listed, `exit ${again.code} ${said(again)}`)
+}
+
+// Tabs (E15-D200): the merge session and a lane, each in a tab of its own, no pane split.
+{
+  const f = fixture({ branch: 'orch', handoffs: { a: '.doctrine/records/a.md', merge: '.doctrine/records/merge.md' } })
+  const rm = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')]), ra = create(f)
+  const log = shimLog(f), made = log.filter((e) => e.made).map((e) => e.made)
+  const tabOf = (role) => made.find((m) => m.pane === laneOf(read(f.laneLog), role)?.pane)?.tab
+  clause('clause 2w — create merge and create a each make one tab create call and no pane split, and the two panes sit in two different tabs (E15-D200, L4)',
+    rm.code === 0 && ra.code === 0 && log.filter((e) => e.args[0] === 'tab' && e.args[1] === 'create').length === 2 && !log.some((e) => e.args[0] === 'pane' && e.args[1] === 'split') &&
+    Boolean(tabOf('merge')) && Boolean(tabOf('a')) && tabOf('merge') !== tabOf('a'), JSON.stringify(log.map((e) => [e.args.slice(0, 3), e.made])))
+}
+
 {
   const f = fixture({ handoffs: { a: 'src.txt/a.md' } })
   const r = create(f)
@@ -517,6 +597,84 @@ for (const [n, file, why] of [['1w', '.doctrine/records/a/gate.out', 'ignored ev
     r.code !== 0 && exists(path.join(s.w, 'new-source.txt')), `exit ${r.code} ${said(r)}`)
 }
 
+
+// Refused calls write no lane.log line (E15-D207), on one lane.
+{
+  const f = fixture()
+  write(path.join(f.repo, 'docs/handoffs/norecord.md'), handoffText(null))
+  const counts = []
+  const count = (what, run) => { const before = laneLines(f).length; const r = run(); counts.push({ what, code: r.code, before, after: laneLines(f).length }) }
+  count('create a, handoff naming no record', () => create(f, 'a', { handoff: path.join(f.repo, 'docs/handoffs/norecord.md') }))
+  create(f)
+  const w = f.wt('a')
+  write(path.join(w, '.doctrine/records/a/gate.out'), 'exit=0\n')
+  lane(f, ['archive', 'a'])
+  append(path.join(w, 'src.txt'), 'uncommitted\n')
+  count('reset a with a tracked file modified', () => lane(f, ['reset', 'a', f.base]))
+  git(w, 'checkout', '--', 'src.txt')
+  append(path.join(w, '.doctrine/records/a/gate.out'), 'after the archive\n')
+  count('remove a after its evidence gained a line', () => lane(f, ['remove', 'a']))
+  count('create b as role a', () => create(f, 'b', { env: { DCTR_ROLE: 'a' } }))
+  clause('clause 1z — each refused call exits non-zero and leaves lane.log\'s line count unchanged (E15-D207)',
+    counts.length === 4 && counts.every((c) => c.code !== 0 && c.after === c.before) && laneLines(f).length === 2, JSON.stringify(counts))
+}
+
+let MISSING
+// A lane whose record does not exist: archive refuses before it copies or repoints, and remove refuses.
+{
+  const s = seeded()
+  const epic = read(path.join(s.f.repo, 'docs/epics/E1.md'))
+  fs.rmSync(path.join(s.w, '.doctrine/records/a.md'))
+  const r = lane(s.f, ['archive', 'a'])
+  clause('clause 1aa — archive refuses a lane whose record does not exist: nothing copied, the epic unchanged, no lane.log line',
+    r.code !== 0 && !exists(s.lanes) && read(path.join(s.f.repo, 'docs/epics/E1.md')) === epic && laneLines(s.f).length === 1, `exit ${r.code} ${said(r)}`)
+  const t = seeded()
+  lane(t.f, ['archive', 'a'])
+  fs.rmSync(path.join(t.w, '.doctrine/records/a.md'))
+  const kick = kickoffHandoff(read(path.join(t.w, 'SESSION_MEMORY.md')))
+  MISSING = kick === 'docs/handoffs/a.md' && /^record: `\.doctrine\/records\/a\.md`$/m.test(read(path.join(t.w, kick)) || '') && !exists(path.join(t.w, '.doctrine/records/a.md')) &&
+    exists(path.join(t.lanes, '.doctrine/records/a.md'))
+  const rr = lane(t.f, ['remove', 'a'])
+  clause('clause 1ab — remove refuses a lane whose record was deleted after its archive, the worktree kept', rr.code !== 0 && exists(t.w) && laneLines(t.f).length === 2, `exit ${rr.code} ${said(rr)}`)
+}
+
+// An existing path at the worktree with no branch: git would make the branch and then refuse the path.
+{
+  const f = fixture()
+  write(path.join(f.wt('a'), 'stray.txt'), 'stray\n')
+  const r = create(f)
+  clause('clause 1ac — create refuses when the worktree path already exists, making no branch, no herdr call and no lane.log line',
+    r.code !== 0 && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0 && !exists(path.join(f.wt('a'), '.git')), `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+}
+
+// A base that already tracks the handoff's copy path.
+const TRACKS = fixture()
+git(TRACKS.repo, 'add', 'docs/handoffs/a.md'); git(TRACKS.repo, 'commit', '-qm', 'track the handoff')
+const tracksBase = head(TRACKS.repo)
+{
+  const r = create(TRACKS, 'a', { base: tracksBase })
+  clause('clause 1ad — create refuses a base that already tracks docs/handoffs/<the handoff>, making nothing', madeNothing(TRACKS, 'a', r), `exit ${r.code} ${said(r)}`)
+}
+
+// A worktree path holding whitespace, a merge base that is a commit and no branch, and a run not named orchestrate.
+const SPACED = fixture({ rootName: ' spaced' })
+{
+  const r = create(SPACED)
+  clause('clause 1ae — create refuses a worktree path holding whitespace, making nothing', madeNothing(SPACED, 'a', r), `exit ${r.code} ${said(r)}`)
+  const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
+  const rm = lane(f, ['create', 'merge', f.repo, f.base, handoffOf(f, 'merge')])
+  clause('clause 1af — create merge refuses a base that is a commit and not a branch, making nothing', madeNothing(f, 'merge', rm), `exit ${rm.code} ${said(rm)}`)
+}
+const RUN2 = fixture({ runName: 'run2' })
+{
+  const rc = create(RUN2)
+  const epic = read(path.join(RUN2.repo, 'docs/epics/E1.md'))
+  const ra = lane(RUN2, ['archive', 'a']), rr = lane(RUN2, ['remove', 'a'])
+  clause('clause 1ag — archive and remove refuse a run whose directory is not <Records>/orchestrate: nothing copied, the epic unchanged, the worktree kept, no lane.log line',
+    rc.code === 0 && ra.code !== 0 && rr.code !== 0 && !exists(path.join(RUN2.repo, '.doctrine/records/lanes')) && read(path.join(RUN2.repo, 'docs/epics/E1.md')) === epic &&
+    exists(RUN2.wt('a')) && laneLines(RUN2).length === 1, `create ${rc.code}; archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
 
 {
@@ -541,9 +699,10 @@ clause('clause 3d — m changes the tracked memory file against the base and k l
   git(MEM.repo, 'diff', '--name-only', MEM.base, memM).out.split('\n').includes('SESSION_MEMORY.md') && !git(MEM.repo, 'diff', '--name-only', MEM.base, memK).out.includes('SESSION_MEMORY.md'),
   `${git(MEM.repo, 'diff', '--name-only', MEM.base, memM).out} / ${git(MEM.repo, 'diff', '--name-only', MEM.base, memK).out}`)
 for (const kind of ['untracked', 'ignored']) {
-  const { U, u } = UNT[kind]
-  clause(`clause 3e — the ${kind}-memory fixture's base does not track SESSION_MEMORY.md and u does${kind === 'ignored' ? ', and the base ignores it' : ''}`,
+  const { U, u, u2 } = UNT[kind]
+  clause(`clause 3e — the ${kind}-memory fixture's base does not track SESSION_MEMORY.md, u does, and u2 changes it${kind === 'ignored' ? ', and the base ignores it' : ''}`,
     git(U.repo, 'ls-tree', '--name-only', U.base).out.split('\n').every((x) => x !== 'SESSION_MEMORY.md') && git(U.repo, 'ls-tree', '--name-only', u).out.split('\n').includes('SESSION_MEMORY.md') &&
+    git(U.repo, 'diff', '--name-only', u, u2).out === 'SESSION_MEMORY.md' &&
     (kind === 'untracked' || read(path.join(U.repo, '.gitignore')).includes('SESSION_MEMORY.md')), kind)
 }
 {
@@ -570,6 +729,25 @@ for (const [n, { s, file }] of Object.entries(TWINS)) {
   const got = JSON.parse(spawnSync(path.join(bin, 'herdr'), ['pane', 'get', 'p1'], { env, encoding: 'utf8' }).stdout)
   clause('clause 3i — the herdr shim answers a fresh pane agent_status unknown with no agent session, as a fresh shell pane reads (L7)',
     got.result.pane.agent_status === 'unknown' && got.result.pane.agent_session === null, JSON.stringify(got))
+}
+{
+  const f = fixture()
+  const epic = read(path.join(f.repo, 'docs/epics/E1.md')) || ''
+  clause('clause 3j — the member fixture\'s epic names the lane\'s worktree record under phase build-a and another, existing record under phase a',
+    epic.split('\n').includes('- phase build-a: .claude/worktrees/a/.doctrine/records/a.md') && epic.split('\n').includes(`- phase a: ${OTHER}`) && exists(path.join(f.repo, OTHER)), epic)
+  clause('clause 3k — before remove, the missing-record lane\'s kickoff still leads to a handoff naming the record, which is gone from the worktree and present in the archive', MISSING, String(MISSING))
+  write(path.join(f.wt('a'), 'stray.txt'), 'stray\n')
+  const add = git(f.repo, 'worktree', 'add', '-q', '-b', 'a', f.wt('a'), f.base)
+  clause('clause 3l — on the existing-path fixture, git worktree add -b refuses the path and still makes the branch, without the command',
+    add.code !== 0 && branches(f.repo).some((b) => b.startsWith('a ')), `exit ${add.code}; ${JSON.stringify(branches(f.repo))}`)
+  clause('clause 3m — the base-tracks fixture\'s base tracks docs/handoffs/a.md, byte for byte the handoff create is given',
+    git(TRACKS.repo, 'show', `${tracksBase}:docs/handoffs/a.md`).out + '\n' === read(handoffOf(TRACKS)), tracksBase)
+  clause('clause 3n — the spaced fixture\'s worktree path holds whitespace', /\s/.test(SPACED.wt('a')), SPACED.wt('a'))
+  const m = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
+  clause('clause 3o — the merge-base fixture\'s base is a commit and names no branch',
+    git(m.repo, 'rev-parse', '--verify', '-q', `${m.base}^{commit}`).code === 0 && git(m.repo, 'show-ref', '--verify', '-q', `refs/heads/${m.base}`).code !== 0, m.base)
+  clause('clause 3p — the run2 fixture\'s run is not named orchestrate and its lane.log holds the create line',
+    path.basename(RUN2.run) !== 'orchestrate' && laneOf(read(RUN2.laneLog), 'a')?.worktree === RUN2.wt('a'), RUN2.run)
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

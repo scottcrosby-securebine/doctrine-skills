@@ -26,9 +26,10 @@
 // bit is set again wherever the revision tracks it.
 //
 // archive copies the lane's memory file, its docs/handoffs/ and every file under its record's directory, listed by
-// find, into `<Records>/lanes/<role>/` at their worktree paths, and repoints the epic's `- phase <role>` member at the
-// archived record. remove lists the same files again and refuses unless each one is archived with an equal sha256 and
-// git status names no other file, then removes the worktree and keeps its branch.
+// find, into `<Records>/lanes/<role>/` at their worktree paths, and repoints the epic's `- phase` member whose path
+// names the lane's record, whatever its phase name, at the archived record. remove lists the same files again and
+// refuses unless each one is archived with an equal sha256 and git status names no other file, then removes the
+// worktree and keeps its branch. Both refuse a lane whose record does not exist.
 //
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
@@ -86,10 +87,12 @@ function recordsDir() {
  *  under docs/handoffs/, and every file in the record's directory, the record and its evidence. */
 function laneFiles(wt) {
   const files = new Set(findFiles(wt, path.join(wt, HANDOFFS)))
-  if (fs.existsSync(path.join(wt, MEMORY))) files.add(MEMORY)
-  const handoff = kickoffHandoff(fs.existsSync(path.join(wt, MEMORY)) ? fs.readFileSync(path.join(wt, MEMORY), 'utf8') : '')
+  let memory = ''
+  try { memory = fs.readFileSync(path.join(wt, MEMORY), 'utf8'); files.add(MEMORY) } catch (e) { if (e.code !== 'ENOENT') throw e }
+  const handoff = kickoffHandoff(memory)
   const rec = handoff && fs.existsSync(path.join(wt, handoff)) ? handoffHeader(fs.readFileSync(path.join(wt, handoff), 'utf8')).record : null
   if (!rec || !inside(wt, path.resolve(wt, rec))) refuse(`the memory file of ${wt} leads to no record inside it`)
+  if (!fs.existsSync(path.resolve(wt, rec))) refuse(`the record ${rec} of ${wt} does not exist`)
   for (const f of findFiles(wt, path.dirname(path.resolve(wt, rec)))) files.add(f)
   return { files: [...files].sort(), record: rec }
 }
@@ -112,7 +115,7 @@ function create() {
     if (!gitOk(repo, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`)) refuse(`${base} is not a branch of ${repo}`)
     const held = git(repo, 'worktree', 'list', '--porcelain').split('\n').includes(`branch refs/heads/${base}`)
     if (held) refuse(`a worktree of ${repo} holds ${base}`)
-  } else if (gitOk(repo, 'show-ref', '--verify', '--quiet', `refs/heads/${role}`)) refuse(`the branch ${role} already exists in ${repo}`)
+  }
   let text
   try { text = fs.readFileSync(handoff, 'utf8') } catch (e) { refuse(`the handoff ${handoff} could not be read (${e.code || e.message})`) }
   const header = handoffHeader(text)
@@ -121,7 +124,7 @@ function create() {
   const recordPath = path.resolve(wt, header.record)
   if (!inside(wt, recordPath)) refuse(`the handoff ${handoff} names a record outside the worktree`)
   const handoffRel = path.posix.join(HANDOFFS, path.basename(handoff))
-  for (const rel of [handoffRel, header.record]) if (gitOk(repo, 'cat-file', '-e', `${base}:${rel}`)) refuse(`${base} already tracks ${rel}`)
+  if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
   const made = [`the worktree ${wt}`]
   const fail = (why) => { process.stderr.write(`dctr-lane: create failed, ${why}; made ${made.join(', ')}, left in place, and lane.log not written\n`); process.exit(1) }
@@ -150,7 +153,7 @@ function create() {
     // herdr-lint: a failed or empty tab create fails the create, which leaves what it made and closes nothing
     const tab = herdr(tabCreateArgs(workspace, `${PREFIX} · ${role}`, wt))
     pane = tab?.result?.root_pane?.pane_id ?? null
-    if (typeof pane !== 'string' || !pane || /\s/.test(pane)) fail(`herdr made no usable pane (${JSON.stringify(pane)})`)
+    if (!pane) fail('herdr made no pane')
     made.push(`the herdr pane ${pane}`)
     const launch = `cd ${shq(wt)} && env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
@@ -188,12 +191,15 @@ function reset() {
   if (!gitOk(wt, 'show-ref', '--verify', '--quiet', `refs/heads/${side}`)) git(wt, 'branch', side, old)
   else if (git(wt, 'rev-parse', `refs/heads/${side}`) !== old) refuse(`the branch ${side} exists and is not at ${old}`)
   const memory = path.join(wt, MEMORY)
-  const bytes = fs.existsSync(memory) ? fs.readFileSync(memory) : null
+  let bytes = null
+  try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== 'ENOENT') throw e }
+  const tracked = gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)
   try {
-    if (gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)) git(wt, 'update-index', '--no-skip-worktree', MEMORY)
+    if (tracked) git(wt, 'update-index', '--no-skip-worktree', MEMORY)
     git(wt, 'reset', '--quiet', '--hard', revision)
   } finally {
     if (bytes) fs.writeFileSync(memory, bytes)
+    // asked again after the move: the revision may track a path the old HEAD did not
     if (gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)) git(wt, 'update-index', '--skip-worktree', MEMORY)
   }
   append(`${role} ${revision}`)
@@ -210,14 +216,15 @@ function archive() {
     fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true })
     fs.copyFileSync(path.join(wt, f), path.join(dest, f))
   }
-  repointMember(path.join(dest, record))
+  repointMember(path.join(wt, record), path.join(dest, record))
   append(role)
-  process.stdout.write(`archived ${files.length ? files.join(', ') : 'nothing'} into ${dest}\n`)
+  process.stdout.write(`archived ${files.join(', ')} into ${dest}\n`)
 }
 
-/** Rewrites the `- phase <role>` member line of the epic that carries it, in the project file's roster, to name the
- *  archived record by its path relative to the project repo, keeping an ordering clause. No such line: no change. */
-function repointMember(archived) {
+/** Rewrites each `- phase` member line, in the epics of the project file's roster, whose path names the lane's record
+ *  `live`, whatever its phase name, to name the archived record by its path relative to the project repo, keeping its
+ *  name and ordering clause. No such line: no change. */
+function repointMember(live, archived) {
   const records = recordsDir()
   let top
   try { top = git(records, 'rev-parse', '--show-toplevel') } catch { return }
@@ -228,12 +235,12 @@ function repointMember(archived) {
     const file = path.join(top, r.record)
     let text
     try { text = fs.readFileSync(file, 'utf8') } catch { continue }
-    const m = parseDoc(text).phases.find((p) => p.name === role)
-    if (!m) continue
     const lines = text.split('\n')
-    lines[m.line - 1] = `- phase ${role}: ${rel}${m.after ? ` after ${m.after} merged` : ''}`
-    fs.writeFileSync(file, lines.join('\n'))
-    process.stdout.write(`repointed ${path.relative(top, file)}:${m.line} at ${rel}\n`)
+    for (const m of parseDoc(text).phases.filter((p) => p.record && path.resolve(top, p.record) === live)) {
+      lines[m.line - 1] = `- phase ${m.name}: ${rel}${m.after ? ` after ${m.after} merged` : ''}`
+      fs.writeFileSync(file, lines.join('\n'))
+      process.stdout.write(`repointed ${path.relative(top, file)}:${m.line} at ${rel}\n`)
+    }
   }
 }
 
