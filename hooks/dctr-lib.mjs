@@ -1154,27 +1154,60 @@ const notThere = (e) => e?.code === 'ENOENT' || e?.code === 'ENOTDIR'
 /** Whether `f` exists, any error but notThere thrown, so the guard never reads an unreadable path as an absent one. */
 const presentStrict = (f) => { try { fs.statSync(f); return true } catch (e) { if (notThere(e)) return false; throw e } }
 
-/** `p` where Claude Code writes it: an absolute path, or one relative to `cwd`, normalized as text first (path.resolve,
- *  every `..` removed lexically), as Claude Code's file tools normalize it before the kernel sees it, then walked
- *  component by component through every symlink by followLinks, strictly, a dangling one included. So a `..` after a
- *  link cancels the link's name, never climbs out of its target. The longest existing prefix is then
- *  spelled as the volume spells it (realpath), so on a case-insensitive volume a case alias is the file it names.
- *  Any error but notThere, a NUL byte in the path among them, throws. `io` is injected by the selftest only. */
-export function guardReal(p, cwd, { lstat = fs.lstatSync, readlink = fs.readlinkSync, realpath = fs.realpathSync.native } = {}) {
+/** `p` where Claude Code writes it, as `[real, rest]`: an absolute path, or one relative to `cwd`, normalized as text
+ *  first (path.resolve, every `..` removed lexically), as Claude Code's file tools normalize it before the kernel sees
+ *  it, then walked component by component through every symlink by followLinks, strictly, a dangling one included. So a
+ *  `..` after a link cancels the link's name, never climbs out of its target. `real` is the longest existing prefix
+ *  spelled as the volume stores it (realpath), `rest` the missing components after it as written. Any error but
+ *  notThere, a NUL byte in the path among them, throws. */
+function guardSpell(p, cwd, { lstat = fs.lstatSync, readlink = fs.readlinkSync, realpath = fs.realpathSync.native } = {}) {
   let head = followLinks(path.resolve(cwd, p), { lstat, readlink, strict: true }), rest = ''
   for (;;) {
-    try { return path.join(realpath(head), rest) } catch (e) { if (!notThere(e) || head === '/') throw e }
+    try { return [realpath(head), rest] } catch (e) { if (!notThere(e) || head === '/') throw e }
     rest = path.join(path.basename(head), rest)
     head = path.dirname(head)
   }
 }
 
+/** `n` with its case swapped, or `n` itself where it holds no cased letter. */
+const swapCase = (n) => n === n.toUpperCase() ? n.toLowerCase() : n.toUpperCase()
+
+/** Whether the volume holding the existing path `dir` looks names up in either case: the first name at or above `dir`
+ *  on its device that holds a cased letter, asked with its case swapped, is the same file. With no such name below the
+ *  volume's root it reads as case-sensitive, which can only refuse more. Any error but notThere throws. */
+function ignoresCase(dir, lstat) {
+  const dev = lstat(dir).dev
+  for (let d = dir; path.dirname(d) !== d; d = path.dirname(d)) {
+    const up = path.dirname(d), name = path.basename(d), alias = swapCase(name)
+    if (lstat(up).dev !== dev) return false
+    if (alias === name) continue
+    let a
+    try { a = lstat(path.join(up, alias)) } catch (e) { if (notThere(e)) return false; throw e }
+    const b = lstat(d)
+    return a.dev === b.dev && a.ino === b.ino
+  }
+  return false
+}
+
+/** `p` as the guard compares it: guardSpell's path, each component looked up in a folder whose volume ignores case
+ *  (ignoresCase) in lower case, and every other component exactly as stored or, past the existing prefix, as written.
+ *  So on a case-insensitive volume a case alias, existing or not yet, compares as the name it reads as, and on a
+ *  case-sensitive one every name compares exactly. Any error but notThere throws. `io` is injected by the selftest only.
+ *  shortcut: toLowerCase stands in for the volume's own case folding, so a name that folds differently under Unicode
+ *  rules (or a normalization alias) compares as another and is refused; upgrade with a folding table if one is hit. */
+export function guardReal(p, cwd, io = {}) {
+  const [real, rest] = guardSpell(p, cwd, io), lstat = io.lstat ?? fs.lstatSync
+  let dir = '/', key = '/'
+  for (const c of real.split('/').filter(Boolean)) { key = path.join(key, ignoresCase(dir, lstat) ? c.toLowerCase() : c); dir = path.join(dir, c) }
+  return path.join(key, rest && ignoresCase(real, lstat) ? rest.toLowerCase() : rest)
+}
+
 /**
  * The orchestrator's allowed paths (E15-D22), the one definition every phase imports. `p` and every path in `ctx`
- * are absolute real paths (guardReal). `ctx` is guardContext's `{ run, records, checkout, record, names }`: the run lies
- * under `records`, `checkout` is the orchestrator's checkout read from the run, `record` its record or null, and `names`
- * each of GUARD_NAMES as guardReal spells it in the checkout, so a stored `docs/project.md` matches a target asked as
- * `DOCS/PROJECT.md` on a case-insensitive volume; without `names` each is joined to the checkout as written. The
+ * but `run` are absolute paths as guardReal gives them. `ctx` is guardContext's `{ run, records, checkout, record, names }`:
+ * the run lies under `records`, `checkout` is the orchestrator's checkout read from the run, `record` its record or null,
+ * and `names` each of GUARD_NAMES as guardReal gives it in the checkout, so on a case-insensitive volume a stored
+ * `docs/project.md` matches a target asked as `DOCS/PROJECT.md`; without `names` each is joined to the checkout as written. The
  * auto-cycle files are the `.doctrine/auto-cycle*` glob treeExcludes uses, a `*` that crosses no `/`.
  */
 export function guardAllowed(p, { records, checkout, record, names }) {
@@ -1191,20 +1224,23 @@ export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics'
 
 /**
  * The guard's context for a session whose project directory is `cwd`, or a throw naming what could not be read: the
- * run from runRoot, which must be an existing folder named `orchestrate` (Run layout); Records its parent; the
- * checkout the repo holding the run (repoOf, never the seat's cwd, E15-D119); GUARD_NAMES as guardReal spells them
- * there; and the record the handoff's `record:` line names, whatever its state line reads (followKickoff's
- * `recordPath`), or null where the chain stops at a file that is not there. Every presence test is strict, so any
- * other error throws. An error thrown once the run is known carries it as `run`, so the guard can still log the
- * refusal there (E15-D24). `io` is guardReal's, injected by the selftest only.
+ * run from runRoot, which must be an existing folder named `orchestrate` as guardReal gives its name (Run layout),
+ * returned as the volume spells it, since guard.log is written there; Records its parent; the checkout the repo holding
+ * the run (repoOf, never the seat's cwd, E15-D119); GUARD_NAMES there; and the record the handoff's `record:` line
+ * names, whatever its state line reads (followKickoff's `recordPath`), or null where the chain stops at a file that is
+ * not there. Records, the checkout, the names and the record are as guardReal gives them. Every presence test is
+ * strict, so any other error throws. Every error thrown once runRoot names the run carries it as `run`, the run as the
+ * volume spells it where that was read and as runRoot named it otherwise, so the guard can still log the refusal there
+ * (E15-D24). `io` is guardReal's, injected by the selftest only.
  */
 export function guardContext(env = process.env, cwd = process.cwd(), io = {}) {
   const named = runRoot(env, cwd, presentStrict)
   if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
-  const run = guardReal(named, cwd, io)
-  if (path.basename(run) !== 'orchestrate') throw new Error(`the run ${run} is not a folder named orchestrate`)
-  if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
+  let run = named
   try {
+    run = path.join(...guardSpell(named, cwd, io))
+    if (path.basename(guardReal(run, cwd, io)) !== 'orchestrate') throw new Error(`the run ${run} is not a folder named orchestrate`)
+    if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
     const checkout = repoOf(run, presentStrict)
     const names = Object.fromEntries(GUARD_NAMES.map((rel) => [rel, guardReal(path.join(checkout, rel), checkout, io)]))
     // followKickoff reads a failed read as a chain that stops; only a file not there may, any other error refuses.
@@ -1212,7 +1248,7 @@ export function guardContext(env = process.env, cwd = process.cwd(), io = {}) {
     const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch (e) { if (!notThere(e)) failed = e; throw e } }
     const k = followKickoff({ projectDir: checkout, read, exists: presentStrict })
     if (failed) throw failed
-    return { run, records: path.dirname(run), checkout, names, record: k.recordPath ? guardReal(k.recordPath, checkout, io) : null }
+    return { run, records: guardReal(path.dirname(run), cwd, io), checkout: guardReal(checkout, cwd, io), names, record: k.recordPath ? guardReal(k.recordPath, checkout, io) : null }
   } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { run }) }
 }
 

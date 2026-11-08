@@ -43,16 +43,26 @@ clause('clause 1c — with no record resolved, the record\'s path is refused and
 // guardReal on an injected filesystem, portable to any volume: a lower-cased tree whose realpath spells every
 // existing path in lower case, as a case-insensitive volume does, and an error injected per operation.
 const err = (code) => Object.assign(new Error(code), { code })
-const FAKE = new Set(['/', '/c', '/c/docs', '/c/docs/project.md', '/c/l'])
-const fakeIo = (fault = {}) => ({
-  lstat: (p) => { if (fault.lstat && p.endsWith(fault.lstat[0])) throw err(fault.lstat[1]); if (!FAKE.has(p.toLowerCase())) throw err('ENOENT'); return { isSymbolicLink: () => p.toLowerCase() === '/c/l' } },
-  readlink: (p) => { if (fault.readlink) throw err(fault.readlink); return '/gone/t.md' },
-  realpath: (p) => { if (fault.realpath && p.toLowerCase() === fault.realpath[0]) throw err(fault.realpath[1]); if (!FAKE.has(p.toLowerCase())) throw err('ENOENT'); return p.toLowerCase() },
-})
+// `exact` makes it a case-sensitive volume instead, finding each path only as stored, /c/DOCS a folder beside /c/docs.
+// lstat gives each file its own ino, and every path at or under `fault.mount` a device of its own.
+const FAKE = ['/', '/c', '/c/docs', '/c/docs/project.md', '/c/l', '/c/DOCS']
+const fakeIo = (fault = {}, exact = false) => {
+  const stored = (p) => FAKE.includes(exact ? p : p.toLowerCase()) ? (exact ? p : p.toLowerCase()) : null
+  return {
+    lstat: (p) => { if (fault.lstat && p.endsWith(fault.lstat[0])) throw err(fault.lstat[1]); const s = stored(p); if (s === null) throw err('ENOENT'); return { dev: fault.mount && (s + '/').startsWith(fault.mount + '/') ? 2 : 1, ino: FAKE.indexOf(s), isSymbolicLink: () => s === '/c/l' } },
+    readlink: (p) => { if (fault.readlink) throw err(fault.readlink); return '/gone/t.md' },
+    realpath: (p) => { if (fault.realpath && p.toLowerCase() === fault.realpath[0]) throw err(fault.realpath[1]); const s = stored(p); if (s === null) throw err('ENOENT'); return s },
+  }
+}
 const gr = (p, io) => { try { return typeof lib.guardReal === 'function' ? lib.guardReal(p, '/c', io) : 'no guardReal export' } catch (e) { return `throws ${e.code}` } }
 const GR = [
   ['a case alias of an existing file', gr('/C/DOCS/PROJECT.md', fakeIo()), '/c/docs/project.md'],
-  ['a missing name under a case alias, kept as written', gr('Docs/New.md', fakeIo()), '/c/docs/New.md'],
+  ['a missing name under a case alias, in lower case as the case-insensitive volume reads it', gr('Docs/New.md', fakeIo()), '/c/docs/new.md'],
+  ['on a case-sensitive volume a missing name, kept as written', gr('docs/New.md', fakeIo({}, true)), '/c/docs/New.md'],
+  ['on a case-sensitive volume a case alias, another name kept as written', gr('Docs/project.md', fakeIo({}, true)), '/c/Docs/project.md'],
+  ['on a case-sensitive volume holding docs and DOCS, a missing name under docs kept as written', gr('/c/docs/Old.md', fakeIo({}, true)), '/c/docs/Old.md'],
+  ['a volume mounted at /c/docs, with no cased name below its root, read as case-sensitive', gr('/c/docs/New.md', fakeIo({ mount: '/c/docs' })), '/c/docs/New.md'],
+  ['EIO on the lstat that reads whether the volume ignores case', gr('/c/docs/new.md', fakeIo({ lstat: ['/DOCS', 'EIO'] })), 'throws EIO'],
   ['a missing component (ENOENT) kept as written', gr('/c/x/y.md', fakeIo()), '/c/x/y.md'],
   ['a parent that is a file (ENOTDIR) kept as written', gr('/c/docs/project.md/x', fakeIo({ lstat: ['/x', 'ENOTDIR'] })), '/c/docs/project.md/x'],
   ['a dangling link followed', gr('/c/l', fakeIo()), '/gone/t.md'],
@@ -63,7 +73,7 @@ const GR = [
   ['a NUL byte, on the real filesystem', gr('/c/a\u0000b.md'), 'throws ERR_INVALID_ARG_VALUE'],
 ]
 const grWrong = GR.filter(([, got, want]) => got !== want)
-clause('clause 1g — guardReal walks strictly and spells the existing prefix as the volume does: a case alias is the file it names, a missing component (ENOENT, or ENOTDIR under a file) is kept as written, a dangling link is followed, and any other error on lstat, readlink or realpath, a NUL byte among them, throws (E15-D183, G1)',
+clause('clause 1g — guardReal walks strictly and spells the existing prefix as the volume does: a case alias is the file it names, a missing component (ENOENT, or ENOTDIR under a file) is kept as written on a case-sensitive volume, one holding the swapped name as another file among them, and in lower case on a case-insensitive one, a volume root read as case-sensitive, an error reading which the volume is throws, a dangling link is followed, and any other error on lstat, readlink or realpath, a NUL byte among them, throws (E15-D183, G1)',
   grWrong.length === 0, JSON.stringify(grWrong))
 
 // The reader: the guard's own PreToolUse group is the one whose command runs dctr-guard.mjs, never the first group,
@@ -145,6 +155,10 @@ const lc = path.join(tmp, 'lc'), lcRun = path.join(lc, '.doctrine/records/orches
 fs.mkdirSync(path.join(lc, '.git'), { recursive: true }); fs.mkdirSync(lcRun, { recursive: true })
 put(path.join(lc, 'docs/project.md'), '# Project\n\nRecords: .doctrine/records\n'); put(path.join(lc, 'session_memory.md'))
 fs.mkdirSync(path.join(lc, 'docs/handoffs'), { recursive: true })
+// A checkout whose run folder is stored as Orchestrate, reached by its Records path.
+const uc = path.join(tmp, 'uc'), ucRun = path.join(uc, '.doctrine/records/Orchestrate')
+fs.mkdirSync(path.join(uc, '.git'), { recursive: true }); fs.mkdirSync(ucRun, { recursive: true })
+put(path.join(uc, 'docs/PROJECT.md'), '# Project\n\nRecords: .doctrine/records\n')
 // A copy of the hook beside a dctr-lib.mjs that cannot load.
 const broken = path.join(tmp, 'broken/hooks')
 fs.mkdirSync(broken, { recursive: true })
@@ -367,6 +381,47 @@ clause('clause 2w — on an injected case-insensitive volume, which runs on any 
   JSON.stringify(folded) === JSON.stringify(foldWant), JSON.stringify(folded))
 
 // A case alias on a case-insensitive volume is the file it names; on a case-sensitive one it is another file.
+// Two volumes emulated on the real fixture on any host, lstat, readlink and realpath alike: one looking each component
+// up in either case, one exactly. Each spells what it finds as it is stored.
+const volume = (fold) => {
+  const find = (d, c) => { const hit = fs.readdirSync(d).find((n) => fold ? n.toLowerCase() === c.toLowerCase() : n === c); if (hit === undefined) throw err('ENOENT'); return path.join(d, hit) }
+  const realpath = (p) => p.split('/').filter(Boolean).reduce((d, c) => fs.realpathSync.native(find(d, c)), '/')
+  const entry = (p) => p === '/' ? '/' : find(realpath(path.dirname(p)), path.basename(p))
+  return { realpath, lstat: (p) => fs.lstatSync(entry(p)), readlink: (p) => fs.readlinkSync(entry(p)) }
+}
+const IVOL = volume(true), SVOL = volume(false)
+const judge = (env, dir, io, asked) => {
+  try { const ctx = lib.guardContext(env, dir, io); return Object.fromEntries(asked.map((p) => [p, allowed(lib.guardReal(p, dir, io), ctx)])) } catch (e) { return `throws ${e.message}` }
+}
+const LCENV = { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun }, UCENV = { DCTR_ROLE: 'orchestrator' }
+const LCASK = ['.Doctrine/Records/x.md', 'Docs/Epics/E2.md', 'docs/epics/E2.md', '.Doctrine/Auto-Cycle.json', '.doctrine/auto-cycle.json', 'Docs/Epics', 'Docs/EpicsX/a.md', 'SRC/a.txt']
+const volumes = {
+  'case-insensitive, lc': judge(LCENV, lc, IVOL, LCASK),
+  'case-insensitive, run stored Orchestrate': judge(UCENV, uc, IVOL, ['docs/handoffs/h.md', 'src/a.txt']),
+  'case-insensitive, DCTR_RUN asked ORCHESTRATE': judge({ ...LCENV, DCTR_RUN: path.join(lc, '.doctrine/records/ORCHESTRATE') }, lc, IVOL, ['docs/handoffs/h.md']),
+  'case-sensitive, lc': judge(LCENV, lc, SVOL, LCASK),
+  'case-sensitive, run stored Orchestrate': judge({ ...UCENV, DCTR_RUN: ucRun }, uc, SVOL, ['docs/handoffs/h.md']),
+}
+const volumesWant = {
+  'case-insensitive, lc': { '.Doctrine/Records/x.md': true, 'Docs/Epics/E2.md': true, 'docs/epics/E2.md': true, '.Doctrine/Auto-Cycle.json': true, '.doctrine/auto-cycle.json': true, 'Docs/Epics': false, 'Docs/EpicsX/a.md': false, 'SRC/a.txt': false },
+  'case-insensitive, run stored Orchestrate': { 'docs/handoffs/h.md': true, 'src/a.txt': false },
+  'case-insensitive, DCTR_RUN asked ORCHESTRATE': { 'docs/handoffs/h.md': true },
+  'case-sensitive, lc': { '.Doctrine/Records/x.md': false, 'Docs/Epics/E2.md': false, 'docs/epics/E2.md': true, '.Doctrine/Auto-Cycle.json': false, '.doctrine/auto-cycle.json': true, 'Docs/Epics': false, 'Docs/EpicsX/a.md': false, 'SRC/a.txt': false },
+  'case-sensitive, run stored Orchestrate': `throws the run ${ucRun} is not a folder named orchestrate`,
+}
+const volumesWrong = Object.keys(volumesWant).filter((k) => JSON.stringify(volumes[k]) !== JSON.stringify(volumesWant[k]))
+clause('clause 2x — on emulated volumes, which run on any host: a case-insensitive one allows .Doctrine/Records/x.md, Docs/Epics/E2.md where docs/epics does not exist yet and .Doctrine/Auto-Cycle.json, and accepts a run stored or asked as Orchestrate; a case-sensitive one refuses both case aliases and a run stored as Orchestrate; neither allows the folder itself, a neighbouring name or src (GS3b)',
+  volumesWrong.length === 0, volumesWrong.map((k) => `${k}: got ${JSON.stringify(volumes[k])} want ${JSON.stringify(volumesWant[k])}`).join(' || '))
+
+// An error on the resolved run itself, before any other context is read, still logs the refusal (E15-D24, GS3a).
+const runErrBefore = logLines().length
+const runErr = cases([['EIO on the stat of the run, Write src/a.txt', ORCH, W('src/a.txt'), 'deny', { fault: ['statSync', 'records/orchestrate'] }],
+  ['EIO on the lstat of the run, Edit docs/handoffs/h12.md', ORCH, E('docs/handoffs/h12.md'), 'deny', { fault: ['lstatSync', 'records/orchestrate'] }]])
+const runErrAdded = logLines().slice(runErrBefore).map((l) => l.replace(/^\S+ /, ''))
+const runErrWant = [`Write ${orch}/src/a.txt`, `Edit ${orch}/docs/handoffs/h12.md`]
+clause('clause 2y — an error reading the run folder itself, EIO on its stat or on its lstat, still logs the refusal, one line per call naming its tool and path (E15-D24, GS3a)',
+  wrong(runErr).length === 0 && JSON.stringify(runErrAdded) === JSON.stringify(runErrWant), `${show(runErr)} got ${JSON.stringify(runErrAdded)} want ${JSON.stringify(runErrWant)}`)
+
 put(path.join(tmp, 'case-probe'))
 const insensitive = fs.existsSync(path.join(tmp, 'CASE-PROBE'))
 const caseAlias = insensitive ? cases([
@@ -376,10 +431,14 @@ const caseAlias = insensitive ? cases([
   ['stored docs/project.md, asked DOCS/PROJECT.md', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('DOCS/PROJECT.md', { cwd: lc }), 'allow', { cwd: lc }],
   ['stored session_memory.md, asked SESSION_MEMORY.md', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, E('SESSION_MEMORY.md', { cwd: lc }), 'allow', { cwd: lc }],
   ['stored docs/project.md, asked DOCS/PROJECT.md.bak', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('DOCS/PROJECT.md.bak', { cwd: lc }), 'deny', { cwd: lc }],
+  ['no docs/epics yet, asked Docs/Epics/E2.md', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('Docs/Epics/E2.md', { cwd: lc }), 'allow', { cwd: lc }],
+  ['no auto-cycle file yet, asked .DOCTRINE/AUTO-CYCLE', { DCTR_ROLE: 'orchestrator', DCTR_RUN: lcRun, CLAUDE_PROJECT_DIR: lc }, W('.DOCTRINE/AUTO-CYCLE', { cwd: lc }), 'allow', { cwd: lc }],
+  ['the run stored as Orchestrate, a handoff', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: uc }, W('docs/handoffs/h.md', { cwd: uc }), 'allow', { cwd: uc }],
+  ['the run stored as Orchestrate, src/a.txt', { DCTR_ROLE: 'orchestrator', CLAUDE_PROJECT_DIR: uc }, W('src/a.txt', { cwd: uc }), 'deny', { cwd: uc }],
 ]) : []
 clause(insensitive
-  ? 'clause 2t — on this case-insensitive temp volume a case alias of an allowed path is allowed (DOCS/PROJECT.md, Docs/Handoffs/, session_memory.md, .DOCTRINE/records/), a stored docs/project.md and session_memory.md are allowed asked in upper case, and a case alias outside them is refused (E15-D22, GR2)'
-  : 'clause 2t — SKIPPED: the temp volume is case-sensitive, so a case alias names another file; clauses 1g and 2w carry the canonical case on an injected volume',
+  ? 'clause 2t — on this case-insensitive temp volume a case alias of an allowed path is allowed (DOCS/PROJECT.md, Docs/Handoffs/, session_memory.md, .DOCTRINE/records/), a stored docs/project.md and session_memory.md are allowed asked in upper case, Docs/Epics/E2.md and .DOCTRINE/AUTO-CYCLE are allowed where neither exists yet, a run stored as Orchestrate is the run, and a case alias outside them is refused (E15-D22, GR2, GS3b)'
+  : 'clause 2t — SKIPPED: the temp volume is case-sensitive, so a case alias names another file; clauses 1g, 2w and 2x carry the canonical case on an injected volume',
   wrong(caseAlias).length === 0, show(caseAlias))
 
 // The log line escapes the path reversibly, so two refused paths never log alike (E15-D24).
@@ -392,7 +451,7 @@ clause('clause 2r — each refused path is logged on one line with backslash as 
   wrong(esc).length === 0 && JSON.stringify(escAdded) === JSON.stringify(escWant) && new Set(escAdded).size === ESC.length,
   `${show(esc)} got ${JSON.stringify(escAdded)} want ${JSON.stringify(escWant)}`)
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc].flat()
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc, runErr].flat()
 clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
@@ -454,11 +513,20 @@ const lcNames = ['docs/project.md', 'session_memory.md', 'docs/handoffs'].map((n
 clause('clause 3m — without the guard: the lower-case checkout stores docs/project.md, session_memory.md and docs/handoffs in lower case and holds its run, and the emulated volume spells DOCS/PROJECT.md as docs/project.md and finds no src',
   lcNames.every(Boolean) && !fs.readdirSync(path.join(lc, 'docs')).includes('PROJECT.md') && fs.statSync(lcRun).isDirectory() &&
   foldReal(path.join(lc, 'DOCS/PROJECT.md')) === path.join(lc, 'docs/project.md') && (() => { try { foldReal(path.join(lc, 'src')); return false } catch (e) { return e.code === 'ENOENT' } })(), JSON.stringify(lcNames))
+const ucNames = fs.readdirSync(path.join(uc, '.doctrine/records'))
+const swapLstat = (io, p) => { try { const a = io.lstat(p), b = io.lstat(p.toUpperCase()); return a.ino === b.ino && a.dev === b.dev } catch (e) { return e.code } }
+clause('clause 3n — without the guard: uc stores its run as Orchestrate only, lc has no docs/epics and no auto-cycle file in any case, the emulated case-insensitive volume finds lc/DOCS as lc/docs and its upper-case alias as the same file while the case-sensitive one finds neither, and the preload makes stat and lstat of the run throw EIO',
+  JSON.stringify(ucNames) === '["Orchestrate"]' && !fs.readdirSync(path.join(lc, 'docs')).some((n) => n.toLowerCase() === 'epics') &&
+  !fs.readdirSync(path.join(lc, '.doctrine')).some((n) => n.toLowerCase().startsWith('auto-cycle')) &&
+  IVOL.realpath(path.join(lc, 'DOCS')) === path.join(lc, 'docs') && swapLstat(IVOL, path.join(lc, 'docs')) === true &&
+  (() => { try { SVOL.realpath(path.join(lc, 'DOCS')); return false } catch (e) { return e.code === 'ENOENT' } })() && swapLstat(SVOL, path.join(lc, 'docs')) === 'ENOENT' &&
+  preloadCode('statSync', run) === 'EIO' && preloadCode('lstatSync', run) === 'EIO' && fs.statSync(run).isDirectory(), JSON.stringify(ucNames))
 const fio = fakeIo()
-clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, and its faults throw their codes' +
+clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, its case-sensitive twin holds /c/DOCS as a file other than /c/docs, its mount puts /c/docs on a device of its own, and its faults throw their codes' +
   (insensitive ? '; on this temp volume the real DOCS/PROJECT.md resolves to docs/PROJECT.md' : ''),
   fio.realpath('/C/DOCS/PROJECT.md') === '/c/docs/project.md' && (() => { try { fio.realpath('/c/docs/new.md'); return false } catch (e) { return e.code === 'ENOENT' } })() &&
-  fio.readlink('/c/l') === '/gone/t.md' && !FAKE.has('/gone') && (() => { try { fakeIo({ readlink: 'EIO' }).readlink('/c/l'); return false } catch (e) { return e.code === 'EIO' } })() &&
+  fio.readlink('/c/l') === '/gone/t.md' && !FAKE.includes('/gone') && fakeIo({}, true).lstat('/c/DOCS').ino !== fakeIo({}, true).lstat('/c/docs').ino &&
+  fio.lstat('/C/DOCS').ino === fio.lstat('/c/docs').ino && fakeIo({ mount: '/c/docs' }).lstat('/c/docs').dev !== fakeIo({ mount: '/c/docs' }).lstat('/c').dev && (() => { try { fakeIo({ readlink: 'EIO' }).readlink('/c/l'); return false } catch (e) { return e.code === 'EIO' } })() &&
   (!insensitive || fs.realpathSync.native(path.join(orch, 'DOCS/PROJECT.md')) === path.join(orch, 'docs/PROJECT.md')), 'injected volume')
 clause('clause 3i — without the guard: the escape paths are four distinct names, holding LF, ?, a backslash then n, and CR', new Set(ESC).size === 4 &&
   ESC[0].includes('\n') && ESC[1].includes('?') && ESC[2].includes('\\n') && ESC[3].includes('\r'), JSON.stringify(ESC))
