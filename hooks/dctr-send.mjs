@@ -54,7 +54,7 @@ function recordOf(dir) {
 }
 
 /** The orchestrator's relay line for a send or wake it makes, `ref` relative to the run. */
-function relay(run, role, ref) {
+function relay(role, ref) {
   if (runRole() !== 'orchestrator') return
   const own = recordOf(process.cwd())
   if (own.why) { process.exitCode = 1; process.stderr.write(`dctr-send: no relay line written: ${own.why}\n`); return }
@@ -126,8 +126,8 @@ if (sub === 'send') {
   const name = `${stamp()}.${process.pid}.md`
   writeNew(path.join(heldDir, name), text)
   say(`held ${path.join(heldDir, name)}`)
-  relay(run, role, `held/${role}/${name}`)
-} else relay(run, role, `held/${role}/`)
+  relay(role, `held/${role}/${name}`)
+} else relay(role, `held/${role}/`)
 if (process.env.DCTR_VIEW_REQUEST_DIR) { say('contained: no pane call'); process.exit() }
 
 const lane = laneOf(readText(path.join(run, 'lane.log')), role)
@@ -154,7 +154,6 @@ function deliver() {
   const lines = handedOff(rec, pane, first.session) ? ['/clear', RESUME_LINE, NUDGE] : [NUDGE]
   for (const line of lines) {
     for (;;) {
-      if (paneClaimHeld(pane, claim)) return say(`another claim on ${pane} is held: stopped before ${line}`)
       const r = readPane(pane)
       if (!r) return
       if (READY_STATUSES.includes(r.status)) break

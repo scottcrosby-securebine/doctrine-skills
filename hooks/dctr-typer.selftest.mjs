@@ -354,19 +354,17 @@ const pausedBefore = typerCase('paused-before-first-read', {}, { pre: (f) => fs.
 clause('clause 2r2 — a paused line written after the Stop\'s key line and before the typer\'s first read: nothing sent, no herdr read, no second paused line (RB8-1)',
   sends(pausedBefore) === '0,0' && pausedBefore.calls.length === 0 && pausedBefore.paused.length === 1, detail(pausedBefore))
 // D148, D195: a sender's claim naming the typer's pane, its pid live (this suite's own), which the shim removes on
-// the pane read after the last held poll. The long one runs at a hundredth of the default timings, past eight times
-// the longest of them, so a typer that gave up its wait, or cleared once a wait ran out, is seen to.
+// the pane read after the last held poll. It runs at a hundredth of the default timings except the poll, held past
+// eight times the longest of them, so a typer that gave up its wait, or cleared once a wait ran out, is seen to.
 const senderClaim = (f) => path.join(autoCycleDir(), `sender-${process.pid}.${f.pane.replace(/[^A-Za-z0-9_-]/g, '_')}.claim`)
 const holdClaim = (n) => (f) => { write(senderClaim(f), JSON.stringify({ pid: process.pid, pane: f.pane })); f.heldBefore = paneClaimHeld(f.pane); setShim(f, () => ({ removeAt: { n, file: senderClaim(f) } })) }
 const removedAt = (c) => c.calls.findIndex((x) => x.removed)
 const firstClear = (c) => c.calls.findIndex((x) => x.args[3] === '/clear')
-const HUNDREDTH = Object.fromEntries(Object.entries(TYPER_TIMES).map(([k, v]) => [k, v / 100]))
-const claimed = typerCase('claim-held', {}, { pre: holdClaim(4) })
-clause('clause 2x — another claim on the pane held for three polls: no /clear while it is held, then /clear once and resume once after it is removed (D148)',
-  sends(claimed) === '1,1' && removedAt(claimed) >= 0 && firstClear(claimed) > removedAt(claimed) && claimed.paused.length === 0, detail(claimed))
-const longClaim = typerCase('claim-held-long', {}, { pre: holdClaim(1001), extraEnv: { DCTR_TYPER_TIMES: JSON.stringify(HUNDREDTH) }, timeout: 300000 })
-clause('clause 2x2 — another claim held for a thousand polls at a hundredth of the timings: no /clear and no exit while it is held, then /clear once after it is removed (D195)',
-  sends(longClaim) === '1,1' && removedAt(longClaim) >= 1000 && firstClear(longClaim) > removedAt(longClaim) && longClaim.paused.length === 0 && longClaim.code === 0, detail(longClaim))
+const CLAIM_TIMES = Object.fromEntries(Object.entries(TYPER_TIMES).map(([k, v]) => [k, k === 'poll' ? 400 : v / 100]))
+const CLAIM_POLLS = 25
+const longClaim = typerCase('claim-held-long', {}, { pre: holdClaim(CLAIM_POLLS + 1), extraEnv: { DCTR_TYPER_TIMES: JSON.stringify(CLAIM_TIMES) }, timeout: 300000 })
+clause('clause 2x2 — another claim held for 25 polls of 400 ms, every other timing a hundredth of its default: no /clear and no exit while it is held, then /clear once after it is removed (D148, D195)',
+  sends(longClaim) === '1,1' && removedAt(longClaim) >= CLAIM_POLLS && firstClear(longClaim) > removedAt(longClaim) && longClaim.paused.length === 0 && longClaim.code === 0, detail(longClaim))
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -632,9 +630,9 @@ clause('clause 3d — without the typer: the late-session shim answered the old 
   late.calls.filter((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session).length === 3 &&
   fs.readFileSync(silent.newTranscript, 'utf8') === '' && fs.readFileSync(normal.newTranscript, 'utf8').includes('"assistant"'), 'shim fixtures wrong')
 
-clause('clause 3x — without the typer: each claim fixture was held on its pane before the run, the shim removed it on the read after the held polls, a thousand for the long one past eight times its longest timing, and no claim file is left',
-  [[claimed, 4], [longClaim, 1001]].every(([c, n]) => c.heldBefore === true && c.calls.filter((x) => x.args[1] === 'get').findIndex((x) => x.removed) === n - 1 && !fs.existsSync(senderClaim(c)) && !paneClaimHeld(c.pane)) &&
-  1000 * HUNDREDTH.poll > 8 * Math.max(...Object.values(HUNDREDTH).slice(1)), JSON.stringify([claimed.heldBefore, longClaim.heldBefore, removedAt(claimed), removedAt(longClaim)]))
+clause('clause 3x — without the typer: the claim fixture was held on its pane before the run, the shim removed it on the read after the held polls, past eight times the longest of the other timings, and no claim file is left',
+  longClaim.heldBefore === true && longClaim.calls.filter((x) => x.args[1] === 'get').findIndex((x) => x.removed) === CLAIM_POLLS && !fs.existsSync(senderClaim(longClaim)) && !paneClaimHeld(longClaim.pane) &&
+  CLAIM_POLLS * CLAIM_TIMES.poll > 8 * Math.max(...Object.entries(CLAIM_TIMES).filter(([k]) => k !== 'poll').map(([, v]) => v)), JSON.stringify([longClaim.heldBefore, removedAt(longClaim)]))
 clause('clause 3e — without the gate: on each host the resume payload carries the marker and a session other than the plain prompt\'s, the plain prompt carries no marker, and the TMPDIR stand-in is a regular file',
   HOSTS.every(([, plain, resume]) => resume.prompt.includes('(typed by doctrine auto-cycle, not a ruling)') && !plain.prompt.includes('typed by doctrine auto-cycle') &&
     resume.session_id !== plain.session_id && resume.hook_event_name === 'UserPromptSubmit' && plain.hook_event_name === 'UserPromptSubmit') &&

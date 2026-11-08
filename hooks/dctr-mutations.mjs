@@ -59,39 +59,11 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   'dctr-roundguard.mjs', 'dctr-roundguard.selftest.mjs',
   // The sender and its suite.
   'dctr-send.mjs', 'dctr-send.selftest.mjs']
-/** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
- *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
- *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
- *  teardown, gate, was commented "cheapest first", and was not: every mutation only the gate suite
- *  caught paid 27.8s instead of 0.5s. Re-measure before reordering; the comment is a claim.
- *  Project placed on 2026-09-13 by measuring on one host: seat 0.07s, project 0.57s, gate 6.07s.
- *  Project history placed the same day, measured on one host: history 0.04s, project 0.46s, seat 1.14s.
- *  Record and restore placed 2026-09-23, measured on one host: record 0.02s, restore 0.59s (after project, before gate).
- *  Gauge and bridge placed 2026-09-23, and the whole list re-measured on one host at that commit: record 0.04s,
- *  history 0.06s, project 0.51s, restore 0.67s, bridge 0.90s, seat 1.18s, gauge 1.30s, gate 6.30s, pane 8.92s,
- *  teardown 17.33s; seat had grown past project since it was placed, so the two swapped.
- *  Typer and cycle placed 2026-09-24, measured on one host with the list up to gate: record 0.07s, history 0.10s,
- *  project 0.61s, restore 0.74s, bridge 0.90s, seat 1.33s, gauge 2.18s, typer 4.92s, cycle 5.62s, gate 7.05s.
- *  Re-measured after the e8-autocycle round-1 repair, one host: typer 5.58s, cycle 6.93s, gate 6.98s; order unchanged.
- *  Re-measured after the cycle suite gained its pause-model enumeration, one host: gate 7.1s, typer 10.3s, pane 12.3s,
- *  cycle 13.0s, teardown 21.0s; gate moved ahead of typer, and pane ahead of cycle.
- *  Re-measured after the cycle suite gained its hook-event enumeration, one host: gate 7.0s, pane 12.4s, typer 13.5s,
- *  teardown 21.0s, cycle 44.8s; pane moved ahead of typer, and teardown ahead of cycle.
- *  The Codex suite placed 2026-09-28, measured on one host: seat 1.36s, seat.codex 2.29s, gauge 2.65s, gate 7.25s.
- *  The two Codex host suites placed 2026-09-28, measured standalone on one host: codex seams 0.05s (first), codex.hooks
- *  9.3s (after gate, before pane). Notify and codex (install) placed 2026-09-28, measured on one host: record 0.03s,
- *  notify 0.56s, project 0.69s, restore 0.84s, codex 0.96s, bridge 1.00s. Merged from three seats' separate
- *  measurements, not re-measured together.
- *  The doctor suite placed 2026-10-03, measured standalone on one host: record 0.03-0.04s, doctor 0.06-0.07s, codex
- *  seams 0.06-0.08s, history 0.07-0.09s; it goes after record and before history.
- *  The whole list re-measured 2026-10-03 on one host, each suite once in the gate's layout, after the doctor suite
- *  gained its interrupted runs and the typer suite its gate combinations: seams 0.1s, record 0.0s, history 0.1s,
- *  project 0.7s, notify 0.9s, restore 0.9s, bridge 1.3s, doctor 1.6s, seat 1.9s, gauge 2.6s, codex 2.9s, seat.codex
- *  6.8s, gate 7.4s, pane 16.6s, typer 22.2s, teardown 27.8s, codex.hooks 30.4s, cycle 50.1s. Doctor moved behind
- *  bridge, codex behind gauge, codex.hooks behind teardown, record ahead of seams and project ahead of notify.
- *  The round guard suite placed 2026-10-14, measured standalone on one host, three runs each: notify 0.61-0.71s,
- *  project 0.69-0.79s, roundguard 0.71-0.74s, restore 0.89-1.04s; it goes after notify and before restore. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-send.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.selftest.mjs']
+/** `some` stops at the first suite that notices, so a mutation pays for every suite ahead of the one that catches it,
+ *  and a cheap suite behind a costly one makes every mutation only it catches pay for both. The send suite is last
+ *  because only the mutations that name its clauses need it. No cost is recorded for the others and their order is not
+ *  claimed to be cheapest first: measure each suite standalone before reordering them. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-send.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -3486,12 +3458,12 @@ const MUTATIONS = [
     to: "  fs.writeFileSync(part, String(text).split('\\n')[0])\n" },
   { name: "the orchestrator's send writes no relay line", file: "dctr-send.mjs",
     clause: "clause 2j \u2014 each send appends one relay line naming its held file",
-    from: "  relay(run, role, `held/${role}/${name}`)\n",
+    from: "  relay(role, `held/${role}/${name}`)\n",
     to: "\n" },
   { name: "the wake's relay line names a file, not the held folder", file: "dctr-send.mjs",
     clause: "clause 2j \u2014 the wake's relay line names the held folder",
-    from: "} else relay(run, role, `held/${role}/`)",
-    to: "} else relay(run, role, `held/${role}/x.md`)" },
+    from: "} else relay(role, `held/${role}/`)",
+    to: "} else relay(role, `held/${role}/x.md`)" },
   { name: "a lane's send writes a relay line too", file: "dctr-send.mjs",
     clause: "clause 2j \u2014 a lane's send appends none",
     from: "  if (runRole() !== 'orchestrator') return\n",
@@ -3541,7 +3513,7 @@ const MUTATIONS = [
     from: "  if (o.stage === 'clear' && o.otherClaim) return { act: 'wait', reason: 'another claim on the pane is held' }\n",
     to: "\n" },
   { name: "the typer reads no other claim before its /clear", file: "dctr-typer.mjs",
-    clause: "typer clause 2x \u2014 no /clear while another claim is held",
+    clause: "typer clause 2x2 \u2014 no /clear while another claim is held",
     from: "    const otherClaim = stage === 'clear' && paneClaimHeld(a.pane, claimFile(a.session, a.keyLine))\n",
     to: "    const otherClaim = false\n" },
 ]

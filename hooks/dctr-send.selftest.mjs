@@ -153,9 +153,12 @@ for (const live of [true, false]) {
   // A live pid is this suite's; a dead one is a process that has already exited.
   const pid = live ? process.pid : spawnSync('true').pid
   at(fx, () => write(path.join(autoCycleDir(), `sender-${pid}.${paneToken(PANE)}.claim`), JSON.stringify({ pid, pane: PANE })))
-  const s = await sender(fx, ['send', 'a', 'hello lane']), w = await sender(fx, ['wake', 'a'])
-  const want = live ? [] : [...nudged(), ...nudged()]
-  if (s.code !== 0 || w.code !== 0 || held(fx).length !== 1 || JSON.stringify(typed(fx)) !== JSON.stringify(want)) claimBad.push(`${live ? 'live' : 'dead'}: ${show(fx, w)}`)
+  // Each command judged on its own lines, so a check that only one of them reads is seen to.
+  const want = JSON.stringify(live ? [] : nudged())
+  const s = await sender(fx, ['send', 'a', 'hello lane']), afterSend = typed(fx)
+  if (s.code !== 0 || held(fx).length !== 1 || JSON.stringify(afterSend) !== want) claimBad.push(`${live ? 'live' : 'dead'} send: ${show(fx, s)}`)
+  const w = await sender(fx, ['wake', 'a'])
+  if (w.code !== 0 || JSON.stringify(typed(fx).slice(afterSend.length)) !== want) claimBad.push(`${live ? 'live' : 'dead'} wake: ${show(fx, w)}`)
 }
 clause('clause 2d — another claim on the pane with a live pid: send and wake type nothing; the same claim whose pid is dead does not hold, and each nudges (D96)',
   claimBad.length === 0, claimBad.join(' || '))
