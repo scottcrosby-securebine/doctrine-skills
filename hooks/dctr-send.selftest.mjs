@@ -413,9 +413,13 @@ const CLASS = [
 ]
 const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
 const controlFx = classFx()
-const classRuns = await Promise.all([...classFxs, ['control', controlFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path } }).then((r) => [label, fx, r])))
-const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== (label === 'control')).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
-clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out: no /clear typed; the healthy control clears (SR1, SR3)',
+// A lane that is no git repository at all, git stopped at the fixture's directory: the handoff file is its landing.
+const noRepoFx = classFx(); fs.rmSync(path.join(noRepoFx.lane, '.git'), { recursive: true, force: true })
+const ceiling = (fx) => ({ GIT_CEILING_DIRECTORIES: fs.realpathSync(fx.dir) })
+const CLEARS = ['control', 'no git repository']
+const classRuns = await Promise.all([...classFxs, ['control', controlFx], ['no git repository', noRepoFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...ceiling(fx) } }).then((r) => [label, fx, r])))
+const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== CLEARS.includes(label)).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
+clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out: no /clear typed; the healthy control, and a lane in no git repository, clear (SR1, SR3, B1)',
   classBad.length === 0, classBad.join(' || '))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
@@ -503,10 +507,12 @@ for (const [label, fx] of classFxs) {
   }
   if (!ok) classProofBad.push(label)
 }
+const noRepoGit = spawnSync(path.join(noRepoFx.gitBin, 'git'), ['-C', path.dirname(noRepoFx.handoff), 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8', timeout: 5000, env: { ...process.env, LC_ALL: 'C', ...ceiling(noRepoFx) } })
+if (!(noRepoGit.status === 128 && /not a git repository/.test(noRepoGit.stderr) && !fs.existsSync(path.join(noRepoFx.lane, '.git')))) classProofBad.push('no git repository')
 const cg = (args) => gitOf(controlFx, args)
 const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARGS['check-ignore']).status === 1 && Number(cg(SUBARGS.log).stdout.trim()) > 0 &&
   handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
-clause('clause 3l — without the sender: each class row carries its one defect, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
+clause('clause 3l — without the sender: each class row carries its one defect, the no-repository lane\'s git says it is not a git repository with the ceiling at the fixture, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
   classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
 
 process.exit(bad ? 1 : 0)

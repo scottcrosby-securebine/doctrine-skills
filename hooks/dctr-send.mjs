@@ -19,8 +19,9 @@
 // reads again: the pane must report the session the line is for (the one it decided on, and after /clear the new
 // one the pane reports in its place), and before /clear the record, latch, handoff and transcript must still clear
 // that session; otherwise it stops typing. Each wait for a ready reading gives up WAKE_GIVE_UP_MS after it starts, the
-// first at the wake's start, every `herdr(` and git call in it bounded by that wait's time left and none started past
-// it, and a wait that gives up types nothing more. Each send or wake the orchestrator
+// first at the wake's start: its pane reads and git calls are bounded by that wait's time left, none starts past it,
+// and a wait that gives up types nothing more. A line already decided on a ready reading inside the window is typed
+// with the default bound of `herdr(`. Each send or wake the orchestrator
 // makes appends one relay line to its own record. Contained (DCTR_VIEW_REQUEST_DIR set) it writes its files and
 // makes no pane call.
 
