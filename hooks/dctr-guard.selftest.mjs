@@ -156,6 +156,9 @@ fs.mkdirSync(path.join(lc, '.git'), { recursive: true }); fs.mkdirSync(lcRun, { 
 put(path.join(lc, 'docs/project.md'), '# Project\n\nRecords: .doctrine/records\n'); put(path.join(lc, 'session_memory.md'))
 fs.mkdirSync(path.join(lc, 'docs/handoffs'), { recursive: true })
 // A checkout whose run folder is stored as Orchestrate, reached by its Records path.
+// A misnamed run folder, and a link called orchestrate pointing at it.
+const misnamed = path.join(orch, 'misnamed'), linkRun = path.join(tmp, 'linkrun/orchestrate')
+fs.mkdirSync(misnamed, { recursive: true }); fs.mkdirSync(path.dirname(linkRun), { recursive: true }); fs.symlinkSync(misnamed, linkRun)
 const uc = path.join(tmp, 'uc'), ucRun = path.join(uc, '.doctrine/records/Orchestrate')
 fs.mkdirSync(path.join(uc, '.git'), { recursive: true }); fs.mkdirSync(ucRun, { recursive: true })
 put(path.join(uc, 'docs/PROJECT.md'), '# Project\n\nRecords: .doctrine/records\n')
@@ -416,11 +419,23 @@ clause('clause 2x — on emulated volumes, which run on any host: a case-insensi
 // An error on the resolved run itself, before any other context is read, still logs the refusal (E15-D24, GS3a).
 const runErrBefore = logLines().length
 const runErr = cases([['EIO on the stat of the run, Write src/a.txt', ORCH, W('src/a.txt'), 'deny', { fault: ['statSync', 'records/orchestrate'] }],
-  ['EIO on the lstat of the run, Edit docs/handoffs/h12.md', ORCH, E('docs/handoffs/h12.md'), 'deny', { fault: ['lstatSync', 'records/orchestrate'] }]])
+  ['EIO on the stat of the run, Edit docs/handoffs/h12.md', ORCH, E('docs/handoffs/h12.md'), 'deny', { fault: ['statSync', 'records/orchestrate'] }]])
 const runErrAdded = logLines().slice(runErrBefore).map((l) => l.replace(/^\S+ /, ''))
 const runErrWant = [`Write ${orch}/src/a.txt`, `Edit ${orch}/docs/handoffs/h12.md`]
-clause('clause 2y — an error reading the run folder itself, EIO on its stat or on its lstat, still logs the refusal, one line per call naming its tool and path (E15-D24, GS3a)',
+clause('clause 2y — an error on the stat of the run folder, once its name is read as orchestrate, still logs the refusal, one line per call naming its tool and path (E15-D24, GS3a)',
   wrong(runErr).length === 0 && JSON.stringify(runErrAdded) === JSON.stringify(runErrWant), `${show(runErr)} got ${JSON.stringify(runErrAdded)} want ${JSON.stringify(runErrWant)}`)
+
+// guard.log is written only in a run whose name has been read as orchestrate: a misnamed run, a link named orchestrate
+// to a misnamed folder, and a run whose spelling cannot be read are refused with no guard.log anywhere (GS3a review).
+const noLogRows = [['DCTR_RUN naming a folder called misnamed', misnamed, W('src/a.txt')],
+  ['DCTR_RUN naming Records itself', records, W(path.join(orch, '.doctrine/x.md'))],
+  ['DCTR_RUN naming a link called orchestrate to the misnamed folder', linkRun, W('src/a.txt')]]
+const noLog = cases(noLogRows.map(([name, r, pay]) => [name, { ...ORCH, DCTR_RUN: r }, pay, 'deny']))
+const lstatBefore = logLines().length
+const noLogEio = cases([['EIO on the lstat of the run, Write src/a.txt', ORCH, W('src/a.txt'), 'deny', { fault: ['lstatSync', 'records/orchestrate'] }]])
+const strayLogs = [misnamed, records, path.dirname(linkRun)].map((d) => path.join(d, 'guard.log')).filter((f) => fs.existsSync(f))
+clause('clause 2z — a run not read as orchestrate is refused and gains no guard.log: DCTR_RUN naming a folder called misnamed, Records itself, or a link called orchestrate to the misnamed folder; and EIO on the lstat of the run, its name unread, refuses with no line',
+  wrong([...noLog, ...noLogEio]).length === 0 && strayLogs.length === 0 && logLines().length === lstatBefore, `${show([...noLog, ...noLogEio])} stray ${JSON.stringify(strayLogs)} lines ${logLines().length - lstatBefore}`)
 
 put(path.join(tmp, 'case-probe'))
 const insensitive = fs.existsSync(path.join(tmp, 'CASE-PROBE'))
@@ -451,7 +466,7 @@ clause('clause 2r — each refused path is logged on one line with backslash as 
   wrong(esc).length === 0 && JSON.stringify(escAdded) === JSON.stringify(escWant) && new Set(escAdded).size === ESC.length,
   `${show(esc)} got ${JSON.stringify(escAdded)} want ${JSON.stringify(escWant)}`)
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc, runErr].flat()
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, late, states, caseAlias, esc, runErr, noLog, noLogEio].flat()
 clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
@@ -515,12 +530,13 @@ clause('clause 3m — without the guard: the lower-case checkout stores docs/pro
   foldReal(path.join(lc, 'DOCS/PROJECT.md')) === path.join(lc, 'docs/project.md') && (() => { try { foldReal(path.join(lc, 'src')); return false } catch (e) { return e.code === 'ENOENT' } })(), JSON.stringify(lcNames))
 const ucNames = fs.readdirSync(path.join(uc, '.doctrine/records'))
 const swapLstat = (io, p) => { try { const a = io.lstat(p), b = io.lstat(p.toUpperCase()); return a.ino === b.ino && a.dev === b.dev } catch (e) { return e.code } }
-clause('clause 3n — without the guard: uc stores its run as Orchestrate only, lc has no docs/epics and no auto-cycle file in any case, the emulated case-insensitive volume finds lc/DOCS as lc/docs and its upper-case alias as the same file while the case-sensitive one finds neither, and the preload makes stat and lstat of the run throw EIO',
+clause('clause 3n — without the guard: uc stores its run as Orchestrate only, lc has no docs/epics and no auto-cycle file in any case, the emulated case-insensitive volume finds lc/DOCS as lc/docs and its upper-case alias as the same file while the case-sensitive one finds neither, the preload makes stat and lstat of the run throw EIO, the misnamed folder exists, and the link called orchestrate resolves to it',
   JSON.stringify(ucNames) === '["Orchestrate"]' && !fs.readdirSync(path.join(lc, 'docs')).some((n) => n.toLowerCase() === 'epics') &&
   !fs.readdirSync(path.join(lc, '.doctrine')).some((n) => n.toLowerCase().startsWith('auto-cycle')) &&
   IVOL.realpath(path.join(lc, 'DOCS')) === path.join(lc, 'docs') && swapLstat(IVOL, path.join(lc, 'docs')) === true &&
   (() => { try { SVOL.realpath(path.join(lc, 'DOCS')); return false } catch (e) { return e.code === 'ENOENT' } })() && swapLstat(SVOL, path.join(lc, 'docs')) === 'ENOENT' &&
-  preloadCode('statSync', run) === 'EIO' && preloadCode('lstatSync', run) === 'EIO' && fs.statSync(run).isDirectory(), JSON.stringify(ucNames))
+  preloadCode('statSync', run) === 'EIO' && preloadCode('lstatSync', run) === 'EIO' && fs.statSync(run).isDirectory() &&
+  fs.statSync(misnamed).isDirectory() && path.basename(misnamed) !== 'orchestrate' && fs.realpathSync(linkRun) === fs.realpathSync(misnamed), JSON.stringify(ucNames))
 const fio = fakeIo()
 clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, its case-sensitive twin holds /c/DOCS as a file other than /c/docs, its mount puts /c/docs on a device of its own, and its faults throw their codes' +
   (insensitive ? '; on this temp volume the real DOCS/PROJECT.md resolves to docs/PROJECT.md' : ''),
