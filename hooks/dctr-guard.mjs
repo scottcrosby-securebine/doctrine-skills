@@ -6,7 +6,7 @@
 // only to a path guardAllowed in dctr-lib.mjs allows, judged where the path really lies (guardReal), against the context
 // guardContext reads from the run; it refuses every other one with the PreToolUse deny shape and, where the run was read
 // and the call names its path, appends one line `<ISO 8601 UTC time> <tool> <path>` to <run>/guard.log, the path as the
-// call gave it, made absolute against its cwd and never normalized. It keeps no latch, so an identical retry is
+// call gave it, made absolute against its cwd and never normalized, a backslash written \\, LF \n and CR \r. It keeps no latch, so an identical retry is
 // refused again. Every other tool, Bash and every MCP tool among them, goes through.
 //
 // In the orchestrator's session any error refuses: dctr-lib.mjs and the node modules are loaded by dynamic import
@@ -14,9 +14,11 @@
 // cannot rely on that library. In any other session an error allows. It calls no herdr.
 
 let fs, path, run = null, tool = null, shown = null
+// The log's reversible escape, so two refused paths never log alike and each stays on one line.
+const ESC = { '\\': '\\\\', '\n': '\\n', '\r': '\\r' }
 const deny = (reason) => {
   // A log that cannot be written still refuses: the refusal does not depend on the log.
-  if (run && shown) try { fs.appendFileSync(path.join(run, 'guard.log'), `${new Date().toISOString()} ${tool} ${shown.replace(/[\r\n]/g, '?')}\n`) } catch { /* refused anyway */ }
+  if (run && shown) try { fs.appendFileSync(path.join(run, 'guard.log'), `${new Date().toISOString()} ${tool} ${shown.replace(/[\\\r\n]/g, (c) => ESC[c])}\n`) } catch { /* refused anyway */ }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }))
   process.exit(0)
 }

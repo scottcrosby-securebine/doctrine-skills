@@ -5,7 +5,7 @@
 // Clause 1 pins guardAllowed in dctr-lib.mjs, the one definition of the allowed paths, each allowed path beside a
 // refused twin, and the hooks.json reader this suite uses, on planted copies and on the real file. Clause 2 drives
 // hooks/dctr-guard.mjs end to end on a fixture run, spawning it with a JSON payload on stdin and a tripwire `herdr`
-// first on PATH. Clause 3 proves the fixtures carry what each case needs without calling the guard.
+// first on PATH, some runs under a preload that makes one fs operation throw EIO. Clause 3 proves the fixtures carry what each case needs without calling the guard.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -39,6 +39,32 @@ clause('clause 1b — guardAllowed refuses each twin: a neighbouring name, the f
 clause('clause 1c — with no record resolved, the record\'s path is refused and the checkout\'s paths are still allowed',
   allowed(C.record, { ...C, record: null }) === false && allowed('/w/o/docs/handoffs/h.md', { ...C, record: null }) === true,
   JSON.stringify([allowed(C.record, { ...C, record: null }), allowed('/w/o/docs/handoffs/h.md', { ...C, record: null })]))
+
+// guardReal on an injected filesystem, portable to any volume: a lower-cased tree whose realpath spells every
+// existing path in lower case, as a case-insensitive volume does, and an error injected per operation.
+const err = (code) => Object.assign(new Error(code), { code })
+const FAKE = new Set(['/', '/c', '/c/docs', '/c/docs/project.md', '/c/l'])
+const fakeIo = (fault = {}) => ({
+  lstat: (p) => { if (fault.lstat && p.endsWith(fault.lstat[0])) throw err(fault.lstat[1]); if (!FAKE.has(p.toLowerCase())) throw err('ENOENT'); return { isSymbolicLink: () => p.toLowerCase() === '/c/l' } },
+  readlink: (p) => { if (fault.readlink) throw err(fault.readlink); return '/gone/t.md' },
+  realpath: (p) => { if (fault.realpath && p.toLowerCase() === fault.realpath[0]) throw err(fault.realpath[1]); if (!FAKE.has(p.toLowerCase())) throw err('ENOENT'); return p.toLowerCase() },
+})
+const gr = (p, io) => { try { return typeof lib.guardReal === 'function' ? lib.guardReal(p, '/c', io) : 'no guardReal export' } catch (e) { return `throws ${e.code}` } }
+const GR = [
+  ['a case alias of an existing file', gr('/C/DOCS/PROJECT.md', fakeIo()), '/c/docs/project.md'],
+  ['a missing name under a case alias, kept as written', gr('Docs/New.md', fakeIo()), '/c/docs/New.md'],
+  ['a missing component (ENOENT) kept as written', gr('/c/x/y.md', fakeIo()), '/c/x/y.md'],
+  ['a parent that is a file (ENOTDIR) kept as written', gr('/c/docs/project.md/x', fakeIo({ lstat: ['/x', 'ENOTDIR'] })), '/c/docs/project.md/x'],
+  ['a dangling link followed', gr('/c/l', fakeIo()), '/gone/t.md'],
+  ['EIO on lstat', gr('/c/docs/project.md', fakeIo({ lstat: ['/docs', 'EIO'] })), 'throws EIO'],
+  ['EACCES on lstat', gr('/c/docs/project.md', fakeIo({ lstat: ['/docs', 'EACCES'] })), 'throws EACCES'],
+  ['EIO on readlink', gr('/c/l', fakeIo({ readlink: 'EIO' })), 'throws EIO'],
+  ['EIO on the realpath of the existing prefix', gr('/c/docs/new.md', fakeIo({ realpath: ['/c/docs', 'EIO'] })), 'throws EIO'],
+  ['a NUL byte, on the real filesystem', gr('/c/a\u0000b.md'), 'throws ERR_INVALID_ARG_VALUE'],
+]
+const grWrong = GR.filter(([, got, want]) => got !== want)
+clause('clause 1g — guardReal walks strictly and spells the existing prefix as the volume does: a case alias is the file it names, a missing component (ENOENT, or ENOTDIR under a file) is kept as written, a dangling link is followed, and any other error on lstat, readlink or realpath, a NUL byte among them, throws (E15-D183, G1)',
+  grWrong.length === 0, JSON.stringify(grWrong))
 
 // The reader: the guard's own PreToolUse group is the one whose command runs dctr-guard.mjs, never the first group,
 // and its matcher is read as Claude Code compares it, against the whole tool name.
@@ -121,8 +147,13 @@ const BASE = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(
 Object.assign(BASE, { PATH: `${bin}:${process.env.PATH}`, HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', TMPDIR: tmp })
 const ORCH = { DCTR_ROLE: 'orchestrator', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orch }
 
-const hookRun = (env, stdin, { hook = hookSrc, cwd = orch } = {}) => {
-  const r = spawnSync('node', [hook], { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...BASE, ...env }, cwd, encoding: 'utf8' })
+// A preload that makes one fs operation throw EIO on any path containing a given string, the hook's real fs otherwise.
+const inject = path.join(tmp, 'inject.mjs')
+put(inject, "import fs from 'node:fs'\nconst [op, match] = JSON.parse(process.env.GUARD_FAULT)\nconst orig = fs[op]\n" +
+  "fs[op] = function (p, ...a) { if (String(p).includes(match)) throw Object.assign(new Error(`EIO: injected, ${op} ${p}`), { code: 'EIO' }); return orig.call(this, p, ...a) }\n")
+const hookRun = (env, stdin, { hook = hookSrc, cwd = orch, fault } = {}) => {
+  const args = fault ? ['--import', pathToFileURL(inject).href, hook] : [hook]
+  const r = spawnSync('node', args, { input: typeof stdin === 'string' ? stdin : JSON.stringify(stdin), env: { ...BASE, ...env, ...(fault ? { GUARD_FAULT: JSON.stringify(fault) } : {}) }, cwd, encoding: 'utf8' })
   let h = null
   try { h = JSON.parse(r.stdout).hookSpecificOutput } catch { /* no output */ }
   const deny = r.status === 0 && h?.hookEventName === 'PreToolUse' && h.permissionDecision === 'deny' && typeof h.permissionDecisionReason === 'string' &&
@@ -267,7 +298,44 @@ fs.rmdirSync(logFile); fs.renameSync(`${logFile}.kept`, logFile)
 clause('clause 2p — with guard.log unwritable the orchestrator\'s Write and MultiEdit outside the allowed paths are still refused, exit 0 with a deny (E15-D188)',
   wrong(unwritable).length === 0, show(unwritable))
 
-const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable].flat()
+// An error that is not a missing file refuses, wherever the guard reads: each fault turns a call that is otherwise
+// allowed into a refusal, and the preload naming nothing the guard reads leaves it allowed (E15-D183, G1).
+const faults = cases([
+  ['EIO on lstat of a dangling link under docs/handoffs', ORCH, W('docs/handoffs/dangling'), 'deny', { fault: ['lstatSync', 'docs/handoffs/dangling'] }],
+  ['EIO on readlink of a dangling link under docs/handoffs', ORCH, W('docs/handoffs/dangling'), 'deny', { fault: ['readlinkSync', 'docs/handoffs/dangling'] }],
+  ['EIO on the kickoff read of the memory file', ORCH, W('docs/handoffs/h9.md'), 'deny', { fault: ['readFileSync', 'SESSION_MEMORY.md'] }],
+  ['EIO on the stat that finds the record', ORCH, W('docs/handoffs/h9.md'), 'deny', { fault: ['statSync', 'docs/epics/E1.md'] }],
+  ['EIO on the stat that finds the checkout above the run', ORCH, W('docs/handoffs/h9.md'), 'deny', { fault: ['statSync', '.doctrine/records/.git'] }],
+  ['a NUL byte in a path under docs/handoffs', ORCH, W('docs/handoffs/a\u0000b.md'), 'deny'],
+  ['the preload naming nothing the guard reads', ORCH, W('docs/handoffs/h9.md'), 'allow', { fault: ['lstatSync', 'no-such-component'] }],
+])
+clause('clause 2s — an error that is not a missing file refuses: EIO on lstat or readlink while walking a path, on the kickoff read, on the stat finding the record or the checkout, and a NUL byte in the path; the same preload naming nothing the guard reads allows (E15-D183, G1)',
+  wrong(faults).length === 0, show(faults))
+
+// A case alias on a case-insensitive volume is the file it names; on a case-sensitive one it is another file.
+put(path.join(tmp, 'case-probe'))
+const insensitive = fs.existsSync(path.join(tmp, 'CASE-PROBE'))
+const caseAlias = insensitive ? cases([
+  ['DOCS/PROJECT.md', ORCH, W('DOCS/PROJECT.md'), 'allow'], ['Docs/Handoffs/h10.md', ORCH, E('Docs/Handoffs/h10.md'), 'allow'],
+  ['session_memory.md', ORCH, W('session_memory.md'), 'allow'], ['.DOCTRINE/records/x.md', ORCH, W('.DOCTRINE/records/x.md'), 'allow'],
+  ['DOCS/HANDOFFS/../../SRC/a.txt', ORCH, W('DOCS/HANDOFFS/../../SRC/a.txt'), 'deny'], ['Docs/PROJECT.md.bak', ORCH, W('Docs/PROJECT.md.bak'), 'deny'],
+]) : []
+clause(insensitive
+  ? 'clause 2t — on this case-insensitive temp volume a case alias of an allowed path is allowed (DOCS/PROJECT.md, Docs/Handoffs/, session_memory.md, .DOCTRINE/records/) and a case alias outside them is refused (E15-D22)'
+  : 'clause 2t — SKIPPED: the temp volume is case-sensitive, so a case alias names another file; clause 1g carries the canonical case on an injected volume',
+  wrong(caseAlias).length === 0, show(caseAlias))
+
+// The log line escapes the path reversibly, so two refused paths never log alike (E15-D24).
+const escBefore = logLines().length
+const ESC = ['src/x\ny.txt', 'src/x?y.txt', 'src/x\\ny.txt', 'src/x\ry.txt']
+const esc = cases(ESC.map((p) => [JSON.stringify(p), ORCH, W(p), 'deny']))
+const escAdded = logLines().slice(escBefore).map((l) => l.replace(/^\S+ Write /, ''))
+const escWant = [`${orch}/src/x\\ny.txt`, `${orch}/src/x?y.txt`, `${orch}/src/x\\\\ny.txt`, `${orch}/src/x\\ry.txt`]
+clause('clause 2r — each refused path is logged on one line with backslash as \\\\, LF as \\n and CR as \\r, so a path holding LF, one holding ?, one holding a backslash then n, and one holding CR each log differently (E15-D24)',
+  wrong(esc).length === 0 && JSON.stringify(escAdded) === JSON.stringify(escWant) && new Set(escAdded).size === ESC.length,
+  `${show(esc)} got ${JSON.stringify(escAdded)} want ${JSON.stringify(escWant)}`)
+
+const all = [d19, d20, d21, d22, d23, d118, d119, paths, errs, noRunDir, d223, own, unwritable, faults, caseAlias, esc].flat()
 clause('clause 2q — every run exits 0, and herdr was called zero times (tripwire on PATH)', all.every((c) => c.r.code === 0) && !fs.existsSync(tripwire),
   `tripwire ${fs.existsSync(tripwire)} codes ${JSON.stringify(all.filter((c) => c.r.code !== 0).map((c) => [c.name, c.r.code]))}`)
 
@@ -300,6 +368,25 @@ clause('clause 3e — without the reader: the planted copies carry their defects
     [!ms?.includes('NotebookEdit'), !ms?.includes('MultiEdit') && ms?.includes('Edit'), ms?.includes('Bash'), ms?.includes('Bash'), ms?.some((x) => x.startsWith(MCP))][i]) &&
   PLANTED.merged.hooks.PreToolUse[0].hooks.length === 2 && JSON.stringify(PLANTED.merged.hooks.PreToolUse[0]).includes('dctr-guard.mjs'), 'planted copies')
 clause('clause 3f — without the guard: guard.log made a folder really cannot be appended to', appendThrows, 'appendFileSync on the folder did not throw')
+
+const preloadCode = (op, target) => spawnSync('node', ['--import', pathToFileURL(inject).href, '-e',
+  `import('node:fs').then(({ default: fs }) => { try { fs.${op}(${JSON.stringify(target)}) ; console.log('none') } catch (e) { console.log(e.code) } })`],
+{ env: { ...process.env, GUARD_FAULT: JSON.stringify([op, path.basename(target)]) }, encoding: 'utf8' }).stdout.trim()
+const proved = [['lstatSync', path.join(orch, 'docs/handoffs/dangling')], ['readlinkSync', path.join(orch, 'docs/handoffs/dangling')],
+  ['readFileSync', path.join(orch, 'SESSION_MEMORY.md')], ['statSync', record], ['statSync', path.join(records, '.git')]].map(([op, t]) => [op, preloadCode(op, t)])
+let nulCode = null
+try { fs.lstatSync(path.join(orch, 'docs/handoffs/a\u0000b.md')) } catch (e) { nulCode = e.code }
+clause('clause 3g — without the guard: the preload really makes lstat, readlink, readFileSync and stat throw EIO on the fixture paths, the dangling link, memory file and record otherwise read, and a NUL byte makes lstat throw an error that is not ENOENT',
+  proved.every(([, c]) => c === 'EIO') && fs.readlinkSync(path.join(orch, 'docs/handoffs/dangling')) && fs.readFileSync(path.join(orch, 'SESSION_MEMORY.md'), 'utf8') &&
+  fs.statSync(record).isFile() && fs.statSync(path.join(orch, '.git')).isDirectory() && nulCode && nulCode !== 'ENOENT', JSON.stringify({ proved, nulCode }))
+const fio = fakeIo()
+clause('clause 3h — without guardReal: the injected volume spells every existing path in lower case and has no /c/docs/new.md, its link names a missing target, and its faults throw their codes' +
+  (insensitive ? '; on this temp volume the real DOCS/PROJECT.md resolves to docs/PROJECT.md' : ''),
+  fio.realpath('/C/DOCS/PROJECT.md') === '/c/docs/project.md' && (() => { try { fio.realpath('/c/docs/new.md'); return false } catch (e) { return e.code === 'ENOENT' } })() &&
+  fio.readlink('/c/l') === '/gone/t.md' && !FAKE.has('/gone') && (() => { try { fakeIo({ readlink: 'EIO' }).readlink('/c/l'); return false } catch (e) { return e.code === 'EIO' } })() &&
+  (!insensitive || fs.realpathSync.native(path.join(orch, 'DOCS/PROJECT.md')) === path.join(orch, 'docs/PROJECT.md')), 'injected volume')
+clause('clause 3i — without the guard: the escape paths are four distinct names, holding LF, ?, a backslash then n, and CR', new Set(ESC).size === 4 &&
+  ESC[0].includes('\n') && ESC[1].includes('?') && ESC[2].includes('\\n') && ESC[3].includes('\r'), JSON.stringify(ESC))
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) failed` : '\nall clauses passed')

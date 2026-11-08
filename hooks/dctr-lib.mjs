@@ -1146,10 +1146,25 @@ export function runRoot(env = process.env, cwd = process.cwd()) {
 /** The tools the guard judges, each with the tool_input field that names its path (G6). */
 export const GUARD_TOOLS = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
+/** Whether a filesystem error means only that the path is not there yet: ENOENT, or ENOTDIR where a parent is a file. */
+const notThere = (e) => e?.code === 'ENOENT' || e?.code === 'ENOTDIR'
+
+/** Whether `f` exists, any error but notThere thrown, so the guard never reads an unreadable path as an absent one. */
+const presentStrict = (f) => { try { fs.statSync(f); return true } catch (e) { if (notThere(e)) return false; throw e } }
+
 /** `p` where it really lies: an absolute path, or one relative to `cwd`, walked component by component through every
- *  symlink by followLinks, a dangling one included. The two are joined as written, never normalized first, so a `..`
- *  after a link climbs out of the link's target as the kernel does. */
-export const guardReal = (p, cwd) => followLinks(path.isAbsolute(p) ? p : `${cwd}/${p}`, { lstat: fs.lstatSync, readlink: fs.readlinkSync })
+ *  symlink by followLinks, strictly, a dangling one included. The two are joined as written, never normalized first,
+ *  so a `..` after a link climbs out of the link's target as the kernel does. The longest existing prefix is then
+ *  spelled as the volume spells it (realpath), so on a case-insensitive volume a case alias is the file it names.
+ *  Any error but notThere, a NUL byte in the path among them, throws. `io` is injected by the selftest only. */
+export function guardReal(p, cwd, { lstat = fs.lstatSync, readlink = fs.readlinkSync, realpath = fs.realpathSync.native } = {}) {
+  let head = followLinks(path.isAbsolute(p) ? p : `${cwd}/${p}`, { lstat, readlink, strict: true }), rest = ''
+  for (;;) {
+    try { return path.join(realpath(head), rest) } catch (e) { if (!notThere(e) || head === '/') throw e }
+    rest = path.join(path.basename(head), rest)
+    head = path.dirname(head)
+  }
+}
 
 /**
  * The orchestrator's allowed paths (E15-D22), the one definition every phase imports. `p` and every path in `ctx`
@@ -1169,7 +1184,8 @@ export function guardAllowed(p, { records, checkout, record }) {
  * The guard's context for a session whose project directory is `cwd`, or a throw naming what could not be read: the
  * run from runRoot, which must be an existing folder named `orchestrate` (Run layout); Records its parent; the
  * checkout the repo holding the run (repoOf, never the seat's cwd, E15-D119); and the record
- * the checkout's kickoff chain reaches (followKickoff), or null where the chain stops.
+ * the checkout's kickoff chain reaches (followKickoff), or null where the chain stops at a file that is not there.
+ * Any other error reading the chain throws.
  */
 export function guardContext(env = process.env, cwd = process.cwd()) {
   const named = runRoot(env, cwd)
@@ -1177,8 +1193,12 @@ export function guardContext(env = process.env, cwd = process.cwd()) {
   const run = guardReal(named, cwd)
   if (path.basename(run) !== 'orchestrate') throw new Error(`the run ${run} is not a folder named orchestrate`)
   if (!fs.statSync(run).isDirectory()) throw new Error(`the run ${run} is not a folder`)
-  const checkout = repoOf(run, fs.existsSync)
-  const k = followKickoff({ projectDir: checkout, read: (f) => fs.readFileSync(f, 'utf8'), exists: fs.existsSync })
+  const checkout = repoOf(run, presentStrict)
+  // followKickoff reads a failed read as a chain that stops; only a file not there may, any other error refuses.
+  let failed = null
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch (e) { if (!notThere(e)) failed = e; throw e } }
+  const k = followKickoff({ projectDir: checkout, read, exists: presentStrict })
+  if (failed) throw failed
   return { run, records: path.dirname(run), checkout, record: k.recordPath ? guardReal(k.recordPath, checkout) : null }
 }
 
@@ -2531,8 +2551,9 @@ export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, le
  *  target is put back on the front of the queue (an absolute target restarts at `/`), and a component that does not
  *  exist is kept as written and the walk goes on, so a link whose target is gone (a wiped scratchpad) is still
  *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after 40
- *  links a link is kept as written, so a cycle ends. */
-export function followLinks(p, { lstat, readlink }) {
+ *  links a link is kept as written, so a cycle ends. With `strict`, an error that is not notThere throws instead of
+ *  reading as a missing component. */
+export function followLinks(p, { lstat, readlink, strict = false }) {
   const queue = String(p).split('/')
   let real = '/'
   for (let hops = 0; queue.length;) {
@@ -2541,7 +2562,7 @@ export function followLinks(p, { lstat, readlink }) {
     if (c === '..') { real = path.dirname(real); continue }
     const next = path.join(real, c)
     let target = null
-    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) } catch { /* missing: kept as written */ }
+    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) } catch (e) { if (strict && !notThere(e)) throw e /* else missing: kept as written */ }
     if (target === null) { real = next; continue }
     hops++
     if (target.startsWith('/')) real = '/'
