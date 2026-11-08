@@ -8,6 +8,18 @@ description: Use when the user asks to load memory, resume the session, restore 
 Restore session state and report drift. This is the cheap path: state only, no
 codebase tour. Use `doctrine-primer` when the agent needs the project explained.
 
+## 0. Under an orchestrated run, hold for the reset first
+
+In a session whose `DCTR_ROLE` is set (a `doctrine-orchestrate` run), this is the first step, before
+step 1's reads, step 1b's skill loads, its interrupted-backup check, the handoff's first action and
+every other step that could start work. Read `$DCTR_ROLE` and `$DCTR_RUN` from your environment, then
+read `<run>/reset.txt`, `<run>` being the directory `DCTR_RUN` names, which only an account-wide
+usage limit writes: a per-model limit writes none and holds nothing. While the time it names has not
+passed, log the hold as one line of your reply, `reset hold: <role> until <time>`, and take no other
+action until it has: wait for that time as your host reference says to wait, then go on to step 1. A
+missing file is no hold. A file that names no time you can read holds nothing, and step 4's report
+says so. With `DCTR_ROLE` unset, skip this step.
+
 ## 1. Find and read saved state
 
 `ls` the repo root first — do not assume the filename. The usual name is
@@ -53,7 +65,7 @@ name (on Claude Code through its skill-loading tool; on Codex by reading each
 skill's SKILL.md from your skill list), in this order: `doctrine:<wrapper>` (for example
 `doctrine:doctrine-code`), then `doctrine:doctrine` unless the wrapper already
 had you invoke it. With `wrapper: none`, or no wrapper line in the record or the handoff header, invoke only
-`doctrine:doctrine`. Nothing comes before them except step 1's `ls` and the
+`doctrine:doctrine`. Nothing comes before them except step 0's reset hold, step 1's `ls` and the
 reads this step and step 1 already made: no drift check, no `git` or `gh`, no
 other file read and no other directory listing, even of the directory the handoff sits in. When it reads Blocked, also name the open question in the
 Handoff line: the record's last `question: <id> opened` line with no later
@@ -219,6 +231,6 @@ warning) or `doctrine-backup` ends the turn.
 
 Every drift check has run, every bare-`#N` cell is hydrated and every skipped
 cell named, the kickoff is quoted or its absence flagged, its first line was
-acted on before anything else, step 1b's interrupted-backup and first-action
+acted on before anything but step 0's reset hold, step 1b's interrupted-backup and first-action
 checks ran, and, with auto-cycle on, step 6 carried the phase on or stopped where
 it says.

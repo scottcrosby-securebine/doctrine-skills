@@ -1,6 +1,6 @@
 # Doctrine Skills
 
-Fourteen skills for Claude Code that put an agent's work through a real gate: every check your project
+Fifteen skills for Claude Code that put an agent's work through a real gate: every check your project
 documents, an adversary that did not write the code, and a loop that does not exit until one full
 pass comes back clean.
 
@@ -18,7 +18,7 @@ attention you had that day. The failures that survive it do not look like failur
 
 ## What the doctrine does
 
-Seven rules, applied to every job the hub and its eight wrappers run. Rules 3 to 6 are a loop rather than a sequence, which is the
+Seven rules, applied to every job the hub and its nine wrappers run. Rules 3 to 6 are a loop rather than a sequence, which is the
 point of rule 6.
 
 1. **Ask first.** Questions reach you before work is aimed, and your answers go verbatim to every
@@ -250,11 +250,11 @@ have not answered, or close a prose job with a list of what it did not fix. The 
 the line always does is distinguish a clean pass from an ending without one, and name what is still
 open.
 
-## The fourteen skills
+## The fifteen skills
 
 | Skill | Use it for |
 |---|---|
-| [`doctrine`](docs/skills/doctrine.md) | The shared posture. The eight wrappers invoke it. |
+| [`doctrine`](docs/skills/doctrine.md) | The shared posture. The nine wrappers invoke it. |
 | [`doctrine-code`](docs/skills/doctrine-code.md) | Features, specs and tickets. |
 | [`doctrine-debug`](docs/skills/doctrine-debug.md) | Anything broken, throwing, failing or slow. |
 | [`doctrine-audit`](docs/skills/doctrine-audit.md) | Bug hunts and deep code audits. |
@@ -263,6 +263,7 @@ open.
 | [`doctrine-research`](docs/skills/doctrine-research.md) | Multi-source questions needing a fact-checked answer. |
 | [`doctrine-gauntlet`](docs/skills/doctrine-gauntlet.md) | Web design, judged on the rendered page. |
 | [`doctrine-project`](docs/skills/doctrine-project.md) | Starting or adopting a repo's project and epic tracking, with a checkable meaning of done. |
+| [`doctrine-orchestrate`](docs/skills/doctrine-orchestrate.md) | Several phases of one epic run at once, one lane session each, landed one at a time behind a gate. |
 | [`doctrine-pane`](docs/skills/doctrine-pane.md) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
 | [`doctrine-backup`](skills/doctrine-backup/SKILL.md) | Saving the session's memory file for the next session, red-teamed before it is done. |
 | [`doctrine-handoff`](skills/doctrine-handoff/SKILL.md) | A detailed handoff under `docs/handoffs/`, tied to the plan, so nothing is lost across a cleared session. |
@@ -296,15 +297,16 @@ Claude Code's own `/code-review`. This plugin does not bundle it.
 
 ## Requirements
 
-**Twelve of the fourteen skills need nothing installed.** `doctrine-gauntlet` judges rendered pages, so it
+**Twelve of the fifteen skills need nothing installed.** `doctrine-gauntlet` judges rendered pages, so it
 needs a browser, and without one its harness refuses to run rather than report a pass.
 `doctrine-pane` needs [herdr](https://herdr.dev) 0.8.2 or later, and outside herdr it refuses.
-Neither degrades into a weaker version of itself.
+`doctrine-orchestrate` needs herdr too, with every session of the run in a herdr pane, and runs on Claude Code only in a repo carrying `docs/PROJECT.md`: without herdr it refuses to start a run and says why.
+None of the three degrades into a weaker version of itself.
 
 Optional, each with a fallback: Matt Pocock's engineering skills, superpowers, the OpenAI codex
 plugin on Claude Code, the Claude Code CLI (`claude`, signed in) on Codex, ponytail, writing-clearly-and-concisely, Claude Code's `deep-research`
 workflow, Claude Code's Workflow tool, Claude Design, and herdr for everything other than
-`doctrine-pane` and auto-cycle, below. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
+`doctrine-pane`, `doctrine-orchestrate` and auto-cycle, below. **[docs/requirements.md](docs/requirements.md)** has the install commands and says
 what happens when each is missing.
 
 Auto-cycle is off by default and switched on per phase in its record. Using it needs these set up

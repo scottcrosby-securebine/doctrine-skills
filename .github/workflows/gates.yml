@@ -84,6 +84,11 @@ jobs:
         # removes everything. Drives the hook with a tripwire herdr; needs only node and bash.
         run: node hooks/dctr-seat.teardown.selftest.mjs
 
+      - name: orchestrator capacity command tamper test
+        # The capacity arithmetic in dctr-lib.mjs on the cases E15-D51 names, and the command on fixture
+        # transcripts for the window it derives and the first usage reading it loads. Pure node.
+        run: node hooks/dctr-orchestrate.selftest.mjs
+
       - name: project format check tamper test
         # Three clauses per check rule in dctr-project.mjs over a known-good project and one-line
         # broken variants, plus the status command's unknown-versus-none reads with tripwire herdr, gh
