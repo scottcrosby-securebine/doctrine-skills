@@ -106,7 +106,7 @@ const asIndexed = (wt, f, mode, blob) => {
   const p = path.join(wt, f), st = fs.lstatSync(p, { throwIfNoEntry: false })
   const now = !st ? null : st.isSymbolicLink() ? '120000' : st.isFile() ? (st.mode & 0o100 ? '100755' : '100644') : null
   if (now !== mode) return false
-  return (now === '120000' ? execFileSync('git', ['-C', wt, 'hash-object', '--stdin'], { ...LISTING, input: fs.readlinkSync(p, 'buffer') }).trim() : git(wt, 'hash-object', '--', f)) === blob
+  return (now === '120000' ? execFileSync('git', ['-C', wt, 'hash-object', '--stdin'], { ...LISTING, stdio: ['pipe', 'pipe', 'pipe'], input: fs.readlinkSync(p, 'buffer') }).trim() : git(wt, 'hash-object', '--', f)) === blob
 }
 const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
 /** Where reset keeps the memory bytes across its move: in the worktree's own git dir, which no checkout or reset of

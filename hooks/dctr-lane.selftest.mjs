@@ -1002,6 +1002,27 @@ for (const [i, K] of MODES.entries()) {
     r.code !== 0 && /dctr-lane: refused/.test(r.err) && head(s2.w) === old && modeOf(path.join(s2.w, 'src.txt')) === before2, `reset ${r.code} ${said(r)}; before ${before2}; after ${modeOf(path.join(s2.w, 'src.txt'))}`)
 }
 
+// The known-good twins of the hidden-change test: a tracked file, executable file and link committed on the lane
+// branch, then marked skip-worktree or assume-unchanged and left untouched, are no change, so remove and reset accept.
+const UNTOUCHED = ['--skip-worktree', '--assume-unchanged'].flatMap((flag) => [
+  { k: `untouched ${flag.slice(2)} 100644 file`, file: 'tw.txt', mode: '100644', flag, make: (p) => write(p, 'twin\n') },
+  { k: `untouched ${flag.slice(2)} 100755 file`, file: 'tw.sh', mode: '100755', flag, make: (p) => { write(p, '#!/bin/sh\n'); fs.chmodSync(p, 0o755) } },
+  { k: `untouched ${flag.slice(2)} 120000 link`, file: 'tw-lnk', mode: '120000', flag, make: (p) => fs.symlinkSync('src.txt', p) },
+])
+const twin = (s, K) => { K.make(path.join(s.w, K.file)); git(s.w, 'add', K.file); git(s.w, 'commit', '-qm', 'twin'); git(s.w, 'update-index', K.flag, K.file) }
+for (const [i, K] of UNTOUCHED.entries()) {
+  const s = matrixLane()
+  twin(s, K)
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1bh${i} — after an archive, remove of a lane holding an ${K.k} exits 0 and the worktree is gone (LC11)`,
+    ra.code === 0 && rr.code === 0 && !exists(s.w), `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+  const s2 = matrixLane()
+  const t = commitIn(s2.f.repo, 'at-t.txt', 't\n', 't')
+  twin(s2, K)
+  const r = lane(s2.f, ['reset', 'a', t])
+  clause(`clause 1bi${i} — reset of a lane holding an ${K.k} moves to t (LC11)`, r.code === 0 && head(s2.w) === t, `reset ${r.code} ${said(r)}`)
+}
+
 // Through reset onto a revision t that adds one file: the kinds a move keeps are kept, the hidden ones refuse.
 for (const [i, K] of KINDS.entries()) {
   const s = matrixLane()
@@ -1186,6 +1207,20 @@ for (const [i, [k, env, prep]] of [
     const bytes = crypto.createHash('sha256').update(fs.readFileSync(path.join(s.w, 'src.txt'))).digest('hex') === crypto.createHash('sha256').update(git(s.w, 'cat-file', 'blob', ':src.txt').out + '\n').digest('hex')
     clause(`clause 3al${i} — on the ${K.k} fixture, src.txt reads ${modeOf(path.join(s.w, 'src.txt'))} with the index's bytes, the index entry is 100644, and the status test prints nothing`,
       ['exec', 'link'].includes(modeOf(path.join(s.w, 'src.txt'))) && bytes && idx.startsWith('100644 ') && st === '', JSON.stringify({ st, idx, bytes }))
+  }
+  // Clause 3 for LC11, without the command: each twin's index entry carries its flag's tag, the mode it was made with
+  // and the blob git computes from the worktree (a link's from its target), and git status prints nothing.
+  for (const [i, K] of UNTOUCHED.entries()) {
+    const s = matrixLane()
+    twin(s, K)
+    const p = path.join(s.w, K.file), [tag, mode, blob] = git(s.w, 'ls-files', '-v', '-s', K.file).out.split(/\s+/)
+    const now = K.mode === '120000'
+      ? spawnSync('git', ['-C', s.w, 'hash-object', '--stdin'], { input: fs.readlinkSync(p), encoding: 'utf8' }).stdout.trim()
+      : git(s.w, 'hash-object', '--', K.file).out
+    const st = git(s.w, 'status', '--porcelain', '--untracked-files=no').out
+    clause(`clause 3an${i} — on the ${K.k} twin, the index entry is tagged ${K.flag === '--skip-worktree' ? 'S' : 'h'} with mode ${K.mode} and the blob git computes from the worktree, and the status test prints nothing`,
+      tag === (K.flag === '--skip-worktree' ? 'S' : 'h') && mode === K.mode && modeOf(p) === { '100644': 'plain', '100755': 'exec', '120000': 'link' }[K.mode] && /^[0-9a-f]{40}$/.test(now) && now === blob && st === '',
+      JSON.stringify({ tag, mode, blob, now, st }))
   }
   // Clause 3 for LC10: the shim answers a fresh pane in each discriminating mode as the clause names it.
   for (const [mode, status, session] of [['session-before', 'unknown', 'old'], ['idle-before', 'idle', null]]) {
