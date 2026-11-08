@@ -45,7 +45,7 @@ if (args[0] === 'tab' && args[1] === 'create') {
   const p = st.panes[args[2]]
   if (mode === 'get-fail') { code = 1; err = 'transport down' }
   else if (mode === 'get-empty') out = ''
-  else if (!p) { code = 1; err = JSON.stringify({ error: { code: 'pane_not_found' } }) }
+  else if (!p || mode === 'gone') { code = 1; err = JSON.stringify({ error: { code: 'pane_not_found' } }) }
   else {
     let status
     if (p.typed === 0) { status = mode === 'agent-before' ? 'idle' : 'unknown'; session = mode === 'agent-before' ? 'old' : null }
@@ -480,7 +480,7 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
   const f = fixture()
   const bads = [['an unknown subcommand', ['move', 'a']], ['create with three arguments', ['create', 'a', f.repo, f.base]], ['a base that is no commit', ['create', 'a', f.repo, 'no-such-rev', handoffOf(f)]],
     ['a handoff that does not exist', ['create', 'a', f.repo, f.base, path.join(f.repo, 'docs/handoffs/none.md')]], ['a role that is not a name', ['create', 'A b', f.repo, f.base, handoffOf(f)]],
-    ['the role orchestrator', ['create', 'orchestrator', f.repo, f.base, handoffOf(f)]]]
+    ['the role orchestrator', ['create', 'orchestrator', f.repo, f.base, handoffOf(f)]], ['a role that climbs out of .claude/worktrees', ['create', '../up', f.repo, f.base, handoffOf(f)]]]
   for (const [why, args] of bads) {
     const r = lane(f, args)
     clause(`clause 1i — dctr-lane.mjs refuses ${why}, making nothing`, r.code !== 0 && !exists(path.join(f.repo, '.claude')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
@@ -502,6 +502,8 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
   const one = fixture({ handoffs: { merge: '.doctrine/records/merge.md' } })
   const before = git(one.repo, 'worktree', 'list', '--porcelain').out
   const r = lane(one, ['create', 'merge', one.repo, 'main', handoffOf(one, 'merge')])
+  // No single-anchor mutation pins the held-branch check in dctr-lane.mjs: git worktree add refuses a held branch
+  // itself, making nothing, in every held case a fixture can build, a worktree whose directory is gone among them.
   clause('clause 1l — create merge refuses while the repo\'s own checkout holds the integration branch: worktrees unchanged, no herdr call, no lane.log line (E15-D167)',
     r.code !== 0 && git(one.repo, 'worktree', 'list', '--porcelain').out === before && shimLog(one).length === 0 && laneLines(one).length === 0, `exit ${r.code} ${said(r)}`)
   const comp = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
@@ -596,6 +598,21 @@ for (const [n, file, why] of [['1w', '.doctrine/records/a/gate.out', 'ignored ev
   clause('clause 1y — remove refuses a lane holding an untracked file the archive does not hold, the worktree still there',
     r.code !== 0 && exists(path.join(s.w, 'new-source.txt')), `exit ${r.code} ${said(r)}`)
 }
+// Files git status cannot show (LR2): an ignored file outside the record's directory, and a tracked file hidden by
+// skip-worktree, each written after the archive.
+const HIDDEN = {}
+for (const [n, file, why, prep] of [['1y2', '.claude/scratch.txt', 'an ignored file outside its record\'s directory', null],
+  ['1y3', 'src.txt', 'a tracked file hidden by skip-worktree', (w) => git(w, 'update-index', '--skip-worktree', 'src.txt')],
+  ['1y4', 'aSESSION_MEMORY.md', 'a tracked aSESSION_MEMORY.md, a name ending in the memory file\'s', (w) => commitIn(w, 'aSESSION_MEMORY.md', 'v1\n', 'track it')]]) {
+  const s = seeded()
+  if (prep) prep(s.w)
+  lane(s.f, ['archive', 'a'])
+  append(path.join(s.w, file), 'written after the archive\n')
+  HIDDEN[n] = { s, file, st: git(s.w, 'status', '--porcelain', '--untracked-files=all').out }
+  const r = lane(s.f, ['remove', 'a'])
+  clause(`clause ${n} — remove refuses a lane holding ${why}, written after its archive, the worktree still there`,
+    r.code !== 0 && exists(path.join(s.w, file)) && laneLines(s.f).length === 2, `exit ${r.code} ${said(r)}`)
+}
 
 
 // Refused calls write no lane.log line (E15-D207), on one lane.
@@ -675,6 +692,137 @@ const RUN2 = fixture({ runName: 'run2' })
     exists(RUN2.wt('a')) && laneLines(RUN2).length === 1, `create ${rc.code}; archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
 }
 
+
+// The untracked and ignored files a reset would overwrite (LR1, LR3): t tracks notes.txt, an ignored file and a name
+// holding a newline, and a file in a directory whose name holds one; lanes a, b and c each hold one of the first three
+// untracked, lane h holds a file named as that directory, and lane d holds only a file t does not track.
+const WEIRD = 'we\nird.txt'
+const WEIRD_DIR = 'we\nird.d'
+const CLOB = fixture({ handoffs: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'g', 'h'].map((r) => [r, `.doctrine/records/${r}.md`])) })
+git(CLOB.repo, 'checkout', '-q', '-b', 'revt')
+for (const x of ['notes.txt', '.doctrine/records/keep.txt', WEIRD, `${WEIRD_DIR}/inner.txt`]) { write(path.join(CLOB.repo, x), `${x} at t\n`); git(CLOB.repo, 'add', '-f', x) }
+git(CLOB.repo, 'commit', '-qm', 't')
+const clobT = head(CLOB.repo)
+git(CLOB.repo, 'checkout', '-q', '-b', 'revs', 'main')
+const clobS = commitIn(CLOB.repo, 'src.txt', 'source at s\n', 's')
+git(CLOB.repo, 'checkout', '-q', 'main')
+for (const [role, file, why] of [['a', 'notes.txt', 'an untracked file'], ['b', '.doctrine/records/keep.txt', 'an ignored file'], ['c', WEIRD, 'an untracked file whose name holds a newline'],
+  ['h', WEIRD_DIR, 'an untracked file whose newline name t tracks as a directory']]) {
+  create(CLOB, role)
+  const w = CLOB.wt(role)
+  write(path.join(w, file), 'the lane\'s own bytes\n')
+  const before = { head: head(w), branches: branches(CLOB.repo), lines: laneLines(CLOB).length }
+  const r = lane(CLOB, ['reset', role, clobT])
+  clause(`clause 1ah — reset refuses when the revision tracks a path where the lane holds ${why}: HEAD unmoved, its bytes kept, no side branch, no lane.log line (LR1, LR3)`,
+    r.code !== 0 && head(w) === before.head && read(path.join(w, file)) === 'the lane\'s own bytes\n' && JSON.stringify(branches(CLOB.repo)) === JSON.stringify(before.branches) &&
+    laneLines(CLOB).length === before.lines, `exit ${r.code} ${said(r)}`)
+}
+// A change skip-worktree or assume-unchanged hides from the status test, on a revision s that changes that file.
+for (const [role, flag, why] of [['e', '--skip-worktree', 'skip-worktree'], ['g', '--assume-unchanged', 'assume-unchanged']]) {
+  create(CLOB, role)
+  const w = CLOB.wt(role)
+  git(w, 'update-index', flag, 'src.txt')
+  write(path.join(w, 'src.txt'), 'the lane\'s own bytes\n')
+  const before = { head: head(w), branches: branches(CLOB.repo), lines: laneLines(CLOB).length }
+  const r = lane(CLOB, ['reset', role, clobS])
+  clause(`clause 1ah2 — reset refuses a lane whose src.txt change ${why} hides from git status: HEAD unmoved, its bytes kept, no side branch, no lane.log line (LR1)`,
+    r.code !== 0 && /dctr-lane: refused/.test(r.err) && head(w) === before.head && read(path.join(w, 'src.txt')) === 'the lane\'s own bytes\n' &&
+    JSON.stringify(branches(CLOB.repo)) === JSON.stringify(before.branches) && laneLines(CLOB).length === before.lines, `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(CLOB.repo))}`)
+}
+{
+  create(CLOB, 'd')
+  const w = CLOB.wt('d')
+  write(path.join(w, 'other.txt'), 'kept\n')
+  const r = lane(CLOB, ['reset', 'd', clobT])
+  clause('clause 2x — reset of a lane holding only an untracked file the revision does not track moves to the revision and keeps the file (LR1)',
+    r.code === 0 && head(w) === clobT && read(path.join(w, 'other.txt')) === 'kept\n', `exit ${r.code} ${said(r)}`)
+}
+
+// A memory file the base tracks as a link to a path that does not exist (LR6).
+const DLINK = fixture({ memory: 'link' })
+const goneMem = path.join(DLINK.root, 'gone-memory.md')
+fs.symlinkSync(goneMem, path.join(DLINK.repo, 'SESSION_MEMORY.md'))
+git(DLINK.repo, 'add', 'SESSION_MEMORY.md'); git(DLINK.repo, 'commit', '-qm', 'dangling memory link')
+const dlinkBase = head(DLINK.repo)
+
+// Handoff names the kickoff line cannot carry (LR5).
+for (const name of ['a b.md', 'a|b.md']) {
+  const f = fixture()
+  const h = path.join(f.repo, 'docs/handoffs', name)
+  write(h, handoffText('.doctrine/records/a.md'))
+  const r = create(f, 'a', { handoff: h })
+  clause(`clause 1aj — create refuses a handoff named ${JSON.stringify(name)}, which the kickoff line cannot carry, making nothing (LR5)`, madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+}
+
+// A record whose real path leaves the worktree through a link the base tracks (LR6).
+const LINKED = fixture()
+const outside = path.join(LINKED.root, 'outside'); fs.mkdirSync(outside)
+fs.symlinkSync(outside, path.join(LINKED.repo, 'evil'))
+git(LINKED.repo, 'add', 'evil'); git(LINKED.repo, 'commit', '-qm', 'link')
+const linkedBase = head(LINKED.repo)
+write(handoffOf(LINKED), handoffText('evil/a.md'))
+{
+  const r = create(LINKED, 'a', { base: linkedBase })
+  clause('clause 1ak — create refuses a record whose real path leaves the worktree through a tracked link: nothing written outside, no herdr call, no lane.log line, the worktree named (LR6)',
+    r.code !== 0 && fs.readdirSync(outside).length === 0 && shimLog(LINKED).length === 0 && laneLines(LINKED).length === 0 && (r.out + r.err).includes(LINKED.wt('a')), `exit ${r.code} ${said(r)}`)
+}
+
+// A memory file the base tracks as a link to a file outside the worktree (LR6).
+const MLINK = fixture({ memory: 'link' })
+const outsideMem = path.join(MLINK.root, 'outside-memory.md'); write(outsideMem, 'outside\n')
+fs.symlinkSync(outsideMem, path.join(MLINK.repo, 'SESSION_MEMORY.md'))
+git(MLINK.repo, 'add', 'SESSION_MEMORY.md'); git(MLINK.repo, 'commit', '-qm', 'memory link')
+const mlinkBase = head(MLINK.repo)
+{
+  const r = create(MLINK, 'a', { base: mlinkBase })
+  clause('clause 1ak2 — create refuses a memory file whose real path leaves the worktree through a tracked link: the outside file unchanged, no handoff copied, no herdr call, no lane.log line (LR6)',
+    r.code !== 0 && read(outsideMem) === 'outside\n' && !exists(path.join(MLINK.wt('a'), 'docs/handoffs/a.md')) && shimLog(MLINK).length === 0 && laneLines(MLINK).length === 0,
+    `exit ${r.code} ${said(r)}; outside ${JSON.stringify(read(outsideMem))}`)
+}
+
+// The other refusals (LR7): a pane herdr reports gone, a revision that is no commit, a side branch held elsewhere.
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'gone' } })
+  const gets = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'get').length
+  clause('clause 1al — when pane get answers pane_not_found, create fails at that first read, types nothing and writes no lane.log line (L7)',
+    r.code !== 0 && gets === 1 && exists(f.wt('a')) && laneLines(f).length === 0, `exit ${r.code} ${said(r)}; pane gets ${gets}`)
+}
+{
+  const f = fixture()
+  create(f)
+  const w = f.wt('a')
+  const c = commitIn(w, 'lane.txt', 'lane\n', 'lane commit')
+  const before = branches(f.repo)
+  // A tree, not a commit: git ls-tree reads it, so only the commit test stops reset before it makes the side branch.
+  const r = lane(f, ['reset', 'a', git(f.repo, 'rev-parse', `${f.base}^{tree}`).out])
+  clause('clause 1am — reset refuses a revision that is a tree and no commit: HEAD unmoved, no side branch, no lane.log line',
+    r.code !== 0 && head(w) === c && JSON.stringify(branches(f.repo)) === JSON.stringify(before) && laneLines(f).length === 1, `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+  git(f.repo, 'branch', `a-was-${c.slice(0, 12)}`, f.base)
+  const held = branches(f.repo)
+  const r2 = lane(f, ['reset', 'a', f.base])
+  clause('clause 1an — reset refuses when its side branch exists at another commit: HEAD unmoved, that branch unchanged, no lane.log line',
+    r2.code !== 0 && head(w) === c && JSON.stringify(branches(f.repo)) === JSON.stringify(held) && laneLines(f).length === 1, `exit ${r2.code} ${said(r2)}`)
+}
+
+// The project file and epic archive repoints (LR8).
+for (const [n, gone, why] of [['1ao', 'docs/epics/E1.md', 'the epic'], ['1ap', 'docs/PROJECT.md', 'the project file']]) {
+  const s = seeded()
+  fs.rmSync(path.join(s.f.repo, gone))
+  const r = lane(s.f, ['archive', 'a'])
+  const rr = lane(s.f, ['remove', 'a'])
+  clause(`clause ${n} — archive refuses when ${why} cannot be read, copying nothing, and remove then refuses, the worktree kept (LR8)`,
+    r.code !== 0 && !exists(s.lanes) && rr.code !== 0 && exists(s.w) && laneLines(s.f).length === 1, `archive ${r.code} ${said(r)}; remove ${rr.code} ${said(rr)}`)
+}
+{
+  const s = seeded()
+  const epicFile = path.join(s.f.repo, 'docs/epics/E1.md')
+  write(epicFile, EPIC('docs/other/b.md'))
+  const r = lane(s.f, ['archive', 'a'])
+  clause('clause 2y — archive of a lane no member line names exits 0, says no member line named its record, and leaves the epic unchanged (LR8)',
+    r.code === 0 && /no - phase member line names/.test(r.out) && read(epicFile) === EPIC('docs/other/b.md'), `exit ${r.code} ${said(r)}`)
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
 
 {
@@ -691,9 +839,15 @@ const RUN2 = fixture({ runName: 'run2' })
   clause('clause 3b — on a worktree made by hand, the status test prints the source change and not the skip-worktree memory file',
     st === 'M src.txt', JSON.stringify(st))
   git(z, 'checkout', '--', 'src.txt')
-  const plain = git(z, 'reset', '--hard', memM)
-  clause('clause 3c — a plain git reset --hard onto a revision that changes a skip-worktree memory file exits 128, the hazard reset carries the bytes across (E15-D165)',
-    plain.code === 128, `exit ${plain.code} ${plain.err}`)
+  git(f.repo, 'checkout', '-q', '-b', 'revm')
+  const m = commitIn(f.repo, 'SESSION_MEMORY.md', '# memory at m\n', 'm')
+  git(f.repo, 'checkout', '-q', 'main')
+  const known = git(z, 'cat-file', '-e', `${m}^{commit}`).code
+  const plain = git(z, 'reset', '--hard', m)
+  git(z, 'update-index', '--no-skip-worktree', 'SESSION_MEMORY.md')
+  const cleared = git(z, 'reset', '--hard', m)
+  clause('clause 3c — in the worktree\'s own repo, a plain git reset --hard onto a revision that changes a skip-worktree memory file exits 128, and the same reset with the bit cleared exits 0 at that revision: the bit is the hazard reset carries the bytes across (E15-D165)',
+    known === 0 && plain.code === 128 && cleared.code === 0 && head(z) === m, `known ${known}; bit set ${plain.code} ${plain.err}; bit cleared ${cleared.code} ${cleared.err}`)
 }
 clause('clause 3d — m changes the tracked memory file against the base and k leaves it',
   git(MEM.repo, 'diff', '--name-only', MEM.base, memM).out.split('\n').includes('SESSION_MEMORY.md') && !git(MEM.repo, 'diff', '--name-only', MEM.base, memK).out.includes('SESSION_MEMORY.md'),
@@ -748,6 +902,87 @@ for (const [n, { s, file }] of Object.entries(TWINS)) {
     git(m.repo, 'rev-parse', '--verify', '-q', `${m.base}^{commit}`).code === 0 && git(m.repo, 'show-ref', '--verify', '-q', `refs/heads/${m.base}`).code !== 0, m.base)
   clause('clause 3p — the run2 fixture\'s run is not named orchestrate and its lane.log holds the create line',
     path.basename(RUN2.run) !== 'orchestrate' && laneOf(read(RUN2.laneLog), 'a')?.worktree === RUN2.wt('a'), RUN2.run)
+}
+
+{
+  // LR1, LR3: without the command, a hand-made worktree holding each file passes the old status test, git reset --hard
+  // overwrites it, the ignored one is missed by ls-files --others --exclude-standard, and the newline name is quoted
+  // by ls-files without -z.
+  const z = path.join(CLOB.repo, '.claude/worktrees/zz')
+  git(CLOB.repo, 'worktree', 'add', '-q', '-b', 'zz', z, CLOB.base)
+  for (const x of ['notes.txt', '.doctrine/records/keep.txt', WEIRD]) write(path.join(z, x), 'own\n')
+  const st = git(z, 'status', '--porcelain', '--untracked-files=no').out
+  const std = git(z, 'ls-files', '--others', '--exclude-standard').out.split('\n')
+  const all = git(z, 'ls-files', '--others').out.split('\n')
+  const tree = git(z, 'ls-tree', '-r', '-z', '--name-only', clobT).out.split('\0')
+  const plain = git(z, 'reset', '-q', '--hard', clobT)
+  clause('clause 3q — t tracks notes.txt, the ignored keep.txt and the newline name; held untracked, the status test prints nothing, --exclude-standard misses keep.txt, ls-files without -z quotes the newline name, and a plain reset --hard overwrites all three',
+    st === '' && tree.includes('notes.txt') && tree.includes('.doctrine/records/keep.txt') && tree.includes(WEIRD) && !std.includes('.doctrine/records/keep.txt') && all.includes('.doctrine/records/keep.txt') &&
+    !all.includes(WEIRD) && all.includes('"we\\nird.txt"') && plain.code === 0 && ['notes.txt', '.doctrine/records/keep.txt', WEIRD].every((x) => read(path.join(z, x)) === `${x} at t\n`),
+    JSON.stringify({ st, std, all, plain: plain.code }))
+}
+{
+  // LR3: without the command, a hand-made worktree holding a file named as the directory t tracks: without -z both
+  // listings quote the name, so the quoted directory prefix is not the quoted file name, and a plain reset --hard
+  // replaces the file with the directory.
+  const z = path.join(CLOB.repo, '.claude/worktrees/zd')
+  git(CLOB.repo, 'worktree', 'add', '-q', '-b', 'zd', z, CLOB.base)
+  write(path.join(z, WEIRD_DIR), 'own\n')
+  const all = git(z, 'ls-files', '--others').out.split('\n')
+  const tree = git(z, 'ls-tree', '-r', '--name-only', clobT).out.split('\n')
+  const plain = git(z, 'reset', '-q', '--hard', clobT)
+  clause('clause 3w — held untracked, the directory name is quoted "we\\nird.d" by ls-files and its file "we\\nird.d/inner.txt" by ls-tree without -z, and a plain reset --hard exits 0 and leaves a directory where the file was',
+    all.includes('"we\\nird.d"') && tree.includes('"we\\nird.d/inner.txt"') && plain.code === 0 && fs.statSync(path.join(z, WEIRD_DIR)).isDirectory(),
+    JSON.stringify({ all, tree, plain: plain.code }))
+}
+{
+  const r = create(DLINK, 'a', { base: dlinkBase })
+  clause('clause 1ak3 — create refuses a memory file tracked as a dangling link out of the worktree: nothing created at its target, no herdr call, no lane.log line (LR6)',
+    r.code !== 0 && !exists(goneMem) && shimLog(DLINK).length === 0 && laneLines(DLINK).length === 0, `exit ${r.code} ${said(r)}; target ${exists(goneMem)}`)
+  const ls = git(DLINK.repo, 'ls-tree', dlinkBase, 'SESSION_MEMORY.md').out
+  const m = path.join(DLINK.repo, 'SESSION_MEMORY.md')
+  clause('clause 3x — the dangling base tracks SESSION_MEMORY.md as a link: existsSync calls it absent, lstat finds it, and its target does not exist',
+    ls.startsWith('120000 ') && !fs.existsSync(m) && Boolean(fs.lstatSync(m, { throwIfNoEntry: false })) && !exists(goneMem), ls)
+}
+for (const [n, { s, file, st }] of Object.entries(HIDDEN)) {
+  if (n === '1y4') {
+    clause(`clause 3r — remove twin ${n}'s ${file} differs from its archived copy, and git status, trimmed and cut at column 3, names SESSION_MEMORY.md for it`,
+      st.trim().slice(3) === 'SESSION_MEMORY.md' && sha(path.join(s.w, file)) !== sha(path.join(s.lanes, file)), JSON.stringify(st))
+  } else {
+    clause(`clause 3r — remove twin ${n}'s ${file} differs from its archived copy and git status does not name it`,
+      !st.includes(file) && sha(path.join(s.w, file)) !== sha(path.join(s.lanes, file)), JSON.stringify(st))
+  }
+}
+{
+  // LR1: without the command, a hand-made worktree hiding a src.txt change passes the status test, and a plain
+  // reset --hard onto s, which changes src.txt, exits 128 only after anything run before it.
+  for (const flag of ['--skip-worktree', '--assume-unchanged']) {
+    const z = path.join(CLOB.repo, `.claude/worktrees/zs${flag.slice(2, 4)}`)
+    git(CLOB.repo, 'worktree', 'add', '-q', '-b', `zs${flag.slice(2, 4)}`, z, CLOB.base)
+    git(z, 'update-index', flag, 'src.txt')
+    write(path.join(z, 'src.txt'), 'own\n')
+    const st = git(z, 'status', '--porcelain', '--untracked-files=no').out
+    const changes = git(CLOB.repo, 'diff', '--name-only', CLOB.base, clobS).out
+    const plain = git(z, 'reset', '-q', '--hard', clobS)
+    clause(`clause 3u — s changes src.txt; with the change hidden by ${flag.slice(2)}, the status test prints nothing and a plain reset --hard onto s exits 128`,
+      st === '' && changes === 'src.txt' && plain.code === 128 && read(path.join(z, 'src.txt')) === 'own\n', JSON.stringify({ st, changes, plain: plain.code }))
+  }
+}
+{
+  const ls = git(MLINK.repo, 'ls-tree', mlinkBase, 'SESSION_MEMORY.md').out
+  clause('clause 3v — the memory-link base tracks SESSION_MEMORY.md as a link whose real path is the outside file',
+    ls.startsWith('120000 ') && fs.realpathSync(path.join(MLINK.repo, 'SESSION_MEMORY.md')) === fs.realpathSync(outsideMem), ls)
+}
+for (const name of ['a b.md', 'a|b.md']) {
+  const rel = `docs/handoffs/${name}`
+  clause(`clause 3s — kickoffHandoff does not read ${JSON.stringify(rel)} back from a kickoff line naming it`,
+    kickoffHandoff(`## Next Session Kickoff\nhandoff: ${rel} | state: open\n`) !== rel, String(kickoffHandoff(`## Next Session Kickoff\nhandoff: ${rel} | state: open\n`)))
+}
+{
+  const ls = git(LINKED.repo, 'ls-tree', linkedBase, 'evil').out
+  const lexical = path.resolve(LINKED.wt('a'), 'evil/a.md')
+  clause('clause 3t — the linked base tracks evil as a link to a directory outside the worktree, and the record path is inside the worktree as written',
+    ls.startsWith('120000 ') && fs.realpathSync(path.join(LINKED.repo, 'evil')) === outside && path.relative(LINKED.wt('a'), lexical) === 'evil/a.md', ls)
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })

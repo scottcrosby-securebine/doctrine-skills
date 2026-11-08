@@ -18,18 +18,24 @@
 // file, makes the role's own herdr tab, types the launch line, `/clear` and RESUME_LINE each once the pane reads
 // ready, and only then appends `create <role> <pane> <worktree> <launch line>`. Before the launch line, ready is a
 // `pane get` that answered with a pane holding no agent session and agent_status unknown; after it, READY_STATUSES. A
-// reply that fails or carries no pane is not ready.
+// reply that fails or carries no pane is not ready. A handoff copy, record or memory file whose real path leaves the
+// worktree through a link fails the create before any of the three is written.
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
 // to the revision with `git reset --hard`, refusing while `git status --porcelain --untracked-files=no` prints
-// anything. The memory file's bytes are carried across the move whether it is tracked or not, and its skip-worktree
-// bit is set again wherever the revision tracks it.
+// anything, while a file other than the memory file differs from the index under skip-worktree or assume-unchanged,
+// which that test cannot see, and while the revision tracks a path where the worktree holds an untracked or ignored
+// file other than the memory file, since the move would overwrite it. The memory file's bytes are carried across the
+// move whether it is tracked or not, and its skip-worktree bit is set again wherever the revision tracks it.
 //
-// archive copies the lane's memory file, its docs/handoffs/ and every file under its record's directory, listed by
-// find, into `<Records>/lanes/<role>/` at their worktree paths, and repoints the epic's `- phase` member whose path
-// names the lane's record, whatever its phase name, at the archived record. remove lists the same files again and
-// refuses unless each one is archived with an equal sha256 and git status names no other file, then removes the
-// worktree and keeps its branch. Both refuse a lane whose record does not exist.
+// archive copies every file of the worktree other than .git, listed by find, its memory file, docs/handoffs/ and
+// record's directory among them, into `<Records>/lanes/<role>/` at their worktree paths, and repoints the epic's
+// `- phase` member whose path names the lane's record, whatever its phase name, at the archived record, saying so
+// when no member line names it. It refuses, copying nothing, when the project file or an epic it names cannot be
+// read. remove lists the files by find again and refuses unless each one is archived with an equal sha256, then
+// removes the worktree and keeps its branch. Both refuse a lane whose record does not exist.
+//
+// Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output.
 //
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
@@ -51,12 +57,18 @@ try { times = { ...times, ...JSON.parse(process.env.DCTR_LANE_TIMES || '{}') } }
 
 const refuse = (why) => { process.stderr.write(`dctr-lane: refused, ${why}\n`); process.exit(1) }
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+/** A git listing read NUL-separated: pass -z in `args`. */
+const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split('\0').filter(Boolean)
 const gitOk = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { stdio: 'ignore' }).status === 0
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
-/** Every file under `dir`, by find, relative to `root`; none when `dir` does not exist. */
-const findFiles = (root, dir) => (fs.existsSync(dir)
-  ? execFileSync('find', [dir, '-type', 'f'], { encoding: 'utf8' }).split('\n').filter(Boolean).map((f) => path.relative(root, f)) : [])
+/** Every file of the worktree `root` other than its .git, by find, relative to `root`. */
+const findFiles = (root) => execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '-type', 'f', '-print0'], { encoding: 'utf8' })
+  .split('\0').filter(Boolean).map((f) => path.relative(root, f))
 const inside = (root, p) => { const r = path.relative(root, p); return Boolean(r) && !r.startsWith('..') && !path.isAbsolute(r) }
+/** `p` with the links in its existing prefix resolved, the rest as written; a dangling link throws. */
+const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry: false })) { rest = path.join(path.basename(p), rest); p = path.dirname(p) } return path.join(fs.realpathSync(p), rest) }
+/** `f`'s ancestor directories, nearest last: a/b/c gives a, a/b. */
+const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
 
 const [sub, ...args] = process.argv.slice(2)
 const ARITY = { create: 4, reset: 2, archive: 1, remove: 1 }
@@ -83,18 +95,16 @@ function recordsDir() {
   if (path.basename(run) !== 'orchestrate') refuse(`the run ${run} is not <Records>/orchestrate`)
   return path.dirname(run)
 }
-/** The files archive keeps and remove checks, relative to the worktree, listed by find: the memory file, every file
- *  under docs/handoffs/, and every file in the record's directory, the record and its evidence. */
+/** The files archive keeps and remove checks, relative to the worktree, listed by find: every file but .git's, so an
+ *  ignored file and one skip-worktree hides are among them; and the record the memory file's kickoff leads to. */
 function laneFiles(wt) {
-  const files = new Set(findFiles(wt, path.join(wt, HANDOFFS)))
   let memory = ''
-  try { memory = fs.readFileSync(path.join(wt, MEMORY), 'utf8'); files.add(MEMORY) } catch (e) { if (e.code !== 'ENOENT') throw e }
+  try { memory = fs.readFileSync(path.join(wt, MEMORY), 'utf8') } catch (e) { if (e.code !== 'ENOENT') throw e }
   const handoff = kickoffHandoff(memory)
   const rec = handoff && fs.existsSync(path.join(wt, handoff)) ? handoffHeader(fs.readFileSync(path.join(wt, handoff), 'utf8')).record : null
   if (!rec || !inside(wt, path.resolve(wt, rec))) refuse(`the memory file of ${wt} leads to no record inside it`)
   if (!fs.existsSync(path.resolve(wt, rec))) refuse(`the record ${rec} of ${wt} does not exist`)
-  for (const f of findFiles(wt, path.dirname(path.resolve(wt, rec)))) files.add(f)
-  return { files: [...files].sort(), record: rec }
+  return { files: findFiles(wt).sort(), record: rec }
 }
 
 // ---------------------------------------------------------------- create
@@ -113,7 +123,7 @@ function create() {
   const merge = role === 'merge'
   if (merge) {
     if (!gitOk(repo, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`)) refuse(`${base} is not a branch of ${repo}`)
-    const held = git(repo, 'worktree', 'list', '--porcelain').split('\n').includes(`branch refs/heads/${base}`)
+    const held = gitZ(repo, 'worktree', 'list', '--porcelain', '-z').includes(`branch refs/heads/${base}`)
     if (held) refuse(`a worktree of ${repo} holds ${base}`)
   }
   let text
@@ -124,6 +134,8 @@ function create() {
   const recordPath = path.resolve(wt, header.record)
   if (!inside(wt, recordPath)) refuse(`the handoff ${handoff} names a record outside the worktree`)
   const handoffRel = path.posix.join(HANDOFFS, path.basename(handoff))
+  const kickoff = ['## Next Session Kickoff', `handoff: ${handoffRel} | state: open`]
+  if (kickoffHandoff(kickoff.join('\n')) !== handoffRel) refuse(`the kickoff line cannot carry the handoff name ${JSON.stringify(path.basename(handoff))}`)
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
   const made = [`the worktree ${wt}`]
@@ -133,12 +145,14 @@ function create() {
   } catch (e) { refuse(`git worktree add failed (${String(e.stderr || e.message).trim().split('\n')[0]})`) }
   let pane = null
   try {
+    const real = fs.realpathSync(wt)
+    const escapes = [handoffRel, header.record, MEMORY].filter((p) => !inside(real, realish(path.resolve(wt, p))))
+    if (escapes.length) fail(`${escapes.join(', ')} would leave the worktree through a link`)
     fs.mkdirSync(path.join(wt, HANDOFFS), { recursive: true })
     fs.copyFileSync(handoff, path.join(wt, handoffRel))
     fs.mkdirSync(path.dirname(recordPath), { recursive: true })
     fs.writeFileSync(recordPath, `# ${header.phase || role} record\n\n- State: Open\n`)
     const memory = path.join(wt, MEMORY)
-    const kickoff = ['## Next Session Kickoff', `handoff: ${handoffRel} | state: open`]
     let lines = fs.existsSync(memory) ? fs.readFileSync(memory, 'utf8').split('\n') : ['# Session memory', '']
     const at = lines.findIndex((l) => /^##\s+Next Session Kickoff\s*$/i.test(l.trim()))
     if (at < 0) lines.push(...kickoff, '')
@@ -186,6 +200,16 @@ function reset() {
   if (!gitOk(wt, 'rev-parse', '--verify', '--quiet', `${revision}^{commit}`)) refuse(`${revision} is not a commit`)
   const dirty = git(wt, 'status', '--porcelain', '--untracked-files=no')
   if (dirty) refuse(`${wt} has uncommitted changes a move would discard:\n${dirty}`)
+  // S is skip-worktree and a lower-case tag assume-unchanged: both hide a change from the status test above
+  const hidden = gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
+    .filter((f) => f !== MEMORY && fs.existsSync(path.join(wt, f)) && git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`))
+  if (hidden.length) refuse(`${wt} has changes skip-worktree or assume-unchanged hides from git status: ${hidden.map((f) => JSON.stringify(f)).join(', ')}`)
+  const others = new Set([...gitZ(wt, 'ls-files', '-z', '--others'), ...gitZ(wt, 'ls-files', '-z', '--others', '--exclude-standard')])
+  others.delete(MEMORY) // its bytes are carried across the move below
+  const target = new Set(gitZ(wt, 'ls-tree', '-r', '-z', '--name-only', revision))
+  const dirs = new Set([...target].flatMap(ancestors))
+  const clobbered = [...others].filter((f) => target.has(f) || dirs.has(f) || ancestors(f).some((d) => target.has(d)))
+  if (clobbered.length) refuse(`${revision} tracks paths where ${wt} holds untracked or ignored files a move would overwrite: ${clobbered.map((f) => JSON.stringify(f)).join(', ')}`)
   const old = git(wt, 'rev-parse', 'HEAD')
   const side = `${role}-was-${old.slice(0, 12)}`
   if (!gitOk(wt, 'show-ref', '--verify', '--quiet', `refs/heads/${side}`)) git(wt, 'branch', side, old)
@@ -212,36 +236,46 @@ function archive() {
   const wt = laneWorktree()
   const dest = path.join(recordsDir(), 'lanes', role)
   const { files, record } = laneFiles(wt)
+  const live = path.join(wt, record)
+  const edits = memberEdits(live, path.join(dest, record))
   for (const f of files) {
     fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true })
     fs.copyFileSync(path.join(wt, f), path.join(dest, f))
   }
-  repointMember(path.join(wt, record), path.join(dest, record))
+  for (const e of edits) {
+    fs.writeFileSync(e.file, e.text)
+    process.stdout.write(`repointed ${e.file}:${e.lines.join(',')} at the archived record\n`)
+  }
+  if (!edits.length) process.stdout.write(`no - phase member line names ${live}, so no epic was repointed\n`)
   append(role)
   process.stdout.write(`archived ${files.join(', ')} into ${dest}\n`)
 }
 
-/** Rewrites each `- phase` member line, in the epics of the project file's roster, whose path names the lane's record
- *  `live`, whatever its phase name, to name the archived record by its path relative to the project repo, keeping its
- *  name and ordering clause. No such line: no change. */
-function repointMember(live, archived) {
+/** The epic rewrites that repoint each `- phase` member line, in the epics of the project file's roster, whose path
+ *  names the lane's record `live`, whatever its phase name, at the archived record by its path relative to the
+ *  project repo, keeping its name and ordering clause: `{ file, text, lines }` per epic that changes. Refuses when the
+ *  project file or a roster epic cannot be read, so archive copies nothing and remove then refuses. */
+function memberEdits(live, archived) {
   const records = recordsDir()
   let top
-  try { top = git(records, 'rev-parse', '--show-toplevel') } catch { return }
+  try { top = git(records, 'rev-parse', '--show-toplevel') } catch { refuse(`${records} is in no git repo, so no project file names its epics`) }
+  const projectFile = path.join(top, 'docs/PROJECT.md')
   let project
-  try { project = parseDoc(fs.readFileSync(path.join(top, 'docs/PROJECT.md'), 'utf8')) } catch { return }
+  try { project = parseDoc(fs.readFileSync(projectFile, 'utf8')) } catch (e) { refuse(`the project file ${projectFile} could not be read (${e.code || e.message})`) }
   const rel = path.relative(top, archived)
+  const edits = []
   for (const r of project.roster) {
     const file = path.join(top, r.record)
     let text
-    try { text = fs.readFileSync(file, 'utf8') } catch { continue }
-    const lines = text.split('\n')
+    try { text = fs.readFileSync(file, 'utf8') } catch (e) { refuse(`the epic ${file} could not be read (${e.code || e.message})`) }
+    const lines = text.split('\n'), hit = []
     for (const m of parseDoc(text).phases.filter((p) => p.record && path.resolve(top, p.record) === live)) {
       lines[m.line - 1] = `- phase ${m.name}: ${rel}${m.after ? ` after ${m.after} merged` : ''}`
-      fs.writeFileSync(file, lines.join('\n'))
-      process.stdout.write(`repointed ${path.relative(top, file)}:${m.line} at ${rel}\n`)
+      hit.push(m.line)
     }
+    if (hit.length) edits.push({ file, text: lines.join('\n'), lines: hit })
   }
+  return edits
 }
 
 function remove() {
@@ -250,9 +284,6 @@ function remove() {
   const { files } = laneFiles(wt)
   const differ = files.filter((f) => !fs.existsSync(path.join(dest, f)) || sha256(path.join(dest, f)) !== sha256(path.join(wt, f)))
   if (differ.length) refuse(`these files of ${wt} are not in ${dest} with an equal sha256: ${differ.join(', ')}`)
-  const kept = new Set(files)
-  const other = git(wt, 'status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean).map((l) => l.slice(3)).filter((f) => !kept.has(f))
-  if (other.length) refuse(`git status in ${wt} names files the archive does not hold: ${other.join(', ')}`)
   const common = git(wt, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   git(path.dirname(common), 'worktree', 'remove', '--force', wt)
   append(role)
