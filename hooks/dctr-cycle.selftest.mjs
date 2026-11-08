@@ -480,6 +480,12 @@ fs.rmSync(path.join(chainB, 'h.md')); fs.symlinkSync('../repoC/h2.md', path.join
 const chainR = run(chainC)
 clause('clause 2b7 — all true but the middle link of a chain of committed links reaching the handoff, retargeted and uncommitted: paused R10, not launched (SR11)',
   !launched(chainR) && paused(chainC).some((l) => l.includes('handoff not written')), show(chainC, chainR))
+// The handoff tracked and committed, then marked skip-worktree and modified, which git's status no longer reports.
+const hiddenH = fixture('hidden-handoff', { tracked: true }), hiddenHPath = path.join(hiddenH.proj, 'docs/handoffs/h.md')
+git(hiddenH.proj, 'update-index', '--skip-worktree', 'docs/handoffs/h.md'); fs.appendFileSync(hiddenHPath, 'unlanded edit\n')
+const hiddenSt = execFileSync('git', ['-C', hiddenH.proj, 'status', '--porcelain'], { encoding: 'utf8' }), hiddenR = run(hiddenH)
+clause('clause 2b8 — all true but the handoff, marked skip-worktree and modified after its commit, with git\'s status empty: paused R10, not launched (SR14)',
+  hiddenSt === '' && !launched(hiddenR) && paused(hiddenH).some((l) => l.includes('handoff not written')), show(hiddenH, hiddenR))
 
 // One fixture per E8-D7 precondition, that precondition alone false.
 const seatUp = (f) => write(path.join(seatsDir(f.session), 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', paneId: 'w9:p2' }))

@@ -968,7 +968,9 @@ export function treeHash(repos, excludes) {
  * or after `warnedAt` (the gauge's latch records when it warned), and every repository holding either file's own real
  * path or a link met at any hop on the way to it reports that path landed there: the handoff's own file ignored by
  * that repository or tracked and committed at or after that second with no uncommitted change, and every other path
- * ignored there, or tracked (or, for the memory file, absent) with no uncommitted change.
+ * ignored there, or tracked (or, for the memory file, absent) with no uncommitted change. For the handoff's file and the
+ * links on its way, no uncommitted change means their bytes are HEAD's; for the memory file's, that git's status reports
+ * none, so a memory file under skip-worktree is landed whatever its edits.
  * Only the repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
  * the user's, so a user-level rule can only ever require a commit. A path with no .git entry above it is landed by
  * the file alone; with one, git must answer from that repository's work tree, and any failure is not landed.
@@ -1007,17 +1009,20 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
   // The system and global config and the default $XDG_CONFIG_HOME/git/ignore are the user's rules, not the repository's.
   const env = { ...process.env }
   for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
-  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null' })
+  // A path given as a pathspec is a glob: an untracked h?.md would match a tracked h1.md beside it.
+  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null', GIT_LITERAL_PATHSPECS: '1' })
   // Whether `file` is landed in the repository holding it, if any: ignored there, or tracked (a memory file may be
-  // absent) with no uncommitted change, and with `handoff` committed at or after the warning.
-  const landedIn = (file, handoff) => {
+  // absent) with no uncommitted change, and with `handoff` committed at or after the warning. With `exact`, a tracked
+  // path's working bytes must also be HEAD's.
+  const landedIn = (file, handoff, exact) => {
     const top = repoOf(file, dotGit)
     if (!dotGit(path.join(top, '.git'))) return true
-    const git = (args) => {
+    const git = (args, input) => {
       const left = end - Date.now()
       if (left <= 0) throw timedOut
       try {
-        return execFileSync('git', ['-C', top, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
+        // check-ignore refuses literal pathspec magic, and reads its path as a name, never a glob.
+        return execFileSync('git', ['-C', top, ...args], { encoding: 'utf8', stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], input, env: args[0] === 'check-ignore' ? { ...env, GIT_LITERAL_PATHSPECS: '0' } : env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
       } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
     }
     // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
@@ -1032,11 +1037,20 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
       const ct = Number(git(['log', '-1', '--format=%ct', '--', file]))
       if (!ct || ct < Math.floor(warnedAt / 1000)) return false
     }
-    return git(['status', '--porcelain', '--ignored=no', '--', file]) === ''
+    if (git(['status', '--porcelain', '--ignored=no', '--', file]) !== '') return false
+    if (!exact) return true
+    // status skips a path whose index entry is assume-unchanged or skip-worktree, or every path under core.ignoreStat,
+    // so the handoff's bytes are hashed against HEAD's blob. Not the memory file: a lane's create sets skip-worktree on
+    // it so the lane's memory edits stay out of git. A link's bytes are its target, hashed unfiltered.
+    const rel = path.relative(top, file), link = fs.lstatSync(file).isSymbolicLink()
+    const [entry, ...more] = git(['ls-tree', '-z', 'HEAD', '--', rel]).split('\0').filter(Boolean)
+    const m = /^(\d+) blob ([0-9a-f]+)\t(.*)$/s.exec(entry ?? '')
+    if (more.length || !m || m[3] !== rel || (m[1] === '120000') !== link) return false
+    return git(['hash-object', '--stdin', ...(link ? ['--no-filters'] : [`--path=${rel}`])], link ? fs.readlinkSync(file) : fs.readFileSync(file)) === m[2]
   }
   try {
     // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.
     const h = forms(handoffPath), m = forms(memoryPath)
-    return [...h.links, ...m.links, m.real].every((f) => landedIn(f, false)) && landedIn(h.real, true)
+    return [...m.links, m.real].every((f) => landedIn(f, false, false)) && h.links.every((f) => landedIn(f, false, true)) && landedIn(h.real, true, true)
   } catch { return false }
 }
