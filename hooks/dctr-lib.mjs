@@ -1225,6 +1225,24 @@ export function guardAllowed(p, { records, checkout, record, names }) {
 export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics', 'docs/handoffs', '.doctrine']
 
 /**
+ * guardContext's run: `named`, runRoot's path, and `run`, the folder a refusal is logged in, decided as guardContext
+ * says, apart from its other reads, so the hook can hand it on before any of them stalls. Throws only where runRoot
+ * names no run or a read runRoot makes fails.
+ */
+export function guardRun(env = process.env, cwd = process.cwd(), io = {}) {
+  const named = runRoot(env, cwd, presentStrict)
+  if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
+  const { lstat = fs.lstatSync, realpath = fs.realpathSync.native } = io, asked = path.resolve(cwd, named)
+  const answer = (q) => { try { return q() } catch { return false } }
+  // Two reads of the case, either answering: the volume's own (ignoresCase on the parent), and whether the lower-case
+  // name is this very folder, so one failed lstat cannot leave a valid run with no log.
+  const same = (a, b) => { const x = lstat(a), y = lstat(b); return x.dev === y.dev && x.ino === y.ino }
+  const reads = (p) => path.basename(p) === 'orchestrate' || (path.basename(p).toLowerCase() === 'orchestrate' &&
+    (answer(() => ignoresCase(path.dirname(p), lstat)) || answer(() => same(p, path.join(path.dirname(p), 'orchestrate')))))
+  return { named, run: answer(() => !lstat(asked).isSymbolicLink() && reads(asked)) || answer(() => reads(realpath(asked))) ? asked : null }
+}
+
+/**
  * The guard's context for a session whose project directory is `cwd`, or a throw naming what could not be read: the
  * run from runRoot, which must be an existing folder named `orchestrate` as guardReal gives its name (Run layout),
  * returned as the volume spells it, since guard.log is written there; Records its parent; the checkout the repo holding
@@ -1236,16 +1254,11 @@ export const GUARD_NAMES = ['docs/PROJECT.md', 'SESSION_MEMORY.md', 'docs/epics'
  * above, so an error in any of them still logs. It is that path where its own name reads as orchestrate and either an
  * lstat shows it is no link or its realpath's name reads so too, and null otherwise, so a folder of another name, or a
  * link to one, never gains a guard.log (N3). A name reads as orchestrate exactly, or in another case where ignoresCase
- * reads the volume as ignoring case. Each of those reads that fails answers nothing. `io` is guardReal's, injected by
+ * reads the volume as ignoring case or where the lower-case name lstats as the same folder. Each of those reads that
+ * fails answers nothing. `io` is guardReal's, injected by
  * the selftest only.
  */
-export function guardContext(env = process.env, cwd = process.cwd(), io = {}) {
-  const named = runRoot(env, cwd, presentStrict)
-  if (!named) throw new Error('no run: DCTR_RUN is unset and the session\'s repo names no Records path')
-  const { lstat = fs.lstatSync, realpath = fs.realpathSync.native } = io, asked = path.resolve(cwd, named)
-  const reads = (p) => path.basename(p) === 'orchestrate' || (path.basename(p).toLowerCase() === 'orchestrate' && ignoresCase(path.dirname(p), lstat))
-  const answer = (q) => { try { return q() } catch { return false } }
-  const run = answer(() => !lstat(asked).isSymbolicLink() && reads(asked)) || answer(() => reads(realpath(asked))) ? asked : null
+export function guardContext(env = process.env, cwd = process.cwd(), io = {}, { named, run } = guardRun(env, cwd, io)) {
   try {
     const spelled = path.join(...guardSpell(named, cwd, io))
     if (path.basename(guardReal(spelled, cwd, io)) !== 'orchestrate') throw new Error(`the run ${spelled} is not a folder named orchestrate`)

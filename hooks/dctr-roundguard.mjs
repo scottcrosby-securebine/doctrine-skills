@@ -58,8 +58,7 @@ try {
   if (!Array.isArray(seen)) process.exit(0)
   if (seen.includes(key)) process.exit(0)
   try { fs.mkdirSync(path.dirname(latch), { recursive: true }); fs.writeFileSync(latch, JSON.stringify([...seen, key])) } catch { process.exit(0) }
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: roundGuardReason(d) } }))
-  process.exit(0)
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: roundGuardReason(d) } }), () => process.exit(0))
 } catch {
   process.exit(0)
 }

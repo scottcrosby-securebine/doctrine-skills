@@ -481,6 +481,13 @@ Object.assign(D, { recUp, recBack, upLink: path.join(bGates, 'r1.out'), backLink
   clause('clause 2n — a link target\'s .. is taken after the link before it (R3-B): gates/r1.out -> hop/../r1.out with hop into TMPDIR is denied; a TMPDIR path whose target climbs out through a link to a durable dir goes through',
     denied(up, `gates/r1.out (resolves to ${scratchTmp}/r1.out) lies under`) && allowed(back), `${JSON.stringify(up)} ${JSON.stringify(back)}`)
 }
+// A deny longer than a pipe's buffer reaches the host whole: the reason names the plugin root, here over 64 KB.
+const longRoot = '/p' + '/x'.repeat(35000)
+{
+  const long = run(pay('s15', C.append(rec, 3)), { CLAUDE_PLUGIN_ROOT: longRoot })
+  clause('clause 2o — a refusal whose reason is over 64 KB prints the whole deny, which parses and names the plugin root in full',
+    denied(long, `node ${longRoot}/hooks/dctr-token.mjs`) && long.out.length > 65536, `exit ${long.code}, ${long.out.length} bytes`)
+}
 clause('clause 2h — herdr was called zero times across every run (tripwire on PATH)', !fs.existsSync(tripwire), 'the tripwire herdr ran')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
@@ -501,6 +508,7 @@ const unproved = (tables, done) => Object.entries(tables).flatMap(([t, tab]) => 
 const isRound = (t) => String(t).split('\n').some((l) => parseRecord(l.trim()).entries.some((e) => e.kind === 'round'))
 const unquoted = (cmd) => cmd.replace(/'/g, '').replace(/"/g, '').replace(/\$\(date[^)]*\)/, '2026-10-14T10:00:00Z').replace(/\$\(git[^)]*\)/, 'abc1234')
 const lines = (cmd) => unquoted(cmd).split(/\n|\\n/).map((l) => l.replace(/^\s*echo /, '').replace(/\s*(>>|\|).*$/, ''))
+clause('clause 3r — without the hook: the long plugin root is over 64 KB', Buffer.byteLength(longRoot) > 65536, String(longRoot.length))
 clause('clause 3a — every refused fixture carries a round line the parser reads, the Bash ones once the shell has run, and the template fixture carries none',
   [prove('F', 'bashNoToken'), prove('F', 'bashDateNoToken'), prove('F', 'heredocNoToken'), prove('F', 'teeNoToken'), prove('F', 'mentionToken')].every(([, i]) => lines(i.command).some(isRound)) &&
   isRound(prove('F', 'writeMd')[1].content) && isRound(prove('F', 'writeMjs')[1].content) && isRound(prove('F', 'editMd')[1].new_string) && !isRound(prove('F', 'template')[1].content),
