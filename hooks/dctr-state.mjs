@@ -781,7 +781,7 @@ export function paneClaimHeld(paneId, except = null) {
     if (except && file === path.resolve(except)) return false
     let c
     try { c = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) { return e.code !== 'ENOENT' }
-    return c?.pane === paneId && claimHeld(file)
+    return c?.pane === paneId && pidAlive(String(c?.pid ?? ''))
   })
 }
 
@@ -969,15 +969,23 @@ export function treeHash(repos, excludes) {
  * touching it was made at or after that second and it and the memory file carry no uncommitted change. Outside a
  * git work tree the file and the kickoff line naming it are the landing. False when `warnedAt` is unknown.
  */
-export function handoffLanded({ handoffPath, memoryPath, warnedAt }) {
+export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
   let st
   try { st = fs.statSync(handoffPath) } catch { return false }
   if (st.mtimeMs < warnedAt) return false
-  const git = (args) => execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-  try { git(['rev-parse', '--is-inside-work-tree']) } catch { return true }
-  try { git(['check-ignore', '-q', handoffPath]); return true } catch { /* not ignored: it needs its commit */ }
+  // Given `timeoutMs`, every git call shares that budget, and one that runs out of it means not landed.
+  const end = Date.now() + timeoutMs, timedOut = new Error('git timed out')
+  const git = (args) => {
+    const left = end - Date.now()
+    if (left <= 0) throw timedOut
+    try {
+      return execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...(left === Infinity ? {} : { timeout: left }) }).trim()
+    } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
+  }
   try {
+    try { git(['rev-parse', '--is-inside-work-tree']) } catch (e) { if (e === timedOut) throw e; return true }
+    try { git(['check-ignore', '-q', handoffPath]); return true } catch (e) { if (e === timedOut) throw e /* else not ignored: it needs its commit */ }
     const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
     if (!ct || ct < Math.floor(warnedAt / 1000)) return false
     return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''

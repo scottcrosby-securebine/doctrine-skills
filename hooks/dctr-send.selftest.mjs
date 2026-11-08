@@ -49,18 +49,19 @@ if (a[0] === 'pane' && a[1] === 'get') {
   if (s.paneGet === 'fail') fail('{"error":{"code":"server_error"}}')
   if (s.paneGet === 'empty') out({})
   const p = s.panes[a[2]]; if (!p) fail('{"error":{"code":"pane_not_found"}}')
-  const status = p.busy > 0 ? (p.busy--, 'working') : p.status
+  const status = p.busyUntil > Date.now() ? 'working' : p.busy > 0 ? (p.busy--, 'working') : p.status
   entry.status = status
   out({ result: { pane: { pane_id: a[2], agent_status: status, focused: false, agent_session: { value: p.session } } } })
 }
 if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send-keys']].some(([x, y]) => a[0] === x && a[1] === y)) {
   entry.typed = { pane: a[2], text: a.slice(3).join(' ') }
   const p = s.panes[a[2]]
-  if (p) { p.busy = s.busyAfterType || 0; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
+  if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
 }
 out({ result: {} })
 `
 
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 const write = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t) }
 const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, stdio: 'ignore', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } })
 const kickoff = (h) => `# memory\n\n## Next Session Kickoff\n\nhandoff: ${h} | state: open\n`
@@ -315,8 +316,56 @@ clause('clause 2p — a wake reads again before each line: the pane reporting an
 const slowShim = fixture({ status: 'working', laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { delayMs: 6000 } })
 handed(slowShim, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
 const rSlowShim = await sender(slowShim, ['wake', 'a'])
-clause('clause 2q — a wake whose every pane read takes 6 s ends by 10.8 s, typing nothing, its reads bounded by the time left (SS5)',
-  rSlowShim.code === 0 && rSlowShim.took <= 10800 && typed(slowShim).length === 0, `${rSlowShim.took} ms; ${show(slowShim, rSlowShim)}`)
+clause('clause 2q — a wake whose every pane read takes 6 s ends no sooner than 9.5 s and by 10.8 s, typing nothing, its reads bounded by the time left (SS5)',
+  rSlowShim.code === 0 && rSlowShim.took >= 9500 && rSlowShim.took <= 10800 && typed(slowShim).length === 0, `${rSlowShim.took} ms; ${show(slowShim, rSlowShim)}`)
+
+// The pane reads working for 8 s, then ready; after each typed line it reads working for 3 s more. A wake whose waits
+// share one window from its start types /clear and gives up before the resume line.
+const late = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { busyAfterTypeMs: 3000, clearSession: 'S-next' } })
+handed(late, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+setShim(late, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0, busyUntil: Date.now() + 8000 } } })
+const rLate = await sender(late, ['wake', 'a'])
+clause('clause 2r — a handed-off pane busy for most of the first wait, and busy a while after each typed line: the wake types /clear, the resume line and the nudge, each wait with its own give-up (SS-1(c))',
+  rLate.code === 0 && JSON.stringify(typed(late)) === JSON.stringify([`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`, `${PANE}|${NUDGE}`]), `${rLate.took} ms; ${show(late, rLate)}`)
+
+// A claim on the pane with a live pid, readable once: every later read of the file fails with EIO.
+const twice = fixture()
+const twiceFile = at(twice, () => path.join(autoCycleDir(), 'other.claim'))
+write(twiceFile, JSON.stringify({ pid: process.pid, pane: PANE }))
+let twiceReads = 0
+const failLaterReads = () => {
+  const real = fs.readFileSync
+  twiceReads = 0
+  fs.readFileSync = function (f, ...r) {
+    if (String(f) === twiceFile && ++twiceReads > 1) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })
+    return real.call(this, f, ...r)
+  }
+  return () => { fs.readFileSync = real }
+}
+let twiceHeld
+{ const undo = failLaterReads(); try { twiceHeld = at(twice, () => paneClaimHeld(PANE)) } finally { undo() } }
+clause('clause 2s — a live claim on the pane whose file reads cleanly once and fails on any later read: paneClaimHeld counts it held, reading it once (SC1)',
+  twiceHeld === true && twiceReads === 1, JSON.stringify({ twiceHeld, twiceReads }))
+
+// A git on PATH that takes 15 s over every call: the wake's handoff test must not carry it past its give-up.
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
+const GIT_SHIM = `#!/usr/bin/env node
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000)
+const r = require('child_process').spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: 'inherit' })
+process.exit(r.status ?? 1)
+`
+const slowGit = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { busyAfterType: 2, clearSession: 'S-next' } })
+handed(slowGit, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+const slowGitBin = path.join(slowGit.dir, 'gitbin'); write(path.join(slowGitBin, 'git'), GIT_SHIM); fs.chmodSync(path.join(slowGitBin, 'git'), 0o755)
+const rSlowGit = await sender(slowGit, ['wake', 'a'], { env: { PATH: `${slowGit.bin}:${slowGitBin}:${process.env.PATH}` } })
+clause('clause 2t — a wake on a handed-off pane whose every git call takes 15 s ends by 10.8 s and types no /clear, its git calls bounded by the time left (SC3)',
+  rSlowGit.code === 0 && rSlowGit.took <= 10800 && !typed(slowGit).includes(`${PANE}|/clear`), `${rSlowGit.took} ms; ${show(slowGit, rSlowGit)}`)
+const wasPath = process.env.PATH; process.env.PATH = `${slowGitBin}:${wasPath}`
+const gt0 = Date.now(); let gitLanded
+try { gitLanded = at(slowGit, () => handoffLanded({ handoffPath: slowGit.handoff, memoryPath: path.join(slowGit.lane, 'SESSION_MEMORY.md'), warnedAt: H - 60000, timeoutMs: 1000 })) } finally { process.env.PATH = wasPath }
+const gitTook = Date.now() - gt0
+clause('clause 2u — handoffLanded given 1 s on that slow git: false within 2 s, a git call that times out never reading as landed (SC3)',
+  gitLanded === false && gitTook < 2000, JSON.stringify({ gitLanded, gitTook }))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
@@ -365,5 +414,19 @@ clause('clause 3g — without the sender: the shim changes the reported session,
   JSON.stringify(sessions) === '["S","S2"]' && !r16Before.includes(R16) && pauseCode(parseRecord(fs.readFileSync(rProof.record, 'utf8')).entries.find((e) => e.sub === 'paused')?.reason) === 'R16' &&
   duringFx.every(([, fx]) => shimLog(fx).filter((e) => e.argv[1] === 'get').slice(0, 3).every((e) => e.status === 'working')) && slowTook >= 6000,
   JSON.stringify({ sessions, slowTook }))
+
+const lateShim = fixture({ shim: { busyAfterTypeMs: 3000 } })
+setShim(lateShim, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0, busyUntil: Date.now() + 1500 } } })
+const lateStatus = () => JSON.parse(shimRun(lateShim, 'pane', 'get', PANE).stdout).result.pane.agent_status
+const lateBefore = lateStatus(); sleep(1600); const lateAfter = lateStatus(); shimRun(lateShim, 'pane', 'run', PANE, 'x'); const lateTyped = lateStatus()
+clause('clause 3h — without the sender: the late shim reads working until its time, idle after it, and working again after a typed line',
+  lateBefore === 'working' && lateAfter === 'idle' && lateTyped === 'working', JSON.stringify({ lateBefore, lateAfter, lateTyped }))
+let twiceProof
+{ const undo = failLaterReads(); try { JSON.parse(fs.readFileSync(twiceFile, 'utf8')); try { fs.readFileSync(twiceFile, 'utf8'); twiceProof = false } catch (e) { twiceProof = e.code === 'EIO' } } finally { undo() } }
+clause('clause 3i — without paneClaimHeld: the claim file parses on its first read and fails with EIO on its second',
+  twiceProof === true && JSON.parse(fs.readFileSync(twiceFile, 'utf8')).pid === process.pid, 'twice-read fixture wrong')
+const gitProbe = spawnSync(path.join(slowGitBin, 'git'), ['--version'], { timeout: 1500 })
+clause('clause 3j — without the sender: the slow git shim is still running after 1.5 s, and the slow-git fixture is handed off as the handed one is with the real git',
+  gitProbe.error?.code === 'ETIMEDOUT' && handoffLanded({ handoffPath: slowGit.handoff, memoryPath: memory(slowGit), warnedAt: latchOf(slowGit, 'S') }), String(gitProbe.error?.code))
 
 process.exit(bad ? 1 : 0)

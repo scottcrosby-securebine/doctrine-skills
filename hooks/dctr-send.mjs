@@ -18,8 +18,9 @@
 // time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone. Before each line it
 // reads again: the pane must report the session the line is for (the one it decided on, and after /clear the new
 // one the pane reports in its place), and before /clear the record, latch, handoff and transcript must still clear
-// that session; otherwise it stops typing. A wake gives up WAKE_GIVE_UP_MS after it starts, every herdr call in it
-// bounded by the time left and none started past it, and types nothing more. Each send or wake the orchestrator
+// that session; otherwise it stops typing. Each wait for a ready reading gives up WAKE_GIVE_UP_MS after it starts, the
+// first at the wake's start, every `herdr(` and git call in it bounded by that wait's time left and none started past
+// it, and a wait that gives up types nothing more. Each send or wake the orchestrator
 // makes appends one relay line to its own record. Contained (DCTR_VIEW_REQUEST_DIR set) it writes its files and
 // makes no pane call.
 
@@ -102,7 +103,7 @@ function handedOff(rec, pane, session) {
   if (!warned) return false
   let latch = null
   try { latch = JSON.parse(fs.readFileSync(path.join(stateDir(session), 'gauge.json'), 'utf8')) } catch { /* no latch: not landed */ }
-  if (!handoffLanded({ handoffPath: rec.handoffPath, memoryPath: rec.memoryPath, warnedAt: latch?.session_id === session ? latch.warnedAt : null })) return false
+  if (!handoffLanded({ handoffPath: rec.handoffPath, memoryPath: rec.memoryPath, warnedAt: latch?.session_id === session ? latch.warnedAt : null, timeoutMs: left() })) return false
   if (rec.record.entries.some((e) => e.line > warned.line && e.kind === 'auto-cycle' && e.sub === 'paused' && pauseCode(e.reason) === 'R16')) return false
   let since
   try { since = fs.statSync(rec.handoffPath).mtimeMs } catch { return false }
@@ -110,8 +111,8 @@ function handedOff(rec, pane, session) {
 }
 
 const [sub, ...args] = process.argv.slice(2)
-const deadline = Date.now() + WAKE_GIVE_UP_MS
-/** A wake's time left before its give-up; a send has no give-up, so its calls keep herdr's own bound. */
+let deadline = Date.now() + WAKE_GIVE_UP_MS
+/** A wake's time left in its current wait; a send has no give-up, so its calls keep the default bound of `herdr(`. */
 const left = () => (sub === 'wake' ? deadline - Date.now() : Infinity)
 const bound = () => (sub === 'wake' ? Math.max(1, left()) : undefined)
 const run = runRoot()
@@ -155,11 +156,13 @@ function deliver() {
     if (type(pane, NUDGE)) say(`nudged ${pane}`)
     return
   }
-  // wake: each line typed only after a fresh reading shows the pane ready on the session that line is for, all of
-  // it within the give-up of the wake's start.
+  // wake: each line typed only after a fresh reading shows the pane ready on the session that line is for, within
+  // the give-up of that line's wait.
   const lines = handedOff(rec, pane, first.session) ? ['/clear', RESUME_LINE, NUDGE] : [NUDGE]
   let session = first.session
-  for (const line of lines) {
+  for (const [i, line] of lines.entries()) {
+    // The first wait opened at the wake's start, so its window also bounds the first reading and handoff test.
+    if (i > 0) deadline = Date.now() + WAKE_GIVE_UP_MS
     let r
     for (;;) {
       if (left() <= 0) return say(`${pane} never read ready: gave up before ${line}`)
