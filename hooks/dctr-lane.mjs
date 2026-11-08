@@ -82,7 +82,7 @@ const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file
 const same = (a, b) => {
   try {
     const x = fs.lstatSync(a), y = fs.lstatSync(b)
-    if (x.isSymbolicLink()) return y.isSymbolicLink() && fs.readlinkSync(a) === fs.readlinkSync(b)
+    if (x.isSymbolicLink()) return y.isSymbolicLink() && fs.readlinkSync(a, 'buffer').equals(fs.readlinkSync(b, 'buffer'))
     return x.isFile() && y.isFile() && sha256(a) === sha256(b)
   } catch { return false }
 }
@@ -312,7 +312,7 @@ function archive() {
     for (const d of ancestors(f)) if (fs.lstatSync(path.join(dest, d), { throwIfNoEntry: false })?.isDirectory() === false) fs.rmSync(path.join(dest, d))
     fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true })
     fs.rmSync(path.join(dest, f), { recursive: true, force: true })
-    if (fs.lstatSync(path.join(wt, f)).isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(path.join(wt, f)), path.join(dest, f))
+    if (fs.lstatSync(path.join(wt, f)).isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(path.join(wt, f), 'buffer'), path.join(dest, f))
     else fs.copyFileSync(path.join(wt, f), path.join(dest, f))
   }
   for (const e of edits) {

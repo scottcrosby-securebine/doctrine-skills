@@ -944,6 +944,29 @@ for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored li
     ra.code === 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && kindOf(path.join(s.w, 'moved-lnk')) === 'link SESSION_MEMORY.md', `archive ${ra.code}; remove ${rr.code} ${said(rr)}`)
 }
 {
+  // Link targets that are not UTF-8: 74 ff and 74 fe both decode to "t�", so only a byte compare tells them apart.
+  const T1 = Buffer.from([0x74, 0xff]), T2 = Buffer.from([0x74, 0xfe])
+  const hex = (p) => { try { return fs.readlinkSync(p, 'buffer').toString('hex') } catch { return 'absent' } }
+  const s = matrixLane(), p = path.join(s.w, 'raw-lnk')
+  fs.symlinkSync(T1, p)
+  clause('clause 3ap0 — the non-UTF-8 link fixture reads back as target bytes 74 ff, without the command',
+    fs.readlinkSync(p, 'buffer').equals(T1), hex(p))
+  clause('clause 3ap1 — targets 74 ff and 74 fe decode to one string, so a string compare cannot tell them apart',
+    T1.toString() === T2.toString() && !T1.equals(T2), JSON.stringify([T1.toString(), T2.toString()]))
+  const ra = lane(s.f, ['archive', 'a'])
+  clause('clause 2af0 — archive of a lane holding an untracked link whose target is not UTF-8 keeps the target bytes exactly (LC13)',
+    ra.code === 0 && hex(path.join(s.lanes, 'raw-lnk')) === '74ff', `archive ${ra.code} ${said(ra)}; archived ${hex(path.join(s.lanes, 'raw-lnk'))}`)
+  fs.rmSync(p); fs.symlinkSync(T2, p)
+  const rr = lane(s.f, ['remove', 'a'])
+  clause('clause 1aq3 — remove refuses a lane whose non-UTF-8 link was retargeted from 74 ff to 74 fe after its archive, the worktree and the new link kept (LC13)',
+    rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && hex(p) === '74fe', `remove ${rr.code} ${said(rr)}; link ${hex(p)}`)
+  const t = matrixLane()
+  fs.symlinkSync(T1, path.join(t.w, 'raw-lnk'))
+  const ta = lane(t.f, ['archive', 'a']), tr = lane(t.f, ['remove', 'a'])
+  clause('clause 2af1 — archive then remove of a lane holding an untouched non-UTF-8 link both exit 0, the worktree gone and the archive holding 74 ff (LC13)',
+    ta.code === 0 && tr.code === 0 && !exists(t.w) && hex(path.join(t.lanes, 'raw-lnk')) === '74ff', `archive ${ta.code} ${said(ta)}; remove ${tr.code} ${said(tr)}; archived ${hex(path.join(t.lanes, 'raw-lnk'))}`)
+}
+{
   // A record reached through a link: the archive would hold the link and the epic would name it.
   const s = matrixLane()
   const epic = read(path.join(s.f.repo, 'docs/epics/E1.md'))
