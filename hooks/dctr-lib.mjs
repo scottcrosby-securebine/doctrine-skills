@@ -1121,10 +1121,10 @@ export function treeExcludes(recordPath, repo) {
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
 /**
- * The run's root directory (E15-D94): DCTR_RUN when set; else, when the role is `orchestrator`, `<Records>/orchestrate`
+ * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
  * under the directory holding `.git` at or above `cwd` (repoOf; a worktree's `.git` file counts), Records being that
  * repo's docs/PROJECT.md `Records:` header as docHeader reads it, the reader dctr-project.mjs uses; else null, as it is
- * when there is no repo, no project file, no or an empty Records value, or Records is `none`. The top level, not the
+ * when no `.git` is found at or above `cwd`, no project file, no or an empty Records value, or Records is `none`. The top level, not the
  * cwd, so a session started in a subdirectory resolves its own repo.
  */
 export function runRoot(env = process.env, cwd = process.cwd()) {
@@ -1134,6 +1134,7 @@ export function runRoot(env = process.env, cwd = process.cwd()) {
   let top, text
   try {
     top = fs.realpathSync(repoOf(path.join(cwd, '.git'), fs.existsSync))
+    if (!fs.existsSync(path.join(top, '.git'))) return null // repoOf falls back to its start directory
     text = fs.readFileSync(path.join(top, 'docs/PROJECT.md'), 'utf8')
   } catch { return null }
   const records = docHeader(text).headers.Records?.value

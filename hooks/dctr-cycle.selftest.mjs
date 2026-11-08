@@ -240,6 +240,9 @@ git(rrOther, 'worktree', 'add', '-q', '-b', 'lane-a', rrWt)
 const rrNone = repo(path.join(tmp, 'rr-none'), '')
 write(path.join(rrNone, 'docs/PROJECT.md'), '# Project: rr\nRecords: none\n')
 const rrBare = path.join(tmp, 'rr-bare'); fs.mkdirSync(rrBare, { recursive: true })
+// A directory in no repo that still carries a project file naming Records: with no `.git` there is no run root.
+const rrBareDoc = path.join(tmp, 'rr-bare-doc')
+write(path.join(rrBareDoc, 'docs/PROJECT.md'), '# P\nRecords: records\n## A\n')
 // Two headers the project parser reads in its own way: an empty Records value does not take the next line, and a bare
 // `## ` line does not end the header.
 const rrEmpty = repo(path.join(tmp, 'rr-empty'), '')
@@ -260,6 +263,7 @@ const RR_CASES = [
   ['orchestrator in a repo with no project file', { DCTR_ROLE: 'orchestrator' }, rrWt, null],
   ['orchestrator in a checkout whose Records is none', { DCTR_ROLE: 'orchestrator' }, rrNone, null],
   ['orchestrator outside any repo', { DCTR_ROLE: 'orchestrator' }, rrBare, null],
+  ['orchestrator outside any repo, in a directory holding a project file that names Records', { DCTR_ROLE: 'orchestrator' }, rrBareDoc, null],
   ['orchestrator whose Records line is empty above another line', { DCTR_ROLE: 'orchestrator' }, rrEmpty, null],
   ['orchestrator whose Records line follows a bare ## line', { DCTR_ROLE: 'orchestrator' }, rrHash, path.join(fs.realpathSync(rrHash), 'r/orchestrate')],
 ]
@@ -276,21 +280,35 @@ clause('clause 1l6 \u2014 runRole: DCTR_ROLE, else null, and both read the proce
   RL({ DCTR_ROLE: 'orchestrator' }) === 'orchestrator' && RL({}) === null && RL({ DCTR_ROLE: '' }) === null &&
   JSON.stringify(rrNoArgs) === JSON.stringify([rrRun, 'lane-b']), JSON.stringify([RL({ DCTR_ROLE: 'orchestrator' }), RL({}), rrNoArgs]))
 const ancestors = (d) => { const out = []; for (let x = path.resolve(d); ; x = path.dirname(x)) { out.push(x); if (path.dirname(x) === x) return out } }
-// The project parser's reading of the two header fixtures, and a line regex's, which is what runRoot read before
-// it shared docHeader; the fixtures are only worth their cases while the two disagree.
-const { parseDoc } = await import('./dctr-project.mjs')
-const rrHeaderReads = [rrEmpty, rrHash].map((r) => parseDoc(fs.readFileSync(path.join(r, 'docs/PROJECT.md'), 'utf8')).headers.Records?.value)
+// The two header fixtures' raw lines, read with neither parseDoc nor docHeader: rrEmpty's Records line has an empty
+// value and the next line is a non-empty plain line a take-the-next-line reader would pick up; rrHash's first `## `
+// line is bare and sits above its Records line, which sits above the first named section. A line regex's reading is
+// the independent control: the fixtures are only worth their cases while it disagrees with runRoot's.
+const rrLines = (r) => fs.readFileSync(path.join(r, 'docs/PROJECT.md'), 'utf8').split('\n')
+const rrEmptyLines = rrLines(rrEmpty), rrHashLines = rrLines(rrHash)
+const rrEmptyAt = rrEmptyLines.indexOf('Records:'), rrHashAt = rrHashLines.indexOf('Records: r')
+const rrRawOk = rrEmptyAt > 0 && /^[a-z]+$/.test(rrEmptyLines[rrEmptyAt + 1]) &&
+  rrEmptyLines.findIndex((l) => l.startsWith('## ')) === rrEmptyAt + 2 &&
+  rrHashLines.findIndex((l) => l.startsWith('##')) === 1 && rrHashLines[1] === '## ' &&
+  rrHashAt === 2 && rrHashLines.findIndex((l) => /^## \S/.test(l)) === 3
 const rrRegexReads = [rrEmpty, rrHash].map((r) => ('\n' + fs.readFileSync(path.join(r, 'docs/PROJECT.md'), 'utf8')).split(/\n(?=## )/)[0].match(/^Records:\s?(.*)$/gm)?.at(-1).replace(/^Records:\s?/, '').trim() ?? '')
 const top = (d) => { try { return fs.realpathSync(execFileSync('git', ['-C', d, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', env: { ...genv, GIT_CEILING_DIRECTORIES: fs.realpathSync(tmp) }, stdio: ['ignore', 'pipe', 'ignore'] }).trim()) } catch { return null } }
-clause('clause 3l5 \u2014 without runRoot: the subdirectory\'s git top level is the own checkout and not the cwd, its project file\'s header names Records once above its first section, the worktree\'s top level holds no project file, the none checkout says none, and the bare directory is in no repo',
+clause('clause 3l5 \u2014 without runRoot: the subdirectory\'s git top level is the own checkout and not the cwd, its project file\'s header names Records once above its first section, the worktree\'s top level holds no project file, the none checkout says none, the bare directories are in no repo, one of them holding a project file that names Records, and the two header fixtures carry an empty Records value above a plain line and a bare ## line above Records',
   top(path.join(rrOwn, 'src/deep')) === fs.realpathSync(rrOwn) && fs.realpathSync(path.join(rrOwn, 'src/deep')) !== fs.realpathSync(rrOwn) &&
   fs.readFileSync(path.join(rrOwn, 'docs/PROJECT.md'), 'utf8').split('\n## ')[0].match(/^Records: .doctrine\/records$/gm)?.length === 1 &&
   top(rrWt) === fs.realpathSync(rrWt) && !fs.existsSync(path.join(rrWt, 'docs/PROJECT.md')) &&
   /^Records: none$/m.test(fs.readFileSync(path.join(rrNone, 'docs/PROJECT.md'), 'utf8')) &&
   ancestors(rrBare).every((d) => !fs.existsSync(path.join(d, '.git'))) &&
-  rrHeaderReads.join('|') === '|r' && rrRegexReads.join('|') === 'notes|',
+  ancestors(rrBareDoc).every((d) => !fs.existsSync(path.join(d, '.git'))) &&
+  /^Records: records$/m.test(fs.readFileSync(path.join(rrBareDoc, 'docs/PROJECT.md'), 'utf8')) &&
+  rrRawOk && rrRegexReads.join('|') === 'notes|',
   'a fixture whose cwd was its top level, or whose other repo carried a project file, would let clause 1l5 pass against a runRoot that resolves the cwd; ' +
-  'and the two header fixtures must read as the project parser reads them and differently from a line regex over the text above `\\n## `: ' + JSON.stringify([rrHeaderReads, rrRegexReads]))
+  'and the two header fixtures must carry those raw lines and read differently from a line regex over the text above `\\n## `: ' + JSON.stringify([rrEmptyLines, rrHashLines, rrRegexReads]))
+// The project parser reads the two header fixtures as runRoot does, since both read through one header reader.
+const { parseDoc } = await import('./dctr-project.mjs')
+const rrParseReads = [rrEmpty, rrHash].map((r) => parseDoc(rrLines(r).join('\n')).headers.Records?.value)
+clause('clause 1l7 \u2014 parseDoc reads the empty Records value as empty and the Records line below a bare ## line as r, as runRoot does (E15-D94)',
+  rrParseReads.join('|') === '|r', JSON.stringify(rrParseReads))
 
 const EX = (repo) => treeExcludes(path.join(repo, '.doctrine/records/r.md'), repo)
 clause('clause 1l2 — treeExcludes: the memory file, the handoffs and the auto-cycle files in every repo; the record and its own run-state sibling only in the repo holding it (B7, SP4)',

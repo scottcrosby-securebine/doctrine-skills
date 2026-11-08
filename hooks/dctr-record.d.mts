@@ -8,3 +8,5 @@ export function parseRecord(text: string): { entries: RecordEntry[]; state: Reco
 export function kickoffHandoff(memoryText: string): string | null
 export function handoffHeader(text: string): { phase: string | null; record: string | null; wrapper: string | null }
 export function restoreState(value: string | null | undefined): string | null
+export const SECTION_LINE: RegExp
+export function docHeader(text: string): { title: { text: string; line: number } | null; headers: Record<string, { value: string; line: number }> }
