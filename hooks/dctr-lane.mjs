@@ -23,7 +23,7 @@
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
 // to the revision with `git reset --hard`, refusing while `git status --porcelain --untracked-files=no` prints
-// anything, while a file other than the memory file is absent or differs from the index under skip-worktree or
+// anything, while a file other than the memory file is absent or differs from the index in bytes, mode or type under skip-worktree or
 // assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
 // while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
 // since the move would overwrite it, and while the revision tracks the memory file as a link. The memory file's bytes
@@ -94,10 +94,20 @@ const inside = (root, p) => { const r = path.relative(root, p); return Boolean(r
 const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry: false })) { rest = path.join(path.basename(p), rest); p = path.dirname(p) } return path.join(fs.realpathSync(p), rest) }
 /** `f`'s ancestor directories, nearest last: a/b/c gives a, a/b. */
 /** The tracked files of `wt` other than the memory file whose change skip-worktree or assume-unchanged (a lower-case
- *  tag) hides from git status: absent, or bytes that differ from the index. A sparse checkout's absent files carry the
- *  same tag and are counted too, since nothing in the index tells the two apart. */
-const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-z').filter((l) => /^(S|[a-z]) /.test(l)).map((l) => l.slice(2))
-  .filter((f) => f !== MEMORY && (!fs.lstatSync(path.join(wt, f), { throwIfNoEntry: false }) || git(wt, 'hash-object', '--', f) !== git(wt, 'rev-parse', `:${f}`)))
+ *  tag) hides from git status: absent, a mode or type other than the index entry's, or bytes that differ from it. A
+ *  sparse checkout's absent files carry the same tag and are counted too, since nothing in the index tells the two
+ *  apart. shortcut: the executable bit is compared even where core.fileMode is false, which refuses a change git would
+ *  ignore; read that setting if such a lane appears. */
+const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-s', '-z').map((l) => /^(?:S|[a-z]) (\d+) ([0-9a-f]+) \d\t(.*)$/s.exec(l)).filter(Boolean)
+  .filter(([, mode, blob, f]) => f !== MEMORY && !asIndexed(wt, f, mode, blob)).map((m) => m[3])
+/** Whether `f` in `wt` is what git would record as `mode` and `blob`: a link by its target, a file by its bytes and its
+ *  owner's executable bit, since a byte compare alone passes a mode or type change that worktree remove then drops. */
+const asIndexed = (wt, f, mode, blob) => {
+  const p = path.join(wt, f), st = fs.lstatSync(p, { throwIfNoEntry: false })
+  const now = !st ? null : st.isSymbolicLink() ? '120000' : st.isFile() ? (st.mode & 0o100 ? '100755' : '100644') : null
+  if (now !== mode) return false
+  return (now === '120000' ? execFileSync('git', ['-C', wt, 'hash-object', '--stdin'], { ...LISTING, input: fs.readlinkSync(p, 'buffer') }).trim() : git(wt, 'hash-object', '--', f)) === blob
+}
 const ancestors = (f) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))
 /** Where reset keeps the memory bytes across its move: in the worktree's own git dir, which no checkout or reset of
  *  the worktree writes, whatever paths the revision tracks. */

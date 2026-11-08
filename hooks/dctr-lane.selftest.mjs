@@ -49,7 +49,7 @@ if (args[0] === 'tab' && args[1] === 'create') {
   else if (!p || mode === 'gone') { code = 1; err = JSON.stringify({ error: { code: 'pane_not_found' } }) }
   else {
     let status
-    if (p.typed === 0) { status = mode === 'agent-before' ? 'idle' : 'unknown'; session = mode === 'agent-before' ? 'old' : null }
+    if (p.typed === 0) { status = ['agent-before', 'idle-before'].includes(mode) ? 'idle' : 'unknown'; session = ['agent-before', 'session-before'].includes(mode) ? 'old' : null }
     else if (p.busy > 0) { p.busy--; status = 'working'; session = 's1' }
     else { status = mode === 'stuck-after' ? 'working' : 'idle'; session = 's1' }
     read = status
@@ -521,7 +521,9 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
 
 // The failed-create partial (L6) and readiness (L7): each leaves the worktree, names it, writes no lane.log line.
 for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every read'], ['1o', 'get-empty', 0, 'pane get answers nothing'],
-  ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line']]) {
+  ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line'],
+  ['1bd', 'session-before', 0, 'the new pane reads agent_status unknown and already holds an agent session'],
+  ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown']]) {
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode } })
   const t = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run').length
@@ -975,6 +977,31 @@ for (const [i, [k, file]] of [['an untracked link', 'late-lnk'], ['an ignored li
     `archive ${r1.code} ${said(r1)}; archive ${r2.code} ${said(r2)}; remove ${rr.code} ${said(rr)}; outside ${JSON.stringify(treeOf(s.out))}`)
 }
 
+// A tracked file whose mode or type changes under skip-worktree or assume-unchanged, bytes kept: git status hides it
+// and a byte compare sees nothing, so only the index entry's mode tells the change apart.
+const MODES = [
+  { k: 'skip-worktree file made executable', prep: (s) => { git(s.w, 'update-index', '--skip-worktree', 'src.txt'); fs.chmodSync(path.join(s.w, 'src.txt'), 0o755) } },
+  { k: 'assume-unchanged file made executable', prep: (s) => { git(s.w, 'update-index', '--assume-unchanged', 'src.txt'); fs.chmodSync(path.join(s.w, 'src.txt'), 0o755) } },
+  { k: 'skip-worktree file made a link to the same bytes', prep: (s) => {
+    git(s.w, 'update-index', '--skip-worktree', 'src.txt'); const t = path.join(s.f.root, 'same.txt'); fs.copyFileSync(path.join(s.w, 'src.txt'), t)
+    fs.rmSync(path.join(s.w, 'src.txt')); fs.symlinkSync(t, path.join(s.w, 'src.txt')) } },
+]
+const modeOf = (p) => { const st = fs.lstatSync(p, { throwIfNoEntry: false }); return !st ? 'absent' : st.isSymbolicLink() ? 'link' : (st.mode & 0o111) ? 'exec' : 'plain' }
+for (const [i, K] of MODES.entries()) {
+  const s = matrixLane()
+  const ra = lane(s.f, ['archive', 'a'])
+  K.prep(s)
+  const before = modeOf(path.join(s.w, 'src.txt')), rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1bf${i} — after an archive, remove of a lane holding a ${K.k} refuses: the worktree kept and src.txt as it was (LC9)`,
+    ra.code === 0 && rr.code !== 0 && /dctr-lane: refused/.test(rr.err) && exists(s.w) && modeOf(path.join(s.w, 'src.txt')) === before, `archive ${ra.code}; remove ${rr.code} ${said(rr)}; before ${before}; after ${modeOf(path.join(s.w, 'src.txt'))}`)
+  const s2 = matrixLane()
+  const t = commitIn(s2.f.repo, 'at-t.txt', 't\n', 't')
+  K.prep(s2)
+  const old = head(s2.w), before2 = modeOf(path.join(s2.w, 'src.txt')), r = lane(s2.f, ['reset', 'a', t])
+  clause(`clause 1bg${i} — reset of a lane holding a ${K.k} refuses: HEAD unmoved and src.txt as it was (LC9)`,
+    r.code !== 0 && /dctr-lane: refused/.test(r.err) && head(s2.w) === old && modeOf(path.join(s2.w, 'src.txt')) === before2, `reset ${r.code} ${said(r)}; before ${before2}; after ${modeOf(path.join(s2.w, 'src.txt'))}`)
+}
+
 // Through reset onto a revision t that adds one file: the kinds a move keeps are kept, the hidden ones refuse.
 for (const [i, K] of KINDS.entries()) {
   const s = matrixLane()
@@ -1148,6 +1175,27 @@ for (const [i, [k, env, prep]] of [
     git(WASREV.s.f.repo, 'cat-file', '-p', `${WASREV.t}:SESSION_MEMORY.md.was`).out === 'tracked was' && !WASREV.mem.equals(Buffer.from('tracked was\n')) &&
     git(WASREV.s.f.repo, 'cat-file', '-e', `${WASREV.old}:SESSION_MEMORY.md.was`).code !== 0 && mv.code === 0 &&
     read(path.join(p, 'SESSION_MEMORY.md.was')) === 'tracked was\n' && read(savedOf(p)) === 'saved\n', JSON.stringify({ mv, was: read(path.join(p, 'SESSION_MEMORY.md.was')) }))
+}
+{
+  // Clause 3 for LC9, without the command: each mode fixture changes src.txt's mode or type and keeps its bytes, the
+  // index still says 100644, and git status prints nothing.
+  for (const [i, K] of MODES.entries()) {
+    const s = matrixLane()
+    K.prep(s)
+    const st = git(s.w, 'status', '--porcelain', '--untracked-files=no').out, idx = git(s.w, 'ls-files', '-s', 'src.txt').out
+    const bytes = crypto.createHash('sha256').update(fs.readFileSync(path.join(s.w, 'src.txt'))).digest('hex') === crypto.createHash('sha256').update(git(s.w, 'cat-file', 'blob', ':src.txt').out + '\n').digest('hex')
+    clause(`clause 3al${i} — on the ${K.k} fixture, src.txt reads ${modeOf(path.join(s.w, 'src.txt'))} with the index's bytes, the index entry is 100644, and the status test prints nothing`,
+      ['exec', 'link'].includes(modeOf(path.join(s.w, 'src.txt'))) && bytes && idx.startsWith('100644 ') && st === '', JSON.stringify({ st, idx, bytes }))
+  }
+  // Clause 3 for LC10: the shim answers a fresh pane in each discriminating mode as the clause names it.
+  for (const [mode, status, session] of [['session-before', 'unknown', 'old'], ['idle-before', 'idle', null]]) {
+    const f = fixture()
+    const env = { ...process.env, HERDR_SHIM_DIR: f.shim, HERDR_SHIM_MODE: mode }
+    spawnSync(path.join(bin, 'herdr'), ['tab', 'create'], { env })
+    const got = JSON.parse(spawnSync(path.join(bin, 'herdr'), ['pane', 'get', 'p1'], { env, encoding: 'utf8' }).stdout)
+    clause(`clause 3am — in ${mode} mode the herdr shim answers a fresh pane agent_status ${status} with agent session ${session}`,
+      got.result.pane.agent_status === status && (got.result.pane.agent_session?.value ?? null) === session, JSON.stringify(got))
+  }
 }
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry their defects
