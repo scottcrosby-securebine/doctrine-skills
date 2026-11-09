@@ -537,7 +537,25 @@ const CLASS = [
     fx.c = path.join(fx.dir, 'repoC'); fs.mkdirSync(fx.c); git(fx.c, 'init', '-q'); fs.renameSync(memory(fx), path.join(fx.c, 'm1.md')); git(fx.c, 'add', '-A'); git(fx.c, 'commit', '-qm', 'memory')
     fs.symlinkSync('m1.md', path.join(fx.c, 'm?.md')); git(fx.c, 'config', 'status.showUntrackedFiles', 'no'); fs.symlinkSync(path.join(fx.c, 'm?.md'), memory(fx)); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'link memory')
   }],
-  ...['hash-object', 'ls-tree'].flatMap((sub) => [[`git ${sub} fails`, gitMode(sub, 'fail')], [`git ${sub} times out`, gitMode(sub, 'slow')]]),
+  // A committed .gitattributes setting ident on the handoff, committed with $Id$, then marked assume-unchanged and its
+  // $Id line rewritten to text the ident filter collapses back to $Id$.
+  ['a committed handoff under an ident attribute, marked assume-unchanged, its $Id line rewritten', (fx) => {
+    write(path.join(fx.lane, '.gitattributes'), 'docs/handoffs/*.md ident\n'); fs.appendFileSync(fx.handoff, '$Id$\n'); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'ident')
+    git(fx.lane, 'update-index', '--assume-unchanged', 'docs/handoffs/h.md'); fs.writeFileSync(fx.handoff, fs.readFileSync(fx.handoff, 'utf8').replace('$Id$', '$Id: unlanded arbitrary text $'))
+  }],
+  // The committed handoff file, whose content is the path of a file outside every repository, marked assume-unchanged
+  // and swapped for a link to that path, so the link's target reads as the file's bytes.
+  ['a committed handoff file marked assume-unchanged, swapped for a link to a file outside every repository', (fx) => {
+    fx.out = path.join(fx.dir, 'out'); fs.mkdirSync(fx.out); const target = path.join(fx.out, 'h.md'); fs.copyFileSync(fx.handoff, target)
+    fs.writeFileSync(fx.handoff, target); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'path handoff')
+    git(fx.lane, 'update-index', '--assume-unchanged', 'docs/handoffs/h.md'); fs.rmSync(fx.handoff); fs.symlinkSync(target, fx.handoff)
+  }],
+  // The handoff committed as a link whose target string is the handoff's own text, marked skip-worktree and swapped
+  // for a file holding that text, so the file's bytes read as the link's.
+  ['a handoff committed as a link whose target is its own text, marked skip-worktree, swapped for a file holding that text', (fx) => {
+    const body = fs.readFileSync(fx.handoff, 'utf8'); fs.rmSync(fx.handoff); fs.symlinkSync(body, fx.handoff); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'link handoff')
+    git(fx.lane, 'update-index', '--skip-worktree', 'docs/handoffs/h.md'); fs.rmSync(fx.handoff); fs.writeFileSync(fx.handoff, body)
+  }],
 ]
 const classFxs = CLASS.map(([label, prep]) => { const fx = classFx(); prep(fx); return [label, fx] })
 const controlFx = classFx()
@@ -664,8 +682,7 @@ const noGitAbove = (fx) => { for (let d = path.dirname(fx.handoff); ; d = path.d
 // No .git entry on the path from a real file's directory up.
 const outside = (f) => { for (let d = path.dirname(f); ; d = path.dirname(d)) { try { fs.lstatSync(path.join(d, '.git')); return false } catch {} if (path.dirname(d) === d) return true } }
 const gitOf = (fx, args) => spawnSync(path.join(fx.gitBin, 'git'), ['-C', fx.lane, ...args], { encoding: 'utf8', timeout: 1500 })
-const SUBARGS = { 'rev-parse': ['rev-parse', '--is-inside-work-tree'], 'check-ignore': ['check-ignore', '-q', 'docs/handoffs/h.md'], 'ls-files': ['ls-files', '--error-unmatch', '--', 'docs/handoffs/h.md'], log: ['log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md'], status: ['status', '--porcelain'],
-  'hash-object': ['hash-object', '--', 'docs/handoffs/h.md'], 'ls-tree': ['ls-tree', 'HEAD', '--', 'docs/handoffs/h.md'] }
+const SUBARGS = { 'rev-parse': ['rev-parse', '--is-inside-work-tree'], 'check-ignore': ['check-ignore', '-q', 'docs/handoffs/h.md'], 'ls-files': ['ls-files', '--error-unmatch', '--', 'docs/handoffs/h.md'], log: ['log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md'], status: ['status', '--porcelain'] }
 // Every change git sees in a repository, untracked files listed whatever its config, and whether a path is tracked there.
 const stAll = (cwd) => spawnSync(realGit, ['-C', cwd, 'status', '--porcelain', '--untracked-files=all'], { encoding: 'utf8' }).stdout
 const tracked = (cwd, p) => spawnSync(realGit, ['-C', cwd, 'ls-files', '--error-unmatch', p]).status === 0
@@ -753,6 +770,20 @@ for (const [label, fx] of classFxs) {
     // The lane calls the tracked memory link modified and nothing else, and the file it now reaches has no .git above it.
     ok = fs.lstatSync(memory(fx)).isSymbolicLink() && tracked(fx.lane, 'SESSION_MEMORY.md') && stAll(fx.lane) === ' M SESSION_MEMORY.md\n' &&
       fs.realpathSync(memory(fx)) === fs.realpathSync(path.join(fx.out, 'm2.md')) && outside(fs.realpathSync(memory(fx)))
+  } else if (/under an ident attribute|swapped for a/.test(label)) {
+    // The index entry carries its bit and a plain status is empty, while a copy of the lane with the bit cleared calls
+    // the handoff modified. The ident row's working bytes differ from HEAD's and clean back to them through the filter;
+    // each swap row's working type differs from HEAD's while its bytes or target equal HEAD's content.
+    const g = (cwd, ...a) => spawnSync(realGit, ['-C', cwd, ...a], { encoding: 'utf8' }).stdout
+    const bit = /skip-worktree/.test(label) ? 'skip-worktree' : 'assume-unchanged', copy = path.join(fx.dir, 'unbit')
+    fs.cpSync(fx.lane, copy, { recursive: true, verbatimSymlinks: true }); g(copy, 'update-index', `--no-${bit}`, '--', 'docs/handoffs/h.md')
+    const link = fs.lstatSync(fx.handoff).isSymbolicLink(), work = link ? fs.readlinkSync(fx.handoff) : fs.readFileSync(fx.handoff, 'utf8'), head = g(fx.lane, 'show', 'HEAD:docs/handoffs/h.md')
+    const mode = g(fx.lane, 'ls-tree', 'HEAD', '--', 'docs/handoffs/h.md').split(' ')[0]
+    ok = g(fx.lane, 'status', '--porcelain') === '' && g(fx.lane, 'ls-files', '-v', '--', 'docs/handoffs/h.md') === `${bit === 'skip-worktree' ? 'S' : 'h'} docs/handoffs/h.md\n` &&
+      /^ [MT] docs\/handoffs\/h\.md$/m.test(g(copy, 'status', '--porcelain')) &&
+      (/ident/.test(label) ? !link && mode === '100644' && work !== head && work.includes('$Id: unlanded arbitrary text $') &&
+        spawnSync(realGit, ['-C', fx.lane, 'hash-object', '--path=docs/handoffs/h.md', '--stdin'], { input: work, encoding: 'utf8' }).stdout === g(fx.lane, 'rev-parse', 'HEAD:docs/handoffs/h.md')
+        : work === head && (link ? mode === '100644' : mode === '120000'))
   } else if (/^a committed handoff marked|core\.ignoreStat=true|committed as a link marked skip-worktree/.test(label)) {
     // A plain status is empty while the working content differs from HEAD's blob, the index entry carrying its bit or the repository its setting.
     const g = (...a) => spawnSync(realGit, ['-C', fx.lane, ...a], { encoding: 'utf8', ...(a[0] === 'hash-object' ? { input: fs.lstatSync(fx.handoff).isSymbolicLink() ? fs.readlinkSync(fx.handoff) : fs.readFileSync(fx.handoff) } : {}) }).stdout.trim()

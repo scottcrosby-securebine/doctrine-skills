@@ -486,6 +486,14 @@ git(hiddenH.proj, 'update-index', '--skip-worktree', 'docs/handoffs/h.md'); fs.a
 const hiddenSt = execFileSync('git', ['-C', hiddenH.proj, 'status', '--porcelain'], { encoding: 'utf8' }), hiddenR = run(hiddenH)
 clause('clause 2b8 — all true but the handoff, marked skip-worktree and modified after its commit, with git\'s status empty: paused R10, not launched (SR14)',
   hiddenSt === '' && !launched(hiddenR) && paused(hiddenH).some((l) => l.includes('handoff not written')), show(hiddenH, hiddenR))
+{
+  // Without the hook: the hidden handoff's working bytes differ from HEAD's, its index entry is tagged S, and its mtime is after the latch's warning time.
+  const g = (...a) => execFileSync('git', ['-C', hiddenH.proj, ...a], { encoding: 'utf8' })
+  const warnedAt = JSON.parse(fs.readFileSync(path.join(stateDir(hiddenH.session), 'gauge.json'), 'utf8')).warnedAt
+  clause('clause 3b8 — without the hook: the skip-worktree handoff\'s working bytes differ from HEAD\'s, git tags it S, and it was written after the warning',
+    fs.readFileSync(hiddenHPath, 'utf8') !== g('show', 'HEAD:docs/handoffs/h.md') && g('ls-files', '-v', '--', 'docs/handoffs/h.md') === 'S docs/handoffs/h.md\n' &&
+    Number.isFinite(warnedAt) && fs.statSync(hiddenHPath).mtimeMs > warnedAt)
+}
 
 // One fixture per E8-D7 precondition, that precondition alone false.
 const seatUp = (f) => write(path.join(seatsDir(f.session), 'dctr-explore-1.json'), JSON.stringify({ agent: 'dctr-explore-1', paneId: 'w9:p2' }))
