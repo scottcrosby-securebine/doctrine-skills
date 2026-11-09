@@ -824,6 +824,22 @@ const rTorn = await wakeAll(torn)
 clause('clause 2x14 — a wake-all.lock whose pid has exited is replaced and the run wakes a; an empty lock refuses with no pane read (E15-D242)',
   rDead.code === 0 && typedTo(relock, 'a').length === 1 && rTorn.code !== 0 && shimLog(torn).length === 0, wshow(relock, rDead) + wshow(torn, rTorn))
 
+// WB27: the retry interval and the window wake-all uses when neither override is set. A preload makes every long wait
+// instant and moves Date.now on by it, logging each, so the defaults run in milliseconds.
+const clockLog = path.join(tmp, 'clock.log'), preload = path.join(tmp, 'clock.mjs')
+write(preload, `import fs from 'node:fs'
+const real = Date.now, wait = Atomics.wait
+let skew = 0
+Date.now = () => real() + skew
+Atomics.wait = (a, i, v, ms) => { if (ms >= 1000) { skew += ms; fs.appendFileSync(${JSON.stringify(clockLog)}, ms + '\\n'); return 'timed-out' } return wait(a, i, v, ms) }
+`)
+const dflt = wakeFx({ a: { status: 'working' } }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+const rDflt = await wakeAll(dflt, { env: { DCTR_WAKEALL_RETRY_MS: '', DCTR_WAKEALL_WINDOW_MS: '', NODE_OPTIONS: `--import=${preload}` } })
+const dfltWaits = fs.existsSync(clockLog) ? fs.readFileSync(clockLog, 'utf8').split('\n').filter(Boolean).map(Number) : []
+clause('clause 2x15 — with neither override set, wake-all retries a working pane every 30000 ms and writes unwoken after 20 such waits, the 600000 ms window (E15 Recovery, XS-35)',
+  dfltWaits.length === 20 && dfltWaits.every((w) => w === 30000) && evWords(dflt).filter((w) => w.startsWith('retry a ')).length === 20 && evWords(dflt).at(-1) === `unwoken a ${L(1)}` && rDflt.code === 1,
+  JSON.stringify([dfltWaits, wshow(dflt, rDflt)]))
+
 // The refusals: contained, and no <run>/tmpdir.
 const refusals = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
 const rCont2 = await wakeAll(refusals, { env: { DCTR_VIEW_REQUEST_DIR: path.join(refusals.dir, 'vr') } })
