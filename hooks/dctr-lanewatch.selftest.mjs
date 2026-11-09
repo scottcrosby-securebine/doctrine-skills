@@ -635,6 +635,7 @@ for (;;) {
     // A contender's next step is decided by the files and what it has observed, so equal keys reached by different
     // schedules are explored once and the number of schedules through them counted.
     const count = (prefix) => {
+      if (bad.length) return 0   // one schedule that lets two in decides the clause
       replay(prefix)
       const enabled = []
       for (let i = 0; i < N; i++) if (Atomics.load(phase, i) === 1) enabled.push(i)
