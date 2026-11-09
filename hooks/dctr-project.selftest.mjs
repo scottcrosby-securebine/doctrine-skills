@@ -980,6 +980,37 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('board B4 [1: a cell holding a | has it escaped as \\|, so the row keeps four cells]',
     boardText(piped).split('\n').includes('| a\\|b | x\\|y.md | none | none |'), boardText(piped))
   clause('board B4 [3: that input really carries a raw | in two cells]', piped[0].phase.includes('|') && !piped[0].phase.includes('\\|') && piped[0].record.includes('|'), 'fixture')
+  // The state cell over the words a record really ends on, each in a one-phase fixture: terminal states
+  // (which restoreState does not read), a tab before the prose, periods inside and after the word, a state
+  // line with no value, and an empty record file, which is readable and so none, never unknown.
+  const STATE_CASES = [
+    ['an Exited state with prose after it', 'state: Exited (round 3 clean at abc)\n', 'Exited', /^state: Exited \(/m],
+    ['a bold Shipped state ending in a period', '- **State: Shipped.**\n', 'Shipped', /^- \*\*State: Shipped\.\*\*$/m],
+    ['a tab between the state word and its prose', 'state: Paused\tby owner\n', 'Paused', /^state: Paused\tby owner$/m],
+    ['a state word with a period inside it and one after it', 'state: v1.2. tagged\n', 'v1.2', /^state: v1\.2\. tagged$/m],
+    ['a state word ending in two periods', 'state: Held.. pending\n', 'Held.', /^state: Held\.\. pending$/m],
+    ['a state line with no value', 'state:\n', 'none', /^state:$/m],
+    ['an empty record file', '', 'none', /^$/],
+  ]
+  for (const [name, recText, want, shape] of STATE_CASES) {
+    const files = { ...BOARD, [EPIC]: `# Epic E5: Lanes\nState: Open\n\n## Members\n- phase solo: ${REC}/solo.md\n`, [`${REC}/solo.md`]: recText }
+    const got = tryRows(files).rows?.[0]
+    clause(`board B3 state — ${name} [1: state reads ${want} and last round none]`,
+      JSON.stringify(got) === JSON.stringify({ phase: 'solo', record: `${REC}/solo.md`, state: want, round: 'none' }), JSON.stringify(tryRows(files)))
+    clause(`board B3 state — ${name} [3: the record text carries that shape and no round line]`,
+      shape.test(recText) && !/round:/i.test(recText) && (recText === '' ? recText.length === 0 : /state:/i.test(recText)), JSON.stringify(recText))
+  }
+  const piped2 = [{ phase: 'p', record: 'x|y|z.md', state: 'none', round: 'none' }]
+  const p2line = boardText(piped2).split('\n')[2]
+  clause('board B4 [1: a cell holding several | has every one escaped, so the row keeps four cells]',
+    p2line === '| p | x\\|y\\|z.md | none | none |' && p2line.split(/(?<!\\)\|/).length === 6, p2line)
+  clause('board B4 [3: that input holds at least two raw | in one cell]', (piped2[0].record.match(/\|/g) ?? []).length >= 2 && !piped2[0].record.includes('\\'), 'fixture')
+  const MISHEAD = mutate([[EPIC, '# Epic E5: Lanes', '# Epic E9: Lanes']], BOARD)
+  const rMis = tryRows(MISHEAD)
+  clause('board B2 refusal — a current epic whose readable record is headed for another epic [1: boardRows throws naming why (does not resolve)]',
+    typeof rMis.err === 'string' && rMis.err.includes('does not resolve'), JSON.stringify(rMis))
+  clause('board B2 refusal — a current epic whose readable record is headed for another epic [3: Current epic E5, its roster row names a record that is there, and that record is headed Epic E9]',
+    /^Current epic: E5$/m.test(MISHEAD[P]) && /^\| E5 \| Lanes \| docs\/epics\/E5\.md \|$/m.test(MISHEAD[P]) && Object.hasOwn(MISHEAD, EPIC) && /^# Epic E9: /m.test(MISHEAD[EPIC]) && !/^# Epic E9: /m.test(BOARD[EPIC]), 'fixture')
 
   // ---- the CLI on a real repo
   const bt = path.join(tmp, 'board'); writeTree(bt, BOARD)
@@ -992,6 +1023,10 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   const bText = read(boardFile)
   clause('board E15-D16 [2: board exits 0 and writes board.md under Records with one row naming each - phase member]',
     rB.status === 0 && bText.split('\n').filter((l) => /^\| lane-/.test(l)).length === 2 && /^\| lane-a \|/m.test(bText) && /^\| lane-b \|/m.test(bText), `status ${rB.status}: ${rB.stdout}${rB.stderr}\n${bText}`)
+  clause('board E15-D16 [2: the file the CLI writes is exactly boardText of boardRows over the same tree, records read against the repo root]',
+    bText === boardText(rowsOf(BOARD)), `${bText}\n---\n${boardText(rowsOf(BOARD))}`)
+  clause('board B1 [2: on success stdout is exactly the one wrote line naming the file and the row count]',
+    rB.stdout === `wrote ${boardFile}: 2 phase row(s)\n`, JSON.stringify(rB.stdout))
   const stB = cli('status', bt).stdout
   clause('board E15-D17 [2: no line of board.md matches the state-line grep, and status names no board.md while it lists the Open lane record]',
     bText !== '' && !bText.split('\n').some((l) => STATE_RE.test(l)) && !stB.includes('board.md') && stB.includes('Phase lane-a: - **State: Open.** limiter phase.'), stB)
@@ -1041,6 +1076,16 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('board B1 — malformed arguments exit 2 with the usage line naming board: two roots, a flag, and no PROJECT.md',
     cli('board', bt, bt).status === 2 && cli('board', '--x').status === 2 && cli('board', '--x').stderr.includes('check|status|board') && cli('board', empty).status === 2, 'status')
   clause('board B1 — every board run above called the tripwire herdr ZERO times', !fs.existsSync(trip('herdr')), 'herdr was called')
+  const misTree = path.join(tmp, 'board-mishead'); writeTree(misTree, MISHEAD)
+  const rMisCli = cli('board', misTree)
+  clause('board B2 refusal — CLI a current epic headed for another epic [1: exits 1 naming why (does not resolve) and writes no board.md]',
+    rMisCli.status === 1 && rMisCli.stderr.includes('does not resolve') && boards(misTree).length === 0, `status ${rMisCli.status}: ${rMisCli.stderr}`)
+  const noDir = path.join(tmp, 'board-no-records-dir'); writeTree(noDir, mutate([[P, `Records: ${REC}`, 'Records: .doctrine/missing']], BOARD))
+  const rNoDir = cli('board', noDir)
+  clause('board B1 [1: a Records directory that does not exist exits 1 with exactly the one cannot-write line, never a stack trace, and writes nothing]',
+    rNoDir.status === 1 && rNoDir.stderr === `dctr-project: cannot write ${path.join(noDir, '.doctrine/missing/board.md')} (ENOENT)\n` && boards(noDir).length === 0, JSON.stringify(rNoDir.stderr))
+  clause('board B1 [3: that tree names Records .doctrine/missing, which does not exist]',
+    /^Records: \.doctrine\/missing$/m.test(read(path.join(noDir, P))) && !fs.existsSync(path.join(noDir, '.doctrine/missing')), 'fixture')
   const noEpic = path.join(tmp, 'board-no-epic')
   const rExact = cli('board', noEpic)
   clause('board B2 refusal — CLI [1: the refusal prints exactly the one refused line on stderr, never a stack trace]',
