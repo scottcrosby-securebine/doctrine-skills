@@ -8,8 +8,10 @@
 // Four subcommands and no others. Each runs only where runRole() is `orchestrator`, reads the run from runRoot(),
 // and refuses, exiting 1 and making nothing, on anything it checks before it writes. A failure after it writes exits 1
 // and writes no lane.log line, but leaves what it made: a create, its worktree, which it names; a reset, its side
-// branch, which it names, with HEAD already at the revision when only the memory file's restore failed; an archive,
-// the copies it made and any epic it repointed before an epic write failed. On success each
+// branch, which it names, with HEAD already at the revision when only the memory file's restore or the lane.log append
+// failed; an archive, the copies it made and any epic it repointed before an epic write failed, naming the copies'
+// directory and the epics when only the lane.log append failed; a remove whose lane.log append fails, naming the
+// worktree it removed. On success each
 // appends one line to `<run>/lane.log`: `<ISO time> <caller tag> <subcommand> <args>`, the caller tag being
 // DCTR_CALLER or else the role.
 //
@@ -49,7 +51,8 @@
 // worktree and keeps its branch.
 // Both refuse a lane whose record does not exist.
 //
-// Every filename read from git is read NUL-separated (-z), never from trimmed or quoted output, and no listing has a
+// Every file listing, from find or git, is read NUL-separated, and a single path git prints (the toplevel, a git path,
+// the common dir) loses only its trailing newline: none is read from trimmed or quoted output, and no listing has a
 // size limit.
 //
 // remove also refuses while a tracked file other than the memory file has an uncommitted change, a deletion or one
@@ -76,7 +79,8 @@ try { times = { ...times, ...JSON.parse(process.env.DCTR_LANE_TIMES || '{}') } }
 
 const refuse = (why) => { process.stderr.write(`dctr-lane: refused, ${why}\n`); process.exit(1) }
 const LISTING = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: Infinity }
-const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).trim()
+// Only git's trailing newline is dropped: a path it prints may end in whitespace of its own.
+const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).replace(/\n$/, '')
 /** A git listing read NUL-separated: pass -z in `args`. */
 const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING).split('\0').filter(Boolean)
 // A git or fs error's first line, for a refusal.
@@ -143,7 +147,15 @@ const laneLog = path.join(run, 'lane.log')
 const role = args[0]
 if (!AGENT_NAME_RE.test(role) || role === 'orchestrator') refuse(`${JSON.stringify(role)} is not a role name`)
 const caller = process.env.DCTR_CALLER || runRole()
-const append = (line) => fs.appendFileSync(laneLog, `${new Date().toISOString()} ${caller} ${sub} ${line}\n`)
+/** Appends the subcommand's lane.log line. With `done`, what the subcommand already did, a failed append exits 1
+ *  saying so and naming it; without it the error is thrown to create's own failure path. */
+const append = (line, done) => {
+  try { fs.appendFileSync(laneLog, `${new Date().toISOString()} ${caller} ${sub} ${line}\n`) } catch (e) {
+    if (done === undefined) throw e
+    process.stderr.write(`dctr-lane: ${sub} failed, lane.log could not be written (${e.code || e.message}); ${done}\n`)
+    process.exit(1)
+  }
+}
 const readLog = () => { try { return fs.readFileSync(laneLog, 'utf8') } catch (e) { if (e.code === 'ENOENT') return ''; throw e } }
 
 /** The lane's worktree from its latest create line, or a refusal. */
@@ -289,13 +301,14 @@ function reset() {
   if (gitZ(wt, 'ls-tree', '-z', revision, '--', MEMORY).some((l) => l.startsWith('120000 '))) refuse(`${revision} tracks ${MEMORY} as a link, so its bytes cannot be carried across the move`)
   const saved = savedOf(wt)
   if (fs.lstatSync(saved, { throwIfNoEntry: false })) refuse(`${saved} ${UNFINISHED}`)
+  const memory = path.join(wt, MEMORY)
+  let bytes = null
+  // read before the side branch is made, so a file it cannot read refuses with nothing made
+  try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== 'ENOENT') refuse(`the memory file ${memory} could not be read (${e.code || e.message})`) }
   const old = git(wt, 'rev-parse', 'HEAD')
   const side = `${role}-was-${old.slice(0, 12)}`
   if (!gitOk(wt, 'show-ref', '--verify', '--quiet', `refs/heads/${side}`)) git(wt, 'branch', side, old)
   else if (git(wt, 'rev-parse', `refs/heads/${side}`) !== old) refuse(`the branch ${side} exists and is not at ${old}`)
-  const memory = path.join(wt, MEMORY)
-  let bytes = null
-  try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== 'ENOENT') throw e }
   const tracked = gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)
   let failed = null, pending = Boolean(bytes)
   // the bytes sit in `saved` until they are back in place, so a failure anywhere below loses none of them
@@ -315,7 +328,7 @@ function reset() {
     process.stderr.write(`dctr-lane: reset failed, ${failed}; the old HEAD is on ${side}${pending ? `, and the memory file's bytes are in ${saved}` : ''}\n`)
     process.exit(1)
   }
-  append(`${role} ${revision}`)
+  append(`${role} ${revision}`, `the old HEAD is on ${side}, and HEAD is at ${revision}`)
   process.stdout.write(`${side}\n`)
 }
 
@@ -340,7 +353,7 @@ function archive() {
     process.stdout.write(`repointed ${e.file}:${e.lines.join(',')} at the archived record\n`)
   }
   if (!edits.length) process.stdout.write(`no - phase member line names ${live}, so no epic was repointed\n`)
-  append(role)
+  append(role, `the copies are in ${dest}${edits.length ? `, and ${edits.map((e) => e.file).join(', ')} repointed` : ''}`)
   process.stdout.write(`archived ${files.join(', ')} into ${dest}\n`)
 }
 
@@ -387,7 +400,7 @@ function remove() {
   if (differ.length) refuse(`these files of ${wt} are not in ${dest} with an equal sha256, or as a link to the same target: ${differ.join(', ')}`)
   const common = git(wt, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   git(path.dirname(common), 'worktree', 'remove', '--force', wt)
-  append(role)
+  append(role, `${wt} is removed and its branch kept`)
   process.stdout.write(`removed ${wt}\n`)
 }
 

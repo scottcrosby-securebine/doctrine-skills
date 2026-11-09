@@ -1688,6 +1688,92 @@ for (const [flag, tag] of [['--skip-worktree', 'S'], ['--assume-unchanged', 'h']
     ra.code === 0 && rr.code !== 0 && NAMED.test(rr.err) && exists(s.w) && laneLines(s.f).length === 2, `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
 }
 
+// ---------------------------------------------------------------- a memory file reset cannot read (LC19)
+
+for (const [kind, spoil, mend] of [
+  ['at mode 000', (m) => fs.chmodSync(m, 0), (m) => fs.chmodSync(m, 0o644)],
+  ['a directory', (m) => { fs.rmSync(m); fs.mkdirSync(m) }, () => {}],
+]) {
+  const f = fixture({ memory: 'untracked' }); create(f)
+  const w = f.wt('a'), m = path.join(w, 'SESSION_MEMORY.md')
+  write(m, MEMORY)
+  const old = commitIn(w, 'lane.txt', 'lane work\n', 'lane commit'), br = branches(f.repo)
+  spoil(m)
+  let readErr = null
+  try { fs.readFileSync(m) } catch (e) { readErr = e.code }
+  clause(`clause 3ar — without the command, the memory file ${kind} cannot be read (${readErr}), and the process is not root`,
+    readErr !== null && readErr !== 'ENOENT' && process.getuid?.() !== 0, `read ${readErr}, uid ${process.getuid?.()}`)
+  const r = lane(f, ['reset', 'a', f.base])
+  mend(m)
+  clause(`clause 1bu — reset refuses a lane whose memory file is ${kind}, naming the file and the error: HEAD unmoved, no side branch, no lane.log line (LC19)`,
+    r.code === 1 && /dctr-lane: refused, the memory file .*SESSION_MEMORY\.md could not be read \((EACCES|EISDIR)\)/.test(r.err) && !/a-was-/.test(r.err) &&
+      head(w) === old && JSON.stringify(branches(f.repo)) === JSON.stringify(br) && laneLines(f).length === 1,
+    `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+}
+{
+  // the known-good twin: the same lane with a readable memory file resets and prints its side branch
+  const f = fixture({ memory: 'untracked' }); create(f)
+  const w = f.wt('a')
+  write(path.join(w, 'SESSION_MEMORY.md'), MEMORY)
+  const old = commitIn(w, 'lane.txt', 'lane work\n', 'lane commit')
+  const r = lane(f, ['reset', 'a', f.base])
+  clause('clause 2ak — reset of the same lane with a readable memory file exits 0, prints a-was-<sha>, moves HEAD and keeps the bytes (LC19)',
+    r.code === 0 && r.out.trim() === `a-was-${old.slice(0, 12)}` && head(w) === f.base && read(path.join(w, 'SESSION_MEMORY.md')) === MEMORY && laneLines(f).length === 2,
+    `exit ${r.code} ${said(r)}`)
+}
+
+// ---------------------------------------------------------------- a lane.log append that fails after the work is done
+
+{
+  const lock = (f) => fs.chmodSync(f.laneLog, 0o444)
+  // reset: HEAD has moved and the side branch exists, so the failure names both
+  const r = fixture(); create(r)
+  const rw = r.wt('a'), old = commitIn(rw, 'lane.txt', 'lane work\n', 'lane commit'), side = `a-was-${old.slice(0, 12)}`
+  lock(r)
+  let appendErr = null
+  try { fs.appendFileSync(r.laneLog, 'x\n') } catch (e) { appendErr = e.code }
+  clause('clause 3ar3 — without the command, appending to the lane.log at mode 444 fails (EACCES), the process not being root',
+    appendErr === 'EACCES' && process.getuid?.() !== 0, `append ${appendErr}`)
+  const rs = lane(r, ['reset', 'a', r.base])
+  clause('clause 1bv — reset whose lane.log append fails exits 1 naming the side branch and the revision, HEAD at the revision and the branch at the old HEAD, no lane.log line',
+    rs.code === 1 && rs.err.includes(`reset failed, lane.log could not be written (EACCES); the old HEAD is on ${side}, and HEAD is at ${r.base}`) &&
+      head(rw) === r.base && git(rw, 'rev-parse', side).out === old && laneLines(r).length === 1, `exit ${rs.code} ${said(rs)}`)
+  // archive: the copies and the repointed epic are made, so the failure names them
+  const a = seeded(); lock(a.f)
+  const ra = lane(a.f, ['archive', 'a'])
+  clause('clause 1bv2 — archive whose lane.log append fails exits 1 naming the copies\' directory and the repointed epic, the record copied, no archive line',
+    ra.code === 1 && ra.err.includes(`archive failed, lane.log could not be written (EACCES); the copies are in ${a.lanes}, and ${path.join(a.f.repo, 'docs/epics/E1.md')} repointed`) &&
+      exists(path.join(a.lanes, '.doctrine/records/a.md')) && laneLines(a.f).length === 1, `exit ${ra.code} ${said(ra)}`)
+  // remove: the worktree is gone, so the failure names it
+  const m = seeded()
+  const ma = lane(m.f, ['archive', 'a'])
+  lock(m.f)
+  const rm = lane(m.f, ['remove', 'a'])
+  clause('clause 1bv3 — remove whose lane.log append fails exits 1 naming the worktree it removed, the worktree gone and its branch kept, no remove line',
+    ma.code === 0 && rm.code === 1 && rm.err.includes(`remove failed, lane.log could not be written (EACCES); ${m.w} is removed and its branch kept`) &&
+      !exists(m.w) && branches(m.f.repo).some((b) => b.startsWith('a ')) && laneLines(m.f).length === 2, `archive ${ma.code}; remove ${rm.code} ${said(rm)}`)
+}
+
+// ---------------------------------------------------------------- a Records repo whose name ends in a space (LC20)
+
+for (const name of ['rec ', 'recB']) {
+  const f = fixture(); create(f)
+  const rr = path.join(f.root, name)
+  fs.mkdirSync(rr); git(rr, 'init', '-q', '-b', 'main')
+  write(path.join(rr, 'docs/PROJECT.md'), PROJECT); write(path.join(rr, 'docs/epics/E1.md'), EPIC('x/y.md'))
+  git(rr, 'add', '-A'); git(rr, 'commit', '-qm', 'p')
+  const run = path.join(rr, '.doctrine/records/orchestrate')
+  write(path.join(run, 'model/a'), 'claude-opus-5-5\n')
+  // lane.log moves with the run, so the create line goes there
+  write(path.join(run, 'lane.log'), read(f.laneLog))
+  const g = { ...f, run, laneLog: path.join(run, 'lane.log') }
+  const raw = spawnSync('git', ['-C', path.dirname(run), 'rev-parse', '--show-toplevel'], { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } }).stdout
+  if (name === 'rec ') clause('clause 3ar2 — without the command, git prints the Records repo\'s toplevel ending "rec \\n", and trimmed it names a directory with no docs/PROJECT.md',
+    raw.endsWith('rec \n') && !exists(path.join(raw.trim(), 'docs/PROJECT.md')) && exists(path.join(raw.slice(0, -1), 'docs/PROJECT.md')), JSON.stringify(raw))
+  const r = lane(g, ['archive', 'a'])
+  clause(`clause 2al — archive with the Records repo named ${JSON.stringify(name)} exits 0 and copies the record into ${JSON.stringify(name)}/.doctrine/records/lanes/a/ (LC20)`,
+    r.code === 0 && exists(path.join(rr, '.doctrine/records/lanes/a/.doctrine/records/a.md')), `exit ${r.code} ${said(r)}`)
+}
 // ---------------------------------------------------------------- every refusal is reached (LC5's class)
 
 /** The message templates of every refuse( call in `src`, each as a regex over the stderr it prints: a `${...}` part

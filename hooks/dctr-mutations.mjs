@@ -3716,6 +3716,18 @@ const MUTATIONS = [
   { name: "a refusal no clause reaches", file: 'dctr-lane.mjs',
     clause: "clause 1ay — every refuse( message in dctr-lane.mjs is printed by some clause's run of it (LC5)",
     from: "const run = runRoot()\n", to: "const run = runRoot()\nif (process.env.DCTR_NEVER_SET) refuse('a refusal no clause reaches')\n" },
+  { name: 'reset makes its side branch before reading the memory file', file: 'dctr-lane.mjs',
+    clause: 'clause 1bu — reset refuses a lane whose memory file is at mode 000, naming the file and the error: HEAD unmoved, no side branch, no lane.log line (LC19)',
+    from: '  const memory = path.join(wt, MEMORY)\n  let bytes = null\n  // read before the side branch is made, so a file it cannot read refuses with nothing made\n  try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== \'ENOENT\') refuse(`the memory file ${memory} could not be read (${e.code || e.message})`) }\n  const old = git(wt, \'rev-parse\', \'HEAD\')\n  const side = `${role}-was-${old.slice(0, 12)}`\n  if (!gitOk(wt, \'show-ref\', \'--verify\', \'--quiet\', `refs/heads/${side}`)) git(wt, \'branch\', side, old)\n  else if (git(wt, \'rev-parse\', `refs/heads/${side}`) !== old) refuse(`the branch ${side} exists and is not at ${old}`)\n', to: '  const old = git(wt, \'rev-parse\', \'HEAD\')\n  const side = `${role}-was-${old.slice(0, 12)}`\n  if (!gitOk(wt, \'show-ref\', \'--verify\', \'--quiet\', `refs/heads/${side}`)) git(wt, \'branch\', side, old)\n  else if (git(wt, \'rev-parse\', `refs/heads/${side}`) !== old) refuse(`the branch ${side} exists and is not at ${old}`)\n  const memory = path.join(wt, MEMORY)\n  let bytes = null\n  // read before the side branch is made, so a file it cannot read refuses with nothing made\n  try { bytes = fs.readFileSync(memory) } catch (e) { if (e.code !== \'ENOENT\') refuse(`the memory file ${memory} could not be read (${e.code || e.message})`) }\n' },
+  { name: 'reset rethrows a memory file read failure other than ENOENT', file: 'dctr-lane.mjs',
+    clause: 'clause 1bu — reset refuses a lane whose memory file is a directory, naming the file and the error: HEAD unmoved, no side branch, no lane.log line (LC19)',
+    from: 'if (e.code !== \'ENOENT\') refuse(`the memory file ${memory} could not be read (${e.code || e.message})`)', to: 'if (e.code !== \'ENOENT\') throw e' },
+  { name: 'git() trims every reply, so a path ending in a space loses it', file: 'dctr-lane.mjs',
+    clause: 'clause 2al — archive with the Records repo named "rec " exits 0 and copies the record into "rec "/.doctrine/records/lanes/a/ (LC20)',
+    from: 'LISTING).replace(/\\n$/, \'\')', to: 'LISTING).trim()' },
+  { name: 'a failed lane.log append throws, naming nothing it did', file: 'dctr-lane.mjs',
+    clause: 'clause 1bv — reset whose lane.log append fails exits 1 naming the side branch and the revision, HEAD at the revision and the branch at the old HEAD, no lane.log line',
+    from: '    if (done === undefined) throw e\n', to: '    throw e\n' },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
