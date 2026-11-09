@@ -508,6 +508,15 @@ clause('clause 2ak — a start whose pane run fails exits 1 with one line naming
   rFail.code === 1 && rFail.err.split('\n').length === 1 && /^dctr-lanewatch: .*pane_send_failed/.test(rFail.err) && failCalls.at(-1) === 'tab close w5:t5' &&
   failLeft.length === 0 && !/ create orchestrator /.test(fs.readFileSync(path.join(failing.run, 'lane.log'), 'utf8')), JSON.stringify([rFail, failCalls, failLeft]))
 
+// WB16: a start whose pane runs but whose watcher never takes the lock (no node on the pane's PATH) undoes it too.
+const noNode = fixture({})
+const noNodeEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: noNode.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: noNode.dir }
+const rNoNode = await proc(['start'], noNodeEnv, noNode.repo)
+const noNodeLeft = ['lanewatch.lock', 'lanewatch.start.lock', 'tmpdir'].filter((f) => fs.existsSync(path.join(noNode.run, f)))
+clause('clause 2aq — a start whose watcher never takes the lock exits 1 with one line, closes its tab and leaves no lock, no tmpdir and no create line (WB16)',
+  rNoNode.code === 1 && rNoNode.err.split('\n').length === 1 && /no watcher took/.test(rNoNode.err) && shimLog(noNode).at(-1)?.argv.join(' ') === 'tab close w5:t5' &&
+  noNodeLeft.length === 0 && !/ create orchestrator /.test(fs.readFileSync(path.join(noNode.run, 'lane.log'), 'utf8')), JSON.stringify([rNoNode, noNodeLeft]))
+
 // WB17, WB18, WB19: a restart keys what it restores as the in-process sets do (the reviewer's three probes).
 {
   const dl = fixture({ wv: {} }), dl2 = fixture({ wv: {} })
@@ -541,6 +550,102 @@ fs.appendFileSync(path.join(twinStall.run, 'events.log'), `${sameMs} unfinished 
 polls(twinStall, watcher(twinStall)); polls(twinStall, watcher(twinStall))
 clause('clause 2ao — two unfinished lines naming the orchestrator in the same millisecond give two notifications, and a restart none more (WB25, E15-D238)',
   notes(twinStall).length === 2, JSON.stringify(notes(twinStall).map((e) => e.argv[2])))
+
+let interleaveCounts = []
+// The run lock under every schedule (WB20, WB22-WB24): contenders run takeRunLock in worker threads, each fs call on the
+// lock a step the scheduler grants, and every schedule is explored, schedules reaching the same state (the files and
+// each contender's observations so far) explored once. In every one at most one contender enters.
+{
+  const { Worker } = await import('node:worker_threads')
+  const STATE = path.join(import.meta.dirname, 'dctr-state.mjs')
+  const box = path.join(tmp, 'interleave'); fs.mkdirSync(box)
+  const lockPath = path.join(box, 'run.lock')
+  const workerFile = path.join(tmp, 'contender.mjs')
+  write(workerFile, `import { workerData } from 'node:worker_threads'
+import fs from 'node:fs'
+const { sab, id, n, statePath, box, pid } = workerData
+const turn = new Int32Array(sab, 0, n), phase = new Int32Array(sab, 4 * n, n), result = new Int32Array(sab, 8 * n, n), go = new Int32Array(sab, 12 * n, 2), seen = new Int32Array(sab, 16 * n, n)
+Object.defineProperty(process, 'pid', { value: pid })
+const { takeRunLock } = await import(statePath)
+// What this contender has observed, as a running hash in shared memory: with the files, it decides every next step.
+const note = (t) => { let h = Atomics.load(seen, id); for (const c of t) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; Atomics.store(seen, id, h) }
+// go[1] set means the scheduler is abandoning this run: every step from here throws, so the contender unwinds untouched.
+const stop = () => { if (Atomics.load(go, 1)) throw new Error('abandoned') }
+const gate = () => { stop(); Atomics.store(phase, id, 1); Atomics.notify(phase, id); Atomics.wait(turn, id, 0); Atomics.store(turn, id, 0); stop(); Atomics.store(phase, id, 0) }
+for (const m of ['mkdirSync', 'writeFileSync', 'readFileSync', 'renameSync', 'rmSync', 'statSync', 'utimesSync', 'chmodSync']) {
+  const orig = fs[m]
+  fs[m] = function (p, ...rest) {
+    if (!String(p).startsWith(box)) return orig.call(fs, p, ...rest)
+    gate()
+    try { const v = orig.call(fs, p, ...rest); note(m + ':' + (m === 'readFileSync' ? String(v) : 'ok') + ';'); return v }
+    catch (e) { note(m + ':' + e.code + ';'); throw e }
+  }
+}
+let at = 0
+for (;;) {
+  Atomics.wait(go, 0, at); at = Atomics.load(go, 0)
+  let r
+  try { r = takeRunLock(box + '/run.lock') ? 1 : 2 } catch { r = 3 }
+  if (Atomics.load(go, 1)) r = 0
+  Atomics.store(result, id, r); Atomics.store(phase, id, 2); Atomics.notify(phase, id)
+}
+`)
+  const live = [spawn('sleep', ['300']), spawn('sleep', ['300']), spawn('sleep', ['300'])]
+  const deadPid = String(spawnSync('true').pid)
+  // The files under the box, names with their times stripped, and contents: half of a state's key.
+  const files = () => {
+    const out = []
+    const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); if (fs.statSync(p).isDirectory()) { out.push(rel + '/'); walk(p) } else out.push(`${rel}=${fs.readFileSync(p, 'utf8')}`) } }
+    walk(box); return out.join(',')
+  }
+  async function explore(N, initial) {
+    const sab = new SharedArrayBuffer(4 * 5 * N)
+    const turn = new Int32Array(sab, 0, N), phase = new Int32Array(sab, 4 * N, N), result = new Int32Array(sab, 8 * N, N), go = new Int32Array(sab, 12 * N, 2), seen = new Int32Array(sab, 16 * N, N)
+    for (let i = 0; i < N; i++) Atomics.store(phase, i, 2)
+    const workers = live.slice(0, N).map((p, id) => new Worker(workerFile, { workerData: { sab, id, n: N, statePath: STATE, box, pid: p.pid } }))
+    await new Promise((r) => setTimeout(r, 500))
+    const settle = (id) => { while (Atomics.load(phase, id) === 0) Atomics.wait(phase, id, 0, 50) }
+    const finished = (id) => { while (Atomics.load(phase, id) !== 2) { if (Atomics.load(phase, id) === 1) { Atomics.store(turn, id, 1); Atomics.notify(turn, id) } Atomics.wait(phase, id, Atomics.load(phase, id), 20) } }
+    const visited = new Map()
+    const bad = []
+    const replay = (prefix) => {
+      Atomics.store(go, 1, 1)
+      for (let i = 0; i < N; i++) finished(i)
+      fs.rmSync(box, { recursive: true, force: true }); fs.mkdirSync(box)
+      if (initial === 'dead') { fs.mkdirSync(lockPath); fs.writeFileSync(path.join(lockPath, 'pid'), deadPid); const old = (Date.now() - 60000) / 1000; fs.utimesSync(lockPath, old, old) }
+      for (let i = 0; i < N; i++) { Atomics.store(phase, i, 0); Atomics.store(result, i, 0); Atomics.store(turn, i, 0); Atomics.store(seen, i, 0) }
+      Atomics.store(go, 1, 0); Atomics.add(go, 0, 1); Atomics.notify(go, 0)
+      for (let i = 0; i < N; i++) settle(i)
+      for (const id of prefix) { Atomics.store(phase, id, 0); Atomics.store(turn, id, 1); Atomics.notify(turn, id); settle(id) }
+    }
+    // A contender's next step is decided by the files and what it has observed, so equal keys reached by different
+    // schedules are explored once and the number of schedules through them counted.
+    const count = (prefix) => {
+      replay(prefix)
+      const enabled = []
+      for (let i = 0; i < N; i++) if (Atomics.load(phase, i) === 1) enabled.push(i)
+      const key = `${files()}|${Array.from(seen).join(',')}|${Array.from(phase).join(',')}|${Array.from(result).join(',')}`
+      if (visited.has(key)) return visited.get(key)
+      let total = 0
+      if (!enabled.length) {
+        if (Array.from(result).filter((r) => r === 1).length > 1) bad.push(prefix.join(''))
+        total = 1
+      } else for (const id of enabled) total += count([...prefix, id])
+      visited.set(key, total)
+      return total
+    }
+    const schedules = count([])
+    Atomics.store(go, 1, 1)
+    for (let i = 0; i < N; i++) finished(i)
+    for (const w of workers) await w.terminate()
+    return { k: N, initial, schedules, states: visited.size, bad: bad.slice(0, 3), badCount: bad.length }
+  }
+  const runs = [await explore(2, 'free'), await explore(2, 'dead'), await explore(3, 'free'), await explore(3, 'dead')]
+  for (const p of live) p.kill()
+  interleaveCounts = runs.map((r) => `${r.k} contenders, ${r.initial} lock: ${r.schedules} schedules, ${r.states} states`)
+  clause(`clause 2ap — the run lock under every schedule of two and of three contenders, on a free lock and on a dead holder's: at most one enters (${interleaveCounts.join('; ')}) (WB20, WB22-WB24)`,
+    runs.every((r) => r.badCount === 0 && r.schedules > 1), JSON.stringify(runs))
+}
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 

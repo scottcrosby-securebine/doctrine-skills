@@ -485,12 +485,29 @@ export function pidAlive(raw) {
 export const RUN_LOCK_PIDLESS_MS = 180000
 
 /** Take a run's single-instance lock, the directory lock acquireLock makes: true when taken, false while any holder that
- *  is alive, or cannot be judged, keeps it. A lock whose holder has exited is broken through breakIfOrphaned, which puts
- *  back anything that replaced it, and taken once more. A take that throws (a pid that could not be published) is false. */
+ *  is alive, or cannot be judged, keeps it. A take that throws (a pid that could not be published) is false.
+ *
+ *  A lock whose holder has exited is broken by moving its PID FILE aside, never the directory: the directory cannot be
+ *  replaced while it exists, so the one pid file in it is the holder that was judged, and only one breaker can move it.
+ *  What moved is compared with the pid judged dead; a mismatch (a replacement published since the judgement) is put back
+ *  into its own directory, where nothing else can have written a pid. breakStaleLock moves the whole directory, and its
+ *  put-back can lose the name to a third contender and drop a live holder's lock, so two enter (the interleaving clause
+ *  in dctr-lanewatch.selftest.mjs found it). A pid-less lock is still broken through breakIfOrphaned, after
+ *  RUN_LOCK_PIDLESS_MS. */
 export function takeRunLock(lock) {
   try {
     if (acquireLock(lock)) return true
-    return breakIfOrphaned(lock, 0, RUN_LOCK_PIDLESS_MS) && acquireLock(lock)
+    const h = lockHolder(lock)
+    if (h === null) return breakIfOrphaned(lock, 0, RUN_LOCK_PIDLESS_MS) && acquireLock(lock)
+    if (h === undefined || holderAlive(h, ownPidNs()) !== false) return false
+    const pidFile = path.join(lock, 'pid'), aside = `${lock}.pid.${process.pid}`
+    try { fs.renameSync(pidFile, aside) } catch { return false }
+    let moved = null
+    try { moved = fs.readFileSync(aside, 'utf8').trim() } catch { /* could not look: put it back */ }
+    if (moved !== h.pid) { try { fs.renameSync(aside, pidFile) } catch { /* its directory is gone */ } return false }
+    fs.rmSync(aside, { force: true })
+    fs.rmSync(lock, { recursive: true, force: true })
+    return acquireLock(lock)
   } catch { return false }
 }
 
