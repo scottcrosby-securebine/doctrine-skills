@@ -1602,6 +1602,92 @@ const NAMED = /dctr-lane: refused, .*t\\xff/
   clause('clause 3aq3 — café.txt\'s name bytes survive a UTF-8 decode and re-encode', roundTrips(Buffer.from(CAFE)) && Buffer.from(CAFE).length === CAFE.length + 1, Buffer.from(CAFE).toString('hex'))
 }
 
+// ---------------------------------------------------------------- index names that are not UTF-8 (LA-1, LC16)
+
+// The index stores a name as bytes, so an entry t\xff can be made where the filesystem refuses the file. Decoded, it
+// reads as t�; a tracked decoy t� with the entry's bytes then passes for it, and a deletion of t\xff that
+// skip-worktree or assume-unchanged hides from git status goes unseen.
+const gitIn = (cwd, args, input) => spawnSync('git', args, { cwd, input, env: { ...process.env, ...GIT_ENV } })
+const nul = (b) => Buffer.concat([b, Buffer.from([0])])
+const hideIndexed = (w, flag) => gitIn(w, ['update-index', flag, '-z', '--stdin'], nul(BADNAME))
+/** Commits into lane `w` an index entry t\xff and a tracked decoy t�, both holding 'invalid name\n', with no t\xff
+ *  file written, and marks the entry `flag`: on any filesystem, a deletion git status cannot see. */
+const indexBad = (w, flag = '--skip-worktree') => {
+  write(path.join(w, REPLACED), 'invalid name\n'); git(w, 'add', REPLACED)
+  const blob = git(w, 'hash-object', '-w', REPLACED).out
+  gitIn(w, ['update-index', '-z', '--index-info'], nul(Buffer.concat([Buffer.from(`100644 ${blob}\t`), BADNAME])))
+  git(w, 'commit', '-qm', 'tracked t\\xff and its decoy')
+  hideIndexed(w, flag)
+}
+/** Without the command: `w`'s index holds t\xff tagged `tag` with the decoy's blob, no t\xff is on disk, the decoy
+ *  is, t\xff does not survive a UTF-8 decode and re-encode, and the status test prints nothing. */
+const carriesHidden = (w, tag) => {
+  const out = gitIn(w, ['ls-files', '-v', '-s', '-z']).stdout, entries = []
+  for (let at = 0, end; (end = out.indexOf(0, at)) >= 0; at = end + 1) entries.push(out.subarray(at, end))
+  const e = entries.find((b) => b.subarray(b.indexOf(9) + 1).equals(BADNAME))
+  const m = e && /^(\S) \d+ ([0-9a-f]+) /.exec(e.toString('latin1'))
+  return Boolean(m) && m[1] === tag && m[2] === git(w, 'hash-object', REPLACED).out && !hasBytes(w, BADNAME) && exists(path.join(w, REPLACED)) &&
+    !roundTrips(BADNAME) && git(w, 'status', '--porcelain', '--untracked-files=no').out === ''
+}
+{
+  // Every filesystem: the entry is made in the index alone.
+  const s = seeded()
+  indexBad(s.w)
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause('clause 1bq — remove refuses, naming the bytes, a lane whose index holds t\\xff deleted under skip-worktree beside a tracked t\\ufffd of the same bytes: the worktree kept, no remove line (LA-1, LC16)',
+    ra.code === 0 && rr.code !== 0 && NAMED.test(rr.err) && exists(s.w) && laneLines(s.f).length === 2, `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+  const r = fixture(); create(r)
+  const rw = r.wt('a')
+  indexBad(rw)
+  const rhead = head(rw), rbr = branches(r.repo)
+  clause('clause 3aq6 — without the command, the index fixture\'s index holds t\\xff tagged S with the decoy\'s blob, no t\\xff is on disk, t\\ufffd is, and the status test prints nothing',
+    carriesHidden(rw, 'S'), gitIn(rw, ['ls-files', '-v', '-s', '-z']).stdout.toString('hex'))
+  const rs = lane(r, ['reset', 'a', rhead])
+  clause('clause 1br — reset refuses, naming the bytes, a lane whose index holds t\\xff deleted under skip-worktree beside a tracked t\\ufffd of the same bytes: HEAD unmoved, no side branch, no lane.log line (LA-1, LC16)',
+    rs.code !== 0 && NAMED.test(rs.err) && head(rw) === rhead && JSON.stringify(branches(r.repo)) === JSON.stringify(rbr) && laneLines(r).length === 1, `exit ${rs.code} ${said(rs)}`)
+  // the known-good twin: a tracked café.txt under skip-worktree, untouched
+  const g = seeded()
+  commitIn(g.w, CAFE, 'accented\n', 'café'); git(g.w, 'update-index', '--skip-worktree', CAFE)
+  const tag = git(g.w, '-c', 'core.quotepath=false', 'ls-files', '-v', CAFE).out
+  const ga = lane(g.f, ['archive', 'a']), gr = lane(g.f, ['remove', 'a'])
+  clause('clause 2ai — archive then remove of a lane holding a tracked café.txt under skip-worktree both exit 0, the worktree gone (LA-1, LC16)',
+    ga.code === 0 && gr.code === 0 && !exists(g.w), `archive ${ga.code} ${said(ga)}; remove ${gr.code} ${said(gr)}`)
+  const h = fixture(); create(h)
+  const hw = h.wt('a')
+  commitIn(hw, CAFE, 'accented\n', 'café'); git(hw, 'update-index', '--skip-worktree', CAFE)
+  const hs = lane(h, ['reset', 'a', h.base])
+  clause('clause 2aj — reset of a lane holding a tracked café.txt under skip-worktree moves to the base (LA-1, LC16)',
+    hs.code === 0 && head(hw) === h.base, `exit ${hs.code} ${said(hs)}`)
+  clause('clause 3aq7 — the twin\'s café.txt index entry is tagged S and its name survives a UTF-8 decode and re-encode', tag === `S ${CAFE}` && roundTrips(Buffer.from(CAFE)), JSON.stringify(tag))
+}
+for (const [flag, tag] of [['--skip-worktree', 'S'], ['--assume-unchanged', 'h']]) {
+  // Linux: t\xff written on disk and committed, then hidden by `flag` and deleted.
+  const r = fixture(); create(r)
+  const rw = r.wt('a')
+  write(path.join(rw, REPLACED), 'invalid name\n')
+  const code = writeBad(rw)
+  if (code) { skip(`clause 1bs, 1bt, 3aq8 — remove and reset refuse a lane whose t\\xff, committed on disk, was deleted under ${flag.slice(2)}`, code); continue }
+  git(rw, 'add', '-A'); git(rw, 'commit', '-qm', 'c1')
+  const c1 = head(rw)
+  fs.writeFileSync(badPath(rw), 'next\n'); git(rw, 'add', '-A'); git(rw, 'commit', '-qm', 'c2')
+  const c2 = head(rw)
+  git(rw, 'reset', '-q', '--hard', c1)
+  hideIndexed(rw, flag); fs.unlinkSync(badPath(rw))
+  const rbr = branches(r.repo)
+  clause(`clause 3aq8 — without the command, the ${flag.slice(2)} disk fixture's index holds t\\xff tagged ${tag} with the decoy's blob, the file is gone, and the status test prints nothing`,
+    carriesHidden(rw, tag) && head(rw) === c1, gitIn(rw, ['ls-files', '-v', '-s', '-z']).stdout.toString('hex'))
+  const rs = lane(r, ['reset', 'a', c2])
+  clause(`clause 1bs — reset to a revision that changes t\\xff refuses a lane whose t\\xff was deleted under ${flag.slice(2)} beside t\\ufffd: HEAD at c1, t\\xff still absent, no side branch, no lane.log line (LA-1, LC16, E15-D165)`,
+    rs.code !== 0 && NAMED.test(rs.err) && head(rw) === c1 && !hasBytes(rw, BADNAME) && JSON.stringify(branches(r.repo)) === JSON.stringify(rbr) && laneLines(r).length === 1, `exit ${rs.code} ${said(rs)}`)
+  const s = seeded()
+  write(path.join(s.w, REPLACED), 'invalid name\n'); writeBad(s.w)
+  git(s.w, 'add', '-A'); git(s.w, 'commit', '-qm', 'c1')
+  hideIndexed(s.w, flag); fs.unlinkSync(badPath(s.w))
+  const ra = lane(s.f, ['archive', 'a']), rr = lane(s.f, ['remove', 'a'])
+  clause(`clause 1bt — remove refuses a lane whose t\\xff, committed on disk, was deleted under ${flag.slice(2)} beside t\\ufffd: the worktree kept, no remove line (LA-1, LC16)`,
+    ra.code === 0 && rr.code !== 0 && NAMED.test(rr.err) && exists(s.w) && laneLines(s.f).length === 2, `archive ${ra.code} ${said(ra)}; remove ${rr.code} ${said(rr)}`)
+}
+
 // ---------------------------------------------------------------- every refusal is reached (LC5's class)
 
 /** The message templates of every refuse( call in `src`, each as a regex over the stderr it prints: a `${...}` part

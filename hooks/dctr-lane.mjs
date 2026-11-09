@@ -23,7 +23,7 @@
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
 // to the revision with `git reset --hard`, refusing first, as archive does, a name find lists in the worktree that is
-// not UTF-8, then while `git status --porcelain --untracked-files=no` prints
+// not UTF-8, and one the index holds, then while `git status --porcelain --untracked-files=no` prints
 // anything, while a file other than the memory file is absent or differs from the index in bytes, mode or type under skip-worktree or
 // assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
 // while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
@@ -51,7 +51,8 @@
 // size limit.
 //
 // remove also refuses while a tracked file other than the memory file has an uncommitted change, a deletion or one
-// skip-worktree or assume-unchanged hides among them, a deletion it hides included, since the kept branch would lack it.
+// skip-worktree or assume-unchanged hides among them, a deletion it hides included, since the kept branch would lack it,
+// and, as reset does, while the index holds a name that is not UTF-8, whose hidden change no decoded name can show.
 //
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
@@ -91,13 +92,16 @@ const same = (a, b) => {
 /** Every entry of the worktree `root` but its directories and its .git, links among them, by find, relative to `root`.
  *  The listing is read as bytes and a name that does not survive a UTF-8 decode and re-encode is refused: decoded, it
  *  can read as another file's name, which is then handled twice and it never. */
-const findFiles = (root) => {
-  const out = execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'], { ...LISTING, encoding: 'buffer' })
-  const names = []
-  for (let at = 0, end; (end = out.indexOf(0, at)) >= 0; at = end + 1) if (end > at) names.push(out.subarray(at, end))
-  const lossy = names.filter((b) => !Buffer.from(b.toString()).equals(b))
-  if (lossy.length) refuse(`${lossy.map(escaped).join(', ')} is not a UTF-8 name, so archive, remove and reset cannot name it`)
-  return names.map((b) => path.relative(root, b.toString()))
+const findFiles = (root) => utf8Entries(execFileSync('find', [root, '-path', path.join(root, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'], { ...LISTING, encoding: 'buffer' }))
+  .map((f) => path.relative(root, f))
+/** The NUL-separated listing `out`, read as bytes, as text entries, refusing first any entry whose name (`name` picks
+ *  its bytes from the entry) does not survive a UTF-8 decode and re-encode. */
+const utf8Entries = (out, name = (b) => b) => {
+  const entries = []
+  for (let at = 0, end; (end = out.indexOf(0, at)) >= 0; at = end + 1) if (end > at) entries.push(out.subarray(at, end))
+  const lossy = entries.filter((b) => !Buffer.from(b.toString()).equals(b))
+  if (lossy.length) refuse(`${lossy.map((b) => escaped(name(b))).join(', ')} is not a UTF-8 name, so archive, remove and reset cannot name it`)
+  return entries.map(String)
 }
 /** `b` as text, a byte outside printable ASCII, and the backslash, as \xHH. */
 const escaped = (b) => [...b].map((c) => (c >= 0x20 && c < 0x7f && c !== 0x5c ? String.fromCharCode(c) : `\\x${c.toString(16).padStart(2, '0')}`)).join('')
@@ -108,9 +112,10 @@ const realish = (p) => { let rest = ''; while (!fs.lstatSync(p, { throwIfNoEntry
 /** The tracked files of `wt` other than the memory file whose change skip-worktree or assume-unchanged (a lower-case
  *  tag) hides from git status: absent, a mode or type other than the index entry's, or bytes that differ from it. A
  *  sparse checkout's absent files carry the same tag and are counted too, since nothing in the index tells the two
- *  apart. shortcut: the executable bit is compared even where core.fileMode is false, which refuses a change git would
+ *  apart. Every index entry's name is read as bytes and one that is not UTF-8 is refused: decoded, it can name another
+ *  file whose bytes match the entry's, and its own change goes unseen. shortcut: the executable bit is compared even where core.fileMode is false, which refuses a change git would
  *  ignore; read that setting if such a lane appears. */
-const hiddenChanges = (wt) => gitZ(wt, 'ls-files', '-v', '-s', '-z').map((l) => /^(?:S|[a-z]) (\d+) ([0-9a-f]+) \d\t(.*)$/s.exec(l)).filter(Boolean)
+const hiddenChanges = (wt) => utf8Entries(execFileSync('git', ['-C', wt, 'ls-files', '-v', '-s', '-z'], { ...LISTING, encoding: 'buffer' }), (b) => b.subarray(b.indexOf(9) + 1)).map((l) => /^(?:S|[a-z]) (\d+) ([0-9a-f]+) \d\t(.*)$/s.exec(l)).filter(Boolean)
   .filter(([, mode, blob, f]) => f !== MEMORY && !asIndexed(wt, f, mode, blob)).map((m) => m[3])
 /** Whether `f` in `wt` is what git would record as `mode` and `blob`: a link by its target, a file by its bytes and its
  *  owner's executable bit, since a byte compare alone passes a mode or type change that worktree remove then drops. */
