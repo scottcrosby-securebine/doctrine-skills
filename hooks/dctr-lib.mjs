@@ -1353,9 +1353,10 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 export const limitKind = (message) => (ACCOUNT_LIMIT.test(String(message ?? '')) ? 'account' : MODEL_LIMIT.test(String(message ?? '')) ? 'model' : 'other')
 
 /** `zone`'s wall clock at `ms` as `{ y, mo, d, h, mi }`, mo from 1. Throws on a zone Intl does not know. */
+const wallFormats = new Map()
 function wallClock(ms, zone) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' })
-    .formatToParts(ms).map((p) => [p.type, Number(p.value)]))
+  if (!wallFormats.has(zone)) wallFormats.set(zone, new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }))
+  const parts = Object.fromEntries(wallFormats.get(zone).formatToParts(ms).map((p) => [p.type, Number(p.value)]))
   return { y: parts.year, mo: parts.month, d: parts.day, h: parts.hour, mi: parts.minute }
 }
 
@@ -1365,7 +1366,11 @@ function wallClock(ms, zone) {
 function zonedInstants(y, mo, d, h, mi, zone) {
   const wall = Date.UTC(y, mo - 1, d, h, mi)
   const offset = (ms) => { const w = wallClock(ms, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / 60000) * 60000 }
-  const tries = [...new Set([wall - offset(wall - 43200000), wall - offset(wall + 43200000)])].sort((a, b) => a - b)
+  // Every offset the zone takes at the instants that can read the wall time (offsets run from -12h to +14h), read each
+  // hour: two samples half a day apart missed an offset held only between them (WB26, Auckland's April fall-back).
+  const offsets = new Set()
+  for (let k = -15; k <= 13; k++) offsets.add(offset(wall + k * 3600000))
+  const tries = [...new Set([...offsets].map((o) => wall - o))].sort((a, b) => a - b)
   const reads = tries.filter((at) => { const w = wallClock(at, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) === wall })
   return reads.length ? reads : [tries.at(-1)]
 }

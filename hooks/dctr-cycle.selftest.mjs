@@ -999,6 +999,10 @@ const RESETS = [
   ['9:75pm, no clock time', "You've hit your session limit · resets 9:75pm (UTC)", '2026-11-09T04:00:00Z', 'unknown'],
   ['a zone Intl does not know', "You've hit your session limit · resets 9pm (Mars/Base)", '2026-11-09T04:00:00Z', 'unknown'],
 ]
+// WB21: from a date after Feb 29 2028 the next Feb 29 is four years on.
+RESETS.push(['Feb 29 from after Feb 29 2028, four years on', "You've hit your weekly limit · resets Feb 29, 7pm (UTC)", '2028-03-01T04:00:00Z', '2032-02-29T19:00:00Z'])
+// WB26: Auckland falls back at 03:00 NZDT on 2027-04-04; at 01:30 NZDT the first 02:30 is still in NZDT.
+RESETS.push(['2:30am Auckland before its April fall-back, its first occurrence', "You've hit your session limit · resets 2:30am (Pacific/Auckland)", '2027-04-03T12:30:00Z', '2027-04-03T13:30:00Z'])
 const resetBad = RESETS.filter(([label, text, now, want], i) => {
   const f = fixture(`limit-reset-${i}`)
   run(f, failure(text), laneEnv(f, Date.parse(now)))
@@ -1007,6 +1011,45 @@ const resetBad = RESETS.filter(([label, text, now, want], i) => {
 }).map(([label]) => label)
 clause('clause 2y4 — an account line carries the reset time as ISO UTC: the first occurrence of the stated time in its zone strictly after the StopFailure (the same instant moves a day on), a dated text in the year that puts it after, unknown for a time that does not parse (E15-D228)',
   resetBad.length === 0, JSON.stringify(resetBad))
+// WB26: a table over zones with DST, both hemispheres, the 30- and 45-minute offsets among them, and every transition
+// in the two years from 2026-11-10: for a stated time at each quarter hour around each transition and a clock before,
+// at and after it, the reset time reads the stated wall time in Intl and is the first such instant after the clock, found
+// here by walking every quarter hour. A stated time a spring-forward gap skips is passed over, its rule pinned above.
+const ZONES = ['America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Australia/Sydney', 'Australia/Adelaide',
+  'Pacific/Auckland', 'America/Santiago', 'Australia/Lord_Howe', 'Pacific/Chatham', 'America/St_Johns', 'Asia/Kathmandu']
+const Q = 900000
+const zoneTable = { cases: 0, transitions: 0, gaps: 0, bad: [] }
+for (const zone of ZONES) {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' })
+  const wall = (ms) => { const p = Object.fromEntries(fmt.formatToParts(ms).map((x) => [x.type, Number(x.value)])); return { day: Date.UTC(p.year, p.month - 1, p.day), min: p.hour * 60 + p.minute } }
+  const off = (ms) => { const w = wall(ms); return w.day + w.min * 60000 - ms }
+  const from = Date.parse('2026-11-10T00:00:00Z'), to = Date.parse('2028-11-10T00:00:00Z')
+  const marks = []
+  for (let t = from; t < to; t += 3600000) if (off(t) !== off(t + 3600000)) { let u = t; while (off(u) === off(t)) u += Q; marks.push(u) }
+  zoneTable.transitions += marks.length
+  if (!marks.length) marks.push(Date.parse('2027-04-04T00:00:00Z'), Date.parse('2027-10-03T00:00:00Z'))
+  for (const T of marks) {
+    for (const now of [T - 3 * 3600000 + 300000, T - Q + 60000, T + Q + 60000]) {
+      for (let k = -8; k <= 8; k++) {
+        const target = ((wall(T).min + k * 15) % 1440 + 1440) % 1440, h = Math.floor(target / 60), mi = target % 60
+        const text = `You've hit your session limit · resets ${(h % 12) || 12}${mi ? `:${String(mi).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'} (${zone})`
+        let want = null, skipped = false
+        for (let t = Math.ceil((now - 86400000) / Q) * Q; t < now + 50 * 3600000; t += Q) {
+          const a = wall(t - Q), b = wall(t), abs = (w) => w.day / 60000 + w.min
+          for (let m = abs(a) + 1; m < abs(b) && abs(b) - abs(a) > 15; m++) if (m % 1440 === target) skipped = true
+          if (b.min === target && t > now && want === null) want = t
+        }
+        const got = lib.resetTime(text, now)
+        zoneTable.cases += 1
+        const gotMs = Date.parse(got)
+        if (skipped && wall(gotMs).min !== target) { zoneTable.gaps += 1; continue }
+        if (got !== new Date(want).toISOString().replace(/\.\d{3}Z$/, 'Z') || wall(gotMs).min !== target) zoneTable.bad.push(`${zone} now ${new Date(now).toISOString()} ${h}:${mi} got ${got} want ${new Date(want).toISOString()}`)
+      }
+    }
+  }
+}
+clause('clause 2y9 — over twelve zones and each transition in two years, the reset time reads the stated wall time in its zone and is its first occurrence after the clock (E15-D228)',
+  zoneTable.bad.length === 0 && zoneTable.transitions >= 40 && zoneTable.cases - zoneTable.gaps >= 1000, JSON.stringify({ ...zoneTable, bad: zoneTable.bad.slice(0, 6), badCount: zoneTable.bad.length }))
 const resetFiles = spawnSync('find', [path.join(tmp, 'fx'), '-name', 'reset.txt'], { encoding: 'utf8' })
 clause('clause 2y5 — no StopFailure above writes a reset.txt anywhere under the fixtures (E15-D229)',
   resetFiles.status === 0 && resetFiles.stdout === '', JSON.stringify([resetFiles.status, resetFiles.stdout]))
