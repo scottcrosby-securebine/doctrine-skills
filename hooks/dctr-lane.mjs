@@ -51,9 +51,10 @@
 // worktree and keeps its branch.
 // Both refuse a lane whose record does not exist.
 //
-// Every file listing, from find or git, is read NUL-separated, and a single path git prints (the toplevel, a git path,
-// the common dir) loses only its trailing newline: none is read from trimmed or quoted output, and no listing has a
-// size limit.
+// Every file listing that names what is copied, compared or removed, from find or git, is read NUL-separated, and a
+// single path git prints (the toplevel, a git path, the common dir) loses only its trailing newline, so no name is read
+// from trimmed or quoted output; and no listing has a size limit. The one listing read otherwise is reset's
+// `git status --porcelain`, whose output decides only by being empty and is quoted, as git prints it, in its refusal.
 //
 // remove also refuses while a tracked file other than the memory file has an uncommitted change, a deletion or one
 // skip-worktree or assume-unchanged hides among them, a deletion it hides included, since the kept branch would lack it,
