@@ -23,7 +23,7 @@ const HERE = import.meta.dirname
 const allowed = typeof lib.guardAllowed === 'function' ? lib.guardAllowed : () => 'no guardAllowed export'
 const C = { run: '/w/o/.doctrine/records/orchestrate', records: '/w/o/.doctrine/records', checkout: '/w/o', record: '/w/p/docs/epics/E1.md' }
 const IN = [C.record, '/w/o/.doctrine/records/x.md', `${C.run}/inbox/m.md`, `${C.run}/held/lane-a/m.md`, `${C.run}/model/lane-a`,
-  `${C.run}/waiting-questions.md`, `${C.run}/reset.txt`, `${C.run}/events.log`, `${C.run}/guard.log`, '/w/o/docs/PROJECT.md',
+  `${C.run}/waiting-questions.md`, `${C.run}/limits.log`, `${C.run}/events.log`, `${C.run}/guard.log`, '/w/o/docs/PROJECT.md',
   '/w/o/docs/epics/E2.md', '/w/o/docs/epics/sub/x.md', '/w/o/SESSION_MEMORY.md', '/w/o/docs/handoffs/h.md',
   '/w/o/.doctrine/auto-cycle.stop', '/w/o/.doctrine/auto-cycle-state.json']
 const OUT = ['/w/o/src/a.txt', '/w/o/docs/PROJECT.md.bak', '/w/o/docs/epicsX/a.md', '/w/o/docs/epics', '/w/o/docs/handoffs',
@@ -32,7 +32,7 @@ const OUT = ['/w/o/src/a.txt', '/w/o/docs/PROJECT.md.bak', '/w/o/docs/epicsX/a.m
   '/w/p/docs/epics/E1.md.bak', '/w/o2/docs/handoffs/h.md', '/w/o/docs/PROJECT.md/x']
 const inMiss = IN.filter((p) => allowed(p, C) !== true)
 const outHit = OUT.filter((p) => allowed(p, C) !== false)
-clause('clause 1a — guardAllowed allows the record, every file under the Records path (the run\'s inbox, held and model folders, waiting-questions, reset, events and guard logs among them), docs/PROJECT.md, every file under docs/epics/, the memory file, every file under docs/handoffs/ and the .doctrine/auto-cycle files (E15-D22)',
+clause('clause 1a — guardAllowed allows the record, every file under the Records path (the run\'s inbox, held and model folders, waiting-questions, limits, events and guard logs among them), docs/PROJECT.md, every file under docs/epics/, the memory file, every file under docs/handoffs/ and the .doctrine/auto-cycle files (E15-D22)',
   inMiss.length === 0, `refused ${JSON.stringify(inMiss)}`)
 clause('clause 1b — guardAllowed refuses each twin: a neighbouring name, the folder itself, the same name one level down, a sibling repo, a file inside a folder named like an auto-cycle file',
   outHit.length === 0, `allowed ${JSON.stringify(outHit)}`)
@@ -249,11 +249,11 @@ const d21 = cases([
 clause('clause 2c — no orchestrator call of Bash or an MCP tool is refused, nor of a tool named like an Object property (E15-D21)', wrong(d21).length === 0, show(d21))
 
 const ALLOWED_PATHS = [record, path.join(records, 'x.md'), path.join(run, 'inbox/m.md'), path.join(run, 'held/lane-a/m.md'),
-  path.join(run, 'waiting-questions.md'), path.join(run, 'reset.txt'), path.join(run, 'events.log'), path.join(orch, 'docs/PROJECT.md'),
+  path.join(run, 'waiting-questions.md'), path.join(run, 'limits.log'), path.join(run, 'events.log'), path.join(orch, 'docs/PROJECT.md'),
   path.join(orch, 'docs/epics/E2.md'), path.join(orch, 'SESSION_MEMORY.md'), path.join(orch, 'docs/handoffs/h2.md'),
   path.join(orch, '.doctrine/auto-cycle.stop'), 'docs/handoffs/rel.md', '.doctrine/auto-cycle-state.json']
 const d22 = cases(ALLOWED_PATHS.flatMap((p) => [[`Write ${p}`, ORCH, W(p), 'allow'], [`Edit ${p}`, ORCH, E(p), 'allow']]))
-clause('clause 2d — the orchestrator\'s Write and Edit at each allowed path go through: the record, the Records path, the run\'s inbox, held folder, waiting-questions, reset file and events log, docs/PROJECT.md, docs/epics/, the memory file, docs/handoffs/ and the .doctrine/auto-cycle files (E15-D22)',
+clause('clause 2d — the orchestrator\'s Write and Edit at each allowed path go through: the record, the Records path, the run\'s inbox, held folder, waiting-questions, limits file and events log, docs/PROJECT.md, docs/epics/, the memory file, docs/handoffs/ and the .doctrine/auto-cycle files (E15-D22)',
   wrong(d22).length === 0, show(d22))
 
 const LANE = { DCTR_ROLE: 'lane-a', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orch }, MERGE = { DCTR_ROLE: 'merge', DCTR_RUN: run, CLAUDE_PROJECT_DIR: orch }

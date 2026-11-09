@@ -88,12 +88,9 @@ overwriting: when the name is taken, append `-2`, `-3`. No earlier handoff is ed
 **Orchestrator profile.** In a session whose `DCTR_ROLE` is `orchestrator` (a `doctrine-orchestrate`
 run, `<run>` the directory `DCTR_RUN` names), three things change:
 
-- Section 5's one action is always this: read `<run>/reset.txt`, which only an account-wide usage
-  limit writes, and, while the time it names has not
-  passed, log the hold only as the one line of your reply `doctrine-resume`'s first step gives, and
-  take no other action until it has. That action writes no file, so `doctrine-resume` finds it due,
-  never ambiguous, and a restarted orchestrator holds before it acts. Anything else due goes in
-  section 4.
+- Section 5's one action is always this: read the last 20 lines of `<run>/events.log`. That action
+  writes no file, so `doctrine-resume` finds it due, never ambiguous, and a restarted orchestrator
+  reads what the run did while it was gone before it acts. Anything else due goes in section 4.
 - Section 4 opens with a roster: one row per lane and one for the merge session, each read live as
   you write it (its record's last state line, the state herdr reports for its pane, its held and inbox
   files), with `unknown` for any field you cannot read, never the value it had earlier.
