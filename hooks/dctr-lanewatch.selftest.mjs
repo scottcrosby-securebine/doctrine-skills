@@ -108,11 +108,11 @@ clause('clause 2b2 — a watcher started again on the same run raises no report 
   JSON.stringify(events(inbox)) === JSON.stringify(afterOne), show(inbox))
 
 // E15-D11, D111, D110: exits and unknown reads.
-const exit = fixture({ a: { session: null } }, { extraLog: ['2026-11-09T09:05:00Z orchestrator reset a HEAD'] })
+const exit = fixture({ a: { session: null } }, { extraLog: ['2026-11-09T09:05:00Z orchestrator reset a HEAD', '2026-11-09T09:06:00Z orchestrator create z w9:p9'] })
 polls(exit, watcher(exit), 2)
 const live = fixture({ a: {} }, { extraLog: ['2026-11-09T09:05:00Z orchestrator reset a HEAD'] })
 polls(live, watcher(live), 2)
-clause('clause 2c — the pane a role\'s latest create line names reporting no agent session, a reset line after it, on two polls: exactly one exit line naming the role (E15-D11)',
+clause('clause 2c — the pane a role\'s latest create line names reporting no agent session, a reset line after it, on two polls: exactly one exit line naming the role; a create line with no worktree names no pane and is passed over (E15-D11)',
   JSON.stringify(events(exit)) === `["exit a ${exit.pane.a}"]` && shimLog(exit).filter((e) => e.argv[1] === 'get').every((e) => e.argv[2] === exit.pane.a), show(exit))
 clause('clause 2d — a pane still reporting an agent session, whatever agent names herdr lists: no event over two polls (E15-D111)',
   events(live).length === 0, show(live))
@@ -161,11 +161,14 @@ const transcript = (fx, r, lines) => {
   const tr = path.join(fx.dir, `${r}.jsonl`); write(tr, lines.join('\n') + '\n')
   write(restoreFile(fx.pane[r]), JSON.stringify({ session_id: `S-${r}`, transcript_path: tr }))
 }
-const held = fixture({ old: {}, young: {} })
-transcript(held, 'old', [asst(ago(READY_LIMIT_MS + 60000), 'Handoff written.\nauto-cycle: ready')])
+const held = fixture({ old: {}, young: {}, cyc: {} })
+for (const r of ['old', 'cyc']) transcript(held, r, [asst(ago(READY_LIMIT_MS + 60000), 'Handoff written.\nauto-cycle: ready')])
 transcript(held, 'young', [asst(ago(READY_LIMIT_MS / 2), 'Handoff written.\nauto-cycle: ready')])
-polls(held, watcher(held), 2)
-clause('clause 2i — a last assistant message ending with the ready line for longer than the ready limit, no cycle line since: one event naming it; its twin younger than the limit none (E15-D107)',
+const wh = watcher(held)
+polls(held, wh)
+fs.appendFileSync(held.record.cyc, '- auto-cycle: cycle 1 tree abc\n')
+polls(held, wh, 2)
+clause('clause 2i — a last assistant message ending with the ready line for longer than the ready limit, no cycle line since: one event naming it; its twin younger than the limit none, and one whose record gains a cycle line after the first poll none (E15-D107)',
   JSON.stringify(events(held)) === '["ready old S-old"]', show(held))
 
 // E15-D108, D109: context past the resolved tier, and a stale bridge file.
@@ -179,9 +182,17 @@ for (const r of ['c', 'w']) transcript(tier, r, [asst(ago(60000), 'working', { i
 const wt = watcher(tier)
 bridge('S-c', 205000); bridge('S-w', 205000); polls(tier, wt, 2)
 const at205 = events(tier).length
-bridge('S-c', 216000); bridge('S-w', 216000); polls(tier, wt, 2)
-clause('clause 2j — a 200,000 tier the first reading of 150,000 raises to 215,000: two polls at 205,000 give nothing, two at 216,000 one event, and a twin whose record warns its session none (E15-D108)',
-  at205 === 0 && JSON.stringify(events(tier)) === '["context c S-c past tier 215000 at 216000"]', show(tier))
+bridge('S-c', 216000); bridge('S-w', 216000); polls(tier, wt)
+const at216once = events(tier).length
+polls(tier, wt)
+clause('clause 2j — a 200,000 tier the first reading of 150,000 raises to 215,000: two polls at 205,000 give nothing, one at 216,000 nothing yet, the second one event, and a twin whose record warns its session none (E15-D108)',
+  at205 === 0 && at216once === 0 && JSON.stringify(events(tier)) === '["context c S-c past tier 215000 at 216000"]', show(tier))
+const latched = fixture({ l: { record: ON } })
+transcript(latched, 'l', [asst(ago(60000), 'working', { input_tokens: 150000 })])
+write(path.join(stateDir('S-l'), 'gauge.json'), JSON.stringify({ session_id: 'S-l', firstUsed: 160000 }))
+bridge('S-l', 220000); polls(latched, watcher(latched), 2)
+clause('clause 2j2 — the first reading is the gauge latch\'s where it has one: a latch first reading of 160,000 sets the tier at 225,000, so two polls at 220,000 give nothing (E15-D108)',
+  events(latched).length === 0, show(latched))
 const stale = fixture({ x: { record: ON }, y: { record: ON } })
 for (const r of ['x', 'y']) transcript(stale, r, [asst(ago(60000), 'working', { input_tokens: 150000 })])
 bridge('S-x', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-y', 300000, BRIDGE_EXPIRY_MS / 2)
@@ -213,9 +224,26 @@ fs.appendFileSync(path.join(lim.run, 'events.log'), `${new Date().toISOString()}
 fs.appendFileSync(path.join(lim.run, 'limits.log'), limLine(5, 'c', 'account', RESET) + '\n')
 polls(lim, wl, 2)
 const titles = notes(lim).map((e) => e.argv[2])
+const limEvents = events(lim).length, limNotes = notes(lim).length
+polls(lim, watcher(lim), 2)
+clause('clause 2l2 — a watcher started again on the same run raises no limit event events.log already holds, and notifies nothing',
+  events(lim).length === limEvents && notes(lim).length === limNotes, show(lim))
 clause('clause 2n — two account lines and a model line notify once, a woken line then a third account line once more, each titled with the repo\'s name, the reset time and wake-all, never sent again after a reply that does not parse (E15-D231)',
   firstNotes === 1 && midNotes === 1 && notes(lim).length === 2 && titles.every((t) => t === `${path.basename(lim.repo)} run: account limit, reset ${RESET}; roll, then wake-all`) &&
   notes(lim).every((e) => JSON.stringify(e.argv.slice(3)) === '["--sound","request"]'), JSON.stringify(titles))
+
+// XS-36: only a woken line ends the episode, and a run outside a git repo is named by its path.
+const episode = fixture({ a: {}, b: {} })
+fs.rmSync(path.join(episode.repo, '.git'), { recursive: true })
+write(path.join(episode.run, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n')
+const we = watcher(episode)
+polls(episode, we)
+sleep(5)
+fs.appendFileSync(path.join(episode.run, 'events.log'), `${new Date().toISOString()} unfinished a 2026-11-09T04:00:01.000Z\n${new Date().toISOString()} retry b 2026-11-09T04:00:01.000Z\n`)
+fs.appendFileSync(path.join(episode.run, 'limits.log'), limLine(2, 'b', 'account', RESET) + '\n')
+polls(episode, we)
+clause('clause 2n2 — an unfinished or retry line after the first notification does not end the episode: a later account line notifies nothing; the title of a run in no git repo names the run\'s path (XS-36)',
+  notes(episode).length === 1 && notes(episode)[0].argv[2] === `${episode.run} run: account limit, reset ${RESET}; roll, then wake-all`, JSON.stringify(notes(episode).map((e) => e.argv[2])))
 
 // E15-D238: orchestrator stalls.
 const stallBad = []
@@ -226,10 +254,11 @@ for (const line of ['unwoken orchestrator L', 'unfinished orchestrator L', 'skip
   const ev = (r) => `${new Date().toISOString()} ${line.replace('orchestrator', r).replace(' L', ` ${L0}`)}`
   fs.appendFileSync(path.join(fx.run, 'events.log'), `${ev('orchestrator')}\n${ev('a')}\n`)
   polls(fx, w, 2)
+  polls(fx, watcher(fx))
   const t = notes(fx).map((e) => e.argv[2])
   if (t.length !== 1 || !t[0].includes('orchestrator') || !t[0].includes(word)) stallBad.push(`${word}: ${JSON.stringify(t)}`)
 }
-clause('clause 2o — each unwoken, unfinished and no-agent skip line naming the orchestrator gives exactly one notification naming the orchestrator and the word; the same line for role a none (E15-D238)',
+clause('clause 2o — each unwoken, unfinished and no-agent skip line naming the orchestrator gives exactly one notification naming the orchestrator and the word, a watcher started again after it none; the same line for role a none (E15-D238)',
   stallBad.length === 0, stallBad.join(' || '))
 
 // E15-D214: the pane only through laneOf.

@@ -710,20 +710,26 @@ const typedTo = (fx, r) => shimLog(fx).filter((e) => e.typed && e.typed.pane ===
 const wshow = (fx, r) => JSON.stringify({ code: r?.code, out: r?.out, err: r?.err, events: evWords(fx), typed: typed(fx) })
 
 // E15-D15, D245: the selection.
-const sel = wakeFx({ orchestrator: { status: 'done' }, a: {}, b: {}, c: {}, d: {}, e: {}, f: {} }, {
+const sel = wakeFx({ orchestrator: { status: 'done' }, a: {}, b: {}, c: {}, d: {}, e: {}, f: {}, g: {} }, {
   limits: [`${L(0)} orchestrator account 2026-11-09T12:00:00Z`, `${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`,
     `${L(3)} c account 2026-11-09T12:00:00Z`, `${L(4)} c model -`, `${L(5)} e account 2026-11-09T12:00:00Z`, `${L(6)} e account 2026-11-09T12:00:00Z`,
-    `${L(7)} f account 2026-11-09T12:00:00Z`],
+    `${L(7)} f account 2026-11-09T12:00:00Z`, `${L(8)} g account 2026-11-09T12:00:00Z`, `${L(9)} g other server_error`],
   events: [`2026-11-09T05:00:00.000Z woken b ${L(2)}`, `2026-11-09T05:00:01.000Z woken e ${L(5)}`, `2026-11-09T05:00:02.000Z unwoken f ${L(7)}`],
 })
 const selEvents0 = fs.readFileSync(path.join(sel.run, 'events.log'), 'utf8')
+setShim(sel, { listDir: at(sel, () => autoCycleDir()) })
 const rSel = await wakeAll(sel)
-const selTyped = ['orchestrator', 'a', 'b', 'c', 'd', 'e', 'f'].filter((r) => typedTo(sel, r).length)
-clause('clause 2x — wake-all wakes the orchestrator (done), a and e, whose latest limits.log line is account and unsettled, and types nothing to b (woken for it), c (a later model line), d (no line) or f (unwoken for it); it exits 0 (E15-D15, D245)',
+const selTyped = ['orchestrator', 'a', 'b', 'c', 'd', 'e', 'f', 'g'].filter((r) => typedTo(sel, r).length)
+clause('clause 2x — wake-all wakes the orchestrator (done), a and e, whose latest limits.log line is account and unsettled, and types nothing to b (woken for it), c (a later model line), d (no line), f (unwoken for it) or g (a later other line); it exits 0 (E15-D15, D245)',
   JSON.stringify(selTyped) === '["orchestrator","a","e"]' && rSel.code === 0 && ['orchestrator', 'a', 'e'].every((r) => JSON.stringify(typedTo(sel, r).map((e) => e.typed.text)) === JSON.stringify([NUDGE])) &&
   JSON.stringify(rSel.words) === '["orchestrator woken","a woken","e woken"]', wshow(sel, rSel))
 clause('clause 2x2 — every call wake-all makes carries sender:watcher, whatever caller it inherited (E15-D232, D161)',
   shimLog(sel).length > 0 && shimLog(sel).every((e) => e.caller === 'sender:watcher'), JSON.stringify(shimLog(sel).map((e) => e.caller)))
+
+const selGets = shimLog(sel).filter((e) => e.argv[1] === 'get')
+clause('clause 2x13 — wake-all reads each pane under a claim of its own naming that pane and its pid, and leaves no claim behind (E15 Messages)',
+  selGets.length > 0 && selGets.every((e) => (e.claims || []).some((c) => c.pane === e.argv[2] && c.pid === rSel.pid)) && claims(sel).length === 0,
+  JSON.stringify(selGets.map((e) => [e.argv[2], e.claims])) + JSON.stringify(claims(sel)))
 
 // E15-D232: from a bare shell, the claims read under <run>/tmpdir.
 const bare = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
@@ -740,10 +746,19 @@ clause('clause 2x3 — wake-all under env -i with PATH and HOME alone: every cal
 // E15-D113, D239: no agent and busy.
 const skips = wakeFx({ x: { noAgent: true }, y: { status: 'working' } }, { limits: [`${L(1)} x account 2026-11-09T12:00:00Z`, `${L(2)} y account 2026-11-09T12:00:00Z`] })
 const rSkips = await wakeAll(skips)
+const skipsGets1 = shimLog(skips).filter((e) => e.argv[1] === 'get' && e.argv[2] === skips.pane.x).length
+const rSkips2 = await wakeAll(skips)
 clause('clause 2x4 — a selected pane with no agent and one busy throughout: no typing call to either (E15-D113)',
   typed(skips).length === 0 && rSkips.code === 1, wshow(skips, rSkips))
 clause('clause 2x5 — the first pass writes exactly skip x <L> no-agent and retry y <L> working, each naming the limit line\'s time, before any retry (E15-D239)',
   JSON.stringify(evWords(skips).slice(0, 2)) === JSON.stringify([`skip x ${L(1)} no-agent`, `retry y ${L(2)} working`]) && evWords(skips).slice(2).every((w) => / y /.test(` ${w} `)), wshow(skips, rSkips))
+clause('clause 2x5b — a later run reads no pane a no-agent skip line settles, nor one an unwoken line settles (XS-33, XS-35)',
+  skipsGets1 === 1 && shimLog(skips).filter((e) => e.argv[1] === 'get').length === shimLog(skips).filter((e) => e.argv[1] === 'get').length && rSkips2.words.length === 0 &&
+  shimLog(skips).filter((e) => e.argv[1] === 'get' && e.argv[2] === skips.pane.x).length === 1, wshow(skips, rSkips2))
+const blankSession = wakeFx({ z: { session: '' } }, { limits: [`${L(1)} z account 2026-11-09T12:00:00Z`] })
+const rBlank = await wakeAll(blankSession)
+clause('clause 2x5c — a pane whose agent session is an empty string has no agent: skip z <L> no-agent, nothing typed (XS-33)',
+  JSON.stringify(evWords(blankSession)) === JSON.stringify([`skip z ${L(1)} no-agent`]) && typed(blankSession).length === 0, wshow(blankSession, rBlank))
 
 // E15-D233, D241, D245: retries, their bound, and a later run.
 const retries = wakeFx({ p: { failGets: 4 }, q: {}, r: { empty: true } }, { limits: [`${L(1)} p account 2026-11-09T12:00:00Z`, `${L(2)} q account 2026-11-09T12:00:00Z`, `${L(3)} r account 2026-11-09T12:00:00Z`] })
@@ -752,10 +767,11 @@ const retryEnv = { env: { DCTR_WAKEALL_RETRY_MS: '100', DCTR_WAKEALL_WINDOW_MS: 
 const rRetry1 = await wakeAll(retries, retryEnv), rRetry2 = await wakeAll(retries, retryEnv)
 const unwokenAt = (r) => Date.parse(evLines(retries).find((l) => l.split(' ')[1] === 'unwoken' && l.split(' ')[2] === r)?.split(' ')[0] ?? 'x')
 const lateCalls = ['q', 'r'].filter((r) => shimLog(retries).some((e) => e.argv.includes(retries.pane[r]) && !(e.t <= unwokenAt(r))))
-clause('clause 2x6 — retries: p, whose read fails four times, is woken once; q (another claim) and r ({}) each get exactly one unwoken line after the window, and no pane read or typing call reaches them after it, in that run or a second one (E15-D233)',
+clause('clause 2x6 — retries, each every interval and naming its reading (failed, empty): p, whose read fails four times, is woken once; q (another claim) and r ({}) each get exactly one unwoken line after the window, and no pane read or typing call reaches them after it, in that run or a second one (E15-D233)',
   evWords(retries).filter((w) => w.startsWith('woken p')).length === 1 && typedTo(retries, 'p').length === 1 &&
   ['q', 'r'].every((r) => evWords(retries).filter((w) => w.startsWith(`unwoken ${r} `)).length === 1 && typedTo(retries, r).length === 0) && lateCalls.length === 0 &&
-  evWords(retries).filter((w) => w.startsWith('retry p ')).length === 4, wshow(retries, rRetry1) + ` late ${JSON.stringify(lateCalls)}`)
+  evWords(retries).filter((w) => w === `retry p ${L(1)} failed`).length === 4 && evWords(retries).includes(`retry r ${L(3)} empty`) &&
+  evWords(retries).filter((w) => w.startsWith('retry q ')).length <= 13, wshow(retries, rRetry1) + ` late ${JSON.stringify(lateCalls)}`)
 clause('clause 2x7 — the first run prints one line per selected role with its last word and exits 1; the second selects none and exits 0 (E15-D241, D245)',
   JSON.stringify(rRetry1.words.sort()) === '["p woken","q unwoken","r unwoken"]' && rRetry1.code === 1 && rRetry2.words.length === 0 && rRetry2.code === 0,
   JSON.stringify([rRetry1.words, rRetry1.code, rRetry2.words, rRetry2.code]))
@@ -769,7 +785,8 @@ handed(partial, { latch: ['S-a'], warnedAt: H2 - 60000, handoffAt: H2, session: 
 const rPart1 = await wakeAll(partial), afterFirst = typed(partial).length, rPart2 = await wakeAll(partial)
 clause('clause 2x8 — a handed-off role whose pane never reads ready after /clear, and a nudge-only role whose typing call fails: each ends with exactly one unfinished line, a\'s pane gets /clear once and nothing more, and a second run types nothing (E15-D234)',
   ['a', 'n'].every((r) => evWords(partial).filter((w) => w.startsWith(`unfinished ${r} `)).length === 1 && !evWords(partial).some((w) => w.startsWith(`woken ${r} `))) &&
-  JSON.stringify(typedTo(partial, 'a').map((e) => e.typed.text)) === '["/clear"]' && typedTo(partial, 'n').length === 1 && typed(partial).length === afterFirst && rPart1.code === 1,
+  JSON.stringify(typedTo(partial, 'a').map((e) => e.typed.text)) === '["/clear"]' && typedTo(partial, 'n').length === 1 && typed(partial).length === afterFirst && rPart1.code === 1 &&
+  JSON.stringify(evWords(partial).filter((w) => / a /.test(` ${w} `))) === JSON.stringify([`intent a ${L(1)}`, `unfinished a ${L(1)}`]),
   wshow(partial, rPart1))
 
 // E15-D240, D241, D245: interrupted runs.
@@ -796,6 +813,16 @@ const rFirst = await firstRun
 clause('clause 2x11 — a second wake-all while the first holds wake-all.lock inside a wake exits non-zero with no pane read and no events.log line, and the first\'s intent ends unfinished once (E15-D242)',
   rSecond.code !== 0 && !shimLog(locked).some((e) => e.ppid === rSecond.pid) && evAfterSecond.length === 0 &&
   evWords(locked).filter((w) => w.startsWith('unfinished a ')).length === 1 && !fs.existsSync(path.join(locked.run, 'wake-all.lock')), wshow(locked, rSecond) + ` first ${rFirst.code}`)
+
+// The lock's own reading: a dead holder's lock is replaced, a torn one refuses.
+const relock = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+write(path.join(relock.run, 'wake-all.lock'), String(spawnSync('true').pid))
+const rDead = await wakeAll(relock)
+const torn = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+write(path.join(torn.run, 'wake-all.lock'), '')
+const rTorn = await wakeAll(torn)
+clause('clause 2x14 — a wake-all.lock whose pid has exited is replaced and the run wakes a; an empty lock refuses with no pane read (E15-D242)',
+  rDead.code === 0 && typedTo(relock, 'a').length === 1 && rTorn.code !== 0 && shimLog(torn).length === 0, wshow(relock, rDead) + wshow(torn, rTorn))
 
 // The refusals: contained, and no <run>/tmpdir.
 const refusals = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })

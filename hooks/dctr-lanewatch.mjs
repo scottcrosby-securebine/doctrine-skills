@@ -20,7 +20,7 @@
 //   pause <role> <reason>        a record newly showing a standing pause: an auto-cycle paused line, a Blocked state,
 //                                an unanswered question or an alarm with no ruling after it
 //   ready <role> <session>       a last assistant message ending with the ready line for longer than READY_LIMIT_MS,
-//                                with no cycle line since
+//                                with no cycle line since the poll that first saw it
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
 //                                polls with no warned line naming the session; `unknown` once for a bridge file older
 //                                than BRIDGE_EXPIRY_MS, whose value is never read
@@ -161,8 +161,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     const read = transcript === null ? null : transcriptEntries(transcript)
     const last = read?.entries.filter((e) => e?.type === 'assistant').at(-1)
     if (!last || !endsReady(entryText(last))) return
+    // Raised on a poll after the one that first saw this ready line, while the record has gained no cycle line since.
     const key = `${s} ${last.timestamp}`, cycles = entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').length
-    if (!readySeen.has(key)) readySeen.set(key, cycles)
+    if (!readySeen.has(key)) { readySeen.set(key, cycles); return }
     if (Date.now() - Date.parse(last.timestamp) > READY_LIMIT_MS && readySeen.get(key) === cycles && !readyRaised.has(key)) { readyRaised.add(key); emit(`ready ${role} ${s}`) }
   }
 
@@ -195,7 +196,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       limits()
       stalls()
       const laneText = readText(path.join(run, 'lane.log'))
-      for (const role of laneRoles(laneText)) session(role, laneOf(laneText, role))
+      for (const role of laneRoles(laneText)) { const lane = laneOf(laneText, role); if (lane) session(role, lane) }
     },
   }
 }
