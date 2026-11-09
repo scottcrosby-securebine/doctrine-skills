@@ -23,8 +23,8 @@
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
 // to the revision with `git reset --hard`, refusing first, as archive does, a name find lists in the worktree that is
-// not UTF-8, and one the index holds, then while `git status --porcelain --untracked-files=no` prints
-// anything, while a file other than the memory file is absent or differs from the index in bytes, mode or type under skip-worktree or
+// not UTF-8, then while `git status --porcelain --untracked-files=no` prints
+// anything, while the index holds a name that is not UTF-8, while a file other than the memory file is absent or differs from the index in bytes, mode or type under skip-worktree or
 // assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
 // while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
 // since the move would overwrite it, and while the revision tracks the memory file as a link. The memory file's bytes
