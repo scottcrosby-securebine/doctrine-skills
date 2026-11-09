@@ -475,6 +475,24 @@ polls(renew, watcher(renew))
 clause('clause 2ah — a poll renews the lock\'s modification time',
   Date.now() - fs.statSync(path.join(renew.run, 'lanewatch.lock')).mtimeMs < 5000, String(fs.statSync(path.join(renew.run, 'lanewatch.lock')).mtimeMs))
 
+// Restarts between polls: each state event a previous watcher raised, its state unchanged, is not raised again; a
+// state that cleared and came back is.
+const rs = fixture({ dead: { session: null }, pz: {}, sx: { record: ON }, cx: { record: ON }, ry: {}, wv: {} })
+fs.appendFileSync(rs.record.pz, '- State: Blocked. waits\n')
+for (const r of ['sx', 'cx']) transcript(rs, r, [asst(ago(60000), 'working', { input_tokens: 150000 })])
+bridge('S-sx', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-cx', 300000)
+transcript(rs, 'ry', [asst(ago(READY_LIMIT_MS + 60000), 'Handoff written.\nauto-cycle: ready')])
+write(path.join(rs.wt.wv, 'w.out'), 'x'); fs.appendFileSync(rs.record.wv, `- wave: ${ago(600000)} seat s9 handle w.out deadline ${ago(60000)}\n`)
+polls(rs, watcher(rs), 2)
+const rsFirst = events(rs).slice().sort()
+polls(rs, watcher(rs), 2)
+const rsAgain = events(rs).slice().sort()
+const rw = watcher(rs)
+setPanes(rs, { [rs.pane.dead]: { session: 'S-dead' } }); polls(rs, rw)
+setPanes(rs, { [rs.pane.dead]: { session: null } }); polls(rs, rw)
+clause('clause 2ai — a watcher restarted between polls raises no exit, pause, deadline, ready, unknown-context or past-tier line again while its state holds; an exit that recovers and comes back after the restart is raised again',
+  rsFirst.length === 6 && JSON.stringify(rsAgain) === JSON.stringify(rsFirst) && events(rs).filter((e) => e.startsWith('exit dead ')).length === 2, JSON.stringify([rsFirst, events(rs)]))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 {

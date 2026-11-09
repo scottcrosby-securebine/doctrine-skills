@@ -74,17 +74,21 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   const eventsFile = path.join(run, 'events.log'), name = runName(run)
   const emit = (text) => { fs.mkdirSync(run, { recursive: true }); fs.appendFileSync(eventsFile, `${new Date().toISOString()} ${text}\n`) }
   const notify = (title) => { try { herdr(['notification', 'show', title, '--sound', 'request']) } catch { /* shown or not, never sent again */ } }
+  // A state event an earlier watcher raised whose state still holds is not raised again after a restart: `reported`
+  // holds the events.log texts (a past-tier line by its prefix), and an entry leaves it once its state is seen to clear.
+  const raise = (text, key = text) => { if (!reported.has(key)) emit(text) }
   const completeLines = () => { const t = readText(eventsFile) ?? ''; return t.split('\n').slice(0, -1) }
 
   // What events.log already reports is never raised again, a restart included: limits.log only grows, so the count of
   // limit events is how many of its lines are reported, whatever two lines share. The account episode is rebuilt too:
   // its notification point is the first account limit event after the last woken line, by position in the file. A stall line is notified once,
   // and a `notified <its time> <word>` line records that, so one written while no watcher ran still notifies.
-  const seenReports = new Set(), notifiedStalls = new Set()
+  const seenReports = new Set(), notifiedStalls = new Set(), reported = new Set()
   // notifiedAt is the events.log line index of the episode's notification point, judged by position, never by time.
   let limitsSeen = 0, notifiedAt = null
   for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
+    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) reported.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
@@ -132,7 +136,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   function session(role, lane) {
     const s = paneSession(lane.pane)
-    if (s === null) { if (!exited.has(role)) { exited.add(role); emit(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) exited.delete(role)
+    if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) { exited.delete(role); reported.delete(`exit ${role} ${lane.pane}`) }
     const rec = recordOf(lane.worktree)
     if (rec) { standing(role, rec.record.entries); seats(role, rec.record.entries, lane.worktree) }
     if (!s || !rec) return
@@ -150,7 +154,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (st.alarm) now.set(`alarm ${st.alarm}`, `${st.alarm} alarm with no ruling`)
     if (st.question) now.set(`question ${st.question.id}`, `question ${st.question.id} unanswered: ${st.question.text}`)
     const before = pauses.get(role) ?? new Map()
-    for (const [k, reason] of now) if (!before.has(k)) emit(`pause ${role} ${reason}`)
+    for (const [k, reason] of now) if (!before.has(k)) raise(`pause ${role} ${reason}`)
+    for (const [k, reason] of before) if (!now.has(k)) reported.delete(`pause ${role} ${reason}`)
     pauses.set(role, now)
   }
 
@@ -165,7 +170,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       if (size === null) { grew.delete(key); continue }
       const was = grew.has(key) ? grew.get(key) : undefined
       grew.set(key, size)
-      if (was !== undefined && was === size) { late.add(key); emit(`deadline ${role} ${w.seat}`) }
+      if (was !== undefined && was === size) { late.add(key); raise(`deadline ${role} ${w.seat}`) }
     }
   }
 
@@ -176,7 +181,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     // Raised on a poll after the one that first saw this ready line, while the record has gained no cycle line since.
     const key = `${s} ${last.timestamp}`, cycles = entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').length
     if (!readySeen.has(key)) { readySeen.set(key, cycles); return }
-    if (Date.now() - Date.parse(last.timestamp) > READY_LIMIT_MS && readySeen.get(key) === cycles && !readyRaised.has(key)) { readyRaised.add(key); emit(`ready ${role} ${s}`) }
+    if (Date.now() - Date.parse(last.timestamp) > READY_LIMIT_MS && readySeen.get(key) === cycles && !readyRaised.has(key)) { readyRaised.add(key); raise(`ready ${role} ${s}`) }
   }
 
   function context(role, s, entries, transcript) {
@@ -185,10 +190,10 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     try { st = fs.statSync(file) } catch { return }
     if (Date.now() - st.mtimeMs > BRIDGE_EXPIRY_MS) {
       past.delete(s)
-      if (!staleRaised.has(s)) { staleRaised.add(s); emit(`context ${role} ${s} unknown`) }
+      if (!staleRaised.has(s)) { staleRaised.add(s); raise(`context ${role} ${s} unknown`) }
       return
     }
-    staleRaised.delete(s)
+    staleRaised.delete(s); reported.delete(`context ${role} ${s} unknown`)
     let b
     try { b = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return }
     if (b?.session_id !== s || typeof b.used !== 'number') return
@@ -199,7 +204,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (tier === null) return
     const n = b.used > tier ? (past.get(s) ?? 0) + 1 : 0
     past.set(s, n)
-    if (n >= 2 && !sessionWarned(entries, s) && !contextRaised.has(s)) { contextRaised.add(s); emit(`context ${role} ${s} past tier ${tier} at ${b.used}`) }
+    if (n >= 2 && !sessionWarned(entries, s) && !contextRaised.has(s)) { contextRaised.add(s); raise(`context ${role} ${s} past tier ${tier} at ${b.used}`, `context ${role} ${s} past tier`) }
   }
 
   return {
