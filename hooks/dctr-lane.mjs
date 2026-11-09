@@ -22,7 +22,8 @@
 // worktree through a link fails the create before any of the three is written.
 //
 // reset keeps the worktree's HEAD on a side branch `<role>-was-<short sha>`, which it prints, and moves the worktree
-// to the revision with `git reset --hard`, refusing while `git status --porcelain --untracked-files=no` prints
+// to the revision with `git reset --hard`, refusing first, as archive does, a name find lists in the worktree that is
+// not UTF-8, then while `git status --porcelain --untracked-files=no` prints
 // anything, while a file other than the memory file is absent or differs from the index in bytes, mode or type under skip-worktree or
 // assume-unchanged, which that test cannot see (a sparse checkout's absent files read the same and are refused too),
 // while the revision tracks a path where the worktree holds an untracked or ignored file other than the memory file,
@@ -95,7 +96,7 @@ const findFiles = (root) => {
   const names = []
   for (let at = 0, end; (end = out.indexOf(0, at)) >= 0; at = end + 1) if (end > at) names.push(out.subarray(at, end))
   const lossy = names.filter((b) => !Buffer.from(b.toString()).equals(b))
-  if (lossy.length) refuse(`${lossy.map(escaped).join(', ')} is not a UTF-8 name, so archive and remove cannot name it`)
+  if (lossy.length) refuse(`${lossy.map(escaped).join(', ')} is not a UTF-8 name, so archive, remove and reset cannot name it`)
   return names.map((b) => path.relative(root, b.toString()))
 }
 /** `b` as text, a byte outside printable ASCII, and the backslash, as \xHH. */
@@ -266,6 +267,7 @@ function waitReady(pane, fresh, fail) {
 function reset() {
   const revision = args[1]
   const wt = laneWorktree()
+  findFiles(wt) // its refusal of a name that is not UTF-8, before any guard reads a decoded name (LA-1)
   if (!gitOk(wt, 'rev-parse', '--verify', '--quiet', `${revision}^{commit}`)) refuse(`${revision} is not a commit`)
   const dirty = git(wt, 'status', '--porcelain', '--untracked-files=no')
   if (dirty) refuse(`${wt} has uncommitted changes a move would discard:\n${dirty}`)

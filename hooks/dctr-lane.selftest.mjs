@@ -1534,13 +1534,14 @@ const NAMED = /dctr-lane: refused, .*t\\xff/
   const code2 = writeBad(t.w)
   if (code2) skip('clause 1bm, 3aq1 — remove refuses a lane given t\\xff after its archive', code2)
   else {
-    const before = hasBytes(t.lanes, BADNAME), copy = exists(path.join(t.lanes, REPLACED))
+    // read before the remove, which takes the worktree with it if it does not refuse
+    const before = hasBytes(t.lanes, BADNAME), copy = exists(path.join(t.lanes, REPLACED)), both = hasBytes(t.w, BADNAME) && hasBytes(t.w, Buffer.from(REPLACED))
     const rr = lane(t.f, ['remove', 'a'])
     clause('clause 1bm — remove refuses a lane given t\\xff after an archive that held t\\ufffd, naming the bytes: the worktree kept, t\\xff intact, no lane.log line (LC14)',
       archived.code === 0 && rr.code !== 0 && NAMED.test(rr.err) && exists(t.w) && read(badPath(t.w)) === 'invalid name\n' && laneLines(t.f).length === 2,
       `archive ${archived.code}; remove ${rr.code} ${said(rr)}`)
     clause('clause 3aq1 — before that remove, the archive holds t\\ufffd and no entry named 74 ff, and the worktree holds both',
-      copy && !before && hasBytes(t.w, Buffer.from(REPLACED)), `${copy} ${before}`)
+      copy && !before && both, `${copy} ${before} ${both}`)
   }
 }
 {
@@ -1557,6 +1558,37 @@ const NAMED = /dctr-lane: refused, .*t\\xff/
   const names = listed.stdout.toString('latin1').split('\0').filter(Boolean).map((n) => Buffer.from(n, 'latin1'))
   clause('clause 3aq2 — without the command, the find shim exits 0 listing the worktree\'s files and last the bytes <worktree>/t ff, which do not survive a UTF-8 decode and re-encode',
     listed.status === 0 && names.at(-1)?.equals(badPath(s.w)) === true && !roundTrips(names.at(-1)) && names.some((n) => n.toString().endsWith('/src.txt')), `${listed.status} ${JSON.stringify(names.map((n) => n.toString('hex')))}`)
+  // reset runs the same refusal (LA-1, LC15)
+  const r = fixture(); create(r)
+  const rw = r.wt('a'), rhead = head(rw), rbr = branches(r.repo)
+  const rs = lane(r, ['reset', 'a', r.base], { env: { PATH: `${fbin}:${bin}:${process.env.PATH}` } })
+  clause('clause 1bo — reset refuses, naming the bytes, when find lists a name ending in 74 ff: HEAD unmoved, no side branch, no lane.log line (LA-1, LC15)',
+    rs.code !== 0 && NAMED.test(rs.err) && head(rw) === rhead && JSON.stringify(branches(r.repo)) === JSON.stringify(rbr) && laneLines(r).length === 1, `exit ${rs.code} ${said(rs)}`)
+  const rl = spawnSync(path.join(fbin, 'find'), [rw, '-path', path.join(rw, '.git'), '-prune', '-o', '!', '-type', 'd', '-print0'])
+  clause('clause 3aq4 — without the command, the find shim on the reset fixture\'s worktree exits 0 and lists last the bytes <worktree>/t ff',
+    rl.status === 0 && rl.stdout.subarray(rl.stdout.lastIndexOf(0, rl.stdout.length - 2) + 1, -1).equals(badPath(rw)), `${rl.status} ${rl.stdout.toString('hex').slice(-40)}`)
+}
+{
+  // Linux: an untracked t\xff beside t\ufffd in a lane, and the known-good twin, an untracked café.txt.
+  const r = fixture(); create(r)
+  const rw = r.wt('a')
+  write(path.join(rw, REPLACED), 'the valid name\n')
+  const code = writeBad(rw)
+  if (code) skip('clause 1bp, 3aq5 — reset refuses a lane holding an untracked t\\xff beside t\\ufffd', code)
+  else {
+    const rhead = head(rw), rbr = branches(r.repo)
+    clause('clause 3aq5 — the reset fixture\'s worktree holds the bytes 74 ff, which do not survive a UTF-8 decode and re-encode, and t\\ufffd',
+      hasBytes(rw, BADNAME) && !roundTrips(BADNAME) && hasBytes(rw, Buffer.from(REPLACED)), JSON.stringify(fs.readdirSync(rw, { encoding: 'buffer' }).map((n) => n.toString('hex'))))
+    const rs = lane(r, ['reset', 'a', r.base])
+    clause('clause 1bp — reset refuses a lane holding an untracked t\\xff beside t\\ufffd, naming the bytes: HEAD unmoved, both files kept, no side branch, no lane.log line (LA-1, LC15)',
+      rs.code !== 0 && NAMED.test(rs.err) && head(rw) === rhead && hasBytes(rw, BADNAME) && exists(path.join(rw, REPLACED)) && JSON.stringify(branches(r.repo)) === JSON.stringify(rbr) && laneLines(r).length === 1, `exit ${rs.code} ${said(rs)}`)
+  }
+  const g = fixture(); create(g)
+  const gw = g.wt('a')
+  write(path.join(gw, CAFE), 'accented\n')
+  const gs = lane(g, ['reset', 'a', g.base])
+  clause('clause 2ah — reset of a lane holding an untracked café.txt exits 0 and keeps it (LA-1, LC15)',
+    gs.code === 0 && read(path.join(gw, CAFE)) === 'accented\n' && laneLines(g).length === 2, `exit ${gs.code} ${said(gs)}`)
 }
 {
   // The known-good twin: a valid non-ASCII name archives and removes.
