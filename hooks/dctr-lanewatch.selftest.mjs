@@ -209,7 +209,7 @@ clause('clause 2j2 — the first reading is the gauge latch\'s where it has one:
   events(latched).length === 0, show(latched))
 const stale = fixture({ x: { record: ON }, y: { record: ON } })
 for (const r of ['x', 'y']) transcript(stale, r, [asst(ago(60000), 'working', { input_tokens: 150000 })])
-bridge('S-x', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-y', 300000, BRIDGE_EXPIRY_MS / 2)
+bridge('S-x', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-y', 300000)
 polls(stale, watcher(stale), 2)
 clause('clause 2k — a bridge file twice the expiry old gives one unknown event and no past-tier line; one half the expiry old gives its past-tier line (E15-D109)',
   JSON.stringify(events(stale).filter((e) => e.startsWith('context x '))) === '["context x S-x unknown"]' &&

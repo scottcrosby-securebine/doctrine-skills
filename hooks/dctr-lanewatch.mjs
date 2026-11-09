@@ -90,8 +90,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   // An event an earlier watcher raised is not raised again after a restart: `restored` holds the events.log texts (a
   // past-tier line by its prefix), and a raise it holds is dropped once, after which the in-process sets carry it. The
   // texts carry the identity those sets key on: a deadline its wave line, a ready its entry, a pause its record line, an
-  // exit or unknown context its state. A poll that reads such a state and sees it clear drops its entry, so it is raised
-  // when it returns; a read that fails drops nothing.
+  // exit or unknown context its state. A poll that reads an exit or unknown context clear drops its entry, so it is raised
+  // when it returns; a read that fails drops nothing. A pause that returns is a new record line, so a new entry.
   const raise = (text, key = text) => { if (!restored.delete(key)) emit(text) }
   const completeLines = () => { const t = readText(eventsFile) ?? ''; return t.split('\n').slice(0, -1) }
 
@@ -173,7 +173,6 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (st.question) now.add(`pause ${role} line ${last((e) => e.kind === 'question-opened' && e.id === st.question.id)} question ${st.question.id} unanswered: ${st.question.text}`)
     const before = pauses.get(role) ?? new Set()
     for (const t of now) if (!before.has(t)) raise(t)
-    for (const k of restored) if (k.startsWith(`pause ${role} `) && !now.has(k)) restored.delete(k)
     pauses.set(role, now)
   }
 
