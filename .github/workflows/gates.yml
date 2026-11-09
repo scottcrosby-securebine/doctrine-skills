@@ -156,8 +156,14 @@ jobs:
         # Drives hooks/dctr-send.mjs on fixture runs with a herdr shim that plays the lane's pane: the held and
         # inbox files byte for byte, the claim before the read, the nudge only on a ready, unwarned, unclaimed
         # pane, the wake's three lines on a handed-off session, its give-up, the relay lines, and zero herdr
-        # calls when contained.
+        # calls when contained; and wake-all's selection, retries, partial wakes, interrupted runs and lock.
         run: node hooks/dctr-send.selftest.mjs
+
+      - name: lane watcher tamper test
+        # Drives hooks/dctr-lanewatch.mjs's polls over fixture runs with a herdr shim playing each pane: reports,
+        # exits, seat deadlines, standing pauses, a held ready line, context past its tier, a stale bridge file,
+        # limit events and their notifications; and start, stop, one watcher per run and containment.
+        run: node hooks/dctr-lanewatch.selftest.mjs
 
       - name: Codex seams tamper test
         # The Codex host's pure readers and decisions (transcripts, usage, the typer's pane check, the watcher's
