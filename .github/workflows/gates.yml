@@ -145,6 +145,13 @@ jobs:
         # case, the claim, focus, the restore file, the first-turn confirm, and zero herdr calls when contained.
         run: node hooks/dctr-typer.selftest.mjs
 
+      - name: lane worktree command tamper test
+        # Drives hooks/dctr-lane.mjs end to end over git fixture repos with a logging herdr shim on PATH: create,
+        # reset, archive and remove, each refusal making nothing, the failed-create partial, readiness before and
+        # after the launch line, the launch line under env -i, and the restore-hook and prompt-gate chain a create
+        # sets up. Needs only node and git.
+        run: node hooks/dctr-lane.selftest.mjs
+
       - name: Codex seams tamper test
         # The Codex host's pure readers and decisions (transcripts, usage, the typer's pane check, the watcher's
         # observations) on fixtures cut from real Codex 0.156.1 captures. Pure node.

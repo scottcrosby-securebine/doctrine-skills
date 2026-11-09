@@ -1307,6 +1307,26 @@ export function guardContext(env = process.env, cwd = process.cwd(), io = {}, { 
   } catch (e) { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { run }) }
 }
 
+/** A lane.log line (L2): `<ISO 8601 UTC time ending Z> <caller tag> <subcommand> <args>`, single spaces. */
+export const LANE_LINE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (\S+) (create|reset|archive|remove) (.+)$/
+
+/**
+ * A role's current pane and worktree (L3): its LATEST `create` line in lane.log's text, whose args are
+ * `<role> <pane id> <worktree> <launch line>`, the launch line last since it holds spaces. Returns
+ * `{ time, caller, role, pane, worktree, launch }`, or null when no create line names the role. A line
+ * outside the grammar is no line.
+ */
+export function laneOf(laneLogText, role) {
+  let found = null
+  for (const l of String(laneLogText ?? '').split('\n')) {
+    const m = LANE_LINE.exec(l)
+    if (!m || m[3] !== 'create') continue
+    const [r, pane, worktree, ...launch] = m[4].split(' ')
+    if (r === role && pane && worktree && launch.length) found = { time: m[1], caller: m[2], role: r, pane, worktree, launch: launch.join(' ') }
+  }
+  return found
+}
+
 /**
  * B7's count and pause (E8-D17): `n` is the next cycle's number, the last cycle line's plus one wherever it sits,
  * so the count continues across session ids and across on lines; `cap` is the last on line's. It pauses with
