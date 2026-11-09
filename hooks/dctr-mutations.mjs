@@ -64,7 +64,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The lane worktree command and its suite.
   'dctr-lane.mjs', 'dctr-lane.selftest.mjs',
   // The sender and its suite.
-  'dctr-send.mjs', 'dctr-send.selftest.mjs']
+  'dctr-send.mjs', 'dctr-send.selftest.mjs',
+  // The lane watcher and its suite.
+  'dctr-lanewatch.mjs', 'dctr-lanewatch.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -100,8 +102,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  The orchestrate suite placed 2026-11-08, measured standalone on one host, three runs each: history 0.12s, orchestrate
  *  0.59-0.61s; it goes after history and before project.
  *  The guard suite, measured standalone on one host, three runs: guard 2.28-2.32s; it goes after seat and before gauge.
- *  The send suite goes last, unmeasured, because only the mutations that name its clauses need it. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
+ *  The send suite goes last, unmeasured, because only the mutations that name its clauses need it.
+ *  The lane watcher suite, measured standalone on one host, three runs: 3.3s each; it goes after gauge. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-lanewatch.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
