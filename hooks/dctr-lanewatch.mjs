@@ -9,13 +9,13 @@
 // carry, takes <run>/lanewatch.start.lock so two starts never run at once, and refuses while a watcher holds
 // <run>/lanewatch.lock. It writes <run>/lanewatch.sh, `exec env DCTR_CALLER=watcher DCTR_RUN=<run> PATH=<path>
 // TMPDIR=<tmp> node <this file>`, since a pane does not inherit the environment, makes a tab and runs `sh <that file>`
-// in its pane: herdr refuses a typed line over 1024 bytes, which an inlined PATH passes. The watcher takes
+// in its pane: the pane refuses a typed line over 1024 bytes, which an inlined PATH passes. The watcher takes
 // <run>/lanewatch.lock itself as its first act, the directory lock takeRunLock makes, and refuses while another holds
 // it. start waits up to WAIT_MS for a live holder of that lock, and only then writes its TMPDIR to <run>/tmpdir,
 // which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag `orchestrator`,
 // naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own environment. A
 // start whose tab, pane or wait fails closes the tab it made, releases its lock, writes neither, and exits 1 with one
-// line. The lock is renewed at every poll and every herdr call; stop signals only a live holder whose lock was renewed
+// line. The lock is renewed at every poll and every herdr( call; stop signals only a live holder whose lock was renewed
 // within 3 * POLL_MS, waits for it to release the lock, removes a lock only when its holder has exited, and touches no
 // other. Contained (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
 //
@@ -241,7 +241,7 @@ export async function watch(w, wait = (ms) => new Promise((r) => setTimeout(r, m
 
 /** Whether a watcher holds `lock`: there, and its holder not one known to have exited. */
 const held = (lock) => { const h = lockHolder(lock); return fs.existsSync(lock) && !(h && holderAlive(h, ownPidNs()) === false) }
-/** A herdr failure as one line. */
+/** A failed herdr( call as one line. */
 const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
 
 /** `start`: its own lock, the watcher's pane, the wait for the watcher's lock, then the records. */
@@ -261,10 +261,10 @@ function start(run) {
   let tab = null
   const undo = (m) => { if (tab) { try { herdr(['tab', 'close', tab]) } catch { /* gone already */ } } fail(m) }
   let made
-  // herdr-lint: a command, not a read; no tab is known yet, so its failure closes nothing and only refuses
-  try { made = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout))?.result } catch (e) { undo(`the watcher's tab was not made: ${why(e)}`) }
-  tab = made?.tab?.tab_id ?? null
-  const watcher = made?.root_pane?.pane_id
+  // A failed create is a refusal: no tab is known yet, so it closes nothing. Its reply is read below, outside the try.
+  try { made = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout)) } catch (e) { undo(`the watcher's tab was not made: ${why(e)}`) }
+  tab = made?.result?.tab?.tab_id ?? null
+  const watcher = made?.result?.root_pane?.pane_id
   if (!watcher) undo('no pane was made for the watcher')
   try { herdr(['pane', 'run', watcher, `sh ${shq(script)}`]) } catch (e) { undo(`the watcher's pane did not run it: ${why(e)}`) }
   const until = Date.now() + WAIT_MS
