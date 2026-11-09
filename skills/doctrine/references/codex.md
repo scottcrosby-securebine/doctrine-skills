@@ -67,7 +67,7 @@ Each of these is a failed seat:
 - a sandbox refusal;
 - no result file by the seat's deadline.
 
-The hub's Fallbacks section then routes it. A missing `claude` command is the tool not installed, so the seat is absent and its row's substitute goes out at once. Each of the others is an installed tool that failed, so the seat is retried once in the round and once more in a later round, and only then substituted. The substitute is a same-model red team, which the record and the exit statement name as such. It never counts as the cross-model red team.
+The hub's Fallbacks section then routes it: a missing `claude` command is the tool not installed, which it substitutes at once, and each of the others is an installed tool that failed, which it retries before substituting. The substitute is a same-model red team, which the record and the exit statement name as such. It never counts as the cross-model red team.
 
 ## Research engines
 
