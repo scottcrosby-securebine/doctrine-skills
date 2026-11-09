@@ -37,7 +37,7 @@ const SHIM = `#!/usr/bin/env node
 const fs = require('fs'), path = require('path')
 const dir = path.dirname(__dirname), st = path.join(dir, 'shim.json'), lg = path.join(dir, 'shim.log')
 const a = process.argv.slice(2), s = JSON.parse(fs.readFileSync(st, 'utf8'))
-const entry = { argv: a, caller: process.env.DCTR_CALLER ?? null }
+const entry = { argv: a, caller: process.env.DCTR_CALLER ?? null, t: Date.now(), ppid: process.ppid }
 const out = (o) => { fs.appendFileSync(lg, JSON.stringify(entry) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
 const fail = (m) => { fs.appendFileSync(lg, JSON.stringify({ ...entry, failed: m }) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); process.stderr.write(m + '\\n'); process.exit(1) }
 if (a[0] === 'pane' && a[1] === 'get') {
@@ -49,6 +49,11 @@ if (a[0] === 'pane' && a[1] === 'get') {
   if (s.paneGet === 'fail') fail('{"error":{"code":"server_error"}}')
   if (s.paneGet === 'empty') out({})
   const p = s.panes[a[2]]; if (!p) fail('{"error":{"code":"pane_not_found"}}')
+  p.gets = (p.gets || 0) + 1
+  for (const x of p.on || []) if (x.n === p.gets && x.rm) { fs.rmSync(x.rm, { force: true }); entry.removed = x.rm }
+  if (p.failGets > 0) { p.failGets--; fail('{"error":{"code":"server_error"}}') }
+  if (p.empty) out({})
+  if (p.noAgent) { entry.status = 'no-agent'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', focused: false } } }) }
   const status = p.busyUntil > Date.now() ? 'working' : p.busy > 0 ? (p.busy--, 'working') : p.status
   entry.status = status
   out({ result: { pane: { pane_id: a[2], agent_status: status, focused: false, agent_session: { value: p.session } } } })
@@ -56,6 +61,7 @@ if (a[0] === 'pane' && a[1] === 'get') {
 if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send-keys']].some(([x, y]) => a[0] === x && a[1] === y)) {
   entry.typed = { pane: a[2], text: a.slice(3).join(' ') }
   const p = s.panes[a[2]]
+  if (p && p.typeFail) fail('{"error":{"code":"server_error"}}')
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
   // A slow reply: the line is delivered (logged) at once and the call returns only after runDelayMs.
   if (s.runDelayMs) { fs.appendFileSync(lg, JSON.stringify(entry) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.runDelayMs); process.stdout.write('{"result":{}}\\n'); process.exit(0) }
@@ -654,6 +660,151 @@ const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).
 clause('clause 2w — the restore file, transcript, latch and record each absent, empty or unreadable, git absent, each git call handoffLanded makes (rev-parse, check-ignore, ls-files --error-unmatch, log, ls-files -v and status) failing or timed out, rev-parse and log printing nothing, a committed handoff or the memory file modified under a core.fsmonitor hook that reports nothing changed, a committed handoff rewritten at the same size and mtime under the repository\'s own core.checkStat=minimal or core.trustctime=false, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, an inherited GIT_CONFIG_* excludes file, a ~/.gitconfig one under a session GIT_CONFIG_GLOBAL=/dev/null, or the user\'s default git/ignore ignoring the untracked handoff, a handoff file that is a link into a repository where it is uncommitted, a memory file that is a link to a file modified in the handoff\'s repository or in a second repository, and a handoff committed in the lane as a link to a file outside every repository with the lane\'s memory file modified or the link retargeted, uncommitted, or a docs directory committed in the lane as a link to a second repository and retargeted, uncommitted, a handoff or memory file reached through a chain of committed links whose middle link is retargeted and uncommitted, an untracked, non-ignored handoff link hidden by the repository\'s own status.showUntrackedFiles=no, and a memory file committed as a link to a file outside every repository and retargeted, uncommitted: no /clear typed, and handoffLanded false on an existing memory link whose real path cannot be read, its directory closed or its target missing; the healthy control, under a ceiling at its root behind a git that stops at one, behind a git that stops at a filesystem boundary unless told to cross one, reached through a symlinked lane path, with its handoff file a link to a committed file in the same repository, with its handoff or its memory file a committed link to a file outside every repository, or with its docs directory a committed link to a second repository, or with its handoff and memory file each reached through a chain of committed links, the repository\'s own .gitignore ignoring docs/handoffs/ with the handoff untracked, under a core.fsmonitor hook that reports nothing changed, under the repository\'s own core.checkStat=minimal and core.trustctime=false, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, SR8, SR9, SR10, SR11, SR12, SR13, B1)',
   classBad.length === 0 && memAccClean === true && memAccDenied === false && memGone === false, `${classBad.join(' || ')} | memory link clean ${memAccClean}, its directory closed ${memAccDenied}, its target missing ${memGone}`)
 
+// ---------------------------------------------------------------- clause 2: wake-all (E15 Recovery)
+
+const L = (i) => `2026-11-09T04:00:0${i}.000Z`
+const WAKE_ENV = { DCTR_WAKEALL_RETRY_MS: '100', DCTR_WAKEALL_WINDOW_MS: '600' }
+/** A run with one session per role: `a` is fixture()'s git lane at PANE, `orchestrator` its own checkout at w0:p0, any
+ *  other role a lane directory of its own at w2:p<n>, each with a kickoff chain to an Open record. `limits` and `events`
+ *  are written as given; <run>/tmpdir names the fixture's TMPDIR. */
+function wakeFx(roles, { limits = [], events = [], shim = {} } = {}) {
+  const fx = fixture({ shim }), lines = [], panes = {}
+  fx.pane = {}
+  let i = 1
+  for (const [r, p] of Object.entries(roles)) {
+    let pane = PANE, wt = fx.lane
+    if (r === 'orchestrator') { pane = 'w0:p0'; wt = fx.own } else if (r !== 'a') {
+      pane = `w2:p${++i}`; wt = path.join(fx.dir, `lane-${r}`)
+      write(path.join(wt, 'SESSION_MEMORY.md'), kickoff('docs/handoffs/h.md'))
+      write(path.join(wt, 'docs/handoffs/h.md'), `record: docs/records/${r}.md\n`)
+      write(path.join(wt, 'docs/records', `${r}.md`), '- State: Open\n')
+    }
+    fx.pane[r] = pane
+    panes[pane] = { status: 'idle', session: `S-${r}`, busy: 0, ...p }
+    lines.push(`2026-11-08T09:00:00Z orchestrator create ${r} ${pane} ${wt} cd ${wt} && env DCTR_ROLE=${r} claude`)
+  }
+  write(path.join(fx.run, 'lane.log'), lines.join('\n') + '\n')
+  write(path.join(fx.run, 'tmpdir'), fx.T)
+  write(path.join(fx.run, 'limits.log'), limits.map((l) => l + '\n').join(''))
+  write(path.join(fx.run, 'events.log'), events.map((l) => l + '\n').join(''))
+  setShim(fx, { panes })
+  return fx
+}
+/** wake-all as a shell runs it: `clean` under env -i with PATH and HOME alone; otherwise with an orchestrator's
+ *  environment whose TMPDIR is not the run's. */
+function wakeAll(fx, { env = {}, clean = false } = {}) {
+  const e = clean ? { PATH: `${fx.bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: fx.dir } : Object.fromEntries(Object.entries(process.env).filter(([k]) => !SCRUB.test(k)))
+  if (!clean) Object.assign(e, { PATH: `${fx.bin}:${process.env.PATH}`, TMPDIR: path.join(fx.dir, 'elsewhere'), DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator' })
+  Object.assign(e, WAKE_ENV, env)
+  return new Promise((resolve) => {
+    const t0 = Date.now(), c = spawn(process.execPath, [SEND, 'wake-all', fx.run], { cwd: fx.dir, env: e, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = '', err = ''
+    c.stdout.on('data', (d) => { out += d }); c.stderr.on('data', (d) => { err += d })
+    const kill = setTimeout(() => c.kill('SIGKILL'), 60000)
+    c.on('close', (code) => { clearTimeout(kill); resolve({ code, out, err: err.trim(), pid: c.pid, took: Date.now() - t0, words: out.split('\n').map((l) => /^dctr-send: wake-all (\S+) (\S+)$/.exec(l)).filter(Boolean).map((m) => `${m[1]} ${m[2]}`) }) })
+  })
+}
+const evLines = (fx) => (fs.readFileSync(path.join(fx.run, 'events.log'), 'utf8').split('\n').filter(Boolean))
+const evWords = (fx) => evLines(fx).map((l) => l.split(' ').slice(1).join(' '))
+const typedTo = (fx, r) => shimLog(fx).filter((e) => e.typed && e.typed.pane === fx.pane[r])
+const wshow = (fx, r) => JSON.stringify({ code: r?.code, out: r?.out, err: r?.err, events: evWords(fx), typed: typed(fx) })
+
+// E15-D15, D245: the selection.
+const sel = wakeFx({ orchestrator: { status: 'done' }, a: {}, b: {}, c: {}, d: {}, e: {}, f: {} }, {
+  limits: [`${L(0)} orchestrator account 2026-11-09T12:00:00Z`, `${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`,
+    `${L(3)} c account 2026-11-09T12:00:00Z`, `${L(4)} c model -`, `${L(5)} e account 2026-11-09T12:00:00Z`, `${L(6)} e account 2026-11-09T12:00:00Z`,
+    `${L(7)} f account 2026-11-09T12:00:00Z`],
+  events: [`2026-11-09T05:00:00.000Z woken b ${L(2)}`, `2026-11-09T05:00:01.000Z woken e ${L(5)}`, `2026-11-09T05:00:02.000Z unwoken f ${L(7)}`],
+})
+const selEvents0 = fs.readFileSync(path.join(sel.run, 'events.log'), 'utf8')
+const rSel = await wakeAll(sel)
+const selTyped = ['orchestrator', 'a', 'b', 'c', 'd', 'e', 'f'].filter((r) => typedTo(sel, r).length)
+clause('clause 2x — wake-all wakes the orchestrator (done), a and e, whose latest limits.log line is account and unsettled, and types nothing to b (woken for it), c (a later model line), d (no line) or f (unwoken for it); it exits 0 (E15-D15, D245)',
+  JSON.stringify(selTyped) === '["orchestrator","a","e"]' && rSel.code === 0 && ['orchestrator', 'a', 'e'].every((r) => JSON.stringify(typedTo(sel, r).map((e) => e.typed.text)) === JSON.stringify([NUDGE])) &&
+  JSON.stringify(rSel.words) === '["orchestrator woken","a woken","e woken"]', wshow(sel, rSel))
+clause('clause 2x2 — every call wake-all makes carries sender:watcher, whatever caller it inherited (E15-D232, D161)',
+  shimLog(sel).length > 0 && shimLog(sel).every((e) => e.caller === 'sender:watcher'), JSON.stringify(shimLog(sel).map((e) => e.caller)))
+
+// E15-D232: from a bare shell, the claims read under <run>/tmpdir.
+const bare = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
+const typerClaim = at(bare, () => path.join(autoCycleDir(), `typer.${paneToken(PANE)}.claim`))
+write(typerClaim, JSON.stringify({ pid: process.pid, pane: PANE }))
+setShim(bare, { panes: { ...JSON.parse(fs.readFileSync(path.join(bare.dir, 'shim.json'), 'utf8')).panes, [PANE]: { status: 'idle', session: 'S-a', busy: 0, on: [{ n: 3, rm: typerClaim }] } } })
+const rBare = await wakeAll(bare, { clean: true })
+const bareLog = shimLog(bare), removedAt = bareLog.findIndex((e) => e.removed === typerClaim)
+const aTypedAt = bareLog.map((e, i) => (e.typed?.pane === PANE ? i : -1)).filter((i) => i >= 0)
+clause('clause 2x3 — wake-all under env -i with PATH and HOME alone: every call tagged sender:watcher, a typer\'s claim under <run>/tmpdir holds a\'s wake through two retries, and a\'s nudge comes only after the claim is removed (E15-D232)',
+  rBare.code === 0 && bareLog.every((e) => e.caller === 'sender:watcher') && removedAt >= 0 && aTypedAt.length === 1 && aTypedAt[0] > removedAt &&
+  evWords(bare).filter((w) => w === `retry a ${L(1)}`).length === 2 && typedTo(bare, 'b').length === 1, wshow(bare, rBare))
+
+// E15-D113, D239: no agent and busy.
+const skips = wakeFx({ x: { noAgent: true }, y: { status: 'working' } }, { limits: [`${L(1)} x account 2026-11-09T12:00:00Z`, `${L(2)} y account 2026-11-09T12:00:00Z`] })
+const rSkips = await wakeAll(skips)
+clause('clause 2x4 — a selected pane with no agent and one busy throughout: no typing call to either (E15-D113)',
+  typed(skips).length === 0 && rSkips.code === 1, wshow(skips, rSkips))
+clause('clause 2x5 — the first pass writes exactly skip x <L> no-agent and retry y <L> working, each naming the limit line\'s time, before any retry (E15-D239)',
+  JSON.stringify(evWords(skips).slice(0, 2)) === JSON.stringify([`skip x ${L(1)} no-agent`, `retry y ${L(2)} working`]) && evWords(skips).slice(2).every((w) => / y /.test(` ${w} `)), wshow(skips, rSkips))
+
+// E15-D233, D241, D245: retries, their bound, and a later run.
+const retries = wakeFx({ p: { failGets: 4 }, q: {}, r: { empty: true } }, { limits: [`${L(1)} p account 2026-11-09T12:00:00Z`, `${L(2)} q account 2026-11-09T12:00:00Z`, `${L(3)} r account 2026-11-09T12:00:00Z`] })
+at(retries, () => write(path.join(autoCycleDir(), `other.${paneToken(retries.pane.q)}.claim`), JSON.stringify({ pid: process.pid, pane: retries.pane.q })))
+const retryEnv = { env: { DCTR_WAKEALL_RETRY_MS: '100', DCTR_WAKEALL_WINDOW_MS: '1000' } }
+const rRetry1 = await wakeAll(retries, retryEnv), rRetry2 = await wakeAll(retries, retryEnv)
+const unwokenAt = (r) => Date.parse(evLines(retries).find((l) => l.split(' ')[1] === 'unwoken' && l.split(' ')[2] === r)?.split(' ')[0] ?? 'x')
+const lateCalls = ['q', 'r'].filter((r) => shimLog(retries).some((e) => e.argv.includes(retries.pane[r]) && !(e.t <= unwokenAt(r))))
+clause('clause 2x6 — retries: p, whose read fails four times, is woken once; q (another claim) and r ({}) each get exactly one unwoken line after the window, and no pane read or typing call reaches them after it, in that run or a second one (E15-D233)',
+  evWords(retries).filter((w) => w.startsWith('woken p')).length === 1 && typedTo(retries, 'p').length === 1 &&
+  ['q', 'r'].every((r) => evWords(retries).filter((w) => w.startsWith(`unwoken ${r} `)).length === 1 && typedTo(retries, r).length === 0) && lateCalls.length === 0 &&
+  evWords(retries).filter((w) => w.startsWith('retry p ')).length === 4, wshow(retries, rRetry1) + ` late ${JSON.stringify(lateCalls)}`)
+clause('clause 2x7 — the first run prints one line per selected role with its last word and exits 1; the second selects none and exits 0 (E15-D241, D245)',
+  JSON.stringify(rRetry1.words.sort()) === '["p woken","q unwoken","r unwoken"]' && rRetry1.code === 1 && rRetry2.words.length === 0 && rRetry2.code === 0,
+  JSON.stringify([rRetry1.words, rRetry1.code, rRetry2.words, rRetry2.code]))
+
+// E15-D234: a partial wake.
+const H2 = Date.now() - 600000
+const partial = wakeFx({ a: {}, n: { typeFail: true } }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} n account 2026-11-09T12:00:00Z`],
+  shim: { busyAfterTypeMs: 60000 } })
+write(partial.record, '- State: Open\n- auto-cycle: warned S-a 20%\n')
+handed(partial, { latch: ['S-a'], warnedAt: H2 - 60000, handoffAt: H2, session: 'S-a', transcript: [asst(H2 - 120000), toolResult(H2 + 1000)] })
+const rPart1 = await wakeAll(partial), afterFirst = typed(partial).length, rPart2 = await wakeAll(partial)
+clause('clause 2x8 — a handed-off role whose pane never reads ready after /clear, and a nudge-only role whose typing call fails: each ends with exactly one unfinished line, a\'s pane gets /clear once and nothing more, and a second run types nothing (E15-D234)',
+  ['a', 'n'].every((r) => evWords(partial).filter((w) => w.startsWith(`unfinished ${r} `)).length === 1 && !evWords(partial).some((w) => w.startsWith(`woken ${r} `))) &&
+  JSON.stringify(typedTo(partial, 'a').map((e) => e.typed.text)) === '["/clear"]' && typedTo(partial, 'n').length === 1 && typed(partial).length === afterFirst && rPart1.code === 1,
+  wshow(partial, rPart1))
+
+// E15-D240, D241, D245: interrupted runs.
+const intr = wakeFx({ a: {}, b: {}, c: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(1)} b account 2026-11-09T12:00:00Z`, `${L(2)} c account 2026-11-09T12:00:00Z`],
+  events: [`2026-11-09T05:00:00.000Z intent a ${L(1)}`, `2026-11-09T05:00:01.000Z intent b ${L(1)}`, `2026-11-09T05:00:02.000Z woken b ${L(1)}`,
+    `2026-11-09T05:00:03.000Z intent c ${L(2)}`, `2026-11-09T05:00:04.000Z retry c ${L(2)}`] })
+const rIntr = [await wakeAll(intr), await wakeAll(intr), await wakeAll(intr)]
+clause('clause 2x9 — on start an intent with nothing after it becomes exactly one unfinished line, one closed by woken or retry does not, over three runs: a is never typed to and c is woken once (E15-D240)',
+  evWords(intr).filter((w) => w === `unfinished a ${L(1)}`).length === 1 && !evWords(intr).some((w) => /^unfinished [bc] /.test(w)) && typedTo(intr, 'a').length === 0 &&
+  JSON.stringify(typedTo(intr, 'c').map((e) => e.typed.text)) === JSON.stringify([NUDGE]) && typedTo(intr, 'b').length === 0, wshow(intr, rIntr[0]))
+clause('clause 2x10 — the first interrupted run prints unfinished a and woken c and exits 1 (E15-D241, D245)',
+  JSON.stringify(rIntr[0].words.sort()) === '["a unfinished","c woken"]' && rIntr[0].code === 1, JSON.stringify(rIntr.map((r) => [r.words, r.code])))
+
+// E15-D242: the lock.
+const locked = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`], shim: { busyAfterTypeMs: 60000 } })
+write(locked.record, '- State: Open\n- auto-cycle: warned S-a 20%\n')
+handed(locked, { latch: ['S-a'], warnedAt: H2 - 60000, handoffAt: H2, session: 'S-a', transcript: [asst(H2 - 120000), toolResult(H2 + 1000)] })
+const firstRun = wakeAll(locked)
+const lockT0 = Date.now()
+while (!evWords(locked).some((w) => w.startsWith('intent a ')) && Date.now() - lockT0 < 8000) sleep(50)
+sleep(300)
+const evBefore = evLines(locked).length, rSecond = await wakeAll(locked), evAfterSecond = evLines(locked).slice(evBefore)
+const rFirst = await firstRun
+clause('clause 2x11 — a second wake-all while the first holds wake-all.lock inside a wake exits non-zero with no pane read and no events.log line, and the first\'s intent ends unfinished once (E15-D242)',
+  rSecond.code !== 0 && !shimLog(locked).some((e) => e.ppid === rSecond.pid) && evAfterSecond.length === 0 &&
+  evWords(locked).filter((w) => w.startsWith('unfinished a ')).length === 1 && !fs.existsSync(path.join(locked.run, 'wake-all.lock')), wshow(locked, rSecond) + ` first ${rFirst.code}`)
+
+// The refusals: contained, and no <run>/tmpdir.
+const refusals = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+const rCont2 = await wakeAll(refusals, { env: { DCTR_VIEW_REQUEST_DIR: path.join(refusals.dir, 'vr') } })
+fs.rmSync(path.join(refusals.run, 'tmpdir'))
+const rNoTmp = await wakeAll(refusals)
+clause('clause 2x12 — wake-all refuses with no pane call contained, and with no <run>/tmpdir rather than use the system temp directory',
+  rCont2.code !== 0 && rNoTmp.code !== 0 && shimLog(refusals).length === 0 && evLines(refusals).length === 0, wshow(refusals, rNoTmp))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const probe = fixture()
@@ -936,5 +1087,21 @@ const controlOk = cg(SUBARGS['rev-parse']).stdout.trim() === 'true' && cg(SUBARG
   handoffLanded({ handoffPath: controlFx.handoff, memoryPath: memory(controlFx), warnedAt: latchOf(controlFx, 'S') }) && turns(controlFx)?.length === 0
 clause('clause 3l — without the sender: each class row carries its one defect (GIT_DIR naming nothing makes git print the phrase with a path, the removed-gitdir row\'s .git a file naming a gitdir that does not exist, which git refuses, the GIT_DIR rows\' handoff uncommitted in the lane, and clean against the other repository), the ceiling row\'s git prints the whole no-repository message inside the lane with the handoff uncommitted, the HEAD row\'s .git a directory without HEAD that git rejects, the nested HEAD row\'s git answering from the enclosing repository with the handoff committed and clean, the ceiling control\'s git printing the whole no-repository message from the handoff\'s directory and its shim printing it at the toplevel only under the ceiling, the no-repository lane has no .git above it, the boundary control\'s .git is in place and its shim prints the stop real git prints at /dev unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set, each symlink row\'s lane path has no .git above it while the handoff\'s physical directory sits in a repository where it is modified, the GIT_CONFIG row\'s handoff untracked and ignored only under the inherited entry, the memory-link row\'s memory file a link git calls clean to a file it calls modified, the file-link row\'s lane path has no .git above it while its handoff is a link to a file modified in its repository, each user-rule row\'s handoff untracked, ignored under that user\'s HOME and not under the repository\'s rules alone, the repository-ignore control\'s handoff untracked and ignored by the repository\'s rules alone, the file-link control\'s handoff a link into its own repository with link, target and memory file tracked and clean, each outside-link row\'s handoff a link tracked in the lane to a file with no .git above it, with only the memory file modified or only the link retargeted, the second-repository memory row\'s link and handoff clean in the lane and the file it reaches modified in its own repository, the closed-directory row\'s memory link clean while its target is modified and its real path refused with EACCES, the missing-target row\'s memory link tracked and clean while its real path is refused with ENOENT, each outside-link control\'s link tracked in a clean lane to a file with no .git above it, the docs-link row\'s lane calling its docs link modified while both repositories it has named hold the handoff committed and clean, the docs-link control\'s lane tracking docs as a clean link to a repository holding the handoff committed and clean, each chain row\'s links each a link, the lane and the last repository clean with every file tracked and only the middle repository calling its link modified, the chain control\'s links and files all tracked in clean repositories, the untracked-link row\'s plain status empty while one listing every untracked file names the link, neither tracked nor ignored, the retargeted memory row\'s lane calling only its tracked memory link modified, which reaches a file with no .git above it, the linked control\'s lane path has no .git above it and its repository is clean with both files tracked, and the control\'s handoff is tracked, committed after the warning and landed through the shim, with no turn since',
   classProofBad.length === 0 && controlOk, JSON.stringify({ classProofBad, controlOk }))
+
+// The wake-all fixtures, read without the sender: the shim plays each pane as the clauses say, and the selection
+// fixture's latest limit line per role and the events naming it are the ones the clause names.
+{
+  const fx = wakeFx({ p: { failGets: 2 }, r: { empty: true }, x: { noAgent: true }, n: { typeFail: true } })
+  const get = (pane) => spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'get', pane], { encoding: 'utf8' })
+  const pg = [get(fx.pane.p), get(fx.pane.p), get(fx.pane.p)], rg = get(fx.pane.r), xg = get(fx.pane.x)
+  const nt = spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'run', fx.pane.n, 'x'], { encoding: 'utf8' })
+  const latest = (r) => fs.readFileSync(path.join(sel.run, 'limits.log'), 'utf8').split('\n').filter((l) => l.split(' ')[1] === r).at(-1)?.split(' ') ?? []
+  const named = (w, r, l) => selEvents0.includes(` ${w} ${r} ${l}`)
+  clause('clause 3x — without the sender: the failing pane exits 1 twice then reads idle, the empty one prints {}, the no-agent one names no session, a failing typing call exits 1; e\'s latest limit line is L6 while its woken names L5, b\'s and f\'s latest lines are named by woken and unwoken, c\'s latest is model, d has none',
+    pg[0].status === 1 && pg[1].status === 1 && pg[2].status === 0 && JSON.parse(pg[2].stdout).result.pane.agent_status === 'idle' && rg.stdout.trim() === '{}' &&
+    !JSON.parse(xg.stdout).result.pane.agent_session && nt.status === 1 && latest('e')[0] === L(6) && named('woken', 'e', L(5)) && !named('woken', 'e', L(6)) &&
+    named('woken', 'b', latest('b')[0]) && named('unwoken', 'f', latest('f')[0]) && latest('c')[2] === 'model' && latest('d').length === 0,
+    JSON.stringify([pg.map((g) => g.status), rg.stdout, xg.stdout, nt.status]))
+}
 
 process.exit(bad ? 1 : 0)
