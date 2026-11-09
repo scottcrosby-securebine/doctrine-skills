@@ -1385,10 +1385,10 @@ export function resetTime(message, nowMs) {
     const now = wallClock(nowMs, zone)
     if (mon) {
       const mo = MONTHS.indexOf(mon.toLowerCase()) + 1
-      // A date no year holds (Feb 31) is no date, never the day it rolls over to.
+      // A date no year holds (Feb 31) gives no candidate and so `unknown`, never the day it rolls over to; Feb 29
+      // holds only in a leap year, so up to four years on.
       const holds = (y) => new Date(Date.UTC(y, mo - 1, Number(day))).getUTCDate() === Number(day)
-      if (mo === 0 || !holds(2024)) return 'unknown'
-      // Feb 29 holds only in a leap year, so up to four years on.
+      if (mo === 0) return 'unknown'
       candidates = [0, 1, 2, 3, 4].map((k) => now.y + k).filter(holds).flatMap((y) => zonedInstants(y, mo, Number(day), h, mi, zone))
     } else {
       candidates = [...zonedInstants(now.y, now.mo, now.d, h, mi, zone), ...zonedInstants(now.y, now.mo, now.d + 1, h, mi, zone)]

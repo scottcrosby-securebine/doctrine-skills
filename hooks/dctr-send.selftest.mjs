@@ -713,14 +713,14 @@ const wshow = (fx, r) => JSON.stringify({ code: r?.code, out: r?.out, err: r?.er
 const sel = wakeFx({ orchestrator: { status: 'done' }, a: {}, b: {}, c: {}, d: {}, e: {}, f: {}, g: {} }, {
   limits: [`${L(0)} orchestrator account 2026-11-09T12:00:00Z`, `${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`,
     `${L(3)} c account 2026-11-09T12:00:00Z`, `${L(4)} c model -`, `${L(5)} e account 2026-11-09T12:00:00Z`, `${L(6)} e account 2026-11-09T12:00:00Z`,
-    `${L(7)} f account 2026-11-09T12:00:00Z`, `${L(8)} g account 2026-11-09T12:00:00Z`, `${L(9)} g other server_error`],
+    `${L(7)} f account 2026-11-09T12:00:00Z`, `${L(8)} g account 2026-11-09T12:00:00Z`, `${L(9)} g other server_error`, `2026-11-09T04:00:10.000Z h account 2026-11-09T12:00:00Z`],
   events: [`2026-11-09T05:00:00.000Z woken b ${L(2)}`, `2026-11-09T05:00:01.000Z woken e ${L(5)}`, `2026-11-09T05:00:02.000Z unwoken f ${L(7)}`],
 })
 const selEvents0 = fs.readFileSync(path.join(sel.run, 'events.log'), 'utf8')
 setShim(sel, { listDir: at(sel, () => autoCycleDir()) })
 const rSel = await wakeAll(sel)
 const selTyped = ['orchestrator', 'a', 'b', 'c', 'd', 'e', 'f', 'g'].filter((r) => typedTo(sel, r).length)
-clause('clause 2x — wake-all wakes the orchestrator (done), a and e, whose latest limits.log line is account and unsettled, and types nothing to b (woken for it), c (a later model line), d (no line), f (unwoken for it) or g (a later other line); it exits 0 (E15-D15, D245)',
+clause('clause 2x — wake-all wakes the orchestrator (done), a and e, whose latest limits.log line is account and unsettled, and types nothing to b (woken for it), c (a later model line), d (no line), f (unwoken for it), g (a later other line) or h (no create line); it exits 0 (E15-D15, D245)',
   JSON.stringify(selTyped) === '["orchestrator","a","e"]' && rSel.code === 0 && ['orchestrator', 'a', 'e'].every((r) => JSON.stringify(typedTo(sel, r).map((e) => e.typed.text)) === JSON.stringify([NUDGE])) &&
   JSON.stringify(rSel.words) === '["orchestrator woken","a woken","e woken"]', wshow(sel, rSel))
 clause('clause 2x2 — every call wake-all makes carries sender:watcher, whatever caller it inherited (E15-D232, D161)',

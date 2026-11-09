@@ -78,16 +78,17 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   // What events.log already reports is never raised again, a restart included: limits.log only grows, so the count of
   // limit events is how many of its lines are reported, whatever two lines share. The account episode is rebuilt too:
-  // its notification point is the first account limit event after the last woken line. A stall line is notified once,
+  // its notification point is the first account limit event after the last woken line, by position in the file. A stall line is notified once,
   // and a `notified <its time> <word>` line records that, so one written while no watcher ran still notifies.
   const seenReports = new Set(), notifiedStalls = new Set()
+  // notifiedAt is the events.log line index of the episode's notification point, judged by position, never by time.
   let limitsSeen = 0, notifiedAt = null
-  for (const l of completeLines()) {
+  for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
-    if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = Date.parse(w[0]) }
+    if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = i }
   }
   const exited = new Set(), pauses = new Map(), grew = new Map(), late = new Set(), readySeen = new Map(), readyRaised = new Set()
   const past = new Map(), contextRaised = new Set(), staleRaised = new Set()
@@ -104,8 +105,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       if (l.kind === 'model') { emit(`limit ${l.role} model ${l.time} /model`); continue }
       if (l.kind === 'other') { emit(`limit ${l.role} other ${l.time} error ${l.field}`); continue }
       emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${plugin}/hooks/dctr-send.mjs wake-all ${run}`)
-      const woken = parseWakeLines(readText(eventsFile)).some((w) => w.word === 'woken' && Date.parse(w.at) >= notifiedAt)
-      if (notifiedAt === null || woken) { notifiedAt = Date.now(); notify(`${name} run: account limit, reset ${l.field}; roll, then wake-all`) }
+      const woken = parseWakeLines(readText(eventsFile)).some((w) => w.word === 'woken' && w.index > notifiedAt)
+      if (notifiedAt === null || woken) { notifiedAt = completeLines().length - 1; notify(`${name} run: account limit, reset ${l.field}; roll, then wake-all`) }
     }
   }
 

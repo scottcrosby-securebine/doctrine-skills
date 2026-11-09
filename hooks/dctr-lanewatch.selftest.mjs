@@ -377,8 +377,16 @@ polls(mid, watcher(mid))
 fs.appendFileSync(path.join(mid.run, 'events.log'), `${new Date().toISOString()} unfinished orchestrator 2026-11-09T04:00:01.000Z\n`)
 polls(mid, watcher(mid), 2)
 polls(mid, watcher(mid))
-clause('clause 2z — a watcher restarted mid-episode sends no second account notification for a later account line, and a stall line written while none ran notifies once, a further restart none (E15-D231, D238)',
-  notes(mid).filter((e) => /account limit/.test(e.argv[2])).length === 1 && notes(mid).filter((e) => /orchestrator unfinished/.test(e.argv[2])).length === 1, JSON.stringify(notes(mid).map((e) => e.argv[2])))
+const midAccount = notes(mid).filter((e) => /account limit/.test(e.argv[2])).length
+sleep(5)
+fs.appendFileSync(path.join(mid.run, 'events.log'), `${new Date().toISOString()} woken a 2026-11-09T04:00:01.000Z\n`)
+const afterWoken = watcher(mid)
+fs.appendFileSync(path.join(mid.run, 'limits.log'), limLine(3, 'a', 'account', RESET) + '\n')
+polls(mid, afterWoken)
+fs.appendFileSync(path.join(mid.run, 'limits.log'), limLine(4, 'b', 'account', RESET) + '\n')
+polls(mid, watcher(mid))
+clause('clause 2z — a watcher restarted mid-episode sends no second account notification for a later account line, one restarted after a woken line notifies the next episode once and, restarted again within it, not twice, and a stall line written while none ran notifies once, a further restart none (E15-D231, D238)',
+  midAccount === 1 && notes(mid).filter((e) => /account limit/.test(e.argv[2])).length === 2 && notes(mid).filter((e) => /orchestrator unfinished/.test(e.argv[2])).length === 1, JSON.stringify(notes(mid).map((e) => e.argv[2])))
 
 // WB8: two limit lines with the same role and time are two lines.
 const twin = fixture({ a: {} })
