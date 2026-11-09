@@ -1054,6 +1054,26 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     pipeLine === '| p\\|q | rec\\|x.md | Held\\|owner | r1 at abc\\|def |' && pipeLine.split(/(?<!\\)\|/).length === 6, pipeLine)
   clause('board B4 [3: the Members line puts a | in the phase and record, and the record puts one in its state word and its round revision]',
     /^- phase p\|q: rec\|x\.md$/m.test(PIPES[EPIC]) && /^State: Held\|owner\.$/m.test(PIPES['rec|x.md']) && /^round: 1 \S+ \S+ at abc\|def /m.test(PIPES['rec|x.md']), 'fixture')
+  // Round 4: one row per Members line, whatever the lines share. Two recordless phases, the first ordered
+  // after a later one, then two phases declaring one record, none in alphabetical order; and two lines with
+  // one phase name and different records.
+  const DUPS = { ...BOARD, [EPIC]: `# Epic E5: Lanes\nState: Open\n\n## Members\n- phase ghost-b: after twin-a merged\n- phase ghost-a\n- phase twin-b: ${REC}/shared.md\n- phase twin-a: ${REC}/shared.md\n`, [`${REC}/shared.md`]: 'state: Open\n' }
+  clause('board B2 [1: two recordless phases and two phases declaring one record give four rows, one per Members line, in Members order]',
+    JSON.stringify((tryRows(DUPS).rows ?? []).map((r) => [r.phase, r.record, r.state])) ===
+      JSON.stringify([['ghost-b', 'none', 'none'], ['ghost-a', 'none', 'none'], ['twin-b', `${REC}/shared.md`, 'Open'], ['twin-a', `${REC}/shared.md`, 'Open']]), JSON.stringify(tryRows(DUPS)))
+  clause('board B2 [3: that epic has four - phase lines, the first ordered and recordless, the second recordless, the last two declaring one record, none sorted]',
+    /^- phase ghost-b: after twin-a merged\n- phase ghost-a\n- phase twin-b: (\S+)\n- phase twin-a: \1\n/m.test(DUPS[EPIC]) && ['ghost-b', 'ghost-a'].join() !== ['ghost-b', 'ghost-a'].sort().join() && ['twin-b', 'twin-a'].join() !== ['twin-b', 'twin-a'].sort().join(), 'fixture')
+  const DUPNAME = { ...BOARD, [EPIC]: `# Epic E5: Lanes\nState: Open\n\n## Members\n- phase dup: ${REC}/d1.md\n- phase dup: ${REC}/d2.md\n`, [`${REC}/d1.md`]: 'state: Open\n', [`${REC}/d2.md`]: 'state: Blocked\n' }
+  clause('board B2 [1: two Members lines with one phase name give two rows, each reading its own record]',
+    JSON.stringify((tryRows(DUPNAME).rows ?? []).map((r) => [r.phase, r.record, r.state])) === JSON.stringify([['dup', `${REC}/d1.md`, 'Open'], ['dup', `${REC}/d2.md`, 'Blocked']]), JSON.stringify(tryRows(DUPNAME)))
+  clause('board B2 [3: that epic has two - phase dup lines naming different records, Open and Blocked]',
+    (DUPNAME[EPIC].match(/^- phase dup: /gm) ?? []).length === 2 && DUPNAME[`${REC}/d1.md`] !== DUPNAME[`${REC}/d2.md`], 'fixture')
+  // The header and separator, as literal bytes rather than through boardText.
+  const HEAD = '| phase | record | state | last round |', SEPR = '|---|---|---|---|'
+  clause('board B4 [1: the first line is exactly the header row and the second exactly the separator row]',
+    lines[0] === HEAD && lines[1] === SEPR, `${lines[0]}\n${lines[1]}`)
+  clause('board B4 [3: the expected header names the four cells in B3 order and the separator has four --- cells]',
+    HEAD.split('|').slice(1, -1).map((c) => c.trim()).join() === 'phase,record,state,last round' && SEPR.split('|').slice(1, -1).every((c) => c === '---') && SEPR.split('|').length === 6, 'fixture')
 
   // ---- the CLI on a real repo
   const bt = path.join(tmp, 'board'); writeTree(bt, BOARD)
@@ -1068,6 +1088,8 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     rB.status === 0 && bText.split('\n').filter((l) => /^\| lane-/.test(l)).length === 2 && /^\| lane-a \|/m.test(bText) && /^\| lane-b \|/m.test(bText), `status ${rB.status}: ${rB.stdout}${rB.stderr}\n${bText}`)
   clause('board E15-D16 [2: the file the CLI writes is exactly boardText of boardRows over the same tree, records read against the repo root]',
     bText === boardText(rowsOf(BOARD)), `${bText}\n---\n${boardText(rowsOf(BOARD))}`)
+  clause('board E15-D16 [1: the file the CLI writes opens with exactly the header row and the separator row, compared as literals]',
+    bText.split('\n')[0] === '| phase | record | state | last round |' && bText.split('\n')[1] === '|---|---|---|---|', bText.split('\n').slice(0, 2).join('\n'))
   clause('board B1 [2: on success stdout is exactly the one wrote line naming the file and the row count]',
     rB.stdout === `wrote ${boardFile}: 2 phase row(s)\n`, JSON.stringify(rB.stdout))
   const stB = cli('status', bt).stdout
