@@ -46,7 +46,7 @@ Then wait on `<out-file>.result` as the table says, which the launcher writes wi
 - With a managed network configured, the sandbox can still apply.
 - On macOS the sandbox works differently, and whether the seat survives there is unknown.
 
-Where the seat cannot run, it fails at its deadline, and the list below says how the hub's Fallbacks section routes that. Once it is substituted, the phase loses the cross-model red team.
+Where the seat cannot run, it fails at its deadline, and the paragraph after the list below says how the hub's Fallbacks section routes that. Once it is substituted, the phase loses the cross-model red team.
 
 - **Paths.** `<out-file>` is a new path for each dispatch, with the dispatch time in its name.
 - **Its record.** The seat's record is that pair of files together with its wave line. `<out-file>` is the return, `<out-file>.result` is its status, and the wave line names the out-file, the workspace and the dispatch time. The hub's ownership test reads all three.
