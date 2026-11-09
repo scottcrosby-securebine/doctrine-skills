@@ -817,10 +817,10 @@ clause('clause 2x11 — a second wake-all while the first holds wake-all.lock in
 
 // The lock's own reading: a dead holder's lock is replaced, a torn one refuses.
 const relock = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
-write(path.join(relock.run, 'wake-all.lock', 'pid'), String(spawnSync('true').pid))
+write(path.join(relock.run, 'wake-all.lock'), `pid ${spawnSync('true').pid}\nns -\ntoken \n`)
 const rDead = await wakeAll(relock)
 const torn = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
-fs.mkdirSync(path.join(torn.run, 'wake-all.lock'))
+write(path.join(torn.run, 'wake-all.lock'), '')
 const rTorn = await wakeAll(torn)
 clause('clause 2x14 — a wake-all.lock whose pid has exited is replaced and the run wakes a; an empty lock refuses with no pane read (E15-D242)',
   rDead.code === 0 && typedTo(relock, 'a').length === 1 && rTorn.code !== 0 && shimLog(torn).length === 0, wshow(relock, rDead) + wshow(torn, rTorn))

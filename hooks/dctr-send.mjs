@@ -28,8 +28,9 @@
 //
 // wake-all <run> (E15 Recovery) runs from any shell: it sets DCTR_RUN to <run>, takes TMPDIR from <run>/tmpdir, which
 // the lane watcher's start writes, and tags every call `sender:watcher`; contained, or with no <run>/tmpdir, it refuses
-// with no pane call. It holds <run>/wake-all.lock, takeRunLock's directory lock naming its pid, and refuses while a
-// live pid, or one it cannot judge, holds it. On start every
+// with no pane call. It holds <run>/wake-all.lock, takeRunLock's lock naming its pid, and refuses while a live pid, or
+// one it cannot judge, holds it; before each typing call it re-reads the lock and, once it is not its own, types nothing
+// more and ends. On start every
 // `intent <role> <L>` in events.log with no later woken, retry, skip, unfinished or unwoken line for that role and <L>
 // gets `unfinished <role> <L>`. It selects each role a lane.log create line names whose latest limits.log line <L> is
 // `account` with no woken, unfinished, unwoken or no-agent skip line for it and <L>, and reads its pane itself, under its
@@ -43,7 +44,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { herdr } from './dctr-state.mjs'
-import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takeRunLock, releaseLock } from './dctr-state.mjs'
+import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takeRunLock, releaseRunLock, ownsRunLock } from './dctr-state.mjs'
 import { laneOf, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
 
 const WAKE_GIVE_UP_MS = 10000
@@ -94,7 +95,11 @@ function readPane(pane) {
 const typing = { planned: 0, calls: 0, ok: 0 }
 /** Type one fixed line; false when the call failed. A line already decided keeps the default bound of `herdr(`: the
  *  window bounds the waiting, never a typing call that may deliver and then fail. A call is counted before it is made. */
+/** Whether a typing call may be made now: wake-all sets it to re-read its lock, and once that lock is not its own it types
+ *  nothing more. */
+let mayType = () => true
 function type(pane, line) {
+  if (!mayType()) { say(`wake-all.lock no longer names this wake-all: nothing more typed into ${pane}`); return false }
   typing.calls += 1
   try { herdr(['pane', 'run', pane, line]); typing.ok += 1; return true } catch (e) { say(`could not type into ${pane} (${String(e.message).split('\n')[0]})`); return false }
 }
@@ -222,7 +227,9 @@ function deliver(pane, lane, claim, role) {
 function wakeAll() {
   const lock = path.join(run, 'wake-all.lock')
   if (!takeRunLock(lock)) fail(`another wake-all holds ${lock}: nothing read or typed`)
-  process.on('exit', () => releaseLock(lock))
+  process.on('exit', () => releaseRunLock(lock))
+  let lost = false
+  mayType = () => ownsRunLock(lock) || ((lost = true), false)
   const retryMs = Number(process.env.DCTR_WAKEALL_RETRY_MS) || 30000, windowMs = Number(process.env.DCTR_WAKEALL_WINDOW_MS) || 600000
   const eventsFile = path.join(run, 'events.log')
   const events = () => parseWakeLines(readText(eventsFile))
@@ -255,7 +262,9 @@ function wakeAll() {
       log(word, r.role, r.limit, reading)
       last.set(r.role, word)
       if (word === 'retry') { if (!firstRetry.has(r.role)) firstRetry.set(r.role, Date.now()); again.push(r) }
+      if (lost) break
     }
+    if (lost) break
     pending = again
     if (pending.length) sleepMs(retryMs)
   }

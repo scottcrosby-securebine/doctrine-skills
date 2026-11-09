@@ -480,44 +480,70 @@ export function pidAlive(raw) {
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
 }
 
-/** How long a run lock (wake-all.lock, lanewatch.lock) with no pid file must sit before it is broken. A holder renews
- *  its lock at each herdr call and each poll. */
-export const RUN_LOCK_PIDLESS_MS = 180000
 /** How long a break gate may sit before it is taken for a breaker that died inside its few steps. */
 export const RUN_LOCK_GATE_MS = 60000
 
-/** Whether a run lock may be broken: its holder has exited, judged in this pid namespace, or it has no pid file and is
- *  older than RUN_LOCK_PIDLESS_MS. A holder that cannot be read, or one from another pid namespace (holderAlive null),
- *  is never broken. */
-function runLockBreakable(lock) {
-  const h = lockHolder(lock)
-  if (h) return holderAlive(h, ownPidNs()) === false
-  if (h === undefined) return false
-  try { return Date.now() - fs.statSync(lock).mtimeMs > RUN_LOCK_PIDLESS_MS } catch { return false }
+/** A run's single-instance lock (wake-all.lock, lanewatch.lock, lanewatch.start.lock) is one FILE, `pid <pid>\nns
+ *  <ns or ->\ntoken <token>\n`, written whole under a name of its own and linked into place, so it appears complete or
+ *  not at all: link fails on any name already there, file or directory, and no reader ever sees a holder half written
+ *  (WB29: an empty pid file read as pid '' was judged dead). `{ pid, ns, token }`, `null` when there is no lock, and
+ *  `undefined` when one is there and cannot be read as a holder, which is never broken. */
+export function runLockHolder(lock) {
+  let t
+  try { t = fs.readFileSync(lock, 'utf8') } catch (e) { return e.code === 'ENOENT' ? null : undefined }
+  const m = /^pid (\d+)\nns (.+)\ntoken (\S*)\n$/.exec(t)
+  return m ? { pid: m[1], ns: m[2] === '-' ? null : m[2], token: m[3] } : undefined
 }
 
-/** Take a run's single-instance lock, the directory lock acquireLock makes: true when taken, false while it is held.
- *  A take that throws (a pid that could not be published) is false.
+/** Take the run lock if nothing holds that name: true when taken. `token` is written beside the pid. */
+function acquireRunLock(lock, token) {
+  const me = selfHolder(), part = `${lock}.new.${process.pid}`
+  fs.writeFileSync(part, `pid ${me.pid}\nns ${me.ns ?? '-'}\ntoken ${token}\n`)
+  try { fs.linkSync(part, lock) } catch (e) { if (e.code === 'EEXIST') return false; throw e } finally { fs.rmSync(part, { force: true }) }
+  heldLocks.add(lock)
+  return true
+}
+
+/** Whether a run lock may be broken: its holder, read whole, has exited, judged in this pid namespace. A lock that
+ *  cannot be read, and a holder from another pid namespace (holderAlive null), are never broken. */
+export function runLockDead(lock) {
+  const h = runLockHolder(lock)
+  return !!h && holderAlive(h, ownPidNs()) === false
+}
+
+/** Take a run's lock: true when taken, false while it is held. A take that throws is false.
  *
- *  A breakable lock (runLockBreakable) is removed only under the gate `<lock>.break`, a directory one breaker at a time
- *  makes, and judged again inside it. Only a breaker removes a lock nobody holds alive, so while the gate is held the
- *  lock judged there cannot be replaced before it is removed, and no put-back is needed. Moving the directory aside
- *  (breakStaleLock) or the pid file aside, then putting back what turned out live, both let two holders enter: the
- *  put-back can land on a lock a third contender made meanwhile (clause 2ap in dctr-lanewatch.selftest.mjs). A gate
- *  older than RUN_LOCK_GATE_MS is removed and the take refused; residual: a breaker stalled that long inside the gate
- *  can run beside the next one. */
-export function takeRunLock(lock) {
+ *  A dead holder's lock is removed only under the gate `<lock>.break`, a directory one breaker at a time makes, and
+ *  judged again inside it, so no put-back is needed. A gate older than RUN_LOCK_GATE_MS is removed and the take refused.
+ *  A breaker stalled that long inside the gate can remove a lock taken meanwhile (WB30); every holder re-reads the lock
+ *  (ownsRunLock) before it acts, at each watcher poll and each wake-all typing call, and stops once it is not its own,
+ *  which bounds that window to one poll or one typing call. */
+export function takeRunLock(lock, token = '') {
   try {
-    if (acquireLock(lock)) return true
-    if (!runLockBreakable(lock)) return false
+    if (acquireRunLock(lock, token)) return true
+    if (!runLockDead(lock)) return false
     const gate = `${lock}.break`
     try { fs.mkdirSync(gate) } catch {
       try { if (Date.now() - fs.statSync(gate).mtimeMs > RUN_LOCK_GATE_MS) fs.rmSync(gate, { recursive: true, force: true }) } catch { /* gone */ }
       return false
     }
-    try { if (runLockBreakable(lock)) fs.rmSync(lock, { recursive: true, force: true }) } finally { fs.rmSync(gate, { recursive: true, force: true }) }
-    return acquireLock(lock)
+    try { if (runLockDead(lock)) fs.rmSync(lock, { force: true }) } finally { fs.rmSync(gate, { recursive: true, force: true }) }
+    return acquireRunLock(lock, token)
   } catch { return false }
+}
+
+/** Whether this process holds the run lock now; when it does, its time is renewed. */
+export function ownsRunLock(lock) {
+  const h = runLockHolder(lock)
+  if (!h || !sameHolder(h, selfHolder())) { heldLocks.delete(lock); return false }
+  try { const now = new Date(); fs.utimesSync(lock, now, now) } catch { /* gone: the next read says so */ }
+  return true
+}
+
+/** Remove the run lock when this process holds it. */
+export function releaseRunLock(lock) {
+  heldLocks.delete(lock)
+  if (sameHolder(runLockHolder(lock) ?? undefined, selfHolder())) fs.rmSync(lock, { force: true })
 }
 
 /** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false
