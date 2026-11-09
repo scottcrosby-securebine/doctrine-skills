@@ -815,6 +815,15 @@ clause('clause 2x11 — a second wake-all while the first holds wake-all.lock in
   rSecond.code !== 0 && !shimLog(locked).some((e) => e.ppid === rSecond.pid) && evAfterSecond.length === 0 &&
   evWords(locked).filter((w) => w.startsWith('unfinished a ')).length === 1 && !fs.existsSync(path.join(locked.run, 'wake-all.lock')), wshow(locked, rSecond) + ` first ${rFirst.code}`)
 
+// WB30: a wake-all whose lock stops naming it between its pane read and its typing call types nothing and exits
+// non-zero. The shim's first pane read writes a line onto the lock, so it no longer reads as this wake-all's.
+const stolen = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+setShim(stolen, { onFirstRead: { file: path.join(stolen.run, 'wake-all.lock'), line: 'taken' } })
+const rStolen = await wakeAll(stolen)
+clause('clause 2x16 — a wake-all whose lock stops naming it after its pane read types nothing, says so and exits non-zero (WB30)',
+  typedTo(stolen, 'a').length === 0 && rStolen.code !== 0 && /no longer names this wake-all/.test(rStolen.out) && /taken/.test(fs.readFileSync(path.join(stolen.run, 'wake-all.lock'), 'utf8')),
+  wshow(stolen, rStolen))
+
 // The lock's own reading: a dead holder's lock is replaced, a torn one refuses.
 const relock = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
 write(path.join(relock.run, 'wake-all.lock'), `pid ${spawnSync('true').pid}\nns -\ntoken \n`)

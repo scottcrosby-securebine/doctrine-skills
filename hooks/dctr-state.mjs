@@ -542,8 +542,7 @@ export function ownsRunLock(lock) {
 
 /** Remove the run lock when this process holds it. */
 export function releaseRunLock(lock) {
-  heldLocks.delete(lock)
-  if (sameHolder(runLockHolder(lock) ?? undefined, selfHolder())) fs.rmSync(lock, { force: true })
+  heldLocks.delete(lock); if (sameHolder(runLockHolder(lock) ?? undefined, selfHolder())) fs.rmSync(lock, { force: true })
 }
 
 /** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false

@@ -605,8 +605,30 @@ clause('clause 2au — a stale bridge raised before a restart, fresh at the firs
   write(lk, lockText(spawn('sleep', ['5']).pid))
   let polled = 0
   await lanewatch.watch({ poll: () => { polled += 1 } }, async () => {}, () => ownsRunLock(lk))
+  // A gate older than its limit is a breaker that died: the take that finds it removes it and refuses, the next breaks.
+  write(lk, lockText(dead())); fs.mkdirSync(`${lk}.break`); const oldG = (Date.now() - 2 * 60000) / 1000; fs.utimesSync(`${lk}.break`, oldG, oldG)
+  const throughOld = [takeRunLock(lk), takeRunLock(lk)]; releaseRunLock(lk)
+  clause('clause 2bb — a dead holder\'s lock behind a gate older than its limit: the first take removes the gate and refuses, the second takes the lock (WB30)',
+    JSON.stringify(throughOld) === '[false,true]', JSON.stringify(throughOld))
   clause('clause 2ax — ownsRunLock renews a lock naming this process; once the lock names another, the watcher\'s loop polls no more (WB30)',
     mine && renewed && polled === 0, JSON.stringify([mine, renewed, polled]))
+}
+
+// WB30: a running watcher whose lock comes to name another holder ends at its next poll.
+{
+  const lost = fixture({}), llock = path.join(lost.run, 'lanewatch.lock')
+  const w = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_RUN: lost.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: lost.dir }, stdio: ['ignore', 'ignore', 'pipe'] })
+  let werr = ''; w.stderr.on('data', (d) => { werr += d })
+  const ended = new Promise((r) => w.on('exit', (code) => r(code)))
+  for (let t = 0; t < 100 && !lockPid(llock); t++) sleep(50)
+  const other = spawn('sleep', ['60'])
+  write(llock, lockText(other.pid))
+  const code = await Promise.race([ended, new Promise((r) => setTimeout(() => r('still running'), POLL_MS + 10000))])
+  if (w.exitCode === null) w.kill('SIGKILL')
+  const left = lockPid(llock)
+  other.kill()
+  clause('clause 2ba — a watcher whose lock comes to name another live holder ends within one poll, says so, and leaves that holder\'s lock (WB30)',
+    code === 0 && /no longer names this watcher/.test(werr) && left === String(other.pid), JSON.stringify([code, werr, left]))
 }
 
 // WB33: start succeeds only on the watcher its own pane ran. Here that one cannot start (no node on its PATH) while a
@@ -805,6 +827,13 @@ clause('clause 3d — without the watcher: the reader fixture\'s lane.log names 
   const over = runLine(`true ${'x'.repeat(1100)}`), under = runLine('true')
   clause('clause 3e — without the watcher: the shim refuses a pane run line of 1105 bytes with herdr\'s pane_send_failed error and runs a short one',
     over.status === 1 && /pane_send_failed/.test(over.stderr) && /1105-byte line/.test(over.stderr) && under.status === 0, JSON.stringify([over.status, over.stderr, under.status]))
+}
+
+{
+  const e = path.join(tmp, 'empty-path')
+  const found = spawnSync('/bin/sh', ['-c', 'command -v node'], { env: { PATH: e }, encoding: 'utf8' })
+  clause('clause 3f — without the watcher: the empty directory 2aq puts on the pane\'s PATH holds no node, on any host',
+    fs.readdirSync(e).length === 0 && found.status !== 0, JSON.stringify([fs.readdirSync(e), found.status, found.stdout]))
 }
 
 process.exit(bad ? 1 : 0)
