@@ -1360,7 +1360,8 @@ function wallClock(ms, zone) {
 }
 
 /** Every instant `zone`'s wall clock reads y-mo-d h:mi (a day past the month's end rolls over), earliest first: two in
- *  a fall-back hour, one otherwise, and for a time a spring-forward gap skips, the instant its later offset gives. */
+ *  a fall-back hour, one otherwise, and for a time a spring-forward gap skips, the instant the offset before the gap
+ *  gives, which the clock after it reads an hour later. */
 function zonedInstants(y, mo, d, h, mi, zone) {
   const wall = Date.UTC(y, mo - 1, d, h, mi)
   const offset = (ms) => { const w = wallClock(ms, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / 60000) * 60000 }

@@ -355,9 +355,10 @@ clause('clause 2w — a pane that exits, recovers and exits again gives two exit
 // WB2: a handle that is not a file gives no liveness, so no deadline.
 const agents = fixture({ a: {} })
 write(agents.record.a, ['- State: Open', `- wave: ${ago(600000)} seat s5 handle agent:abc123 deadline ${ago(60000)}`,
-  `- wave: ${ago(600000)} seat s6 handle agent b77 (worktree wt/b) deadline ${ago(60000)}`, `- wave: ${ago(600000)} seat s7 handle a1b2c3 deadline ${ago(60000)}`, ''].join('\n'))
+  `- wave: ${ago(600000)} seat s6 handle agent b77 (worktree wt/b) deadline ${ago(60000)}`, `- wave: ${ago(600000)} seat s7 handle a1b2c3 deadline ${ago(60000)}`,
+  `- wave: ${ago(600000)} seat s8 handle docs deadline ${ago(60000)}`, ''].join('\n'))
 polls(agents, watcher(agents), 3)
-clause('clause 2x — a seat past its deadline whose handle names no readable file (an agent id in any form) raises no deadline line: its liveness is unknown (E15-D12, D13)',
+clause('clause 2x — a seat past its deadline whose handle names no readable file (an agent id in any form, or a directory) raises no deadline line: its liveness is unknown (E15-D12, D13)',
   events(agents).length === 0, show(agents))
 
 // WB5: the stall title, exactly.
@@ -424,9 +425,11 @@ clause('clause 2ad — two starts at once: one exits 0 and one non-zero, with on
 const spaced = path.join(tmp, 'with space', 'repo'); fs.mkdirSync(path.join(spaced, '.git'), { recursive: true })
 const spacedRun = path.join(spaced, '.doctrine/records/orchestrate')
 write(path.join(tmp, 'spaced-shim', 'shim.json'), JSON.stringify({ panes: {} })); write(path.join(tmp, 'spaced-shim', 'shim.log'), '')
+const tabbed = path.join(tmp, 'with\ttab', 'repo'); fs.mkdirSync(path.join(tabbed, '.git'), { recursive: true })
+const rTabbed = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_RUN: path.join(tabbed, '.doctrine/records/orchestrate'), HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: path.join(tmp, 'spaced-shim') }, tabbed)
 const rSpaced = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_RUN: spacedRun, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: path.join(tmp, 'spaced-shim') }, spaced)
-clause('clause 2ae — start from a checkout whose path holds a space refuses, writes no tmpdir or lane.log line, and calls herdr( zero times',
-  rSpaced.code !== 0 && !fs.existsSync(path.join(spacedRun, 'tmpdir')) && !fs.existsSync(path.join(spacedRun, 'lane.log')) && fs.readFileSync(path.join(tmp, 'spaced-shim', 'shim.log'), 'utf8') === '', JSON.stringify(rSpaced))
+clause('clause 2ae — start from a checkout whose path holds a space, or a tab, refuses, writes no tmpdir or lane.log line, and calls herdr( zero times',
+  rSpaced.code !== 0 && rTabbed.code !== 0 && !fs.existsSync(path.join(spacedRun, 'tmpdir')) && !fs.existsSync(path.join(spacedRun, 'lane.log')) && fs.readFileSync(path.join(tmp, 'spaced-shim', 'shim.log'), 'utf8') === '', JSON.stringify(rSpaced))
 
 // WN3: stop signals only a watcher.
 const imposter = fixture({ a: {} })
@@ -437,8 +440,32 @@ const rImp = await proc(['stop'], { DCTR_RUN: imposter.run, PATH: `${bin}:/usr/b
 sleep(200)
 const impAlive = sleeper.exitCode === null && sleeper.signalCode === null
 sleeper.kill('SIGKILL')
+const deadHolder = fixture({ a: {} })
+write(path.join(deadHolder.run, 'lanewatch.lock'), String(spawnSync('true').pid))
+const rDeadStop = await proc(['stop'], { DCTR_RUN: deadHolder.run, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: deadHolder.dir })
+clause('clause 2af2 — stop on a fresh lock whose pid has exited signals nothing, exits 0 and removes the lock',
+  rDeadStop.code === 0 && !fs.existsSync(path.join(deadHolder.run, 'lanewatch.lock')), JSON.stringify(rDeadStop))
 clause('clause 2af — stop sends no signal to a pid whose lock the watcher has not renewed within its polls: a process that is not the watcher lives on',
   impAlive, JSON.stringify([rImp, impAlive]))
+
+// The hand-over: a watcher whose DCTR_WATCH_FROM names the live start that holds the lock takes it over.
+const handed = fixture({ a: {} })
+const starter = spawn('sleep', ['30'], { stdio: 'ignore' })
+write(path.join(handed.run, 'lanewatch.lock'), String(starter.pid))
+const heir = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_RUN: handed.run, DCTR_WATCH_FROM: String(starter.pid), PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: handed.dir }, stdio: 'ignore' })
+for (let t = 0; t < 100 && fs.readFileSync(path.join(handed.run, 'lanewatch.lock'), 'utf8').trim() !== String(heir.pid); t++) sleep(50)
+const heirHolds = fs.readFileSync(path.join(handed.run, 'lanewatch.lock'), 'utf8').trim() === String(heir.pid) && heir.exitCode === null
+heir.kill('SIGKILL'); starter.kill('SIGKILL')
+clause('clause 2ag — the watcher start\'s pane runs takes the lock over from the live start whose pid DCTR_WATCH_FROM names, and runs',
+  heirHolds, JSON.stringify([heirHolds, heir.exitCode]))
+
+// Each poll renews the lock's time, which is how stop tells the watcher from a reused pid.
+const renew = fixture({ a: {} })
+write(path.join(renew.run, 'lanewatch.lock'), String(process.pid))
+const oldLock = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(path.join(renew.run, 'lanewatch.lock'), oldLock, oldLock)
+polls(renew, watcher(renew))
+clause('clause 2ah — a poll renews the lock\'s modification time',
+  Date.now() - fs.statSync(path.join(renew.run, 'lanewatch.lock')).mtimeMs < 5000, String(fs.statSync(path.join(renew.run, 'lanewatch.lock')).mtimeMs))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 

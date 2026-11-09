@@ -972,12 +972,13 @@ const laneEnv = (f, nowMs = NOW) => ({ DCTR_ROLE: 'a', DCTR_CALLER: 'a', DCTR_RU
 const kindsFx = fixture('limit-kinds')
 for (const k of ['session', 'fiveHour', 'weekly', 'fable']) run(kindsFx, failure(LIMIT_TEXTS[k]), laneEnv(kindsFx))
 run(kindsFx, failure(LIMIT_TEXTS.server, 'server_error'), laneEnv(kindsFx))
+const spacedErr = fixture('limit-spaced-error'); run(spacedErr, failure(LIMIT_TEXTS.server, 'bad gateway'), laneEnv(spacedErr))
 const kindLines = limitsOf(kindsFx).map((l) => l.split(' '))
 clause('clause 2y — a lane session\'s StopFailure appends one limits.log line each: account for the session-limit, 5-hour and weekly texts, model for the Fable text, other for a server_error, each naming the role and the hook clock\'s time (E15-D114)',
   kindLines.length === 5 && JSON.stringify(kindLines.map((l) => l[2])) === '["account","account","account","model","other"]' &&
   kindLines.every((l) => l[0] === new Date(NOW).toISOString() && l[1] === 'a'), JSON.stringify(limitsOf(kindsFx)))
-clause('clause 2y2 — a model line\'s field is -, an other line\'s the payload\'s error (E15-D237)',
-  kindLines[3]?.[3] === '-' && kindLines[4]?.[3] === 'server_error' && kindLines.every((l) => l.length === 4), JSON.stringify(limitsOf(kindsFx)))
+clause('clause 2y2 — a model line\'s field is -, an other line\'s the payload\'s error, its spaces written as _ so the line stays four fields (E15-D237)',
+  kindLines[3]?.[3] === '-' && kindLines[4]?.[3] === 'server_error' && kindLines.every((l) => l.length === 4) && JSON.stringify(limitsOf(spacedErr).map((l) => l.split(' ').slice(2))) === '[["other","bad_gateway"]]', JSON.stringify(limitsOf(kindsFx)))
 clause('clause 2y3 — in a lane session whose record is active the StopFailure still writes its R9 paused line beside its limits.log line (E15 Recovery)',
   paused(kindsFx).length >= 1 && /API error: rate_limit/.test(paused(kindsFx)[0]) && kindLines.length === 5, show(kindsFx, { code: 0, msg: '', err: '' }))
 const RESETS = [
@@ -991,6 +992,12 @@ const RESETS = [
   ['Jan 2, 7pm on Nov 9', "You've hit your weekly limit · resets Jan 2, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2027-01-02T10:00:00Z'],
   ['1:30am New York in the fall-back hour, its second occurrence', "You've hit your session limit · resets 1:30am (America/New_York)", '2026-11-01T06:15:00Z', '2026-11-01T06:30:00Z'],
   ['Feb 31, a date no year holds', "You've hit your weekly limit · resets Feb 31, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['1:30am New York before the fall-back hour, its first occurrence', "You've hit your session limit · resets 1:30am (America/New_York)", '2026-11-01T05:15:00Z', '2026-11-01T05:30:00Z'],
+  ['2:30am New York, a time the spring-forward gap skips', "You've hit your session limit · resets 2:30am (America/New_York)", '2027-03-14T05:00:00Z', '2027-03-14T07:30:00Z'],
+  ['Feb 29 from a year that has none', "You've hit your weekly limit · resets Feb 29, 7pm (UTC)", '2026-11-09T04:00:00Z', '2028-02-29T19:00:00Z'],
+  ['13pm, no clock time', "You've hit your session limit · resets 13pm (UTC)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['9:75pm, no clock time', "You've hit your session limit · resets 9:75pm (UTC)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['a zone Intl does not know', "You've hit your session limit · resets 9pm (Mars/Base)", '2026-11-09T04:00:00Z', 'unknown'],
 ]
 const resetBad = RESETS.filter(([label, text, now, want], i) => {
   const f = fixture(`limit-reset-${i}`)
