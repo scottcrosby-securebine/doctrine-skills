@@ -4893,6 +4893,10 @@ const MUTATIONS = [
     clause: "clause 2k \u2014 a bridge file twice the expiry old gives o\u2026",
     from: "    if (Date.now() - st.mtimeMs > BRIDGE_EXPIRY_MS) {",
     to: "    if (Date.now() - st.mtimeMs > BRIDGE_EXPIRY_MS / 3) {" },
+  { name: "ownsRunLock owns any readable lock (N1) (R4-N1)", file: "dctr-state.mjs",
+    clause: "clause 2ax — ownsRunLock renews a lock naming this pro…",
+    from: "  if (!h || !sameHolder(h, selfHolder())) { heldLocks.delete(lock); return false }",
+    to: "  if (!h) { heldLocks.delete(lock); return false }" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
