@@ -490,8 +490,13 @@ const rsAgain = events(rs).slice().sort()
 const rw = watcher(rs)
 setPanes(rs, { [rs.pane.dead]: { session: 'S-dead' } }); polls(rs, rw)
 setPanes(rs, { [rs.pane.dead]: { session: null } }); polls(rs, rw)
-clause('clause 2ai — a watcher restarted between polls raises no exit, pause, deadline, ready, unknown-context or past-tier line again while its state holds; an exit that recovers and comes back after the restart is raised again',
-  rsFirst.length === 6 && JSON.stringify(rsAgain) === JSON.stringify(rsFirst) && events(rs).filter((e) => e.startsWith('exit dead ')).length === 2, JSON.stringify([rsFirst, events(rs)]))
+fs.appendFileSync(rs.record.pz, '- State: Open\n'); polls(rs, rw)
+fs.appendFileSync(rs.record.pz, '- State: Blocked. waits\n'); polls(rs, rw)
+bridge('S-sx', 100000); polls(rs, rw)
+bridge('S-sx', 100000, 2 * BRIDGE_EXPIRY_MS); polls(rs, rw)
+clause('clause 2ai — a watcher restarted between polls raises no exit, pause, deadline, ready, unknown-context or past-tier line again while its state holds; an exit, a pause and a stale bridge that clear and come back after the restart are each raised again',
+  rsFirst.length === 6 && JSON.stringify(rsAgain) === JSON.stringify(rsFirst) && events(rs).filter((e) => e.startsWith('exit dead ')).length === 2 &&
+  events(rs).filter((e) => e.startsWith('pause pz ')).length === 2 && events(rs).filter((e) => e === 'context sx S-sx unknown').length === 2, JSON.stringify([rsFirst, events(rs)]))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
