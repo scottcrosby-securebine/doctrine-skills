@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, readCodex, readRecords, memberRecords, trackedRoot, PROJECT_PATH, RECORDS_LABEL } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, boardRows, boardText, readCodex, readRecords, memberRecords, trackedRoot, PROJECT_PATH, RECORDS_LABEL } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -897,6 +897,127 @@ clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints un
 const rEmptyReply = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1' }, encoding: 'utf8' })
 clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look": live seats: unknown, and herdr really was asked',
   rEmptyReply.stdout.split('\n').includes('live seats: unknown') && fs.existsSync(trip('herdr')), rEmptyReply.stdout)
+
+// ---------------------------------------------------------------- board (E15-D16, D17, D18; seams B1 to B5)
+// T-board: the two pure seams, boardRows (model plus a record reader to rows) and boardText (rows to the
+// file), then the CLI end to end on a two-lane fixture repo under `git init`. Three clauses as above.
+{
+  const REC = '.doctrine/records'
+  const BP = `# Project: board\nState: Ruled\nCurrent epic: E5\nCertification target: none\nRecords: ${REC}\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n| E5 | Lanes | docs/epics/E5.md |\n`
+  const BE = `# Epic E5: Lanes\nState: Open\n\n## Members\n- phase lane-a: ${REC}/lane-a.md\n- issue #7\n- phase lane-b: ${REC}/lane-b.md after lane-a merged\n`
+  const LANE_A = '# Phase lane-a\nstate: Blocked\nround: 1 closed 2026-11-09T01:00:00Z at aaa111 blockers 2 alarm 0\nround: 2 closed 2026-11-09T02:00:00Z at bbb222 blockers 0 alarm 0\n- **State: Open.** limiter phase.\n'
+  const LANE_B = '# Phase lane-b\nwrapper: doctrine-code\n'
+  const BOARD = { [P]: BP, 'docs/epics/E5.md': BE, [`${REC}/lane-a.md`]: LANE_A, [`${REC}/lane-b.md`]: LANE_B }
+  const EPIC = 'docs/epics/E5.md'
+  const rowsOf = (files) => boardRows(build(files), (rel) => (Object.hasOwn(files, rel) ? files[rel] : null))
+  const tryRows = (files) => { try { return { rows: rowsOf(files) } } catch (e) { return { err: e.message } } }
+  const STATE_RE = /^\s*-?\s*\**state:/i
+  const rows = tryRows(BOARD).rows ?? []
+  const row = (rs, name) => rs.find((r) => r.phase === name)
+
+  clause('board B2 [2: one row per - phase member of the current epic, in Members order, and the issue member gets none]',
+    JSON.stringify(rows.map((r) => r.phase)) === '["lane-a","lane-b"]', JSON.stringify(tryRows(BOARD)))
+  clause('board B2 [3: the fixture epic has two - phase lines with an - issue line between them]',
+    (BE.match(/^- phase /gm) ?? []).length === 2 && /^- phase lane-a.*\n- issue #7\n- phase lane-b/m.test(BE), 'fixture')
+  clause('board B3 [1: state is the first word of the LAST state line, bold and a trailing period ignored, and last round is the LAST round line as r<n> at <revision>]',
+    JSON.stringify(row(rows, 'lane-a')) === JSON.stringify({ phase: 'lane-a', record: `${REC}/lane-a.md`, state: 'Open', round: 'r2 at bbb222' }), JSON.stringify(row(rows, 'lane-a')))
+  clause('board B3 [3: lane-a carries an earlier Blocked state line, a last bold state line ending in a period with prose after it, and two round lines]',
+    /^state: Blocked$/m.test(LANE_A) && /^- \*\*State: Open\.\*\* limiter phase\.$/m.test(LANE_A.trimEnd().split('\n').at(-1)) && (LANE_A.match(/^round: /gm) ?? []).length === 2, 'fixture')
+  clause('board B3 [1: a readable record with no state line and no round line carries none in both, never a blank]',
+    JSON.stringify(row(rows, 'lane-b')) === JSON.stringify({ phase: 'lane-b', record: `${REC}/lane-b.md`, state: 'none', round: 'none' }), JSON.stringify(row(rows, 'lane-b')))
+  clause('board B3 [3: lane-b is readable and has no state and no round line]', !/state:/i.test(LANE_B) && !/round:/i.test(LANE_B), 'fixture')
+  const NOREC = mutate([[EPIC, '- issue #7\n', '- issue #7\n- phase lane-c\n']], BOARD)
+  clause('board B3 [1: a phase whose Members line names no record carries none in record, state and last round]',
+    JSON.stringify(row(tryRows(NOREC).rows ?? [], 'lane-c')) === JSON.stringify({ phase: 'lane-c', record: 'none', state: 'none', round: 'none' }), JSON.stringify(tryRows(NOREC)))
+  clause('board B3 [3: that fixture has a - phase line with no record path]', /^- phase lane-c$/m.test(NOREC[EPIC]), 'fixture')
+  const UNREAD = { ...BOARD }; delete UNREAD[`${REC}/lane-b.md`]
+  clause('board B3 [1: a record that cannot be read carries unknown in state and last round, never a blank]',
+    JSON.stringify(row(tryRows(UNREAD).rows ?? [], 'lane-b')) === JSON.stringify({ phase: 'lane-b', record: `${REC}/lane-b.md`, state: 'unknown', round: 'unknown' }), JSON.stringify(tryRows(UNREAD)))
+  clause('board B3 [3: that fixture names lane-b\'s record and does not hold it]', UNREAD[EPIC].includes(`${REC}/lane-b.md`) && !Object.hasOwn(UNREAD, `${REC}/lane-b.md`), 'fixture')
+
+  const refusals = [
+    ['Current epic: none', mutate([[P, 'Current epic: E5', 'Current epic: none']], BOARD), 'no current epic', (f) => /^Current epic: none$/m.test(f[P])],
+    ['no Current epic line', mutate([[P, 'Current epic: E5\n', '']], BOARD), 'no current epic', (f) => !/^Current epic:/m.test(f[P])],
+    ['a Current epic not on the roster', mutate([[P, 'Current epic: E5', 'Current epic: E9']], BOARD), 'does not resolve', (f) => /^Current epic: E9$/m.test(f[P]) && !/^\| E9 /m.test(f[P])],
+    ['a Current epic whose record cannot be read', (() => { const f = { ...BOARD }; delete f[EPIC]; return f })(), 'does not resolve', (f) => !Object.hasOwn(f, EPIC) && f[P].includes(EPIC)],
+  ]
+  for (const [name, files, frag, shape] of refusals) {
+    const r = tryRows(files)
+    clause(`board B2 refusal — ${name} [1: boardRows throws naming why (${frag})]`, typeof r.err === 'string' && r.err.includes(frag), JSON.stringify(r))
+    clause(`board B2 refusal — ${name} [3: the fixture carries that defect and the good one does not]`, shape(files) && !shape(BOARD), 'fixture')
+  }
+
+  const text = boardText(rows), lines = text.split('\n').filter(Boolean)
+  clause('board B4 [2: every line of the file is a table row starting with |, none is a state or wrapper line, and each row has four cells]',
+    lines.length === 4 && lines.every((l) => l.startsWith('|') && !STATE_RE.test(l) && !/^\s*-?\s*\**wrapper:/i.test(l)) && lines.slice(2).every((l) => l.split(/(?<!\\)\|/).length === 6), text)
+  clause('board B4 [2: the rows read phase, record, state and last round]',
+    lines.includes(`| lane-a | ${REC}/lane-a.md | Open | r2 at bbb222 |`) && lines.includes(`| lane-b | ${REC}/lane-b.md | none | none |`), text)
+  const piped = [{ phase: 'a|b', record: 'x|y.md', state: 'none', round: 'none' }]
+  clause('board B4 [1: a cell holding a | has it escaped as \\|, so the row keeps four cells]',
+    boardText(piped).split('\n').includes('| a\\|b | x\\|y.md | none | none |'), boardText(piped))
+  clause('board B4 [3: that input really carries a raw | in two cells]', piped[0].phase.includes('|') && !piped[0].phase.includes('\\|') && piped[0].record.includes('|'), 'fixture')
+
+  // ---- the CLI on a real repo
+  const bt = path.join(tmp, 'board'); writeTree(bt, BOARD)
+  spawnSync('git', ['init', '-q', bt], { encoding: 'utf8' })
+  fs.appendFileSync(path.join(bt, '.git/info/exclude'), `${REC}/\n`)
+  fs.rmSync(trip('herdr'), { force: true })
+  const boardFile = path.join(bt, REC, 'board.md')
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch { return '' } }
+  const rB = cli('board', bt)
+  const bText = read(boardFile)
+  clause('board E15-D16 [2: board exits 0 and writes board.md under Records with one row naming each - phase member]',
+    rB.status === 0 && bText.split('\n').filter((l) => /^\| lane-/.test(l)).length === 2 && /^\| lane-a \|/m.test(bText) && /^\| lane-b \|/m.test(bText), `status ${rB.status}: ${rB.stdout}${rB.stderr}\n${bText}`)
+  const stB = cli('status', bt).stdout
+  clause('board E15-D17 [2: no line of board.md matches the state-line grep, and status names no board.md while it lists the Open lane record]',
+    bText !== '' && !bText.split('\n').some((l) => STATE_RE.test(l)) && !stB.includes('board.md') && stB.includes('Phase lane-a: - **State: Open.** limiter phase.'), stB)
+  const ci = (rel) => spawnSync('git', ['-C', bt, 'check-ignore', '-q', rel]).status
+  clause('board E15-D18 [2: git check-ignore exits 0 on the written board.md, Records being excluded through .git/info/exclude]',
+    fs.existsSync(boardFile) && ci(`${REC}/board.md`) === 0, String(ci(`${REC}/board.md`)))
+  clause('board E15-D18 [3: the fixture is a git repo whose .git/info/exclude names the Records path]',
+    fs.existsSync(path.join(bt, '.git')) && read(path.join(bt, '.git/info/exclude')).split('\n').includes(`${REC}/`), 'fixture')
+  // Controls.
+  fs.writeFileSync(path.join(bt, 'board.md'), bText)
+  clause('board E15-D18 control [1: the same file written outside the Records path is not ignored: git check-ignore exits 1]', ci('board.md') === 1, String(ci('board.md')))
+  fs.rmSync(path.join(bt, 'board.md'))
+  fs.writeFileSync(boardFile, bText + 'State: Open\n')
+  const stPlant = cli('status', bt).stdout
+  clause('board E15-D17 control [1: a State: Open line planted in board.md makes status list it]', stPlant.includes(`${REC}/board.md: State: Open`), stPlant)
+  const rB2 = cli('board', bt)
+  clause('board B1 [2: board overwrites board.md whole, so the planted line is gone after a rerun]', rB2.status === 0 && read(boardFile) === bText, read(boardFile))
+  fs.appendFileSync(path.join(bt, EPIC), '- phase lane-c\n')
+  clause('board E15-D16 control [1: a third - phase added after the board was written is missing from the stale file]',
+    !/^\| lane-c \|/m.test(read(boardFile)), read(boardFile))
+  clause('board E15-D16 control [3: the fixture epic now really has three - phase members]', (read(path.join(bt, EPIC)).match(/^- phase /gm) ?? []).length === 3, 'fixture')
+  const rB3 = cli('board', bt)
+  clause('board E15-D16 [1: rerun, the board names the third phase, with none in record, state and last round]',
+    rB3.status === 0 && read(boardFile).split('\n').includes('| lane-c | none | none | none |'), read(boardFile))
+
+  // Refusals: each writes nothing anywhere under the tree.
+  const boards = (root) => fs.readdirSync(root, { recursive: true }).filter((f) => path.basename(String(f)) === 'board.md')
+  const refuseTree = (name, edits, prep) => { const d = path.join(tmp, `board-${name}`); writeTree(d, mutate(edits, BOARD)); prep?.(d); return d }
+  const noneDir = refuseTree('records-none', [[P, `Records: ${REC}`, 'Records: none']], (d) => fs.mkdirSync(path.join(d, 'none')))
+  const rNone = cli('board', noneDir)
+  clause('board B1 refusal — Records none [1: exits 1 naming Records and writes no board.md]',
+    rNone.status === 1 && /Records/.test(rNone.stderr) && boards(noneDir).length === 0, `status ${rNone.status}: ${rNone.stderr} ${boards(noneDir)}`)
+  clause('board B1 refusal — Records none [3: the project says Records: none and a directory named none exists, so a write there would succeed]',
+    /^Records: none$/m.test(read(path.join(noneDir, P))) && fs.statSync(path.join(noneDir, 'none')).isDirectory(), 'fixture')
+  for (const [name, edit] of [['absent', `Records: ${REC}\n`], ['empty', `Records:\n`]]) {
+    const d = refuseTree(`records-${name}`, [[P, `Records: ${REC}\n`, name === 'absent' ? '' : edit]])
+    const r = cli('board', d)
+    clause(`board B1 refusal — Records ${name} [1: exits 1 naming Records and writes no board.md]`, r.status === 1 && /Records/.test(r.stderr) && boards(d).length === 0, `status ${r.status}: ${r.stderr}`)
+    clause(`board B1 refusal — Records ${name} [3: the fixture project has ${name === 'absent' ? 'no Records line' : 'an empty Records line'}]`,
+      name === 'absent' ? !/^Records:/m.test(read(path.join(d, P))) : /^Records:\s*$/m.test(read(path.join(d, P))), 'fixture')
+  }
+  for (const [name, edit, frag] of [['no-epic', 'Current epic: none', 'no current epic'], ['bad-epic', 'Current epic: E9', 'does not resolve']]) {
+    const d = refuseTree(name, [[P, 'Current epic: E5', edit]])
+    const r = cli('board', d)
+    clause(`board B2 refusal — CLI ${edit} [1: exits 1 naming why (${frag}) and writes no board.md]`, r.status === 1 && r.stderr.includes(frag) && boards(d).length === 0, `status ${r.status}: ${r.stderr}`)
+  }
+  clause('board B1 — malformed arguments exit 2 with the usage line naming board: two roots, a flag, and no PROJECT.md',
+    cli('board', bt, bt).status === 2 && cli('board', '--x').status === 2 && cli('board', '--x').stderr.includes('check|status|board') && cli('board', empty).status === 2, 'status')
+  clause('board B1 — every board run above called the tripwire herdr ZERO times', !fs.existsSync(trip('herdr')), 'herdr was called')
+}
 
 // ---------------------------------------------------------------- readCodex: unknown whenever anything could not be read
 {

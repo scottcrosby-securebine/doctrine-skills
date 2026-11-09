@@ -4,6 +4,10 @@
 //                                                       docs/PROJECT.md or malformed arguments
 //   node hooks/dctr-project.mjs status [<repo-root>]   read-only; exit 2 only for malformed arguments
 //                                                       or no docs/PROJECT.md
+//   node hooks/dctr-project.mjs board  [<repo-root>]   overwrites <Records>/board.md; exit 1 when it refuses
+//                                                       (Records absent, empty or none; no current epic, or
+//                                                       one that does not resolve), writing nothing; exit 2
+//                                                       as check does
 //
 // Formats: docs/PROJECT.md and docs/epics/<ID>.md, as skills/doctrine-project/formats.md defines them.
 // `check` is offline: no network call, never runs `gh`, never dereferences an issue number. One finding
@@ -13,7 +17,7 @@
 // (a readable source with nothing in it) prints `(none)`, or for open records, which are searched only
 // where the block's label says, `none found in the searched paths`; the two are never the same line.
 //
-// Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines, memberRecords) are exported for
+// Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines, boardRows, boardText, memberRecords) are exported for
 // hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
 //
 // Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id, members.
@@ -518,6 +522,32 @@ export function statusLines(model, readers) {
   return out
 }
 
+// ---------------------------------------------------------------- board
+
+/** The current epic's `- phase` members, in Members order, each with its record path and that record's state
+ *  (the first word of its last state line's value) and last round, both as parseRecord reads them. A phase
+ *  with no record path is `none` throughout, a record `readRecord` returns null for is `unknown`, and a
+ *  readable record with no state or round line is `none` in that cell. Throws, naming why, when there is no
+ *  current epic or it does not resolve: the CLI then refuses and writes nothing. */
+export function boardRows(model, readRecord) {
+  const id = val(model.project, 'Current epic')
+  if (!id || id === 'none') throw new Error(`no current epic: Current epic is ${id ? 'none' : 'absent'}`)
+  const epic = resolveRoster(model).get(id)
+  if (!epic) throw new Error(`current epic ${id} does not resolve to a readable roster record headed Epic ${id}`)
+  return epic.doc.phases.map((m) => {
+    if (!m.record) return { phase: m.name, record: 'none', state: 'none', round: 'none' }
+    const text = readRecord(m.record)
+    if (text == null) return { phase: m.name, record: m.record, state: 'unknown', round: 'unknown' }
+    const { state, entries } = parseRecord(text), r = entries.filter((e) => e.kind === 'round').at(-1)
+    return { phase: m.name, record: m.record, state: state?.value.split(/\s+/)[0].replace(/\.$/, '') || 'none', round: r ? `r${r.n} at ${r.revision}` : 'none' }
+  })
+}
+
+/** board.md's whole text: a table and nothing else, so no line is a state or `wrapper:` line and status never
+ *  lists the file (E15-D17). A `|` in a cell is written `\|`. */
+export const boardText = (rows) => ['| phase | record | state | last round |', '|---|---|---|---|',
+  ...rows.map((r) => `| ${[r.phase, r.record, r.state, r.round].map((c) => String(c).replace(/\|/g, '\\|')).join(' | ')} |`)].join('\n') + '\n'
+
 // ---------------------------------------------------------------- readers (the only I/O)
 
 /** The open-records block reads a bounded set, never every file under Records, so its label says what
@@ -623,19 +653,31 @@ export function readCodex(root, stateDir = codexStateDir()) {
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(import.meta.filename) } catch { return false } })()
 if (isMain) {
   const [cmd, ...rest] = process.argv.slice(2)
-  if (!['check', 'status'].includes(cmd) || rest.length > 1 || rest.some((a) => a.startsWith('-'))) {
-    console.error('usage: node dctr-project.mjs check|status [<repo-root>]')
+  if (!['check', 'status', 'board'].includes(cmd) || rest.length > 1 || rest.some((a) => a.startsWith('-'))) {
+    console.error('usage: node dctr-project.mjs check|status|board [<repo-root>]')
     process.exit(2)
   }
   const root = path.resolve(rest[0] ?? '.')
   let text
   try { text = fs.readFileSync(path.join(root, PROJECT_PATH), 'utf8') }
   catch (e) { console.error(`dctr-project: cannot read ${PROJECT_PATH} under ${root} (${e.code || e.message})`); process.exit(2) }
-  const model = modelFrom(text, (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8') } catch { return null } })
+  const readRel = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8') } catch { return null } }
+  const model = modelFrom(text, readRel)
   if (cmd === 'check') {
     const findings = check(model, (rel) => fs.existsSync(path.join(root, rel)))
     for (const f of findings) console.log(formatFinding(f))
     process.exit(findings.length ? 1 : 0)
+  }
+  if (cmd === 'board') {
+    const records = val(model.project, 'Records')
+    const refuse = (why) => { console.error(`dctr-project: board refused, nothing written: ${why}`); process.exit(1) }
+    if (!records || records === 'none') refuse(`Records is ${records || 'absent or empty'}`)
+    let rows
+    try { rows = boardRows(model, readRel) } catch (e) { refuse(e.message) }
+    const out = path.resolve(root, records, 'board.md')
+    try { fs.writeFileSync(out, boardText(rows)) } catch (e) { console.error(`dctr-project: cannot write ${out} (${e.code || e.message})`); process.exit(1) }
+    console.log(`wrote ${out}: ${rows.length} phase row(s)`)
+    process.exit(0)
   }
   const lines = statusLines(model, {
     records: () => readRecords(root, val(model.project, 'Records'), memberRecords(model)),
