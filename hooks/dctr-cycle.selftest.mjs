@@ -987,6 +987,8 @@ const RESETS = [
   ['Nov 12, 7pm on Nov 9', "You've hit your weekly limit · resets Nov 12, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-12T10:00:00Z'],
   ['12pm UTC at 13:00 UTC', "You've hit your session limit · resets 12pm (UTC)", '2026-11-09T13:00:00Z', '2026-11-10T12:00:00Z'],
   ['an unparseable time', "You've hit your session limit · resets whenever it likes", '2026-11-09T04:00:00Z', 'unknown'],
+  ['1pm at exactly 13:00 KST', "You've hit your session limit · resets 1pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-10T04:00:00Z'],
+  ['Jan 2, 7pm on Nov 9', "You've hit your weekly limit · resets Jan 2, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2027-01-02T10:00:00Z'],
 ]
 const resetBad = RESETS.filter(([label, text, now, want], i) => {
   const f = fixture(`limit-reset-${i}`)
@@ -994,7 +996,7 @@ const resetBad = RESETS.filter(([label, text, now, want], i) => {
   const l = limitsOf(f)
   return l.length !== 1 || l[0] !== `${new Date(Date.parse(now)).toISOString()} a account ${want}`
 }).map(([label]) => label)
-clause('clause 2y4 — an account line carries the reset time as ISO UTC: the first occurrence of the stated time in its zone strictly after the StopFailure, a dated text in its year, unknown for a time that does not parse (E15-D228)',
+clause('clause 2y4 — an account line carries the reset time as ISO UTC: the first occurrence of the stated time in its zone strictly after the StopFailure (the same instant moves a day on), a dated text in the year that puts it after, unknown for a time that does not parse (E15-D228)',
   resetBad.length === 0, JSON.stringify(resetBad))
 const resetFiles = spawnSync('find', [path.join(tmp, 'fx'), '-name', 'reset.txt'], { encoding: 'utf8' })
 clause('clause 2y5 — no StopFailure above writes a reset.txt anywhere under the fixtures (E15-D229)',
