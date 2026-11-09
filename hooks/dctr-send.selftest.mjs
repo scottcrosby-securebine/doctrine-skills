@@ -747,13 +747,14 @@ clause('clause 2x3 — wake-all under env -i with PATH and HOME alone: every cal
 const skips = wakeFx({ x: { noAgent: true }, y: { status: 'working' } }, { limits: [`${L(1)} x account 2026-11-09T12:00:00Z`, `${L(2)} y account 2026-11-09T12:00:00Z`] })
 const rSkips = await wakeAll(skips)
 const skipsGets1 = shimLog(skips).filter((e) => e.argv[1] === 'get' && e.argv[2] === skips.pane.x).length
+const skipsAllGets1 = shimLog(skips).filter((e) => e.argv[1] === 'get').length
 const rSkips2 = await wakeAll(skips)
 clause('clause 2x4 — a selected pane with no agent and one busy throughout: no typing call to either (E15-D113)',
   typed(skips).length === 0 && rSkips.code === 1, wshow(skips, rSkips))
 clause('clause 2x5 — the first pass writes exactly skip x <L> no-agent and retry y <L> working, each naming the limit line\'s time, before any retry (E15-D239)',
   JSON.stringify(evWords(skips).slice(0, 2)) === JSON.stringify([`skip x ${L(1)} no-agent`, `retry y ${L(2)} working`]) && evWords(skips).slice(2).every((w) => / y /.test(` ${w} `)), wshow(skips, rSkips))
 clause('clause 2x5b — a later run reads no pane a no-agent skip line settles, nor one an unwoken line settles (XS-33, XS-35)',
-  skipsGets1 === 1 && shimLog(skips).filter((e) => e.argv[1] === 'get').length === shimLog(skips).filter((e) => e.argv[1] === 'get').length && rSkips2.words.length === 0 &&
+  skipsGets1 === 1 && shimLog(skips).filter((e) => e.argv[1] === 'get').length === skipsAllGets1 && rSkips2.words.length === 0 &&
   shimLog(skips).filter((e) => e.argv[1] === 'get' && e.argv[2] === skips.pane.x).length === 1, wshow(skips, rSkips2))
 const blankSession = wakeFx({ z: { session: '' }, n: { noAgent: 'null' } }, { limits: [`${L(1)} z account 2026-11-09T12:00:00Z`, `${L(2)} n account 2026-11-09T12:00:00Z`] })
 const rBlank = await wakeAll(blankSession)

@@ -517,6 +517,18 @@ clause('clause 2aq — a start whose watcher never takes the lock exits 1 with o
   rNoNode.code === 1 && rNoNode.err.split('\n').length === 1 && /no watcher took/.test(rNoNode.err) && shimLog(noNode).at(-1)?.argv.join(' ') === 'tab close w5:t5' &&
   noNodeLeft.length === 0 && !/ create orchestrator /.test(fs.readFileSync(path.join(noNode.run, 'lane.log'), 'utf8')), JSON.stringify([rNoNode, noNodeLeft]))
 
+// WB24: stop returns only once the watcher it signalled has released the lock, here a holder slow to exit.
+const slowExit = fixture({})
+const slowLock = path.join(slowExit.run, 'lanewatch.lock')
+const slowHolder = spawn(process.execPath, ['-e', `const fs = require('fs'); fs.mkdirSync(${JSON.stringify(slowLock)}); fs.writeFileSync(${JSON.stringify(path.join(slowLock, 'pid'))}, String(process.pid))
+process.on('SIGTERM', () => setTimeout(() => { fs.rmSync(${JSON.stringify(slowLock)}, { recursive: true }); process.exit(0) }, 1500)); setInterval(() => {}, 1000)`], { stdio: 'ignore' })
+for (let t = 0; t < 100 && !fs.existsSync(path.join(slowLock, 'pid')); t++) sleep(50)
+const rSlow = await proc(['stop'], { DCTR_RUN: slowExit.run, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: slowExit.dir })
+const slowGone = !fs.existsSync(slowLock)
+slowHolder.kill('SIGKILL')
+clause('clause 2ar — stop on a watcher that takes 1.5 s to exit after its signal returns 0 only once the lock is gone (WB24)',
+  rSlow.code === 0 && slowGone, JSON.stringify([rSlow, slowGone]))
+
 // WB17, WB18, WB19: a restart keys what it restores as the in-process sets do (the reviewer's three probes).
 {
   const dl = fixture({ wv: {} }), dl2 = fixture({ wv: {} })
@@ -604,8 +616,10 @@ for (;;) {
     for (let i = 0; i < N; i++) Atomics.store(phase, i, 2)
     const workers = live.slice(0, N).map((p, id) => new Worker(workerFile, { workerData: { sab, id, n: N, statePath: STATE, box, pid: p.pid } }))
     await new Promise((r) => setTimeout(r, 500))
-    const settle = (id) => { while (Atomics.load(phase, id) === 0) Atomics.wait(phase, id, 0, 50) }
-    const finished = (id) => { while (Atomics.load(phase, id) !== 2) { if (Atomics.load(phase, id) === 1) { Atomics.store(turn, id, 1); Atomics.notify(turn, id) } Atomics.wait(phase, id, Atomics.load(phase, id), 20) } }
+    // A contender that neither reaches its next step nor finishes within 30 s has died: the clause fails, never hangs.
+    const stalled = (t0) => { if (Date.now() - t0 > 30000) throw new Error('a contender stalled in the interleaving clause') }
+    const settle = (id) => { const t0 = Date.now(); while (Atomics.load(phase, id) === 0) { stalled(t0); Atomics.wait(phase, id, 0, 50) } }
+    const finished = (id) => { const t0 = Date.now(); while (Atomics.load(phase, id) !== 2) { stalled(t0); if (Atomics.load(phase, id) === 1) { Atomics.store(turn, id, 1); Atomics.notify(turn, id) } Atomics.wait(phase, id, Atomics.load(phase, id), 20) } }
     const visited = new Map()
     const bad = []
     const replay = (prefix) => {

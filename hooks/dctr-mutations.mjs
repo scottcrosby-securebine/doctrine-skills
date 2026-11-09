@@ -4806,7 +4806,7 @@ const MUTATIONS = [
     from: "      const key = `${w.index} ${w.word}`",
     to: "      const key = `${w.at} ${w.word}`" },
   { name: "stop does not wait for the watcher to release (WB24) (R2-WB24)", file: "dctr-lanewatch.mjs",
-    clause: "clause 2t — a second watcher and a second start on the…",
+    clause: "clause 2ar — stop on a watcher that takes 1.5 s to exit afte…",
     from: "    if (now !== undefined && !(now && now.pid === h.pid && now.ns === h.ns)) break",
     to: "    break" },
   { name: "a dead holder's lock is never broken (WB22) (R2-WB22)", file: "dctr-state.mjs",
