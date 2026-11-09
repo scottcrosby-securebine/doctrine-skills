@@ -391,12 +391,14 @@ export const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b &&
 /** This process as a holder, in the shape lockHolder reads back. */
 const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
 
-/** The locks this process holds, which renewHeldLocks keeps fresh. acquireLock adds, releaseLock removes. */
+/** The locks this process holds, which renewHeldLocks keeps fresh. acquireLock and acquireRunLock add; releaseLock,
+ *  releaseRunLock and ownsRunLock (on a lock no longer ours) remove. */
 const heldLocks = new Set()
 
-/** Renew every lock this process holds: set its mtime to now. A holder that cannot be judged by its
- *  pid (another namespace, or none published) is broken on AGE, past the pid-less window, so a live
- *  one must never age that far. herdr() calls this before every call, and a herdr call is the only
+/** Renew every lock this process holds: set its mtime to now. A directory lock whose holder cannot be
+ *  judged by its pid (another namespace, or none published) is broken on AGE, past the pid-less window,
+ *  so a live one must never age that far; a run lock is never broken on age, and its renewal only feeds
+ *  stop's freshness test. herdr() calls this before every call, and a herdr call is the only
  *  wait in any lock section that can approach the window. A holder that dies stops renewing, and its
  *  lock ages out as before. The renewal does not re-check that the lock is still ours: one stolen from
  *  us is renewed at most until our own section ends, which is already the stolen-lock residual
