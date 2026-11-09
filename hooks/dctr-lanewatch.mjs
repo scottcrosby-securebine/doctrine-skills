@@ -34,7 +34,8 @@
 // written after that notification, and one for each unwoken, unfinished or skip line naming the orchestrator; each
 // inside a catch that never sends again, and writes `notified <time> <word>` for each stall it notified. What it has
 // reported survives a restart through events.log: a report, a limit line, an account episode's notification and a
-// stall's notification already there are not raised again.
+// stall's notification already there are not raised again, nor is an exit, pause, deadline, ready or context event
+// whose state still holds; one whose state cleared and returned is raised again.
 
 import fs from 'node:fs'
 import os from 'node:os'
