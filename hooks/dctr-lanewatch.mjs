@@ -262,6 +262,7 @@ function start(run) {
   let tab = null
   const undo = (m) => { if (tab) { try { herdr(['tab', 'close', tab]) } catch { /* gone already */ } } fail(m) }
   let made
+  // herdr-lint: a command, not a read; no tab is known yet, so its failure closes nothing and only refuses
   try { made = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout))?.result } catch (e) { undo(`the watcher's tab was not made: ${why(e)}`) }
   tab = made?.tab?.tab_id ?? null
   const watcher = made?.root_pane?.pane_id
