@@ -935,6 +935,30 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
     JSON.stringify(row(tryRows(UNREAD).rows ?? [], 'lane-b')) === JSON.stringify({ phase: 'lane-b', record: `${REC}/lane-b.md`, state: 'unknown', round: 'unknown' }), JSON.stringify(tryRows(UNREAD)))
   clause('board B3 [3: that fixture names lane-b\'s record and does not hold it]', UNREAD[EPIC].includes(`${REC}/lane-b.md`) && !Object.hasOwn(UNREAD, `${REC}/lane-b.md`), 'fixture')
 
+  // A roster whose FIRST epic is not the current one, with phases of its own, and a current epic whose
+  // Members order is not alphabetical: one record with a state line and no round line, one the reverse.
+  const MULTI = {
+    [P]: BP.replace('| E5 | Lanes | docs/epics/E5.md |', '| E4 | Other | docs/epics/E4.md |\n| E5 | Lanes | docs/epics/E5.md |'),
+    'docs/epics/E4.md': `# Epic E4: Other\nState: Open\n\n## Members\n- phase other-x: ${REC}/other-x.md\n`,
+    [EPIC]: `# Epic E5: Lanes\nState: Open\n\n## Members\n- phase lane-z: ${REC}/lane-z.md\n- phase lane-y: ${REC}/lane-y.md\n`,
+    [`${REC}/other-x.md`]: '# x\nstate: Open\n',
+    [`${REC}/lane-z.md`]: '# z\nstate: Open\n',
+    [`${REC}/lane-y.md`]: '# y\nround: 3 closed 2026-11-09T03:00:00Z at ccc333 blockers 0 alarm 0\n',
+  }
+  const mrows = tryRows(MULTI).rows ?? []
+  clause('board B2 [1: only the current epic\'s phases get rows, though another epic with phases is first on the roster]',
+    mrows.length === 2 && !row(mrows, 'other-x'), JSON.stringify(tryRows(MULTI)))
+  clause('board B2 [1: rows keep Members order where that order is not alphabetical]',
+    JSON.stringify(mrows.map((r) => r.phase)) === '["lane-z","lane-y"]', JSON.stringify(mrows))
+  clause('board B3 [1: a record with a state line and no round line carries the state word and none in last round]',
+    JSON.stringify(row(mrows, 'lane-z')) === JSON.stringify({ phase: 'lane-z', record: `${REC}/lane-z.md`, state: 'Open', round: 'none' }), JSON.stringify(row(mrows, 'lane-z')))
+  clause('board B3 [1: a record with a round line and no state line carries none in state and r<n> at <revision> in last round]',
+    JSON.stringify(row(mrows, 'lane-y')) === JSON.stringify({ phase: 'lane-y', record: `${REC}/lane-y.md`, state: 'none', round: 'r3 at ccc333' }), JSON.stringify(row(mrows, 'lane-y')))
+  clause('board B2/B3 [3: the roster lists E4, with its own phase, before the current E5; E5\'s Members order is not sorted; lane-z has a state and no round line, lane-y the reverse]',
+    /^\| E4 [^\n]*\n\| E5 /m.test(MULTI[P]) && /^Current epic: E5$/m.test(MULTI[P]) && /^- phase other-x/m.test(MULTI['docs/epics/E4.md']) &&
+    ['lane-z', 'lane-y'].join() !== ['lane-z', 'lane-y'].sort().join() && /^- phase lane-z[^\n]*\n- phase lane-y/m.test(MULTI[EPIC]) &&
+    /state:/.test(MULTI[`${REC}/lane-z.md`]) && !/round:/.test(MULTI[`${REC}/lane-z.md`]) && /^round: 3 /m.test(MULTI[`${REC}/lane-y.md`]) && !/state:/i.test(MULTI[`${REC}/lane-y.md`]), 'fixture')
+
   const refusals = [
     ['Current epic: none', mutate([[P, 'Current epic: E5', 'Current epic: none']], BOARD), 'no current epic', (f) => /^Current epic: none$/m.test(f[P])],
     ['no Current epic line', mutate([[P, 'Current epic: E5\n', '']], BOARD), 'no current epic', (f) => !/^Current epic:/m.test(f[P])],
@@ -1017,6 +1041,28 @@ clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look"
   clause('board B1 — malformed arguments exit 2 with the usage line naming board: two roots, a flag, and no PROJECT.md',
     cli('board', bt, bt).status === 2 && cli('board', '--x').status === 2 && cli('board', '--x').stderr.includes('check|status|board') && cli('board', empty).status === 2, 'status')
   clause('board B1 — every board run above called the tripwire herdr ZERO times', !fs.existsSync(trip('herdr')), 'herdr was called')
+  const noEpic = path.join(tmp, 'board-no-epic')
+  const rExact = cli('board', noEpic)
+  clause('board B2 refusal — CLI [1: the refusal prints exactly the one refused line on stderr, never a stack trace]',
+    rExact.stderr === 'dctr-project: board refused, nothing written: no current epic: Current epic is none\n', JSON.stringify(rExact.stderr))
+  // D16's own command shape: no positional root, run from inside the repo.
+  const cwdTree = path.join(tmp, 'board-cwd'); writeTree(cwdTree, BOARD)
+  const cwdBefore = boards(cwdTree).length
+  const rCwd = spawnSync('node', [script, 'board'], { env, cwd: cwdTree, encoding: 'utf8' })
+  clause('board E15-D16 [1: board with no root argument, run from the repo, exits 0 and writes the rows under that repo\'s Records]',
+    rCwd.status === 0 && /^\| lane-a \|/m.test(read(path.join(cwdTree, REC, 'board.md'))) && /^\| lane-b \|/m.test(read(path.join(cwdTree, REC, 'board.md'))), `status ${rCwd.status}: ${rCwd.stderr}`)
+  clause('board E15-D16 [3: that run passed no root, and its cwd holds the project file and no board yet before it]',
+    fs.existsSync(path.join(cwdTree, P)) && cwdBefore === 0, 'fixture')
+  // Inside herdr: an env where status's seat reader does call herdr, so a board that called it would trip.
+  const hEnv = { ...env, HERDR_ENV: '1', HERDR_PANE_ID: 'p1', HERDR_WORKSPACE_ID: 'w1', DCTR_VIEW_REQUEST_DIR: '' }
+  const hTree = path.join(tmp, 'board-herdr'); writeTree(hTree, BOARD)
+  spawnSync('node', [script, 'status', hTree], { env: hEnv, encoding: 'utf8' })
+  const statusCalled = fs.existsSync(trip('herdr'))
+  fs.rmSync(trip('herdr'), { force: true })
+  clause('board B1 [3: in the herdr env, status really calls the tripwire herdr, so the env is one where a seat read would trip]', statusCalled, 'status did not call herdr')
+  const rH = spawnSync('node', [script, 'board', hTree], { env: hEnv, encoding: 'utf8' })
+  clause('board B1 [1: inside herdr (HERDR_ENV=1, pane and workspace set, not contained) board exits 0 and calls the tripwire herdr ZERO times]',
+    rH.status === 0 && !fs.existsSync(trip('herdr')), `status ${rH.status}: ${rH.stderr} herdr called: ${fs.existsSync(trip('herdr'))}`)
 }
 
 // ---------------------------------------------------------------- readCodex: unknown whenever anything could not be read

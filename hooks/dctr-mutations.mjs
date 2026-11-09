@@ -1120,6 +1120,20 @@ const MUTATIONS = [
     from: "path.resolve(root, records, 'board.md')", to: "path.resolve(root, 'board.md')" },
   { name: 'board: the board subcommand is not dispatched', file: 'dctr-project.mjs', clause: 'board E15-D16 [2: board exits 0 and writes board.md under Records with one row naming each - phase member]',
     from: "['check', 'status', 'board'].includes(cmd)", to: "['check', 'status'].includes(cmd)" },
+  // Round-1 repair of e15-board (BR1 to BR5 and the refusal line): each a simpler wrong board the earlier fixtures passed.
+  { name: 'board: the roster\'s first epic is rendered, not the current one (BR1)', file: 'dctr-project.mjs', clause: 'board B2 [1: only the current epic\'s phases get rows, though another epic with phases is first on the roster]',
+    from: "const epic = resolveRoster(model).get(id)", to: "const epic = resolveRoster(model).get(id) && [...resolveRoster(model).values()][0]" },
+  { name: 'board: a board run reads herdr seats (BR2)', file: 'dctr-project.mjs', clause: 'board B1 [1: inside herdr (HERDR_ENV=1, pane and workspace set, not contained) board exits 0 and calls the tripwire herdr ZERO times]',
+    from: "    const out = path.resolve(root, records, 'board.md')", to: "    try { readSeats(root) } catch {}\n    const out = path.resolve(root, records, 'board.md')" },
+  { name: 'board: state and last round are none together whenever either is (BR3)', file: 'dctr-project.mjs', clause: 'board B3 [1: a record with a state line and no round line carries the state word and none in last round]',
+    from: "return { phase: m.name, record: m.record, state: state?.value.split(/\\s+/)[0].replace(/\\.$/, '') || 'none', round: r ? `r${r.n} at ${r.revision}` : 'none' }",
+    to: "const o = { phase: m.name, record: m.record, state: state?.value.split(/\\s+/)[0].replace(/\\.$/, '') || 'none', round: r ? `r${r.n} at ${r.revision}` : 'none' }; if (o.state === 'none' || o.round === 'none') o.state = o.round = 'none'; return o" },
+  { name: 'board: board with no root argument is refused (BR4)', file: 'dctr-project.mjs', clause: 'board E15-D16 [1: board with no root argument, run from the repo, exits 0 and writes the rows under that repo\'s Records]',
+    from: "  if (cmd === 'board') {", to: "  if (cmd === 'board' && !rest.length) process.exit(2)\n  if (cmd === 'board') {" },
+  { name: 'board: rows are sorted by phase name, not kept in Members order (BR5)', file: 'dctr-project.mjs', clause: 'board B2 [1: rows keep Members order where that order is not alphabetical]',
+    from: "  return epic.doc.phases.map((m) => {", to: "  return [...epic.doc.phases].sort((a, b) => (a.name < b.name ? -1 : 1)).map((m) => {" },
+  { name: 'board: a boardRows refusal escapes the CLI as a stack trace', file: 'dctr-project.mjs', clause: 'board B2 refusal — CLI [1: the refusal prints exactly the one refused line on stderr, never a stack trace]',
+    from: "try { rows = boardRows(model, readRel) } catch (e) { refuse(e.message) }", to: "rows = boardRows(model, readRel)" },
 
   // Repair of 2026-09-13: a suite that never ran was read as a suite that noticed nothing.
   { name: 'a suite that could not be run is read as one that stayed green', file: 'dctr-lib.mjs',
