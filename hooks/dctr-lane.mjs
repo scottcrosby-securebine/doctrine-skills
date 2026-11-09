@@ -6,8 +6,10 @@
 //   node hooks/dctr-lane.mjs remove <role>
 //
 // Four subcommands and no others. Each runs only where runRole() is `orchestrator`, reads the run from runRoot(),
-// and refuses, exiting 1 and making nothing, on anything it cannot do; the one exception is a create that fails after
-// its worktree is made, which leaves that worktree, writes no lane.log line, and names what it made. On success each
+// and refuses, exiting 1 and making nothing, on anything it checks before it writes. A failure after it writes exits 1
+// and writes no lane.log line, but leaves what it made: a create, its worktree, which it names; a reset, its side
+// branch, which it names, with HEAD already at the revision when only the memory file's restore failed; an archive,
+// the copies it made and any epic it repointed before an epic write failed. On success each
 // appends one line to `<run>/lane.log`: `<ISO time> <caller tag> <subcommand> <args>`, the caller tag being
 // DCTR_CALLER or else the role.
 //
