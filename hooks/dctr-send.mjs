@@ -43,7 +43,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { herdr } from './dctr-state.mjs'
 import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takePidLock, releasePidLock } from './dctr-state.mjs'
-import { laneOf, laneRoles, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
+import { laneOf, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
 
 const WAKE_GIVE_UP_MS = 10000
 const POLL_MS = 250
@@ -236,12 +236,14 @@ function wakeAll() {
   }
   const settled = (role, limit) => events().some((e) => e.role === role && e.limit === limit &&
     (['woken', 'unfinished', 'unwoken'].includes(e.word) || (e.word === 'skip' && e.rest === 'no-agent')))
-  const laneText = readText(path.join(run, 'lane.log')), limits = parseLimits(readText(path.join(run, 'limits.log')))
+  // The candidates are the roles limits.log names; a role is selected only where laneOf finds its create line.
+  const limits = parseLimits(readText(path.join(run, 'limits.log')))
   let pending = []
-  for (const role of laneRoles(laneText)) {
+  for (const role of [...new Set(limits.map((l) => l.role))]) {
     const latest = limits.filter((l) => l.role === role).at(-1)
-    const lane = laneOf(laneText, role)
-    if (latest?.kind === 'account' && lane && !settled(role, latest.time)) pending.push({ role, limit: latest.time, lane })
+    if (latest.kind !== 'account' || settled(role, latest.time)) continue
+    const lane = laneOf(readText(path.join(run, 'lane.log')), role)
+    if (lane) pending.push({ role, limit: latest.time, lane })
   }
   const firstRetry = new Map()
   while (pending.length) {

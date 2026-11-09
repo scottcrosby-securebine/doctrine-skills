@@ -473,7 +473,7 @@ export function releaseLock(lock) {
 
 /** True only for a pid that reads back as a number and is running. EPERM means running under
  *  another user, which is still running. */
-function pidAlive(raw) {
+export function pidAlive(raw) {
   if (raw === null) return false
   const pid = Number(raw)
   if (!Number.isInteger(pid) || pid <= 0) return false
@@ -481,15 +481,23 @@ function pidAlive(raw) {
 }
 
 /** Take the single-instance lock `file`, a file holding this process's pid (wake-all.lock, lanewatch.lock): true when
- *  taken, false while a live pid holds it. A lock whose pid has exited is replaced; one that cannot be read or holds no
- *  pid counts as held, so a torn lock never lets two in. */
+ *  taken, false while a live pid holds it. A lock whose pid has exited is replaced, identity-safe as breakStaleLock is:
+ *  it is renamed aside, and what moved must still be the dead holder that was read, else it is put straight back, so a
+ *  contender that read a dead pid never removes a live holder that replaced it meanwhile. One that cannot be read or
+ *  holds no pid counts as held, so a torn lock never lets two in. Residual, as breakStaleLock's: a put-back that loses
+ *  the name to a third contender drops the moved lock. */
 export function takePidLock(file) {
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     try { fs.writeFileSync(file, String(process.pid), { flag: 'wx' }); return true } catch (e) { if (e.code !== 'EEXIST') throw e }
     let raw
     try { raw = fs.readFileSync(file, 'utf8').trim() } catch (e) { if (e.code === 'ENOENT') continue; return false }
     if (!/^\d+$/.test(raw) || pidAlive(raw)) return false
-    fs.rmSync(file, { force: true })
+    const aside = `${file}.dead.${process.pid}.${Date.now()}`
+    try { fs.renameSync(file, aside) } catch { continue }
+    let moved = null
+    try { moved = fs.readFileSync(aside, 'utf8').trim() } catch { /* could not look: put it back */ }
+    if (moved !== raw) { try { fs.renameSync(aside, file) } catch { /* the name was retaken */ } return false }
+    fs.rmSync(aside, { force: true })
   }
   return false
 }

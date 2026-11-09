@@ -1327,6 +1327,9 @@ export function laneOf(laneLogText, role) {
   return found
 }
 
+/** Why `p` cannot stand in a lane.log line, whose args are split on spaces, or null: it holds whitespace. */
+export const laneLogPathRefusal = (p) => (/\s/.test(p) ? `the worktree path ${JSON.stringify(p)} holds whitespace, which a lane.log line cannot carry` : null)
+
 /** The roles lane.log's `create` lines name, in first-seen order: names only, since a role's pane and worktree come
  *  from `laneOf` alone (E15-D214). */
 export function laneRoles(laneLogText) {
@@ -1356,12 +1359,14 @@ function wallClock(ms, zone) {
   return { y: parts.year, mo: parts.month, d: parts.day, h: parts.hour, mi: parts.minute }
 }
 
-/** The instant `zone`'s wall clock reads y-mo-d h:mi, the zone's offset read at that instant. */
-function zonedInstant(y, mo, d, h, mi, zone) {
+/** Every instant `zone`'s wall clock reads y-mo-d h:mi (a day past the month's end rolls over), earliest first: two in
+ *  a fall-back hour, one otherwise, and for a time a spring-forward gap skips, the instant its later offset gives. */
+function zonedInstants(y, mo, d, h, mi, zone) {
   const wall = Date.UTC(y, mo - 1, d, h, mi)
-  let at = wall
-  for (let i = 0; i < 2; i++) { const w = wallClock(at, zone); at = wall - (Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - at) }
-  return at
+  const offset = (ms) => { const w = wallClock(ms, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / 60000) * 60000 }
+  const tries = [...new Set([wall - offset(wall - 43200000), wall - offset(wall + 43200000)])].sort((a, b) => a - b)
+  const reads = tries.filter((at) => { const w = wallClock(at, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) === wall })
+  return reads.length ? reads : [tries.at(-1)]
 }
 
 /** An account limit's reset time as ISO 8601 UTC (E15-D228): the stated clock time's first occurrence in its zone
@@ -1374,20 +1379,22 @@ export function resetTime(message, nowMs) {
   const [, mon, day, hh, mm = '0', ap, zone] = m
   const h = (Number(hh) % 12) + (ap.toLowerCase() === 'pm' ? 12 : 0), mi = Number(mm)
   if (Number(hh) < 1 || Number(hh) > 12 || mi > 59) return 'unknown'
-  let at
+  let candidates
   try {
     const now = wallClock(nowMs, zone)
     if (mon) {
       const mo = MONTHS.indexOf(mon.toLowerCase()) + 1
-      if (mo === 0) return 'unknown'
-      at = zonedInstant(now.y, mo, Number(day), h, mi, zone)
-      if (at <= nowMs) at = zonedInstant(now.y + 1, mo, Number(day), h, mi, zone)
+      // A date no year holds (Feb 31) is no date, never the day it rolls over to.
+      const holds = (y) => new Date(Date.UTC(y, mo - 1, Number(day))).getUTCDate() === Number(day)
+      if (mo === 0 || !holds(2024)) return 'unknown'
+      // Feb 29 holds only in a leap year, so up to four years on.
+      candidates = [0, 1, 2, 3, 4].map((k) => now.y + k).filter(holds).flatMap((y) => zonedInstants(y, mo, Number(day), h, mi, zone))
     } else {
-      at = zonedInstant(now.y, now.mo, now.d, h, mi, zone)
-      if (at <= nowMs) at = zonedInstant(now.y, now.mo, now.d + 1, h, mi, zone)
+      candidates = [...zonedInstants(now.y, now.mo, now.d, h, mi, zone), ...zonedInstants(now.y, now.mo, now.d + 1, h, mi, zone)]
     }
   } catch { return 'unknown' }
-  return new Date(at).toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const at = candidates.find((c) => c > nowMs)
+  return at === undefined ? 'unknown' : new Date(at).toISOString().replace(/\.\d{3}Z$/, 'Z')
 }
 
 /** The limits.log line a StopFailure appends (E15-D114, D228, D237): `<ISO ms> <role> <kind> <field>`, the field the
@@ -1402,9 +1409,7 @@ export function limitLine({ nowMs, role, message, error }) {
 export const parseLimits = (text) => String(text ?? '').split('\n').map((l) => /^(\S+Z) (\S+) (account|model|other) (\S+)$/.exec(l))
   .filter(Boolean).map(([, time, role, kind, field]) => ({ time, role, kind, field }))
 
-/** The words wake-all writes to events.log, each line `<ISO time> <word> <role> <limit line's time>[ <rest>]`. */
-export const WAKE_WORDS = ['intent', 'woken', 'retry', 'skip', 'unfinished', 'unwoken']
-/** events.log's wake-all lines, in order, as `{ at, word, role, limit, rest, index }`; every other line is skipped. */
+/** events.log's wake-all lines, each `<ISO time> <word> <role> <limit line's time>[ <rest>]`, in order, as `{ at, word, role, limit, rest, index }`; every other line is skipped. */
 export const parseWakeLines = (text) => String(text ?? '').split('\n').map((l, index) => {
   const m = /^(\S+Z) (intent|woken|retry|skip|unfinished|unwoken) (\S+) (\S+)(?: (.*))?$/.exec(l)
   return m && { at: m[1], word: m[2], role: m[3], limit: m[4], rest: m[5] ?? '', index }

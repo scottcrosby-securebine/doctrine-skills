@@ -989,6 +989,8 @@ const RESETS = [
   ['an unparseable time', "You've hit your session limit · resets whenever it likes", '2026-11-09T04:00:00Z', 'unknown'],
   ['1pm at exactly 13:00 KST', "You've hit your session limit · resets 1pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-10T04:00:00Z'],
   ['Jan 2, 7pm on Nov 9', "You've hit your weekly limit · resets Jan 2, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2027-01-02T10:00:00Z'],
+  ['1:30am New York in the fall-back hour, its second occurrence', "You've hit your session limit · resets 1:30am (America/New_York)", '2026-11-01T06:15:00Z', '2026-11-01T06:30:00Z'],
+  ['Feb 31, a date no year holds', "You've hit your weekly limit · resets Feb 31, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', 'unknown'],
 ]
 const resetBad = RESETS.filter(([label, text, now, want], i) => {
   const f = fixture(`limit-reset-${i}`)
@@ -1001,6 +1003,29 @@ clause('clause 2y4 — an account line carries the reset time as ISO UTC: the fi
 const resetFiles = spawnSync('find', [path.join(tmp, 'fx'), '-name', 'reset.txt'], { encoding: 'utf8' })
 clause('clause 2y5 — no StopFailure above writes a reset.txt anywhere under the fixtures (E15-D229)',
   resetFiles.status === 0 && resetFiles.stdout === '', JSON.stringify([resetFiles.status, resetFiles.stdout]))
+// The order and the reach of the limit line: it is in limits.log at the moment the R9 line is appended, and it is
+// written with auto-cycle off and with no kickoff chain at all; a run with no role writes none (E15 Recovery).
+const ORDER = path.join(tmp, 'order-probe.mjs'), orderLog = path.join(tmp, 'order.log')
+fs.writeFileSync(ORDER, [
+  "import fs from 'node:fs'",
+  'const orig = fs.appendFileSync, NL = String.fromCharCode(10)',
+  'fs.appendFileSync = function (p, data, ...rest) {',
+  "  if (String(p).endsWith('.md') && String(data).includes('auto-cycle paused:')) { let n = 0; try { n = fs.readFileSync(process.env.DCTR_RUN + '/limits.log', 'utf8').split(NL).filter(Boolean).length } catch {} ; orig.call(fs, process.env.ORDER_LOG, 'limits=' + n + NL) }",
+  '  return orig.call(fs, p, data, ...rest)',
+  '}', ''].join('\n'))
+const orderFx = fixture('limit-order')
+run(orderFx, failure(LIMIT_TEXTS.session), { ...laneEnv(orderFx), NODE_OPTIONS: `--import=${ORDER}`, ORDER_LOG: orderLog })
+const offFx = fixture('limit-off', { lines: ['- auto-cycle: off'] })
+run(offFx, failure(LIMIT_TEXTS.session), laneEnv(offFx))
+const chainless = fixture('limit-chainless'); fs.rmSync(path.join(chainless.proj, 'SESSION_MEMORY.md'))
+run(chainless, failure(LIMIT_TEXTS.session), laneEnv(chainless))
+clause('clause 2y7 — the limits.log line is already written when the R9 paused line is appended, and it is written with auto-cycle off and with no kickoff chain, where no paused line is (E15 Recovery, D114)',
+  fs.existsSync(orderLog) && fs.readFileSync(orderLog, 'utf8') === 'limits=1\n' && paused(orderFx).length === 1 &&
+  limitsOf(offFx).length === 1 && paused(offFx).length === 0 && limitsOf(chainless).length === 1, JSON.stringify([fs.existsSync(orderLog) && fs.readFileSync(orderLog, 'utf8'), limitsOf(offFx), limitsOf(chainless)]))
+const roleless = fixture('limit-roleless')
+run(roleless, failure(LIMIT_TEXTS.session), { DCTR_RUN: limitsRun(roleless), DCTR_NOW_MS: String(NOW) })
+clause('clause 2y8 — DCTR_RUN set and no DCTR_ROLE: no limits.log (P3)',
+  !fs.existsSync(path.join(limitsRun(roleless), 'limits.log')), JSON.stringify(limitsOf(roleless)))
 const noRunFx = fixture('limit-no-run')
 run(noRunFx, failure(LIMIT_TEXTS.session), { DCTR_NOW_MS: String(NOW) })
 const strayLimits = spawnSync('find', [tmp, '-name', 'limits.log', '-path', '*limit-no-run*'], { encoding: 'utf8' })

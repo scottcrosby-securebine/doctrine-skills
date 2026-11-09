@@ -9,8 +9,11 @@
 // `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own
 // environment, writes its TMPDIR to <run>/tmpdir, which wake-all reads, then makes a tab and runs
 // `env DCTR_CALLER=watcher DCTR_RUN=<run> PATH=<path> TMPDIR=<tmp> node <this file>` in its pane, since a pane does not
-// inherit the environment. The watcher holds <run>/lanewatch.lock with its pid, so a second one, and a second start,
-// refuse while it runs. Contained (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
+// inherit the environment. start refuses a checkout whose path holds whitespace, which a lane.log line cannot carry,
+// and takes <run>/lanewatch.lock with its own pid before it writes anything; the watcher its pane runs takes the lock
+// over from that pid (DCTR_WATCH_FROM), so a second watcher, and a second start, refuse while either holds it. The
+// watcher renews the lock's time at every poll, and stop signals the pid only while that renewal is recent. Contained
+// (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
 //
 // Each poll, every POLL_MS, appends one events.log line per new fact, `<ISO time> <word> ...`:
 //   report <file>                a new file in <run>/inbox/
@@ -29,18 +32,19 @@
 // A pane read that fails or comes back empty is unknown: no exit event, and the watcher types nothing ever. It shows a
 // notification for the first account line of an episode, and none for later ones until events.log holds a woken line
 // written after that notification, and one for each unwoken, unfinished or skip line naming the orchestrator; each
-// inside a catch that never sends again. What it has reported survives a restart through events.log: a report or
-// limit event already there is not raised again.
+// inside a catch that never sends again, and writes `notified <time> <word>` for each stall it notified. What it has
+// reported survives a restart through events.log: a report, a limit line, an account episode's notification and a
+// stall's notification already there are not raised again.
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { herdr } from './dctr-state.mjs'
-import { restoreFile, stateDir, takePidLock, releasePidLock } from './dctr-state.mjs'
+import { restoreFile, stateDir, takePidLock, releasePidLock, pidAlive } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, pausingStates, resolveTier,
-  lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX,
+  lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -72,14 +76,19 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   const notify = (title) => { try { herdr(['notification', 'show', title, '--sound', 'request']) } catch { /* shown or not, never sent again */ } }
   const completeLines = () => { const t = readText(eventsFile) ?? ''; return t.split('\n').slice(0, -1) }
 
-  // What events.log already reports is never raised again, a restart included.
-  const seenReports = new Set(), seenLimits = new Set()
+  // What events.log already reports is never raised again, a restart included: limits.log only grows, so the count of
+  // limit events is how many of its lines are reported, whatever two lines share. The account episode is rebuilt too:
+  // its notification point is the first account limit event after the last woken line. A stall line is notified once,
+  // and a `notified <its time> <word>` line records that, so one written while no watcher ran still notifies.
+  const seenReports = new Set(), notifiedStalls = new Set()
+  let limitsSeen = 0, notifiedAt = null
   for (const l of completeLines()) {
     const w = l.split(' ')
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
-    if (w[1] === 'limit') seenLimits.add(`${w[2]} ${w[4]}`)
+    if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
+    if (w[1] === 'woken') notifiedAt = null
+    if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = Date.parse(w[0]) }
   }
-  let eventsRead = completeLines().length, notifiedAt = null
   const exited = new Set(), pauses = new Map(), grew = new Map(), late = new Set(), readySeen = new Map(), readyRaised = new Set()
   const past = new Map(), contextRaised = new Set(), staleRaised = new Set()
 
@@ -90,10 +99,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   }
 
   function limits() {
-    for (const l of parseLimits(readText(path.join(run, 'limits.log')))) {
-      const key = `${l.role} ${l.time}`
-      if (seenLimits.has(key)) continue
-      seenLimits.add(key)
+    for (const l of parseLimits(readText(path.join(run, 'limits.log'))).slice(limitsSeen)) {
+      limitsSeen += 1
       if (l.kind === 'model') { emit(`limit ${l.role} model ${l.time} /model`); continue }
       if (l.kind === 'other') { emit(`limit ${l.role} other ${l.time} error ${l.field}`); continue }
       emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${plugin}/hooks/dctr-send.mjs wake-all ${run}`)
@@ -103,11 +110,13 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   }
 
   function stalls() {
-    const lines = completeLines()
-    for (const w of parseWakeLines(lines.slice(eventsRead).join('\n'))) {
-      if (w.role === 'orchestrator' && ['unwoken', 'unfinished', 'skip'].includes(w.word)) notify(`${name} run: orchestrator ${w.word} by wake-all; the orchestrator is not running`)
+    for (const w of parseWakeLines(completeLines().join('\n'))) {
+      const key = `${w.at} ${w.word}`
+      if (w.role !== 'orchestrator' || !['unwoken', 'unfinished', 'skip'].includes(w.word) || notifiedStalls.has(key)) continue
+      notifiedStalls.add(key)
+      emit(`notified ${key}`)
+      notify(`${name} run: orchestrator ${w.word} by wake-all`)
     }
-    eventsRead = lines.length
   }
 
   /** The pane's session id, null for a pane with no agent session, undefined when the read failed or came back empty. */
@@ -149,8 +158,10 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       const due = Date.parse(w.deadline ?? '')
       const key = `${role} ${w.line}`
       if (!(due < Date.now()) || late.has(key)) continue
+      // Liveness comes only from a handle naming a readable file; an agent id or a missing file is unknown, never late.
       let size = null
-      try { size = fs.statSync(path.resolve(worktree, w.handle)).size } catch { /* no output file: nothing grows */ }
+      try { const st = fs.statSync(path.resolve(worktree, w.handle)); if (st.isFile()) size = st.size } catch { /* unknown */ }
+      if (size === null) { grew.delete(key); continue }
       const was = grew.has(key) ? grew.get(key) : undefined
       grew.set(key, size)
       if (was !== undefined && was === size) { late.add(key); emit(`deadline ${role} ${w.seat}`) }
@@ -192,6 +203,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   return {
     poll() {
+      try { const now = new Date(); fs.utimesSync(path.join(run, 'lanewatch.lock'), now, now) } catch { /* not this run's watcher */ }
       inbox()
       limits()
       stalls()
@@ -201,33 +213,53 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   }
 }
 
-/** `start`: the records, then the watcher's pane. */
+/** The watcher's loop: poll, then wait POLL_MS, for ever. `wait` is the timer, injectable for its selftest. */
+export async function watch(w, wait = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  for (;;) { w.poll(); await wait(POLL_MS) }
+}
+
+/** `start`: the lock, then the records, then the watcher's pane, whose watcher takes the lock over from this pid. */
 function start(run) {
-  const lock = path.join(run, 'lanewatch.lock')
-  const holder = readText(lock)?.trim()
-  if (holder && /^\d+$/.test(holder) && (() => { try { process.kill(Number(holder), 0); return true } catch (e) { return e.code === 'EPERM' } })()) fail(`a watcher already runs on ${run} (pid ${holder})`)
+  const checkout = repoOf(path.join(process.cwd(), '.git'), fs.existsSync)
+  if (laneLogPathRefusal(checkout)) fail(laneLogPathRefusal(checkout))
   const pane = process.env.HERDR_PANE_ID, workspace = process.env.HERDR_WORKSPACE_ID
   if (!pane || !workspace) fail('no HERDR_PANE_ID or HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
-  const checkout = repoOf(path.join(process.cwd(), '.git'), fs.existsSync)
-  const tmp = process.env.TMPDIR || os.tmpdir(), envPath = process.env.PATH ?? ''
   fs.mkdirSync(run, { recursive: true })
+  if (!takePidLock(path.join(run, 'lanewatch.lock'))) fail(`a watcher, or another start, already holds ${path.join(run, 'lanewatch.lock')}`)
+  const tmp = process.env.TMPDIR || os.tmpdir(), envPath = process.env.PATH ?? ''
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
   const launch = `cd ${shq(checkout)} && env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
     `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
     `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`
   fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} ${launch}\n`)
-  // A failed call throws and fails start, which closes nothing.
+  // A failed call throws and fails start, which closes nothing; the lock it leaves names a pid that has exited.
   const watcher = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout))?.result?.root_pane?.pane_id
   if (!watcher) fail('no pane was made for the watcher')
-  herdr(['pane', 'run', watcher, `env DCTR_CALLER=watcher DCTR_RUN=${shq(run)} PATH=${shq(envPath)} TMPDIR=${shq(tmp)} node ${shq(SELF)}`])
+  herdr(['pane', 'run', watcher, `env DCTR_CALLER=watcher DCTR_RUN=${shq(run)} DCTR_WATCH_FROM=${process.pid} PATH=${shq(envPath)} TMPDIR=${shq(tmp)} node ${shq(SELF)}`])
   process.stdout.write(`dctr-lanewatch: started in ${watcher}\n`)
 }
 
-/** `stop`: end the watcher that holds the lock. */
+/** The lock for the watcher itself: taken over from the start that made its pane, else taken as any other. */
+function takeOver(lock) {
+  const from = process.env.DCTR_WATCH_FROM
+  if (from && readText(lock)?.trim() === from) {
+    const mine = `${lock}.${process.pid}`
+    fs.writeFileSync(mine, String(process.pid))
+    fs.renameSync(mine, lock)
+    return readText(lock)?.trim() === String(process.pid)
+  }
+  return takePidLock(lock)
+}
+
+/** `stop`: end the watcher that holds the lock. A pid whose lock no poll has renewed lately is not the watcher, and is
+ *  never signalled: the lock is only removed. */
 function stop(run) {
   const lock = path.join(run, 'lanewatch.lock'), holder = readText(lock)?.trim()
   if (!holder || !/^\d+$/.test(holder)) fail(`no watcher holds ${lock}`)
-  try { process.kill(Number(holder), 'SIGTERM') } catch { /* already gone */ }
+  let fresh = false
+  try { fresh = Date.now() - fs.statSync(lock).mtimeMs < 3 * POLL_MS } catch { /* gone */ }
+  if (fresh && pidAlive(holder)) process.kill(Number(holder), 'SIGTERM')
+  else process.stdout.write(`dctr-lanewatch: pid ${holder} has not renewed the lock, so it is not signalled\n`)
   fs.rmSync(lock, { force: true })
   process.stdout.write(`dctr-lanewatch: stopped pid ${holder}\n`)
 }
@@ -244,11 +276,10 @@ if (isMain) {
   else {
     fs.mkdirSync(run, { recursive: true })
     const lock = path.join(run, 'lanewatch.lock')
-    if (!takePidLock(lock)) fail(`a watcher already runs on ${run}`)
+    if (!takeOver(lock)) fail(`a watcher already runs on ${run}`)
     process.on('exit', () => releasePidLock(lock))
     for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(0))
-    const w = createWatcher(run)
     // A timer, never a blocking sleep, so stop's SIGTERM reaches the handler that releases the lock.
-    for (;;) { w.poll(); await new Promise((r) => setTimeout(r, POLL_MS)) }
+    await watch(createWatcher(run))
   }
 }

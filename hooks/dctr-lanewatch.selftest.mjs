@@ -36,7 +36,7 @@ if (a[0] === 'pane' && a[1] === 'get') {
   if (!p || p.fail) { log({ failed: true }); process.stderr.write('{"error":{"code":"server_error"}}\\n'); process.exit(1) }
   log({})
   if (p.empty) { console.log('{}'); process.exit(0) }
-  console.log(JSON.stringify({ result: { pane: { pane_id: a[2], agent_status: p.status || 'idle', ...(p.session ? { agent_session: { value: p.session } } : {}) } } }))
+  console.log(JSON.stringify({ result: { pane: { pane_id: a[2], agent_status: p.status || 'idle', ...(p.session !== null && p.session !== undefined ? { agent_session: { value: p.session } } : {}) } } }))
   process.exit(0)
 }
 if (a[0] === 'notification') { log({}); console.log('shown'); process.exit(0) }
@@ -49,7 +49,8 @@ process.env.PATH = `${bin}:${process.env.PATH}`
 
 const { createWatcher, POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS } = await import('./dctr-lanewatch.mjs')
 const { laneOf } = await import('./dctr-lib.mjs')
-const { restoreFile, stateDir } = await import('./dctr-state.mjs')
+const { restoreFile, stateDir, takePidLock } = await import('./dctr-state.mjs')
+const lanewatch = await import('./dctr-lanewatch.mjs')
 const { bridgeFile } = await import('./dctr-bridge.mjs')
 const WATCH = path.join(import.meta.dirname, 'dctr-lanewatch.mjs')
 
@@ -339,6 +340,105 @@ clause('clause 2u — contained, start and the watcher each exit non-zero and th
 
 clause('clause 2v — the header names a 30 s poll interval, a 10 minute ready limit and a 5 minute bridge expiry (WS-1)',
   POLL_MS === 30000 && READY_LIMIT_MS === 600000 && BRIDGE_EXPIRY_MS === 300000, JSON.stringify([POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS]))
+
+// ---------------------------------------------------------------- clause 2: round-1 repairs
+
+// WB13, WB14: an exit after a recovery is a new exit; an empty session value is no agent.
+const again = fixture({ a: { session: null }, e: { session: '' } })
+const wa = watcher(again)
+polls(again, wa)
+setPanes(again, { [again.pane.a]: { session: 'S-a' } }); polls(again, wa)
+setPanes(again, { [again.pane.a]: { session: null } }); polls(again, wa)
+clause('clause 2w — a pane that exits, recovers and exits again gives two exit lines; a pane whose agent session value is empty is an exit (E15-D11)',
+  events(again).filter((e) => e.startsWith('exit a ')).length === 2 && events(again).filter((e) => e.startsWith('exit e ')).length === 1, show(again))
+
+// WB2: a handle that is not a file gives no liveness, so no deadline.
+const agents = fixture({ a: {} })
+write(agents.record.a, ['- State: Open', `- wave: ${ago(600000)} seat s5 handle agent:abc123 deadline ${ago(60000)}`,
+  `- wave: ${ago(600000)} seat s6 handle agent b77 (worktree wt/b) deadline ${ago(60000)}`, `- wave: ${ago(600000)} seat s7 handle a1b2c3 deadline ${ago(60000)}`, ''].join('\n'))
+polls(agents, watcher(agents), 3)
+clause('clause 2x — a seat past its deadline whose handle names no readable file (an agent id in any form) raises no deadline line: its liveness is unknown (E15-D12, D13)',
+  events(agents).length === 0, show(agents))
+
+// WB5: the stall title, exactly.
+const titled = fixture({ a: {} })
+fs.appendFileSync(path.join(titled.run, 'events.log'), `${new Date().toISOString()} unwoken orchestrator 2026-11-09T04:00:01.000Z\n`)
+polls(titled, watcher(titled))
+clause('clause 2y — the stall notification is titled `<name> run: orchestrator <word> by wake-all` and nothing more (E15-D238)',
+  JSON.stringify(notes(titled).map((e) => e.argv.slice(2))) === JSON.stringify([[`${path.basename(titled.repo)} run: orchestrator unwoken by wake-all`, '--sound', 'request']]), JSON.stringify(notes(titled)))
+
+// WB4: a restart mid-episode, and a stall line written while no watcher ran.
+const mid = fixture({ a: {}, b: {} })
+write(path.join(mid.run, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n')
+polls(mid, watcher(mid))
+fs.appendFileSync(path.join(mid.run, 'limits.log'), limLine(2, 'b', 'account', RESET) + '\n')
+polls(mid, watcher(mid))
+fs.appendFileSync(path.join(mid.run, 'events.log'), `${new Date().toISOString()} unfinished orchestrator 2026-11-09T04:00:01.000Z\n`)
+polls(mid, watcher(mid), 2)
+polls(mid, watcher(mid))
+clause('clause 2z — a watcher restarted mid-episode sends no second account notification for a later account line, and a stall line written while none ran notifies once, a further restart none (E15-D231, D238)',
+  notes(mid).filter((e) => /account limit/.test(e.argv[2])).length === 1 && notes(mid).filter((e) => /orchestrator unfinished/.test(e.argv[2])).length === 1, JSON.stringify(notes(mid).map((e) => e.argv[2])))
+
+// WB8: two limit lines with the same role and time are two lines.
+const twin = fixture({ a: {} })
+write(path.join(twin.run, 'limits.log'), [limLine(1, 'a', 'model', '-'), limLine(1, 'a', 'other', 'server_error')].join('\n') + '\n')
+polls(twin, watcher(twin)); polls(twin, watcher(twin))
+clause('clause 2aa — two limits.log lines with the same role and time each raise one event, and a restart raises neither again (E15-D227)',
+  events(twin).filter((e) => e.startsWith('limit ')).length === 2, show(twin))
+
+// WB9: the poll loop waits POLL_MS between polls.
+const looped = fixture({ a: {} })
+const waits = []
+let loopPolls = 0
+const counting = { poll: () => { loopPolls += 1 } }
+process.env.SHIM_DIR = looped.dir
+await lanewatch.watch?.(counting, async (ms) => { waits.push(ms); if (waits.length >= 2) throw new Error('stop') }).catch(() => {})
+clause('clause 2ab — the watcher\'s loop polls, waits POLL_MS, polls again and waits POLL_MS again (WS-1)',
+  typeof lanewatch.watch === 'function' && JSON.stringify(waits) === JSON.stringify([POLL_MS, POLL_MS]) && loopPolls === 2, JSON.stringify([waits, loopPolls]))
+
+// WB1: a stale lock replaced by one contender while another holds a dead read of it.
+const raceLock = path.join(tmp, 'race.lock')
+const deadPid = String(spawnSync('true').pid)
+fs.writeFileSync(raceLock, deadPid)
+const origRead = fs.readFileSync
+let interleaved = false
+fs.readFileSync = function (p, ...rest) {
+  const v = origRead.call(fs, p, ...rest)
+  if (!interleaved && String(p) === raceLock) { interleaved = true; fs.rmSync(raceLock); fs.writeFileSync(raceLock, '1') } // contender B, pid 1 (live)
+  return v
+}
+let raced
+try { raced = takePidLock(raceLock) } finally { fs.readFileSync = origRead }
+clause('clause 2ac — a contender that read a dead pid while another replaced the lock with a live one does not take it and leaves the live holder in place',
+  interleaved && raced === false && fs.readFileSync(raceLock, 'utf8').trim() === '1', JSON.stringify([interleaved, raced, fs.readFileSync(raceLock, 'utf8')]))
+
+// WB3: two concurrent starts.
+const duo = fixture({})
+const duoEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: duo.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: duo.dir }
+const duoR = await Promise.all([proc(['start'], duoEnv, duo.repo), proc(['start'], duoEnv, duo.repo)])
+const creates = fs.readFileSync(path.join(duo.run, 'lane.log'), 'utf8').split('\n').filter((l) => / create orchestrator /.test(l))
+clause('clause 2ad — two starts at once: one exits 0 and one non-zero, with one create line and one tab between them',
+  duoR.filter((r) => r.code === 0).length === 1 && creates.length === 1 && shimLog(duo).filter((e) => e.argv[0] === 'tab').length === 1, JSON.stringify([duoR, creates.length, shimLog(duo).length]))
+
+// WB6: a checkout path holding whitespace.
+const spaced = path.join(tmp, 'with space', 'repo'); fs.mkdirSync(path.join(spaced, '.git'), { recursive: true })
+const spacedRun = path.join(spaced, '.doctrine/records/orchestrate')
+write(path.join(tmp, 'spaced-shim', 'shim.json'), JSON.stringify({ panes: {} })); write(path.join(tmp, 'spaced-shim', 'shim.log'), '')
+const rSpaced = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_RUN: spacedRun, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: path.join(tmp, 'spaced-shim') }, spaced)
+clause('clause 2ae — start from a checkout whose path holds a space refuses, writes no tmpdir or lane.log line, and calls herdr( zero times',
+  rSpaced.code !== 0 && !fs.existsSync(path.join(spacedRun, 'tmpdir')) && !fs.existsSync(path.join(spacedRun, 'lane.log')) && fs.readFileSync(path.join(tmp, 'spaced-shim', 'shim.log'), 'utf8') === '', JSON.stringify(rSpaced))
+
+// WN3: stop signals only a watcher.
+const imposter = fixture({ a: {} })
+const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
+write(path.join(imposter.run, 'lanewatch.lock'), String(sleeper.pid))
+const oldAt = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(path.join(imposter.run, 'lanewatch.lock'), oldAt, oldAt)
+const rImp = await proc(['stop'], { DCTR_RUN: imposter.run, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: imposter.dir })
+sleep(200)
+const impAlive = sleeper.exitCode === null && sleeper.signalCode === null
+sleeper.kill('SIGKILL')
+clause('clause 2af — stop sends no signal to a pid whose lock the watcher has not renewed within its polls: a process that is not the watcher lives on',
+  impAlive, JSON.stringify([rImp, impAlive]))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
