@@ -209,7 +209,7 @@ clause('clause 2j2 — the first reading is the gauge latch\'s where it has one:
   events(latched).length === 0, show(latched))
 const stale = fixture({ x: { record: ON }, y: { record: ON } })
 for (const r of ['x', 'y']) transcript(stale, r, [asst(ago(60000), 'working', { input_tokens: 150000 })])
-bridge('S-x', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-y', 300000)
+bridge('S-x', 300000, 2 * BRIDGE_EXPIRY_MS); bridge('S-y', 300000, BRIDGE_EXPIRY_MS / 2); const yWritten = Date.now()
 polls(stale, watcher(stale), 2)
 clause('clause 2k — a bridge file twice the expiry old gives one unknown event and no past-tier line; one half the expiry old gives its past-tier line (E15-D109)',
   JSON.stringify(events(stale).filter((e) => e.startsWith('context x '))) === '["context x S-x unknown"]' &&
@@ -226,7 +226,7 @@ const firstEv = events(lim).filter((e) => e.startsWith('limit ')), firstNotes = 
 fs.appendFileSync(path.join(lim.run, 'limits.log'), [limLine(2, 'b', 'account', RESET), limLine(3, 'a', 'model', '-'), limLine(4, 'a', 'other', 'server_error')].join('\n') + '\n')
 polls(lim, wl, 2)
 const limEv = events(lim).filter((e) => e.startsWith('limit ')).slice(1)
-const CMD = `roll, then run: node /plugin/hooks/dctr-send.mjs wake-all ${lim.run}`
+const CMD = `roll, then run: node '/plugin/hooks/dctr-send.mjs' wake-all '${lim.run}'`
 clause('clause 2l — one line seen on an earlier poll, then three new ones: exactly three limit events over two polls, one per line (E15-D227)',
   firstEv.length === 1 && limEv.length === 3, show(lim))
 clause('clause 2m — an account event names the role, the reset time and the wake-all command; a model event the role and /model; an other event the role and the error (E15-D230)',
@@ -600,18 +600,21 @@ clause('clause 2au — a stale bridge raised before a restart, fresh at the firs
     !foreign && /elsewhere/.test(fs.readFileSync(lk, 'utf8')), JSON.stringify([foreign, fs.readFileSync(lk, 'utf8')]))
   fs.rmSync(lk)
   // WB30's bound: a holder that re-reads a lock no longer its own stops; the watcher's loop polls only while it holds.
-  write(lk, lockText(process.pid)); const oldT = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(lk, oldT, oldT)
+  // Taken through takeRunLock, so it carries this process's pid namespace on any host (WB45).
+  const tookOwn = takeRunLock(lk); const oldT = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(lk, oldT, oldT)
   const mine = ownsRunLock(lk), renewed = Date.now() - fs.statSync(lk).mtimeMs < 5000
   write(lk, lockText(spawn('sleep', ['5']).pid))
   let polled = 0
-  await lanewatch.watch({ poll: () => { polled += 1 } }, async () => {}, () => ownsRunLock(lk))
+  // Bounded: a holds() that never turns false fails the clause after three polls instead of looping for ever.
+  let asked = 0
+  await lanewatch.watch({ poll: () => { polled += 1 } }, async () => {}, () => (++asked <= 3 && ownsRunLock(lk)))
   // A gate older than its limit is a breaker that died: the take that finds it removes it and refuses, the next breaks.
   write(lk, lockText(dead())); fs.mkdirSync(`${lk}.break`); const oldG = (Date.now() - 2 * 60000) / 1000; fs.utimesSync(`${lk}.break`, oldG, oldG)
   const throughOld = [takeRunLock(lk), takeRunLock(lk)]; releaseRunLock(lk)
   clause('clause 2bb — a dead holder\'s lock behind a gate older than its limit: the first take removes the gate and refuses, the second takes the lock (WB30)',
     JSON.stringify(throughOld) === '[false,true]', JSON.stringify(throughOld))
   clause('clause 2ax — ownsRunLock renews a lock naming this process; once the lock names another, the watcher\'s loop polls no more (WB30)',
-    mine && renewed && polled === 0, JSON.stringify([mine, renewed, polled]))
+    tookOwn && mine && renewed && polled === 0, JSON.stringify([tookOwn, mine, renewed, polled]))
 }
 
 // WB30: a running watcher whose lock comes to name another holder ends at its next poll.
@@ -655,6 +658,43 @@ clause('clause 2au — a stale bridge raised before a restart, fresh at the firs
     rGated.code === 1 && /left/.test(rGated.err) && !/removed/.test(rGated.out) && fs.existsSync(glock), JSON.stringify(rGated))
 }
 
+// ---------------------------------------------------------------- clause 2: round-4 repairs
+
+// WB46: an alarm ruled and fired again, a paused line resolved and written again, and a question answered and opened
+// again, each with the same words while no watcher ran, are raised again after the restart (the reviewer's probe).
+{
+  const pa = fixture({ al: {}, pp: { record: ON }, qq: {} })
+  fs.appendFileSync(pa.record.al, '- alarm: round fired 2026-11-09T09:00:00Z count 4\n')
+  fs.appendFileSync(pa.record.pp, '- auto-cycle paused: session idle, waiting for you\n')
+  fs.appendFileSync(pa.record.qq, '- question: Q1 opened 2026-11-09T09:00:00Z which way?\n'); polls(pa, watcher(pa))
+  fs.appendFileSync(pa.record.al, '- ruling: R1 2026-11-09T09:10:00Z go on\n- alarm: round fired 2026-11-09T10:00:00Z count 8\n')
+  fs.appendFileSync(pa.record.pp, '- auto-cycle: on cap 10 tier 200000\n- auto-cycle paused: session idle, waiting for you\n')
+  fs.appendFileSync(pa.record.qq, '- question: Q1 answered 2026-11-09T09:10:00Z left\n- question: Q1 opened 2026-11-09T10:00:00Z which way?\n'); polls(pa, watcher(pa))
+  const n = (r) => events(pa).filter((x) => x.startsWith(`pause ${r} `)).length
+  clause('clause 2bc — a round alarm ruled and fired again while no watcher ran is raised again after the restart (WB46, E15-D105)', n('al') === 2, JSON.stringify(events(pa)))
+  clause('clause 2bd — a paused line resolved by a later on line and written again, the same words, while no watcher ran is raised again after the restart (WB46, E15-D105)', n('pp') === 2, JSON.stringify(events(pa)))
+  clause('clause 2be — a question answered and opened again, the same words, while no watcher ran is raised again after the restart (N3, E15-D105)', n('qq') === 2, JSON.stringify(events(pa)))
+}
+
+// WB44: the account event's command carries the plugin and run paths quoted, so each arrives whole through a POSIX
+// shell when both hold spaces.
+{
+  const spacedRepo = path.join(tmp, 'acct space', 'repo'); fs.mkdirSync(path.join(spacedRepo, '.git'), { recursive: true })
+  const sRun = path.join(spacedRepo, '.doctrine/records/orchestrate'); fs.mkdirSync(sRun, { recursive: true })
+  write(path.join(sRun, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n'); write(path.join(sRun, 'lane.log'), '\n')
+  const shimDir = path.join(tmp, 'acct-shim'); write(path.join(shimDir, 'shim.json'), JSON.stringify({ panes: {} })); write(path.join(shimDir, 'shim.log'), '')
+  process.env.SHIM_DIR = shimDir
+  createWatcher(sRun, { plugin: path.join(tmp, 'plug in') }).poll()
+  const line = fs.readFileSync(path.join(sRun, 'events.log'), 'utf8').split('\n').find((l) => / limit a account /.test(l)) ?? ''
+  const cmd = line.split('roll, then run: ')[1] ?? ''
+  const stubDir = path.join(tmp, 'argv-stub'), argvLog = path.join(tmp, 'argv.json')
+  write(path.join(stubDir, 'node'), `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)))\n`); fs.chmodSync(path.join(stubDir, 'node'), 0o755)
+  spawnSync('/bin/sh', ['-c', cmd], { env: { PATH: `${stubDir}:/usr/bin:/bin` } })
+  const got = fs.existsSync(argvLog) ? JSON.parse(fs.readFileSync(argvLog, 'utf8')) : null
+  clause('clause 2bf — the account event\'s command, run through sh -c, hands node the plugin\'s dctr-send.mjs and the run whole, with both paths holding spaces (WB44, E15-D230)',
+    JSON.stringify(got) === JSON.stringify([path.join(tmp, 'plug in', 'hooks/dctr-send.mjs'), 'wake-all', sRun]), JSON.stringify([cmd, got]))
+}
+
 let interleaveCounts = []
 // The run lock under every schedule (WB20, WB22-WB24, WB29, WB30): contenders run takeRunLock, or stop's dead-holder
 // path, in worker threads, each fs call on the lock a step the scheduler grants; a file write is two steps, its open and
@@ -682,7 +722,9 @@ const stop = () => { if (Atomics.load(go, 1)) throw new Error('abandoned') }
 const gate = () => { stop(); Atomics.store(phase, id, 1); Atomics.notify(phase, id); Atomics.wait(turn, id, 0); Atomics.store(turn, id, 0); stop(); Atomics.store(phase, id, 0) }
 const orig = {}
 for (const m of ['mkdirSync', 'writeFileSync', 'readFileSync', 'renameSync', 'rmSync', 'statSync', 'utimesSync', 'chmodSync', 'linkSync', 'openSync', 'writeSync', 'closeSync']) orig[m] = fs[m]
-const step = (m, p, f) => { gate(); try { const v = f(); note(m + ':' + (m === 'readFileSync' ? String(v) : 'ok') + ';'); return v } catch (e) { note(m + ':' + e.code + ';'); throw e } }
+// A stat's result enters the observation by what the code can judge from it: older than the gate's limit or not.
+const seenAs = (m, v) => (m === 'readFileSync' ? String(v) : m === 'statSync' ? (Date.now() - v.mtimeMs > 60000 ? 'old' : 'new') : 'ok')
+const step = (m, p, f) => { gate(); try { const v = f(); note(m + ':' + seenAs(m, v) + ';'); return v } catch (e) { note(m + ':' + e.code + ';'); throw e } }
 // A contender's own part file (<lock>.new.<pid>) is seen by no other until it is linked, so only the link is a step.
 const shared = (p) => String(p).startsWith(box) && !String(p).includes('.new.')
 for (const m of ['mkdirSync', 'readFileSync', 'renameSync', 'rmSync', 'statSync', 'utimesSync', 'chmodSync']) {
@@ -711,7 +753,7 @@ for (;;) {
   const deadPid = String(spawnSync('true').pid)
   const files = () => {
     const out = []
-    const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); if (fs.statSync(p).isDirectory()) { out.push(rel + '/'); walk(p) } else out.push(`${rel}=${fs.readFileSync(p, 'utf8')}`) } }
+    const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); const st = fs.statSync(p), old = Date.now() - st.mtimeMs > 60000 ? '@old' : ''; if (st.isDirectory()) { out.push(rel + '/' + old); walk(p) } else out.push(`${rel}${old}=${fs.readFileSync(p, 'utf8')}`) } }
     walk(box); return out.join(',')
   }
   const plantDead = () => {
@@ -814,7 +856,7 @@ for (;;) {
 }
 clause('clause 3c — without the watcher: 150,000 plus the 65,000 handoff cost is 215,000, above 205,000 and below 216,000; the stale bridge file is older than the expiry and the fresh one younger; the twin\'s record warns S-w',
   150000 + 65000 === 215000 && 205000 < 215000 && 216000 > 215000 && Date.now() - fs.statSync(bridgeFile('S-x')).mtimeMs > BRIDGE_EXPIRY_MS &&
-  Date.now() - fs.statSync(bridgeFile('S-y')).mtimeMs < BRIDGE_EXPIRY_MS && /warned S-w/.test(fs.readFileSync(tier.record.w, 'utf8')), 'fixture arithmetic or files wrong')
+  yWritten - fs.statSync(bridgeFile('S-y')).mtimeMs < BRIDGE_EXPIRY_MS && /warned S-w/.test(fs.readFileSync(tier.record.w, 'utf8')), 'fixture arithmetic or files wrong')
 clause('clause 3d — without the watcher: the reader fixture\'s lane.log names w1:p1, whose pane has an agent session, while w7:p7 has none',
   /create a w1:p1 /.test(fs.readFileSync(path.join(viaReader.run, 'lane.log'), 'utf8')) &&
   JSON.parse(fs.readFileSync(path.join(viaReader.dir, 'shim.json'), 'utf8')).panes['w1:p1'].session === 'S-a' &&

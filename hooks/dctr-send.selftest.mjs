@@ -63,6 +63,7 @@ if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send
   const p = s.panes[a[2]]
   if (p && p.typeFail) fail('{"error":{"code":"server_error"}}')
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
+  if (s.onType && entry.typed.text === s.onType.text) fs.appendFileSync(s.onType.file, s.onType.line + '\\n')
   // A slow reply: the line is delivered (logged) at once and the call returns only after runDelayMs.
   if (s.runDelayMs) { fs.appendFileSync(lg, JSON.stringify(entry) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.runDelayMs); process.stdout.write('{"result":{}}\\n'); process.exit(0) }
 }
@@ -823,6 +824,36 @@ const rStolen = await wakeAll(stolen)
 clause('clause 2x16 — a wake-all whose lock stops naming it after its pane read types nothing, says so and exits non-zero (WB30)',
   typedTo(stolen, 'a').length === 0 && rStolen.code !== 0 && /no longer names this wake-all/.test(rStolen.out) && /taken/.test(fs.readFileSync(path.join(stolen.run, 'wake-all.lock'), 'utf8')),
   wshow(stolen, rStolen))
+
+// WB42: the lock is re-read before every typing call, not only the first: lost after a /clear that took, no resume line
+// or nudge follows. Its twin, the lock kept, types all three.
+const handedWake = (onType) => {
+  const fx = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+  write(fx.record, '- State: Open\n- auto-cycle: warned S-a 20%\n')
+  handed(fx, { latch: ['S-a'], warnedAt: H2 - 60000, handoffAt: H2, session: 'S-a', transcript: [asst(H2 - 120000), toolResult(H2 + 1000)] })
+  setShim(fx, { busyAfterType: 2, clearSession: 'S-next', ...(onType ? { onType: { text: '/clear', file: path.join(fx.run, 'wake-all.lock'), line: 'taken' } } : {}) })
+  return fx
+}
+const keptFx = handedWake(false), lostFx = handedWake(true)
+const rKept = await wakeAll(keptFx), rLost = await wakeAll(lostFx)
+clause('clause 2x17 — a handed-off wake whose lock stops naming it after its /clear types no resume line or nudge and exits non-zero; with the lock kept the same wake types all three (WB42)',
+  typedTo(keptFx, 'a').length === 3 && rKept.code === 0 && JSON.stringify(typedTo(lostFx, 'a').map((e) => e.typed.text)) === '["/clear"]' && rLost.code !== 0 &&
+  /no longer names this wake-all/.test(rLost.out), wshow(keptFx, rKept) + wshow(lostFx, rLost))
+
+// WB41: a role whose wake was never tried because the lock was lost still gets its report line, and the exit is non-zero.
+const cut = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
+setShim(cut, { onFirstRead: { file: path.join(cut.run, 'wake-all.lock'), line: 'taken' } })
+const rCut = await wakeAll(cut)
+clause('clause 2x18 — after wake-all loses its lock on a\'s wake, b, never tried, is still reported, with retry, and nothing is typed to either; exit 1 (WB41, E15-D241)',
+  JSON.stringify(rCut.words.sort()) === '["a retry","b retry"]' && rCut.code === 1 && typed(cut).length === 0, wshow(cut, rCut))
+
+// WB43: a role reconciled to unfinished for an older limit is reported, never typed to, in that run, whatever its newer
+// limit line says.
+const recon = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} a account 2026-11-09T13:00:00Z`],
+  events: [`2026-11-09T05:00:00.000Z intent a ${L(1)}`] })
+const rRecon = await wakeAll(recon)
+clause('clause 2x19 — a role reconciled to unfinished at start is not selected for its newer limit in that run: reported unfinished, nothing typed, exit 1 (WB43, Design step 3)',
+  JSON.stringify(rRecon.words) === '["a unfinished"]' && typedTo(recon, 'a').length === 0 && rRecon.code === 1 && !evWords(recon).some((w) => w.startsWith(`intent a ${L(2)}`)), wshow(recon, rRecon))
 
 // The lock's own reading: a dead holder's lock is replaced, a torn one refuses.
 const relock = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })

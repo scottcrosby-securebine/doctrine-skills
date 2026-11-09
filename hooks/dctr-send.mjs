@@ -242,6 +242,8 @@ function wakeAll() {
     log('unfinished', e.role, e.limit)
     last.set(e.role, 'unfinished')
   }
+  // A role reconciled above is reported, and never typed to in this run (Design step 3), whatever its newer limit says.
+  const reconciled = new Set(last.keys())
   const settled = (role, limit) => events().some((e) => e.role === role && e.limit === limit &&
     (['woken', 'unfinished', 'unwoken'].includes(e.word) || (e.word === 'skip' && e.rest === 'no-agent')))
   // The candidates are the roles limits.log names; a role is selected only where laneOf finds its create line.
@@ -249,7 +251,7 @@ function wakeAll() {
   let pending = []
   for (const role of [...new Set(limits.map((l) => l.role))]) {
     const latest = limits.filter((l) => l.role === role).at(-1)
-    if (latest.kind !== 'account' || settled(role, latest.time)) continue
+    if (latest.kind !== 'account' || settled(role, latest.time) || reconciled.has(role)) continue
     const lane = laneOf(readText(path.join(run, 'lane.log')), role)
     if (lane) pending.push({ role, limit: latest.time, lane })
   }
@@ -262,7 +264,8 @@ function wakeAll() {
       log(word, r.role, r.limit, reading)
       last.set(r.role, word)
       if (word === 'retry') { if (!firstRetry.has(r.role)) firstRetry.set(r.role, Date.now()); again.push(r) }
-      if (lost) break
+      // A lost lock ends the run; a selected role whose wake was never tried is reported retry, and stays selectable.
+      if (lost) { for (const x of pending) if (!last.has(x.role)) last.set(x.role, 'retry'); break }
     }
     if (lost) break
     pending = again

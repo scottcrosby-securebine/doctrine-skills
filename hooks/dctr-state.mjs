@@ -517,9 +517,9 @@ export function runLockDead(lock) {
  *
  *  A dead holder's lock is removed only under the gate `<lock>.break`, a directory one breaker at a time makes, and
  *  judged again inside it, so no put-back is needed. A gate older than RUN_LOCK_GATE_MS is removed and the take refused.
- *  A breaker stalled that long inside the gate can remove a lock taken meanwhile (WB30); every holder re-reads the lock
- *  (ownsRunLock) before it acts, at each watcher poll and each wake-all typing call, and stops once it is not its own,
- *  which bounds that window to one poll or one typing call. */
+ *  A breaker stalled that long inside the gate can remove a lock taken meanwhile (WB30). The watcher re-reads its lock
+ *  (ownsRunLock) before each poll and wake-all before each typing call, each stopping once it is not its own, which
+ *  bounds that window to one poll or one typing call; start's lanewatch.start.lock is never re-read. */
 export function takeRunLock(lock, token = '') {
   try {
     if (acquireRunLock(lock, token)) return true

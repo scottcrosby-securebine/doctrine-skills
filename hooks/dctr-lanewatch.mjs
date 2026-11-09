@@ -125,7 +125,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       limitsSeen += 1
       if (l.kind === 'model') { emit(`limit ${l.role} model ${l.time} /model`); continue }
       if (l.kind === 'other') { emit(`limit ${l.role} other ${l.time} error ${l.field}`); continue }
-      emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${plugin}/hooks/dctr-send.mjs wake-all ${run}`)
+      emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${shq(path.join(plugin, 'hooks/dctr-send.mjs'))} wake-all ${shq(run)}`)
       const woken = parseWakeLines(readText(eventsFile)).some((w) => w.word === 'woken' && w.index > notifiedAt)
       if (notifiedAt === null || woken) { notifiedAt = completeLines().length - 1; notify(`${name} run: account limit, reset ${l.field}; roll, then wake-all`) }
     }
