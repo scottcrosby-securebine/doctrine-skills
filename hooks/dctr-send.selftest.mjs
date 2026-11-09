@@ -53,7 +53,7 @@ if (a[0] === 'pane' && a[1] === 'get') {
   for (const x of p.on || []) if (x.n === p.gets && x.rm) { fs.rmSync(x.rm, { force: true }); entry.removed = x.rm }
   if (p.failGets > 0) { p.failGets--; fail('{"error":{"code":"server_error"}}') }
   if (p.empty) out({})
-  if (p.noAgent) { entry.status = 'no-agent'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', focused: false } } }) }
+  if (p.noAgent) { entry.status = 'no-agent'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', focused: false, ...(p.noAgent === 'null' ? { agent_session: null } : {}) } } }) }
   const status = p.busyUntil > Date.now() ? 'working' : p.busy > 0 ? (p.busy--, 'working') : p.status
   entry.status = status
   out({ result: { pane: { pane_id: a[2], agent_status: status, focused: false, agent_session: { value: p.session } } } })
@@ -755,10 +755,10 @@ clause('clause 2x5 — the first pass writes exactly skip x <L> no-agent and ret
 clause('clause 2x5b — a later run reads no pane a no-agent skip line settles, nor one an unwoken line settles (XS-33, XS-35)',
   skipsGets1 === 1 && shimLog(skips).filter((e) => e.argv[1] === 'get').length === shimLog(skips).filter((e) => e.argv[1] === 'get').length && rSkips2.words.length === 0 &&
   shimLog(skips).filter((e) => e.argv[1] === 'get' && e.argv[2] === skips.pane.x).length === 1, wshow(skips, rSkips2))
-const blankSession = wakeFx({ z: { session: '' } }, { limits: [`${L(1)} z account 2026-11-09T12:00:00Z`] })
+const blankSession = wakeFx({ z: { session: '' }, n: { noAgent: 'null' } }, { limits: [`${L(1)} z account 2026-11-09T12:00:00Z`, `${L(2)} n account 2026-11-09T12:00:00Z`] })
 const rBlank = await wakeAll(blankSession)
-clause('clause 2x5c — a pane whose agent session is an empty string has no agent: skip z <L> no-agent, nothing typed (XS-33)',
-  JSON.stringify(evWords(blankSession)) === JSON.stringify([`skip z ${L(1)} no-agent`]) && typed(blankSession).length === 0, wshow(blankSession, rBlank))
+clause('clause 2x5c — a pane whose agent session is an empty string, or null, has no agent: skip <role> <L> no-agent, nothing typed (XS-33)',
+  JSON.stringify(evWords(blankSession)) === JSON.stringify([`skip z ${L(1)} no-agent`, `skip n ${L(2)} no-agent`]) && typed(blankSession).length === 0, wshow(blankSession, rBlank))
 
 // E15-D233, D241, D245: retries, their bound, and a later run.
 const retries = wakeFx({ p: { failGets: 4 }, q: {}, r: { empty: true } }, { limits: [`${L(1)} p account 2026-11-09T12:00:00Z`, `${L(2)} q account 2026-11-09T12:00:00Z`, `${L(3)} r account 2026-11-09T12:00:00Z`] })
@@ -790,15 +790,15 @@ clause('clause 2x8 — a handed-off role whose pane never reads ready after /cle
   wshow(partial, rPart1))
 
 // E15-D240, D241, D245: interrupted runs.
-const intr = wakeFx({ a: {}, b: {}, c: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(1)} b account 2026-11-09T12:00:00Z`, `${L(2)} c account 2026-11-09T12:00:00Z`],
-  events: [`2026-11-09T05:00:00.000Z intent a ${L(1)}`, `2026-11-09T05:00:01.000Z intent b ${L(1)}`, `2026-11-09T05:00:02.000Z woken b ${L(1)}`,
+const intr = wakeFx({ a: {}, b: {}, c: {}, d: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(1)} b account 2026-11-09T12:00:00Z`, `${L(2)} c account 2026-11-09T12:00:00Z`, `${L(3)} d account 2026-11-09T12:00:00Z`],
+  events: [`2026-11-09T04:59:00.000Z intent d ${L(3)}`, `2026-11-09T04:59:01.000Z intent d ${L(3)}`, `2026-11-09T05:00:00.000Z intent a ${L(1)}`, `2026-11-09T05:00:01.000Z intent b ${L(1)}`, `2026-11-09T05:00:02.000Z woken b ${L(1)}`,
     `2026-11-09T05:00:03.000Z intent c ${L(2)}`, `2026-11-09T05:00:04.000Z retry c ${L(2)}`] })
 const rIntr = [await wakeAll(intr), await wakeAll(intr), await wakeAll(intr)]
-clause('clause 2x9 — on start an intent with nothing after it becomes exactly one unfinished line, one closed by woken or retry does not, over three runs: a is never typed to and c is woken once (E15-D240)',
-  evWords(intr).filter((w) => w === `unfinished a ${L(1)}`).length === 1 && !evWords(intr).some((w) => /^unfinished [bc] /.test(w)) && typedTo(intr, 'a').length === 0 &&
+clause('clause 2x9 — on start an intent with nothing after it becomes exactly one unfinished line, two such intents for one role and limit one line too, one closed by woken or retry none, over three runs: a and d are never typed to and c is woken once (E15-D240)',
+  evWords(intr).filter((w) => w === `unfinished a ${L(1)}`).length === 1 && evWords(intr).filter((w) => w === `unfinished d ${L(3)}`).length === 1 && typedTo(intr, 'd').length === 0 && !evWords(intr).some((w) => /^unfinished [bc] /.test(w)) && typedTo(intr, 'a').length === 0 &&
   JSON.stringify(typedTo(intr, 'c').map((e) => e.typed.text)) === JSON.stringify([NUDGE]) && typedTo(intr, 'b').length === 0, wshow(intr, rIntr[0]))
-clause('clause 2x10 — the first interrupted run prints unfinished a and woken c and exits 1 (E15-D241, D245)',
-  JSON.stringify(rIntr[0].words.sort()) === '["a unfinished","c woken"]' && rIntr[0].code === 1, JSON.stringify(rIntr.map((r) => [r.words, r.code])))
+clause('clause 2x10 — the first interrupted run prints unfinished a and d and woken c and exits 1 (E15-D241, D245)',
+  JSON.stringify(rIntr[0].words.sort()) === '["a unfinished","c woken","d unfinished"]' && rIntr[0].code === 1, JSON.stringify(rIntr.map((r) => [r.words, r.code])))
 
 // E15-D242: the lock.
 const locked = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`], shim: { busyAfterTypeMs: 60000 } })

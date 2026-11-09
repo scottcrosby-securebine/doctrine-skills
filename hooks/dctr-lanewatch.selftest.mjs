@@ -235,6 +235,7 @@ clause('clause 2n — two account lines and a model line notify once, a woken li
 // XS-36: only a woken line ends the episode, and a run outside a git repo is named by its path.
 const episode = fixture({ a: {}, b: {} })
 fs.rmSync(path.join(episode.repo, '.git'), { recursive: true })
+write(path.join(episode.run, 'events.log'), `${ago(3600000)} woken a 2026-11-08T04:00:01.000Z\n`)
 write(path.join(episode.run, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n')
 const we = watcher(episode)
 polls(episode, we)
@@ -242,7 +243,7 @@ sleep(5)
 fs.appendFileSync(path.join(episode.run, 'events.log'), `${new Date().toISOString()} unfinished a 2026-11-09T04:00:01.000Z\n${new Date().toISOString()} retry b 2026-11-09T04:00:01.000Z\n`)
 fs.appendFileSync(path.join(episode.run, 'limits.log'), limLine(2, 'b', 'account', RESET) + '\n')
 polls(episode, we)
-clause('clause 2n2 — an unfinished or retry line after the first notification does not end the episode: a later account line notifies nothing; the title of a run in no git repo names the run\'s path (XS-36)',
+clause('clause 2n2 — a woken line from before the first notification, or an unfinished or retry line after it, does not end the episode: a later account line notifies nothing; the title of a run in no git repo names the run\'s path (XS-36)',
   notes(episode).length === 1 && notes(episode)[0].argv[2] === `${episode.run} run: account limit, reset ${RESET}; roll, then wake-all`, JSON.stringify(notes(episode).map((e) => e.argv[2])))
 
 // E15-D238: orchestrator stalls.
