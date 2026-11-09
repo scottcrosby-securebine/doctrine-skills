@@ -1045,7 +1045,8 @@ export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = I
       const [entry, ...more] = git(['ls-files', '-v', '-z', '--', file]).split('\0').filter(Boolean)
       if (more.length || entry !== `H ${path.relative(top, file)}`) return false
     }
-    return git(['status', '--porcelain', '--ignored=no', '--', file]) === ''
+    // The repository's config can let status trust a core.fsmonitor or a coarse stat check that misses a modified file.
+    return git(['-c', 'core.fsmonitor=false', '-c', 'core.checkStat=default', '-c', 'core.trustctime=true', 'status', '--porcelain', '--ignored=no', '--', file]) === ''
   }
   try {
     // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.

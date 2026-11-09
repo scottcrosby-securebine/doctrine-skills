@@ -384,8 +384,9 @@ clause('clause 2v — a pane that reads ready near the end of the first wait, ea
 const MODE_GIT = `#!/usr/bin/env node
 const fs = require('fs'), path = require('path'), cp = require('child_process')
 let m = {}; try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'mode.json'), 'utf8')) } catch {}
-const a = process.argv.slice(2), sub = a[0] === '-C' ? a[2] : a[0]
-if (m.sub === sub) {
+// A row names its git call by arguments that call alone carries, found as one contiguous run anywhere in argv.
+const a = process.argv.slice(2), k = m.args || []
+if (k.length && a.some((_, i) => k.every((x, j) => a[i + j] === x))) {
   if (m.mode === 'fail') { process.stderr.write('fatal: unable to read: Input/output error\\n'); process.exit(128) }
   if (m.mode === 'empty') process.exit(0)
   if (m.mode === 'boundary' && !process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM) { process.stderr.write('fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n'); process.exit(128) }
@@ -426,13 +427,45 @@ const chain = (fx, f, tag = '') => {
   fs.symlinkSync(path.join(fx.b, 'f.md'), f); git(fx.lane, 'add', '-A'); git(fx.lane, 'commit', '-qm', 'link')
 }
 const retarget = (fx) => { fs.rmSync(path.join(fx.b, 'f.md')); fs.symlinkSync(`../${path.basename(fx.c)}/f2.md`, path.join(fx.b, 'f.md')) }
-const gitMode = (sub, mode) => (fx) => write(path.join(fx.gitBin, 'mode.json'), JSON.stringify({ sub, mode }))
+const gitMode = (call, mode) => (fx) => write(path.join(fx.gitBin, 'mode.json'), JSON.stringify({ args: call.split(' '), mode }))
+// Each git call handoffLanded makes, keyed by the arguments that name it, with that call as it runs on the lane's handoff.
+const GITCALLS = {
+  'rev-parse --show-toplevel': ['rev-parse', '--show-toplevel'], 'check-ignore -q': ['check-ignore', '-q', 'docs/handoffs/h.md'],
+  'ls-files --error-unmatch': ['ls-files', '--error-unmatch', '--', 'docs/handoffs/h.md'], 'log -1 --format=%ct': ['log', '-1', '--format=%ct', '--', 'docs/handoffs/h.md'],
+  'ls-files -v -z': ['ls-files', '-v', '-z', '--', 'docs/handoffs/h.md'], 'status --porcelain': ['status', '--porcelain', '--ignored=no', '--', 'docs/handoffs/h.md'],
+}
+// A core.fsmonitor hook that reports nothing changed since any token, so git's status trusts every entry it has marked valid.
+const lyingMonitor = (fx, f) => {
+  const hook = path.join(fx.dir, 'fsmonitor.sh'); write(hook, '#!/bin/sh\nprintf "tok\\0"\n'); fs.chmodSync(hook, 0o755)
+  git(fx.lane, 'config', 'core.fsmonitor', hook); git(fx.lane, 'status', '--porcelain'); sleep(1100); git(fx.lane, 'status', '--porcelain')
+  if (!f) return
+  fs.appendFileSync(f, 'unlanded edit\n')
+  // Proved here, before the sender runs, since a status with the monitor off clears the valid bit it would read: a plain
+  // status is empty while the file differs from HEAD's blob under that bit, and a copy's status with the monitor off names it.
+  const g = (cwd, ...a) => spawnSync(realGit, ['-C', cwd, ...a], { encoding: 'utf8' }).stdout, rel = path.relative(fx.lane, f), copy = path.join(fx.dir, 'monitor-off')
+  fs.cpSync(fx.lane, copy, { recursive: true, verbatimSymlinks: true })
+  fx.monitorProof = g(fx.lane, 'status', '--porcelain') === '' && g(fx.lane, 'hash-object', '--', rel) !== g(fx.lane, 'rev-parse', `HEAD:${rel}`) &&
+    g(fx.lane, 'ls-files', '-f', '--', rel) === `h ${rel}\n` && g(copy, '-c', 'core.fsmonitor=false', 'status', '--porcelain') === ` M ${rel}\n`
+}
+// The committed handoff ends in a note, the index refreshed under the given repository config, then the note rewritten
+// to text of the same size with the mtime set back to the same value, so only ctime and the sub-second stat fields move.
+const sameStat = (fx, config, edit = true) => {
+  fs.appendFileSync(fx.handoff, 'note: AAAA\n'); git(fx.lane, 'commit', '-qam', 'note'); fs.utimesSync(fx.handoff, H / 1000, H / 1000)
+  for (const [k, v] of config) git(fx.lane, 'config', k, v)
+  sleep(1100); git(fx.lane, 'status', '--porcelain'); fx.mtimeNs = fs.statSync(fx.handoff, { bigint: true }).mtimeNs
+  if (edit) { fs.writeFileSync(fx.handoff, fs.readFileSync(fx.handoff, 'utf8').replace('AAAA', 'BBBB')); fs.utimesSync(fx.handoff, H / 1000, H / 1000) }
+}
 const fileRows = (label, key) => [[`${label} absent`, (fx) => fs.rmSync(fx[key])], [`${label} empty`, (fx) => fs.writeFileSync(fx[key], '')], [`${label} unreadable`, (fx) => fs.chmodSync(fx[key], 0)]]
 const CLASS = [
   ...fileRows('the restore file', 'restore'), ...fileRows('the transcript', 'transcript'), ...fileRows('the latch', 'latch'), ...fileRows('the record', 'record'),
   ['git absent', (fx) => { fx.path = `${fx.bin}:${nodeBin}` }],
-  ...['rev-parse', 'check-ignore', 'ls-files', 'log', 'status'].flatMap((sub) => [[`git ${sub} fails`, gitMode(sub, 'fail')], [`git ${sub} times out`, gitMode(sub, 'slow')]]),
-  ['git rev-parse prints nothing', gitMode('rev-parse', 'empty')], ['git log prints nothing', gitMode('log', 'empty')],
+  ...Object.keys(GITCALLS).flatMap((call) => [[`git ${call} fails`, gitMode(call, 'fail')], [`git ${call} times out`, gitMode(call, 'slow')]]),
+  ['git rev-parse --show-toplevel prints nothing', gitMode('rev-parse --show-toplevel', 'empty')], ['git log -1 --format=%ct prints nothing', gitMode('log -1 --format=%ct', 'empty')],
+  // A status that git's own repository config lets skip a modified file: a lying fsmonitor, or a stat check too coarse to see a same-size edit.
+  ['a committed handoff modified under a core.fsmonitor hook that reports nothing changed', (fx) => lyingMonitor(fx, fx.handoff)],
+  ['a memory file modified under a core.fsmonitor hook that reports nothing changed', (fx) => lyingMonitor(fx, memory(fx))],
+  ['a committed handoff rewritten at the same size and mtime under the repository\'s own core.checkStat=minimal', (fx) => sameStat(fx, [['core.checkStat', 'minimal']])],
+  ['a committed handoff rewritten at the same size and mtime under the repository\'s own core.trustctime=false', (fx) => sameStat(fx, [['core.trustctime', 'false']])],
   // Two git failures that print the no-repository phrase with a path after it, inside a real repository.
   ['GIT_DIR names nothing', (fx) => { fs.appendFileSync(fx.handoff, 'unlanded edit\n'); fx.env = { GIT_DIR: '/dev/null' } }],
   // A GIT_DIR (with its GIT_WORK_TREE) naming another repository whose commit carries the lane's unlanded handoff, which only the lane's own repo shows as unlanded.
@@ -587,12 +620,16 @@ const docsLinkFx = classFx(); docsLink(docsLinkFx)
 const chainFx = classFx(); chain(chainFx, memory(chainFx), 'm'); chainFx.mb = chainFx.b; chainFx.mc = chainFx.c; chain(chainFx, chainFx.handoff)
 // The control again with its tracked memory file marked skip-worktree and modified, as a lane's create leaves it.
 const memSkipFx = classFx(); git(memSkipFx.lane, 'update-index', '--skip-worktree', 'SESSION_MEMORY.md'); fs.appendFileSync(memory(memSkipFx), 'lane memory edit\n')
+// The control again under the lying fsmonitor hook, and again under core.checkStat=minimal with core.trustctime=false, nothing modified.
+const monitorFx = classFx(); lyingMonitor(monitorFx)
+const statFx = classFx(); sameStat(statFx, [['core.checkStat', 'minimal'], ['core.trustctime', 'false']], false)
 const CLEARS = ['control', 'no git repository', 'the control, git stopping at a filesystem boundary unless told to cross one', 'the control under GIT_CEILING_DIRECTORIES at its root', 'the control reached through a symlinked lane path',
   'the repository\'s own .gitignore ignoring docs/handoffs/, the handoff untracked', 'the control with its handoff file a link to a committed file in the same repository',
   'the control with its handoff a committed link to a file outside every repository', 'the control with its memory file a committed link to a file outside every repository',
   'the control with its docs directory a committed link to a second repository', 'the control with its handoff and its memory file each reached through a chain of committed links',
-  'the control with its tracked memory file marked skip-worktree and modified, the handoff committed and clean']
-const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx], [CLEARS[5], repoIgnoreFx], [CLEARS[6], fileLinkFx], [CLEARS[7], outLinkFx], [CLEARS[8], memOutFx], [CLEARS[9], docsLinkFx], [CLEARS[10], chainFx], [CLEARS[11], memSkipFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
+  'the control with its tracked memory file marked skip-worktree and modified, the handoff committed and clean',
+  'the control under a core.fsmonitor hook that reports nothing changed, nothing modified', 'the control under the repository\'s own core.checkStat=minimal and core.trustctime=false, nothing modified']
+const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx], [CLEARS[5], repoIgnoreFx], [CLEARS[6], fileLinkFx], [CLEARS[7], outLinkFx], [CLEARS[8], memOutFx], [CLEARS[9], docsLinkFx], [CLEARS[10], chainFx], [CLEARS[11], memSkipFx], [CLEARS[12], monitorFx], [CLEARS[13], statFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
 // An existing memory file, a committed link to a file in the lane, whose real path cannot be read once its directory is
 // closed: landed while the target is clean and readable, and not landed once it is modified and its directory closed,
 // since the link alone then reads clean. Asked of handoffLanded itself, because the sender's kickoff read fails first.
@@ -609,7 +646,7 @@ try {
   memAccProof.linkCleanDenied = memAccSt('SESSION_MEMORY.md') === ''
 } finally { fs.chmodSync(memAccStore, 0o755) }
 const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).includes(`${PANE}|/clear`) !== CLEARS.includes(label)).map(([label, fx, r]) => `${label}: ${show(fx, r)}`)
-clause('clause 2w — every read the wake\'s handoff test makes (restore file, transcript, latch, record, each git call) absent, empty, unreadable or timed out, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, an inherited GIT_CONFIG_* excludes file, a ~/.gitconfig one under a session GIT_CONFIG_GLOBAL=/dev/null, or the user\'s default git/ignore ignoring the untracked handoff, a handoff file that is a link into a repository where it is uncommitted, a memory file that is a link to a file modified in the handoff\'s repository or in a second repository, and a handoff committed in the lane as a link to a file outside every repository with the lane\'s memory file modified or the link retargeted, uncommitted, or a docs directory committed in the lane as a link to a second repository and retargeted, uncommitted, a handoff or memory file reached through a chain of committed links whose middle link is retargeted and uncommitted, an untracked, non-ignored handoff link hidden by the repository\'s own status.showUntrackedFiles=no, and a memory file committed as a link to a file outside every repository and retargeted, uncommitted: no /clear typed, and handoffLanded false on an existing memory link whose real path cannot be read; the healthy control, under a ceiling at its root, behind a git that stops at a filesystem boundary unless told to cross one, reached through a symlinked lane path, with its handoff file a link to a committed file in the same repository, with its handoff or its memory file a committed link to a file outside every repository, or with its docs directory a committed link to a second repository, or with its handoff and memory file each reached through a chain of committed links, the repository\'s own .gitignore ignoring docs/handoffs/ with the handoff untracked, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, SR8, SR9, SR10, SR11, SR12, SR13, B1)',
+clause('clause 2w — the restore file, transcript, latch and record each absent, empty or unreadable, git absent, each git call handoffLanded makes (rev-parse, check-ignore, ls-files --error-unmatch, log, ls-files -v and status) failing or timed out, rev-parse and log printing nothing, a committed handoff or the memory file modified under a core.fsmonitor hook that reports nothing changed, a committed handoff rewritten at the same size and mtime under the repository\'s own core.checkStat=minimal or core.trustctime=false, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, an inherited GIT_CONFIG_* excludes file, a ~/.gitconfig one under a session GIT_CONFIG_GLOBAL=/dev/null, or the user\'s default git/ignore ignoring the untracked handoff, a handoff file that is a link into a repository where it is uncommitted, a memory file that is a link to a file modified in the handoff\'s repository or in a second repository, and a handoff committed in the lane as a link to a file outside every repository with the lane\'s memory file modified or the link retargeted, uncommitted, or a docs directory committed in the lane as a link to a second repository and retargeted, uncommitted, a handoff or memory file reached through a chain of committed links whose middle link is retargeted and uncommitted, an untracked, non-ignored handoff link hidden by the repository\'s own status.showUntrackedFiles=no, and a memory file committed as a link to a file outside every repository and retargeted, uncommitted: no /clear typed, and handoffLanded false on an existing memory link whose real path cannot be read; the healthy control, under a ceiling at its root, behind a git that stops at a filesystem boundary unless told to cross one, reached through a symlinked lane path, with its handoff file a link to a committed file in the same repository, with its handoff or its memory file a committed link to a file outside every repository, or with its docs directory a committed link to a second repository, or with its handoff and memory file each reached through a chain of committed links, the repository\'s own .gitignore ignoring docs/handoffs/ with the handoff untracked, under a core.fsmonitor hook that reports nothing changed, under the repository\'s own core.checkStat=minimal and core.trustctime=false, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, SR8, SR9, SR10, SR11, SR12, SR13, B1)',
   classBad.length === 0 && memAccClean === true && memAccDenied === false, `${classBad.join(' || ')} | memory link clean ${memAccClean}, its directory closed ${memAccDenied}`)
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
@@ -804,9 +841,19 @@ for (const [label, fx] of classFxs) {
     ok = fs.readlinkSync(memory(fx)) === path.join(fx.c, 'm?.md') && fs.lstatSync(path.join(fx.c, 'm?.md')).isSymbolicLink() && ls().stdout === 'm1.md\n' && ls('--literal-pathspecs').status === 1 &&
       plain.status === 0 && plain.stdout === '' && spawnSync(realGit, ['-C', fx.c, 'check-ignore', '-q', 'm?.md'], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', XDG_CONFIG_HOME: '/dev/null' } }).status === 1 &&
       tracked(fx.lane, 'SESSION_MEMORY.md') && stAll(fx.lane) === '' && tracked(fx.c, 'm1.md')
+  } else if (/core\.fsmonitor hook that reports nothing changed$/.test(label)) {
+    ok = fx.monitorProof === true
+  } else if (/rewritten at the same size and mtime/.test(label)) {
+    // A plain status is empty while the handoff differs from HEAD's blob at HEAD's size, with the mtime git stored, and the same status under the default stat check names it.
+    const g = (...a) => spawnSync(realGit, ['-C', fx.lane, ...a], { encoding: 'utf8' }).stdout.trim(), key = /checkStat/.test(label) ? ['core.checkStat', 'minimal'] : ['core.trustctime', 'false']
+    ok = g('status', '--porcelain') === '' && g('hash-object', '--', 'docs/handoffs/h.md') !== g('rev-parse', 'HEAD:docs/handoffs/h.md') &&
+      fs.statSync(fx.handoff).size === Number(g('cat-file', '-s', 'HEAD:docs/handoffs/h.md')) && fs.statSync(fx.handoff, { bigint: true }).mtimeNs === fx.mtimeNs &&
+      g('config', key[0]) === key[1] && g('-c', `${key[0]}=${key[0] === 'core.checkStat' ? 'default' : 'true'}`, 'status', '--porcelain') === 'M docs/handoffs/h.md'
   } else {
-    const [, sub, how] = /^git (\S+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, SUBARGS[sub])
-    ok = how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === ''
+    // The row's shim trips its own call and lets every other call handoffLanded makes through.
+    const [, call, how] = /^git (.+) (fails|times out|prints nothing)$/.exec(label), r = gitOf(fx, GITCALLS[call])
+    const others = Object.keys(GITCALLS).filter((c) => c !== call).every((c) => { const o = gitOf(fx, GITCALLS[c]); return !o.error && o.status !== 128 && !/Input\/output error/.test(o.stderr) })
+    ok = others && (how === 'fails' ? r.status === 128 && /Input\/output error/.test(r.stderr) : how === 'times out' ? r.error?.code === 'ETIMEDOUT' : r.status === 0 && r.stdout === '')
   }
   if (!ok) classProofBad.push(label)
 }
@@ -857,6 +904,15 @@ for (const [i, fx, link] of [[7, outLinkFx, () => outLinkFx.handoff], [8, memOut
   const g = (...a) => spawnSync(realGit, ['-C', memSkipFx.lane, ...a], { encoding: 'utf8' }).stdout.trim()
   if (!(g('ls-files', '-v', '--', 'SESSION_MEMORY.md')[0] === 'S' && g('hash-object', '--', 'SESSION_MEMORY.md') !== g('rev-parse', 'HEAD:SESSION_MEMORY.md') && g('status', '--porcelain') === '' &&
     g('hash-object', '--', 'docs/handoffs/h.md') === g('rev-parse', 'HEAD:docs/handoffs/h.md') && g('ls-files', '-v', '--', 'docs/handoffs/h.md')[0] === 'H')) classProofBad.push(CLEARS[11])
+}
+// The monitor control: the hook configured and every entry marked valid, a plain status empty, the handoff and memory file HEAD's own.
+// The stat control: both settings in the repository's config, a plain status empty, the handoff HEAD's own at the mtime git stored.
+{
+  const g = (fx, ...a) => spawnSync(realGit, ['-C', fx.lane, ...a], { encoding: 'utf8' }).stdout.trim(), same = (fx, rel) => g(fx, 'hash-object', '--', rel) === g(fx, 'rev-parse', `HEAD:${rel}`)
+  if (!(g(monitorFx, 'config', 'core.fsmonitor').endsWith('fsmonitor.sh') && g(monitorFx, 'status', '--porcelain') === '' && same(monitorFx, 'docs/handoffs/h.md') && same(monitorFx, 'SESSION_MEMORY.md') &&
+    g(monitorFx, 'ls-files', '-f', '--', 'docs/handoffs/h.md') === 'h docs/handoffs/h.md')) classProofBad.push(CLEARS[12])
+  if (!(g(statFx, 'config', 'core.checkStat') === 'minimal' && g(statFx, 'config', 'core.trustctime') === 'false' && g(statFx, 'status', '--porcelain') === '' &&
+    same(statFx, 'docs/handoffs/h.md') && same(statFx, 'SESSION_MEMORY.md') && fs.statSync(statFx.handoff, { bigint: true }).mtimeNs === statFx.mtimeNs)) classProofBad.push(CLEARS[13])
 }
 // The closed-directory row: the link clean and its target modified as git reads them, and its real path refused while the link itself is there.
 if (!(memAccProof.linkClean && memAccProof.targetModified && memAccProof.realpathFails && memAccProof.linkCleanDenied)) classProofBad.push(`closed memory directory ${JSON.stringify(memAccProof)}`)
