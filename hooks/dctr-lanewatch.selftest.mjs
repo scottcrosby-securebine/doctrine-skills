@@ -40,8 +40,17 @@ if (a[0] === 'pane' && a[1] === 'get') {
   process.exit(0)
 }
 if (a[0] === 'notification') { log({}); console.log('shown'); process.exit(0) }
-if (a[0] === 'tab' && a[1] === 'create') { log({}); console.log(JSON.stringify({ result: { root_pane: { pane_id: 'w5:p5' } } })); process.exit(0) }
+if (a[0] === 'tab' && a[1] === 'create') { log({}); console.log(JSON.stringify({ result: { tab: { tab_id: 'w5:t5' }, root_pane: { pane_id: 'w5:p5' } } })); process.exit(0) }
+// herdr's own limit: a typed line over 1024 bytes is refused while the terminal is in canonical mode.
+const long = a.slice(3).flatMap((x) => x.split('\\n')).find((l) => Buffer.byteLength(l) > 1024)
+if (a[0] === 'pane' && ['run', 'send-text'].includes(a[1]) && (long !== undefined || s.failRun)) {
+  log({ typed: true, failed: true })
+  process.stderr.write(JSON.stringify({ error: { code: 'pane_send_failed', message: \`input contains a \${long === undefined ? 0 : Buffer.byteLength(long)}-byte line but the terminal is in canonical mode with a 1024-byte limit\` } }) + '\\n')
+  process.exit(1)
+}
 log({ typed: ['run', 'send-text', 'send-keys', 'prompt'].includes(a[1]) })
+// A pane runs its command in a fresh environment, as a herdr pane does: only its PATH, HOME and the shim's directory.
+if (a[0] === 'pane' && a[1] === 'run') require('child_process').spawn('/bin/sh', ['-c', a[3]], { detached: true, stdio: 'ignore', env: { PATH: '/usr/bin:/bin', HOME: dir, SHIM_DIR: dir } }).unref()
 process.exit(0)
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
@@ -49,7 +58,7 @@ process.env.PATH = `${bin}:${process.env.PATH}`
 
 const { createWatcher, POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS } = await import('./dctr-lanewatch.mjs')
 const { laneOf } = await import('./dctr-lib.mjs')
-const { restoreFile, stateDir, takePidLock } = await import('./dctr-state.mjs')
+const { restoreFile, stateDir } = await import('./dctr-state.mjs')
 const lanewatch = await import('./dctr-lanewatch.mjs')
 const { bridgeFile } = await import('./dctr-bridge.mjs')
 const WATCH = path.join(import.meta.dirname, 'dctr-lanewatch.mjs')
@@ -80,6 +89,7 @@ function fixture(roles, { extraLog = [] } = {}) {
   return fx
 }
 const setPanes = (fx, patch) => { const f = path.join(fx.dir, 'shim.json'), s = JSON.parse(fs.readFileSync(f, 'utf8')); for (const [k, v] of Object.entries(patch)) s.panes[k] = { ...s.panes[k], ...v }; fs.writeFileSync(f, JSON.stringify(s)) }
+const setShimTop = (fx, patch) => { const f = path.join(fx.dir, 'shim.json'); fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), ...patch })) }
 const shimLog = (fx) => fs.readFileSync(path.join(fx.dir, 'shim.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
 const events = (fx) => { try { return fs.readFileSync(path.join(fx.run, 'events.log'), 'utf8').split('\n').filter(Boolean).map((l) => l.split(' ').slice(1).join(' ')) } catch { return [] } }
 const notes = (fx) => shimLog(fx).filter((e) => e.argv[0] === 'notification')
@@ -135,9 +145,9 @@ write(waves.record.a, ['- State: Open',
 const ww = watcher(waves)
 polls(waves, ww); fs.appendFileSync(out('s2'), 'more'); polls(waves, ww); fs.appendFileSync(out('s2'), 'more'); polls(waves, ww)
 clause('clause 2f — a seat past its deadline with no growth in its handle file: one event line naming it, over three polls (E15-D12)',
-  events(waves).filter((e) => e === 'deadline a s1').length === 1, show(waves))
+  events(waves).filter((e) => e.startsWith('deadline a s1 line ')).length === 1, show(waves))
 clause('clause 2g — a seat past its deadline whose output grows each poll, an undated wave line, and a deadline still ahead: no event (E15-D13, D14)',
-  events(waves).every((e) => e === 'deadline a s1'), show(waves))
+  events(waves).every((e) => e.startsWith('deadline a s1 line ')), show(waves))
 
 // E15-D105: standing pauses.
 const ROLES = { p: {}, b: {}, q: {}, al: {}, ok: {} }
@@ -170,7 +180,7 @@ polls(held, wh)
 fs.appendFileSync(held.record.cyc, '- auto-cycle: cycle 1 tree abc\n')
 polls(held, wh, 2)
 clause('clause 2i — a last assistant message ending with the ready line for longer than the ready limit, no cycle line since: one event naming it; its twin younger than the limit none, and one whose record gains a cycle line after the first poll none (E15-D107)',
-  JSON.stringify(events(held)) === '["ready old S-old"]', show(held))
+  events(held).length === 1 && events(held)[0].startsWith('ready old S-old '), show(held))
 
 // E15-D108, D109: context past the resolved tier, and a stale bridge file.
 const bridge = (s, used, ageMs = 0) => {
@@ -298,7 +308,7 @@ function proc(args, env, cwd = tmp) {
 const st = fixture({})
 const T2 = path.join(tmp, 'T2'); fs.mkdirSync(T2)
 const nodeShimDir = path.join(tmp, 'nodeshim'), envLog = path.join(tmp, 'node-env.log')
-write(path.join(nodeShimDir, 'node'), `#!/bin/sh\nenv > ${envLog}\n`); fs.chmodSync(path.join(nodeShimDir, 'node'), 0o755)
+write(path.join(nodeShimDir, 'node'), `#!/bin/sh\nenv > ${envLog}\nexec ${process.execPath} "$@"\n`); fs.chmodSync(path.join(nodeShimDir, 'node'), 0o755)
 const startPath = `${nodeShimDir}:${bin}:/usr/bin:/bin`
 const rStart = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: st.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: startPath, TMPDIR: T2, SHIM_DIR: st.dir }, st.repo)
 const orch = laneOf(fs.readFileSync(path.join(st.run, 'lane.log'), 'utf8'), 'orchestrator')
@@ -308,11 +318,12 @@ clause('clause 2q — start appends an orchestrator create line that laneOf read
 clause('clause 2r — start writes its TMPDIR to <run>/tmpdir (E15-D248)',
   fs.existsSync(path.join(st.run, 'tmpdir')) && fs.readFileSync(path.join(st.run, 'tmpdir'), 'utf8') === T2, JSON.stringify(rStart))
 const paneCmd = shimLog(st).find((e) => e.argv[0] === 'pane' && e.argv[1] === 'run')?.argv[3]
-const ran = paneCmd ? spawnSync('env', ['-i', 'sh', '-c', paneCmd], { encoding: 'utf8' }) : null
 const nodeEnv = fs.existsSync(envLog) ? Object.fromEntries(fs.readFileSync(envLog, 'utf8').split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])) : {}
-clause('clause 2s — the pane command, run under env -i, starts node with DCTR_CALLER=watcher and the DCTR_RUN, PATH and TMPDIR of the start call (E15-D162)',
-  Boolean(paneCmd) && ran?.status === 0 && nodeEnv.DCTR_CALLER === 'watcher' && nodeEnv.DCTR_RUN === st.run && nodeEnv.PATH === startPath && nodeEnv.TMPDIR === T2,
-  JSON.stringify([paneCmd, nodeEnv]))
+const stHolder = (() => { try { return fs.readFileSync(path.join(st.run, 'lanewatch.lock', 'pid'), 'utf8') } catch { return null } })()
+clause('clause 2s — the pane command, run in the pane\'s fresh environment, starts node with DCTR_CALLER=watcher and the DCTR_RUN, PATH and TMPDIR of the start call, and that watcher holds the lock (E15-D162)',
+  Boolean(paneCmd) && nodeEnv.DCTR_CALLER === 'watcher' && nodeEnv.DCTR_RUN === st.run && nodeEnv.PATH === startPath && nodeEnv.TMPDIR === T2 && /^\d+$/.test(stHolder ?? ''),
+  JSON.stringify([paneCmd, nodeEnv, stHolder]))
+const rStStop = await proc(['stop'], { DCTR_RUN: st.run, PATH: startPath, TMPDIR: T2, SHIM_DIR: st.dir })
 
 // E15-D8: one watcher per run.
 const single = fixture({ a: {} })
@@ -405,29 +416,14 @@ await lanewatch.watch?.(counting, async (ms) => { waits.push(ms); if (waits.leng
 clause('clause 2ab — the watcher\'s loop polls, waits POLL_MS, polls again and waits POLL_MS again (WS-1)',
   typeof lanewatch.watch === 'function' && JSON.stringify(waits) === JSON.stringify([POLL_MS, POLL_MS]) && loopPolls === 2, JSON.stringify([waits, loopPolls]))
 
-// WB1: a stale lock replaced by one contender while another holds a dead read of it.
-const raceLock = path.join(tmp, 'race.lock')
-const deadPid = String(spawnSync('true').pid)
-fs.writeFileSync(raceLock, deadPid)
-const origRead = fs.readFileSync
-let interleaved = false
-fs.readFileSync = function (p, ...rest) {
-  const v = origRead.call(fs, p, ...rest)
-  if (!interleaved && String(p) === raceLock) { interleaved = true; fs.rmSync(raceLock); fs.writeFileSync(raceLock, '1') } // contender B, pid 1 (live)
-  return v
-}
-let raced
-try { raced = takePidLock(raceLock) } finally { fs.readFileSync = origRead }
-clause('clause 2ac — a contender that read a dead pid while another replaced the lock with a live one does not take it and leaves the live holder in place',
-  interleaved && raced === false && fs.readFileSync(raceLock, 'utf8').trim() === '1', JSON.stringify([interleaved, raced, fs.readFileSync(raceLock, 'utf8')]))
-
 // WB3: two concurrent starts.
 const duo = fixture({})
-const duoEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: duo.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: duo.dir }
+const duoEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: duo.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: duo.dir }
 const duoR = await Promise.all([proc(['start'], duoEnv, duo.repo), proc(['start'], duoEnv, duo.repo)])
 const creates = fs.readFileSync(path.join(duo.run, 'lane.log'), 'utf8').split('\n').filter((l) => / create orchestrator /.test(l))
 clause('clause 2ad — two starts at once: one exits 0 and one non-zero, with one create line and one tab between them',
   duoR.filter((r) => r.code === 0).length === 1 && creates.length === 1 && shimLog(duo).filter((e) => e.argv[0] === 'tab').length === 1, JSON.stringify([duoR, creates.length, shimLog(duo).length]))
+await proc(['stop'], duoEnv)
 
 // WB6: a checkout path holding whitespace.
 const spaced = path.join(tmp, 'with space', 'repo'); fs.mkdirSync(path.join(spaced, '.git'), { recursive: true })
@@ -442,34 +438,23 @@ clause('clause 2ae — start from a checkout whose path holds a space, or a tab,
 // WN3: stop signals only a watcher.
 const imposter = fixture({ a: {} })
 const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
-write(path.join(imposter.run, 'lanewatch.lock'), String(sleeper.pid))
+write(path.join(imposter.run, 'lanewatch.lock', 'pid'), String(sleeper.pid))
 const oldAt = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(path.join(imposter.run, 'lanewatch.lock'), oldAt, oldAt)
 const rImp = await proc(['stop'], { DCTR_RUN: imposter.run, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: imposter.dir })
 sleep(200)
 const impAlive = sleeper.exitCode === null && sleeper.signalCode === null
 sleeper.kill('SIGKILL')
 const deadHolder = fixture({ a: {} })
-write(path.join(deadHolder.run, 'lanewatch.lock'), String(spawnSync('true').pid))
+write(path.join(deadHolder.run, 'lanewatch.lock', 'pid'), String(spawnSync('true').pid))
 const rDeadStop = await proc(['stop'], { DCTR_RUN: deadHolder.run, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: deadHolder.dir })
 clause('clause 2af2 — stop on a fresh lock whose pid has exited signals nothing, exits 0 and removes the lock',
   rDeadStop.code === 0 && !fs.existsSync(path.join(deadHolder.run, 'lanewatch.lock')), JSON.stringify(rDeadStop))
-clause('clause 2af — stop sends no signal to a pid whose lock the watcher has not renewed within its polls: a process that is not the watcher lives on',
-  impAlive, JSON.stringify([rImp, impAlive]))
-
-// The hand-over: a watcher whose DCTR_WATCH_FROM names the live start that holds the lock takes it over.
-const handed = fixture({ a: {} })
-const starter = spawn('sleep', ['30'], { stdio: 'ignore' })
-write(path.join(handed.run, 'lanewatch.lock'), String(starter.pid))
-const heir = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_RUN: handed.run, DCTR_WATCH_FROM: String(starter.pid), PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: handed.dir }, stdio: 'ignore' })
-for (let t = 0; t < 100 && fs.readFileSync(path.join(handed.run, 'lanewatch.lock'), 'utf8').trim() !== String(heir.pid); t++) sleep(50)
-const heirHolds = fs.readFileSync(path.join(handed.run, 'lanewatch.lock'), 'utf8').trim() === String(heir.pid) && heir.exitCode === null
-heir.kill('SIGKILL'); starter.kill('SIGKILL')
-clause('clause 2ag — the watcher start\'s pane runs takes the lock over from the live start whose pid DCTR_WATCH_FROM names, and runs',
-  heirHolds, JSON.stringify([heirHolds, heir.exitCode]))
+clause('clause 2af — stop sends no signal to a pid whose lock the watcher has not renewed within its polls, and leaves its lock: a process that is not the watcher lives on, and stop exits non-zero (WN3, WB24)',
+  impAlive && rImp.code !== 0 && fs.existsSync(path.join(imposter.run, 'lanewatch.lock', 'pid')), JSON.stringify([rImp, impAlive]))
 
 // Each poll renews the lock's time, which is how stop tells the watcher from a reused pid.
 const renew = fixture({ a: {} })
-write(path.join(renew.run, 'lanewatch.lock'), String(process.pid))
+write(path.join(renew.run, 'lanewatch.lock', 'pid'), String(process.pid))
 const oldLock = (Date.now() - 10 * POLL_MS) / 1000; fs.utimesSync(path.join(renew.run, 'lanewatch.lock'), oldLock, oldLock)
 polls(renew, watcher(renew))
 clause('clause 2ah — a poll renews the lock\'s modification time',
@@ -497,6 +482,65 @@ bridge('S-sx', 100000, 2 * BRIDGE_EXPIRY_MS); polls(rs, rw)
 clause('clause 2ai — a watcher restarted between polls raises no exit, pause, deadline, ready, unknown-context or past-tier line again while its state holds; an exit, a pause and a stale bridge that clear and come back after the restart are each raised again',
   rsFirst.length === 6 && JSON.stringify(rsAgain) === JSON.stringify(rsFirst) && events(rs).filter((e) => e.startsWith('exit dead ')).length === 2 &&
   events(rs).filter((e) => e.startsWith('pause pz ')).length === 2 && events(rs).filter((e) => e === 'context sx S-sx unknown').length === 2, JSON.stringify([rsFirst, events(rs)]))
+
+// ---------------------------------------------------------------- clause 2: round-2 repairs
+
+// WB15: herdr refuses a typed line over 1024 bytes, and the shim does too; a start whose PATH is longer still starts.
+const longPath = fixture({})
+const LONG = `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin:${Array.from({ length: 12 }, (_, i) => `/nonexistent/${'x'.repeat(100)}${i}`).join(':')}`
+const longEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: longPath.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: LONG, TMPDIR: T, SHIM_DIR: longPath.dir }
+const rLong = await proc(['start'], longEnv, longPath.repo)
+const longRun = shimLog(longPath).filter((e) => e.argv[1] === 'run')
+const longHolder = (() => { try { return fs.readFileSync(path.join(longPath.run, 'lanewatch.lock', 'pid'), 'utf8') } catch { return null } })()
+await proc(['stop'], longEnv)
+clause('clause 2aj — with a PATH over 1024 bytes start exits 0, its one pane run line is under 1024 bytes, and the watcher it ran holds the lock (WB15)',
+  Buffer.byteLength(LONG) > 1024 && rLong.code === 0 && longRun.length === 1 && !longRun[0].failed && Buffer.byteLength(longRun[0].argv[3]) < 1024 && /^\d+$/.test(longHolder ?? ''),
+  JSON.stringify([rLong, longRun, longHolder]))
+
+// WB16: a start whose pane step fails undoes what it made.
+const failing = fixture({})
+setShimTop(failing, { failRun: true })
+const failEnv = { DCTR_ROLE: 'orchestrator', DCTR_RUN: failing.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: `${bin}:/usr/bin:/bin`, TMPDIR: T, SHIM_DIR: failing.dir }
+const rFail = await proc(['start'], failEnv, failing.repo)
+const failCalls = shimLog(failing).map((e) => e.argv.slice(0, 3).join(' '))
+const failLeft = ['lanewatch.lock', 'lanewatch.start.lock', 'tmpdir'].filter((f) => fs.existsSync(path.join(failing.run, f)))
+clause('clause 2ak — a start whose pane run fails exits 1 with one line naming herdr\'s error, closes the tab it made, and leaves no lock, no tmpdir and no create line (WB16)',
+  rFail.code === 1 && rFail.err.split('\n').length === 1 && /^dctr-lanewatch: .*pane_send_failed/.test(rFail.err) && failCalls.at(-1) === 'tab close w5:t5' &&
+  failLeft.length === 0 && !/ create orchestrator /.test(fs.readFileSync(path.join(failing.run, 'lane.log'), 'utf8')), JSON.stringify([rFail, failCalls, failLeft]))
+
+// WB17, WB18, WB19: a restart keys what it restores as the in-process sets do (the reviewer's three probes).
+{
+  const dl = fixture({ wv: {} }), dl2 = fixture({ wv: {} })
+  for (const fx of [dl, dl2]) { write(path.join(fx.wt.wv, 'w.out'), 'x'); fs.appendFileSync(fx.record.wv, `- wave: ${ago(600000)} seat codex handle w.out deadline ${ago(60000)}\n`) }
+  const a = watcher(dl); polls(dl, a, 2); const b = watcher(dl2); polls(dl2, b, 2)
+  for (const fx of [dl, dl2]) { write(path.join(fx.wt.wv, 'w2.out'), 'y'); fs.appendFileSync(fx.record.wv, `- wave: ${ago(300000)} seat codex handle w2.out deadline ${ago(30000)}\n`) }
+  polls(dl, watcher(dl), 2); polls(dl2, b, 2)
+  clause('clause 2al — after a restart a later late seat of the same name on a new wave line is raised, as without the restart (WB17, E15-D12)',
+    events(dl).length === 2 && events(dl).length === events(dl2).length, JSON.stringify([events(dl), events(dl2)]))
+
+  const ry = fixture({ ry: {} }), ry2 = fixture({ ry: {} })
+  for (const fx of [ry, ry2]) transcript(fx, 'ry', [asst(ago(READY_LIMIT_MS + 120000), 'Handoff written.\nauto-cycle: ready')])
+  const c = watcher(ry); polls(ry, c, 2); const d = watcher(ry2); polls(ry2, d, 2)
+  for (const fx of [ry, ry2]) transcript(fx, 'ry', [asst(ago(READY_LIMIT_MS + 120000), 'Handoff written.\nauto-cycle: ready'), asst(ago(READY_LIMIT_MS + 60000), 'again\nauto-cycle: ready')])
+  polls(ry, watcher(ry), 2); polls(ry2, d, 2)
+  clause('clause 2am — after a restart the same session ready again on a later entry is raised, as without the restart (WB18, E15-D107)',
+    events(ry).length === 2 && events(ry).length === events(ry2).length, JSON.stringify([events(ry), events(ry2)]))
+
+  const pz = fixture({ pz: {} })
+  fs.appendFileSync(pz.record.pz, '- State: Blocked. waits\n'); polls(pz, watcher(pz))
+  fs.appendFileSync(pz.record.pz, '- State: Open\n'); const e = watcher(pz); polls(pz, e)
+  fs.appendFileSync(pz.record.pz, '- State: Blocked. waits\n'); polls(pz, e)
+  clause('clause 2an — a pause that cleared while no watcher ran is raised again when it returns after the restart (WB19, E15-D105)',
+    events(pz).filter((x) => x.startsWith('pause pz ')).length === 2, JSON.stringify(events(pz)))
+}
+
+// WB25: two stall lines in the same millisecond are two stalls, before a restart and after it.
+const twinStall = fixture({ a: {} })
+const sameMs = new Date().toISOString()
+fs.appendFileSync(path.join(twinStall.run, 'events.log'), `${sameMs} unfinished orchestrator 2026-11-09T04:00:01.000Z\n${sameMs} unfinished orchestrator 2026-11-09T04:00:02.000Z\n`)
+polls(twinStall, watcher(twinStall)); polls(twinStall, watcher(twinStall))
+clause('clause 2ao — two unfinished lines naming the orchestrator in the same millisecond give two notifications, and a restart none more (WB25, E15-D238)',
+  notes(twinStall).length === 2, JSON.stringify(notes(twinStall).map((e) => e.argv[2])))
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
@@ -527,5 +571,14 @@ clause('clause 3d — without the watcher: the reader fixture\'s lane.log names 
   /create a w1:p1 /.test(fs.readFileSync(path.join(viaReader.run, 'lane.log'), 'utf8')) &&
   JSON.parse(fs.readFileSync(path.join(viaReader.dir, 'shim.json'), 'utf8')).panes['w1:p1'].session === 'S-a' &&
   JSON.parse(fs.readFileSync(path.join(viaReader.dir, 'shim.json'), 'utf8')).panes['w7:p7'].session === null, 'reader fixture wrong')
+
+{
+  const fx = fixture({})
+  process.env.SHIM_DIR = fx.dir
+  const runLine = (line) => spawnSync(path.join(bin, 'herdr'), ['pane', 'run', 'w9:p9', line], { encoding: 'utf8', env: { ...process.env, PATH: '/usr/bin:/bin' } })
+  const over = runLine(`true ${'x'.repeat(1100)}`), under = runLine('true')
+  clause('clause 3e — without the watcher: the shim refuses a pane run line of 1105 bytes with herdr\'s pane_send_failed error and runs a short one',
+    over.status === 1 && /pane_send_failed/.test(over.stderr) && /1105-byte line/.test(over.stderr) && under.status === 0, JSON.stringify([over.status, over.stderr, under.status]))
+}
 
 process.exit(bad ? 1 : 0)

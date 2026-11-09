@@ -480,30 +480,18 @@ export function pidAlive(raw) {
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
 }
 
-/** Take the single-instance lock `file`, a file holding this process's pid (wake-all.lock, lanewatch.lock): true when
- *  taken, false while a live pid holds it. A lock whose pid has exited is replaced, identity-safe as breakStaleLock is:
- *  it is renamed aside, and what moved must still be the dead holder that was read, else it is put straight back, so a
- *  contender that read a dead pid never removes a live holder that replaced it meanwhile. One that cannot be read or
- *  holds no pid counts as held, so a torn lock never lets two in. Residual, as breakStaleLock's: a put-back that loses
- *  the name to a third contender drops the moved lock. */
-export function takePidLock(file) {
-  for (let i = 0; i < 3; i++) {
-    try { fs.writeFileSync(file, String(process.pid), { flag: 'wx' }); return true } catch (e) { if (e.code !== 'EEXIST') throw e }
-    let raw
-    try { raw = fs.readFileSync(file, 'utf8').trim() } catch (e) { if (e.code === 'ENOENT') continue; return false }
-    if (!/^\d+$/.test(raw) || pidAlive(raw)) return false
-    const aside = `${file}.dead.${process.pid}.${Date.now()}`
-    try { fs.renameSync(file, aside) } catch { continue }
-    let moved = null
-    try { moved = fs.readFileSync(aside, 'utf8').trim() } catch { /* could not look: put it back */ }
-    if (moved !== raw) { try { fs.renameSync(aside, file) } catch { /* the name was retaken */ } return false }
-    fs.rmSync(aside, { force: true })
-  }
-  return false
-}
-/** Remove `file` when this process holds it. */
-export function releasePidLock(file) {
-  try { if (fs.readFileSync(file, 'utf8').trim() === String(process.pid)) fs.rmSync(file, { force: true }) } catch { /* not ours or gone */ }
+/** How long a run lock (wake-all.lock, lanewatch.lock) whose holder cannot be judged by its pid, none published yet or
+ *  one from another namespace, must sit before it is broken. A holder renews its lock at each herdr call and each poll. */
+export const RUN_LOCK_PIDLESS_MS = 180000
+
+/** Take a run's single-instance lock, the directory lock acquireLock makes: true when taken, false while any holder that
+ *  is alive, or cannot be judged, keeps it. A lock whose holder has exited is broken through breakIfOrphaned, which puts
+ *  back anything that replaced it, and taken once more. A take that throws (a pid that could not be published) is false. */
+export function takeRunLock(lock) {
+  try {
+    if (acquireLock(lock)) return true
+    return breakIfOrphaned(lock, 0, RUN_LOCK_PIDLESS_MS) && acquireLock(lock)
+  } catch { return false }
 }
 
 /** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false

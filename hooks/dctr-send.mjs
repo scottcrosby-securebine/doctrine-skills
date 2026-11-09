@@ -28,7 +28,8 @@
 //
 // wake-all <run> (E15 Recovery) runs from any shell: it sets DCTR_RUN to <run>, takes TMPDIR from <run>/tmpdir, which
 // the lane watcher's start writes, and tags every call `sender:watcher`; contained, or with no <run>/tmpdir, it refuses
-// with no pane call. It holds <run>/wake-all.lock with its pid and refuses while a live pid holds it. On start every
+// with no pane call. It holds <run>/wake-all.lock, takeRunLock's directory lock naming its pid, and refuses while a
+// live pid, or one it cannot judge, holds it. On start every
 // `intent <role> <L>` in events.log with no later woken, retry, skip, unfinished or unwoken line for that role and <L>
 // gets `unfinished <role> <L>`. It selects each role a lane.log create line names whose latest limits.log line <L> is
 // `account` with no woken, unfinished, unwoken or no-agent skip line for it and <L>, and reads its pane itself, under its
@@ -42,7 +43,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { herdr } from './dctr-state.mjs'
-import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takePidLock, releasePidLock } from './dctr-state.mjs'
+import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takeRunLock, releaseLock } from './dctr-state.mjs'
 import { laneOf, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
 
 const WAKE_GIVE_UP_MS = 10000
@@ -220,8 +221,8 @@ function deliver(pane, lane, claim, role) {
 /** wake-all (E15 Recovery): never returns. */
 function wakeAll() {
   const lock = path.join(run, 'wake-all.lock')
-  if (!takePidLock(lock)) fail(`another wake-all holds ${lock}: nothing read or typed`)
-  process.on('exit', () => releasePidLock(lock))
+  if (!takeRunLock(lock)) fail(`another wake-all holds ${lock}: nothing read or typed`)
+  process.on('exit', () => releaseLock(lock))
   const retryMs = Number(process.env.DCTR_WAKEALL_RETRY_MS) || 30000, windowMs = Number(process.env.DCTR_WAKEALL_WINDOW_MS) || 600000
   const eventsFile = path.join(run, 'events.log')
   const events = () => parseWakeLines(readText(eventsFile))

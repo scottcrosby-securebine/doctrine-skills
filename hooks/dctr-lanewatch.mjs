@@ -5,25 +5,30 @@
 //   node hooks/dctr-lanewatch.mjs stop     end the watcher: the orchestrator's last step of the run
 //   node hooks/dctr-lanewatch.mjs          the watcher itself, as start's pane runs it
 //
-// The run comes from runRoot(). `start` appends an orchestrator `create` line to lane.log, under the caller tag
-// `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own
-// environment, writes its TMPDIR to <run>/tmpdir, which wake-all reads, then makes a tab and runs
-// `env DCTR_CALLER=watcher DCTR_RUN=<run> PATH=<path> TMPDIR=<tmp> node <this file>` in its pane, since a pane does not
-// inherit the environment. start refuses a checkout whose path holds whitespace, which a lane.log line cannot carry,
-// and takes <run>/lanewatch.lock with its own pid before it writes anything; the watcher its pane runs takes the lock
-// over from that pid (DCTR_WATCH_FROM), so a second watcher, and a second start, refuse while either holds it. The
-// watcher renews the lock's time at every poll, and stop signals the pid only while that renewal is recent. Contained
-// (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
+// The run comes from runRoot(). `start` refuses a checkout whose path holds whitespace, which a lane.log line cannot
+// carry, takes <run>/lanewatch.start.lock so two starts never run at once, and refuses while a watcher holds
+// <run>/lanewatch.lock. It writes <run>/lanewatch.sh, `exec env DCTR_CALLER=watcher DCTR_RUN=<run> PATH=<path>
+// TMPDIR=<tmp> node <this file>`, since a pane does not inherit the environment, makes a tab and runs `sh <that file>`
+// in its pane: herdr refuses a typed line over 1024 bytes, which an inlined PATH passes. The watcher takes
+// <run>/lanewatch.lock itself as its first act, the directory lock takeRunLock makes, and refuses while another holds
+// it. start waits up to START_WAIT_MS for a live holder of that lock, and only then writes its TMPDIR to <run>/tmpdir,
+// which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag `orchestrator`,
+// naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own environment. A
+// start whose tab, pane or wait fails closes the tab it made, releases its lock, writes neither, and exits 1 with one
+// line. The lock is renewed at every poll and every herdr call; stop signals only a live holder whose lock was renewed
+// within 3 * POLL_MS, waits for it to release the lock, removes a lock only when its holder has exited, and touches no
+// other. Contained (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
 //
 // Each poll, every POLL_MS, appends one events.log line per new fact, `<ISO time> <word> ...`:
 //   report <file>                a new file in <run>/inbox/
 //   exit <role> <pane>           a session's pane, the one its role's latest create line names (laneOf, the only way
 //                                this file learns a pane or worktree), reporting no agent session
-//   deadline <role> <seat>       a seat past its wave line's deadline whose handle file did not grow between two polls
+//   deadline <role> <seat> line <n>  a seat past the deadline of its wave line, record line n, whose handle file did not
+//                                grow between two polls
 //   pause <role> <reason>        a record newly showing a standing pause: an auto-cycle paused line, a Blocked state,
 //                                an unanswered question or an alarm with no ruling after it
-//   ready <role> <session>       a last assistant message ending with the ready line for longer than READY_LIMIT_MS,
-//                                with no cycle line since the poll that first saw it
+//   ready <role> <session> <at>  a last assistant message, timestamped at, ending with the ready line for longer than
+//                                READY_LIMIT_MS, with no cycle line since the poll that first saw it
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
 //                                polls with no warned line naming the session; `unknown` once for a bridge file older
 //                                than BRIDGE_EXPIRY_MS, whose value is never read
@@ -32,17 +37,19 @@
 // A pane read that fails or comes back empty is unknown: no exit event, and the watcher types nothing ever. It shows a
 // notification for the first account line of an episode, and none for later ones until events.log holds a woken line
 // written after that notification, and one for each unwoken, unfinished or skip line naming the orchestrator; each
-// inside a catch that never sends again, and writes `notified <time> <word>` for each stall it notified. What it has
-// reported survives a restart through events.log: a report, a limit line, an account episode's notification and a
-// stall's notification already there are not raised again, nor is an exit, pause, deadline, ready or context event
-// whose state still holds; one whose state cleared and returned is raised again.
+// inside a catch that never sends again, and writes `notified <line index> <word>` for each stall it notified, the
+// stall line's index in events.log. What it has reported survives a restart through events.log: a report, a limit
+// line, an account episode's notification and a stall's notification already there are not raised again, nor a
+// deadline for the same wave line, a ready for the same entry or a past-tier context for the same session; an exit,
+// pause or unknown context already there is not raised again while the first poll after the restart sees its state
+// still hold, and one whose state cleared, before the restart or after it, is raised again when it returns.
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { herdr } from './dctr-state.mjs'
-import { restoreFile, stateDir, takePidLock, releasePidLock, pidAlive } from './dctr-state.mjs'
+import { restoreFile, stateDir, takeRunLock, releaseLock, lockHolder, holderAlive, ownPidNs, breakStaleLock, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, pausingStates, resolveTier,
   lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
@@ -53,6 +60,9 @@ import { bridgeFile } from './dctr-bridge.mjs'
 export const POLL_MS = 30000
 export const READY_LIMIT_MS = 600000
 export const BRIDGE_EXPIRY_MS = 300000
+/** How long start waits for its watcher to take the lock, and stop for a signalled watcher to release it. */
+export const START_WAIT_MS = 10000
+export const STOP_WAIT_MS = 10000
 
 const SELF = fileURLToPath(import.meta.url)
 const readText = (file) => { try { return fs.readFileSync(file, 'utf8') } catch { return null } }
@@ -75,21 +85,24 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   const eventsFile = path.join(run, 'events.log'), name = runName(run)
   const emit = (text) => { fs.mkdirSync(run, { recursive: true }); fs.appendFileSync(eventsFile, `${new Date().toISOString()} ${text}\n`) }
   const notify = (title) => { try { herdr(['notification', 'show', title, '--sound', 'request']) } catch { /* shown or not, never sent again */ } }
-  // A state event an earlier watcher raised whose state still holds is not raised again after a restart: `reported`
-  // holds the events.log texts (a past-tier line by its prefix), and an entry leaves it once its state is seen to clear.
-  const raise = (text, key = text) => { if (!reported.has(key)) emit(text) }
+  // An event an earlier watcher raised is not raised again after a restart: `restored` holds the events.log texts (a
+  // past-tier line by its prefix), and a raise it holds is dropped once, after which the in-process sets carry it. The
+  // texts carry the identity those sets key on: a deadline its wave line, a ready its entry, a pause, exit or unknown
+  // context its state, so these last are kept only while the first poll sees them hold.
+  const raise = (text, key = text) => { if (!restored.delete(key)) emit(text) }
   const completeLines = () => { const t = readText(eventsFile) ?? ''; return t.split('\n').slice(0, -1) }
 
   // What events.log already reports is never raised again, a restart included: limits.log only grows, so the count of
   // limit events is how many of its lines are reported, whatever two lines share. The account episode is rebuilt too:
   // its notification point is the first account limit event after the last woken line, by position in the file. A stall line is notified once,
-  // and a `notified <its time> <word>` line records that, so one written while no watcher ran still notifies.
-  const seenReports = new Set(), notifiedStalls = new Set(), reported = new Set()
+  // and a `notified <its line index> <word>` line records that, so one written while no watcher ran still notifies, and
+  // two stall lines written in the same millisecond are two.
+  const seenReports = new Set(), notifiedStalls = new Set(), restored = new Set()
   // notifiedAt is the events.log line index of the episode's notification point, judged by position, never by time.
   let limitsSeen = 0, notifiedAt = null
   for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
-    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) reported.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
+    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
@@ -117,7 +130,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   function stalls() {
     for (const w of parseWakeLines(completeLines().join('\n'))) {
-      const key = `${w.at} ${w.word}`
+      const key = `${w.index} ${w.word}`
       if (w.role !== 'orchestrator' || !['unwoken', 'unfinished', 'skip'].includes(w.word) || notifiedStalls.has(key)) continue
       notifiedStalls.add(key)
       emit(`notified ${key}`)
@@ -137,7 +150,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   function session(role, lane) {
     const s = paneSession(lane.pane)
-    if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) { exited.delete(role); reported.delete(`exit ${role} ${lane.pane}`) }
+    if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) exited.delete(role)
     const rec = recordOf(lane.worktree)
     if (rec) { standing(role, rec.record.entries); seats(role, rec.record.entries, lane.worktree) }
     if (!s || !rec) return
@@ -156,7 +169,6 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (st.question) now.set(`question ${st.question.id}`, `question ${st.question.id} unanswered: ${st.question.text}`)
     const before = pauses.get(role) ?? new Map()
     for (const [k, reason] of now) if (!before.has(k)) raise(`pause ${role} ${reason}`)
-    for (const [k, reason] of before) if (!now.has(k)) reported.delete(`pause ${role} ${reason}`)
     pauses.set(role, now)
   }
 
@@ -171,7 +183,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       if (size === null) { grew.delete(key); continue }
       const was = grew.has(key) ? grew.get(key) : undefined
       grew.set(key, size)
-      if (was !== undefined && was === size) { late.add(key); raise(`deadline ${role} ${w.seat}`) }
+      if (was !== undefined && was === size) { late.add(key); raise(`deadline ${role} ${w.seat} line ${w.line}`) }
     }
   }
 
@@ -182,7 +194,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     // Raised on a poll after the one that first saw this ready line, while the record has gained no cycle line since.
     const key = `${s} ${last.timestamp}`, cycles = entries.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').length
     if (!readySeen.has(key)) { readySeen.set(key, cycles); return }
-    if (Date.now() - Date.parse(last.timestamp) > READY_LIMIT_MS && readySeen.get(key) === cycles && !readyRaised.has(key)) { readyRaised.add(key); raise(`ready ${role} ${s}`) }
+    if (Date.now() - Date.parse(last.timestamp) > READY_LIMIT_MS && readySeen.get(key) === cycles && !readyRaised.has(key)) { readyRaised.add(key); raise(`ready ${role} ${s} ${last.timestamp}`) }
   }
 
   function context(role, s, entries, transcript) {
@@ -194,7 +206,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       if (!staleRaised.has(s)) { staleRaised.add(s); raise(`context ${role} ${s} unknown`) }
       return
     }
-    staleRaised.delete(s); reported.delete(`context ${role} ${s} unknown`)
+    staleRaised.delete(s)
     let b
     try { b = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return }
     if (b?.session_id !== s || typeof b.used !== 'number') return
@@ -208,6 +220,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (n >= 2 && !sessionWarned(entries, s) && !contextRaised.has(s)) { contextRaised.add(s); raise(`context ${role} ${s} past tier ${tier} at ${b.used}`, `context ${role} ${s} past tier`) }
   }
 
+  let firstPoll = true
   return {
     poll() {
       try { const now = new Date(); fs.utimesSync(path.join(run, 'lanewatch.lock'), now, now) } catch { /* not this run's watcher */ }
@@ -216,6 +229,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       stalls()
       const laneText = readText(path.join(run, 'lane.log'))
       for (const role of laneRoles(laneText)) { const lane = laneOf(laneText, role); if (lane) session(role, lane) }
+      if (firstPoll) for (const k of restored) if (/^(exit|pause) |^context \S+ \S+ unknown$/.test(k)) restored.delete(k)
+      firstPoll = false
     },
   }
 }
@@ -225,50 +240,68 @@ export async function watch(w, wait = (ms) => new Promise((r) => setTimeout(r, m
   for (;;) { w.poll(); await wait(POLL_MS) }
 }
 
-/** `start`: the lock, then the records, then the watcher's pane, whose watcher takes the lock over from this pid. */
+/** Whether a watcher holds `lock`: there, and its holder not one known to have exited. */
+const held = (lock) => { const h = lockHolder(lock); return fs.existsSync(lock) && !(h && holderAlive(h, ownPidNs()) === false) }
+/** A herdr failure as one line. */
+const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
+
+/** `start`: its own lock, the watcher's pane, the wait for the watcher's lock, then the records. */
 function start(run) {
   const checkout = repoOf(path.join(process.cwd(), '.git'), fs.existsSync)
   if (laneLogPathRefusal(checkout)) fail(laneLogPathRefusal(checkout))
   const pane = process.env.HERDR_PANE_ID, workspace = process.env.HERDR_WORKSPACE_ID
   if (!pane || !workspace) fail('no HERDR_PANE_ID or HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
   fs.mkdirSync(run, { recursive: true })
-  if (!takePidLock(path.join(run, 'lanewatch.lock'))) fail(`a watcher, or another start, already holds ${path.join(run, 'lanewatch.lock')}`)
+  const lock = path.join(run, 'lanewatch.lock'), startLock = path.join(run, 'lanewatch.start.lock')
+  if (!takeRunLock(startLock)) fail(`another start holds ${startLock}`)
+  process.on('exit', () => releaseLock(startLock))
+  if (held(lock)) fail(`a watcher already holds ${lock}`)
   const tmp = process.env.TMPDIR || os.tmpdir(), envPath = process.env.PATH ?? ''
+  const script = path.join(run, 'lanewatch.sh')
+  fs.writeFileSync(script, `exec env DCTR_CALLER=watcher DCTR_RUN=${shq(run)} PATH=${shq(envPath)} TMPDIR=${shq(tmp)} node ${shq(SELF)}\n`)
+  let tab = null
+  const undo = (m) => { if (tab) { try { herdr(['tab', 'close', tab]) } catch { /* gone already */ } } fail(m) }
+  let made
+  try { made = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout))?.result } catch (e) { undo(`the watcher's tab was not made: ${why(e)}`) }
+  tab = made?.tab?.tab_id ?? null
+  const watcher = made?.root_pane?.pane_id
+  if (!watcher) undo('no pane was made for the watcher')
+  try { herdr(['pane', 'run', watcher, `sh ${shq(script)}`]) } catch (e) { undo(`the watcher's pane did not run it: ${why(e)}`) }
+  const until = Date.now() + START_WAIT_MS
+  for (;;) {
+    const h = lockHolder(lock)
+    if (h && holderAlive(h, ownPidNs()) === true) break
+    if (Date.now() > until) undo(`no watcher took ${lock} within ${START_WAIT_MS} ms`)
+    sleepMs(100)
+  }
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
   const launch = `cd ${shq(checkout)} && env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
     `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
     `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`
   fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} ${launch}\n`)
-  // A failed call throws and fails start, which closes nothing; the lock it leaves names a pid that has exited.
-  const watcher = herdr(tabCreateArgs(workspace, `${PREFIX} · watcher`, checkout))?.result?.root_pane?.pane_id
-  if (!watcher) fail('no pane was made for the watcher')
-  herdr(['pane', 'run', watcher, `env DCTR_CALLER=watcher DCTR_RUN=${shq(run)} DCTR_WATCH_FROM=${process.pid} PATH=${shq(envPath)} TMPDIR=${shq(tmp)} node ${shq(SELF)}`])
   process.stdout.write(`dctr-lanewatch: started in ${watcher}\n`)
 }
 
-/** The lock for the watcher itself: taken over from the start that made its pane, else taken as any other. */
-function takeOver(lock) {
-  const from = process.env.DCTR_WATCH_FROM
-  if (from && readText(lock)?.trim() === from) {
-    const mine = `${lock}.${process.pid}`
-    fs.writeFileSync(mine, String(process.pid))
-    fs.renameSync(mine, lock)
-    return readText(lock)?.trim() === String(process.pid)
-  }
-  return takePidLock(lock)
-}
-
-/** `stop`: end the watcher that holds the lock. A pid whose lock no poll has renewed lately is not the watcher, and is
- *  never signalled: the lock is only removed. */
+/** `stop`: end the watcher that holds the lock. Only a live holder whose lock was renewed within 3 * POLL_MS is the
+ *  watcher, and it is signalled and releases the lock itself; a lock whose holder has exited is removed, as
+ *  breakStaleLock removes one, and any other is left. */
 function stop(run) {
-  const lock = path.join(run, 'lanewatch.lock'), holder = readText(lock)?.trim()
-  if (!holder || !/^\d+$/.test(holder)) fail(`no watcher holds ${lock}`)
-  let fresh = false
-  try { fresh = Date.now() - fs.statSync(lock).mtimeMs < 3 * POLL_MS } catch { /* gone */ }
-  if (fresh && pidAlive(holder)) process.kill(Number(holder), 'SIGTERM')
-  else process.stdout.write(`dctr-lanewatch: pid ${holder} has not renewed the lock, so it is not signalled\n`)
-  fs.rmSync(lock, { force: true })
-  process.stdout.write(`dctr-lanewatch: stopped pid ${holder}\n`)
+  const lock = path.join(run, 'lanewatch.lock'), h = lockHolder(lock)
+  if (!h) fail(`no watcher holds ${lock}`)
+  let age = Infinity
+  try { age = Date.now() - fs.statSync(lock).mtimeMs } catch { /* gone */ }
+  const alive = holderAlive(h, ownPidNs())
+  if (alive === false) { breakStaleLock(lock, h); process.stdout.write(`dctr-lanewatch: pid ${h.pid} had exited; its lock is removed\n`); return }
+  if (alive !== true || !(age < 3 * POLL_MS)) fail(`pid ${h.pid} holds ${lock} but did not renew it within ${3 * POLL_MS} ms, so it is not taken for the watcher: nothing signalled or removed`)
+  process.kill(Number(h.pid), 'SIGTERM')
+  const until = Date.now() + STOP_WAIT_MS
+  for (;;) {
+    const now = lockHolder(lock)
+    if (now !== undefined && !(now && now.pid === h.pid && now.ns === h.ns)) break
+    if (Date.now() > until) fail(`pid ${h.pid} was signalled and still holds ${lock}`)
+    sleepMs(100)
+  }
+  process.stdout.write(`dctr-lanewatch: stopped pid ${h.pid}\n`)
 }
 
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(SELF) } catch { return false } })()
@@ -283,9 +316,9 @@ if (isMain) {
   else {
     fs.mkdirSync(run, { recursive: true })
     const lock = path.join(run, 'lanewatch.lock')
-    if (!takeOver(lock)) fail(`a watcher already runs on ${run}`)
-    process.on('exit', () => releasePidLock(lock))
-    for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(0))
+    if (!takeRunLock(lock)) fail(`a watcher already holds ${lock}`)
+    process.on('exit', () => releaseLock(lock))
+    for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(0))
     // A timer, never a blocking sleep, so stop's SIGTERM reaches the handler that releases the lock.
     await watch(createWatcher(run))
   }
