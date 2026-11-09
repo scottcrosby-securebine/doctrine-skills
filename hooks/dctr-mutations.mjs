@@ -4825,6 +4825,10 @@ const MUTATIONS = [
     clause: "clause 2x15 — with neither override set, wake-all retr…",
     from: "Number(process.env.DCTR_WAKEALL_WINDOW_MS) || 600000",
     to: "Number(process.env.DCTR_WAKEALL_WINDOW_MS) || 60000" },
+  { name: "a dead holder's lock broken by moving its directory, breakStaleLock's put-back (WB22) (R2-WB22b)", file: "dctr-state.mjs",
+    clause: "clause 2ap — the run lock under every schedule of two a…",
+    from: "    const pidFile = path.join(lock, 'pid'), aside = `${lock}.pid.${process.pid}`",
+    to: "    return breakIfOrphaned(lock, 0, RUN_LOCK_PIDLESS_MS) && acquireLock(lock)\n    const pidFile = path.join(lock, 'pid'), aside = `${lock}.pid.${process.pid}`" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
