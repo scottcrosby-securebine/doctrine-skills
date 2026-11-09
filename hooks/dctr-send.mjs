@@ -228,11 +228,9 @@ function wakeAll() {
   const log = (word, role, limit, rest = '') => fs.appendFileSync(eventsFile, `${new Date().toISOString()} ${word} ${role} ${limit}${rest ? ` ${rest}` : ''}\n`)
   const last = new Map()
   const closed = (e, x) => x.index > e.index && x.role === e.role && x.limit === e.limit && x.word !== 'intent'
-  const reconciled = new Set()
+  // events() is read again for each intent, so the unfinished line written for one closes any earlier twin of it.
   for (const e of events()) {
-    const key = `${e.role} ${e.limit}`
-    if (e.word !== 'intent' || reconciled.has(key) || events().some((x) => closed(e, x))) continue
-    reconciled.add(key)
+    if (e.word !== 'intent' || events().some((x) => closed(e, x))) continue
     log('unfinished', e.role, e.limit)
     last.set(e.role, 'unfinished')
   }
