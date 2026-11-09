@@ -236,7 +236,7 @@ clause('clause 2n — two account lines and a model line notify once, a woken li
 // XS-36: only a woken line ends the episode, and a run outside a git repo is named by its path.
 const episode = fixture({ a: {}, b: {} })
 fs.rmSync(path.join(episode.repo, '.git'), { recursive: true })
-write(path.join(episode.run, 'events.log'), `${ago(3600000)} woken a 2026-11-08T04:00:01.000Z\n`)
+write(path.join(episode.run, 'events.log'), `${ago(3700000)} report 20261108T040000000Z.1-a-report.md\n${ago(3600000)} woken a 2026-11-08T04:00:01.000Z\n`)
 write(path.join(episode.run, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n')
 const we = watcher(episode)
 polls(episode, we)
