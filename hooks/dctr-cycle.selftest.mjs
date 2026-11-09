@@ -376,7 +376,7 @@ fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
 `)
 
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_TYPER_SCRIPT: stub, HERDR_PANE_ID: 'w9:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS']) delete baseEnv[k]
 const T0 = Date.parse('2026-09-24T01:00:00Z')
 
 /**
@@ -955,6 +955,57 @@ const offs = ['permission_prompt', 'idle_prompt', 'StopFailure'].map((t) => {
 clause('clause 2n — each with auto-cycle off does nothing and calls no herdr (E8-D18)',
   offs.every((f) => paused(f).length === 0 && calls(f).length === 0), offs.map((f) => JSON.stringify(calls(f))).join(' '))
 const nStop = fixture('n-stop'); write(path.join(nStop.proj, '.doctrine/auto-cycle.stop'), ''); note(nStop, 'permission_prompt')
+// E15 Recovery: the limit line (E15-D114, D115, D228, D229, D237). The texts are the 2.1.319 bundle read's
+// (.doctrine/records/e15-watcher/captures/bundle-read-2.1.319.md in the companion), the weekly one modelled on them.
+const LIMIT_TEXTS = {
+  session: "You've hit your session limit · resets 9pm (Asia/Seoul)",
+  fiveHour: "You've hit your 5-hour limit · resets 3:30am (Asia/Seoul)",
+  weekly: "You've hit your weekly limit · resets Nov 12, 7pm (Asia/Seoul)",
+  fable: "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.",
+  server: 'The server had an error while processing your request. Sorry about that!',
+}
+const NOW = Date.parse('2026-11-09T04:00:00Z') // 13:00 KST
+const limitsRun = (f) => path.join(f.dir, 'run')
+const limitsOf = (f) => { try { return fs.readFileSync(path.join(limitsRun(f), 'limits.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+const failure = (text, error = 'rate_limit') => ({ hook_event_name: 'StopFailure', error, ...(text === LIMIT_TEXTS.fable ? { error_details: '429 {"type":"error"}' } : {}), last_assistant_message: text })
+const laneEnv = (f, nowMs = NOW) => ({ DCTR_ROLE: 'a', DCTR_CALLER: 'a', DCTR_RUN: limitsRun(f), DCTR_NOW_MS: String(nowMs) })
+const kindsFx = fixture('limit-kinds')
+for (const k of ['session', 'fiveHour', 'weekly', 'fable']) run(kindsFx, failure(LIMIT_TEXTS[k]), laneEnv(kindsFx))
+run(kindsFx, failure(LIMIT_TEXTS.server, 'server_error'), laneEnv(kindsFx))
+const kindLines = limitsOf(kindsFx).map((l) => l.split(' '))
+clause('clause 2y — a lane session\'s StopFailure appends one limits.log line each: account for the session-limit, 5-hour and weekly texts, model for the Fable text, other for a server_error, each naming the role and the hook clock\'s time (E15-D114)',
+  kindLines.length === 5 && JSON.stringify(kindLines.map((l) => l[2])) === '["account","account","account","model","other"]' &&
+  kindLines.every((l) => l[0] === new Date(NOW).toISOString() && l[1] === 'a'), JSON.stringify(limitsOf(kindsFx)))
+clause('clause 2y2 — a model line\'s field is -, an other line\'s the payload\'s error (E15-D237)',
+  kindLines[3]?.[3] === '-' && kindLines[4]?.[3] === 'server_error' && kindLines.every((l) => l.length === 4), JSON.stringify(limitsOf(kindsFx)))
+clause('clause 2y3 — in a lane session whose record is active the StopFailure still writes its R9 paused line beside its limits.log line (E15 Recovery)',
+  paused(kindsFx).length >= 1 && /API error: rate_limit/.test(paused(kindsFx)[0]) && kindLines.length === 5, show(kindsFx, { code: 0, msg: '', err: '' }))
+const RESETS = [
+  ['9pm at 13:00 KST', "You've hit your session limit · resets 9pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-09T12:00:00Z'],
+  ['9pm at 22:00 KST', "You've hit your session limit · resets 9pm (Asia/Seoul)", '2026-11-09T13:00:00Z', '2026-11-10T12:00:00Z'],
+  ['3:30am at 13:00 KST', "You've hit your 5-hour limit · resets 3:30am (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-09T18:30:00Z'],
+  ['Nov 12, 7pm on Nov 9', "You've hit your weekly limit · resets Nov 12, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-12T10:00:00Z'],
+  ['12pm UTC at 13:00 UTC', "You've hit your session limit · resets 12pm (UTC)", '2026-11-09T13:00:00Z', '2026-11-10T12:00:00Z'],
+  ['an unparseable time', "You've hit your session limit · resets whenever it likes", '2026-11-09T04:00:00Z', 'unknown'],
+]
+const resetBad = RESETS.filter(([label, text, now, want], i) => {
+  const f = fixture(`limit-reset-${i}`)
+  run(f, failure(text), laneEnv(f, Date.parse(now)))
+  const l = limitsOf(f)
+  return l.length !== 1 || l[0] !== `${new Date(Date.parse(now)).toISOString()} a account ${want}`
+}).map(([label]) => label)
+clause('clause 2y4 — an account line carries the reset time as ISO UTC: the first occurrence of the stated time in its zone strictly after the StopFailure, a dated text in its year, unknown for a time that does not parse (E15-D228)',
+  resetBad.length === 0, JSON.stringify(resetBad))
+const resetFiles = spawnSync('find', [path.join(tmp, 'fx'), '-name', 'reset.txt'], { encoding: 'utf8' })
+clause('clause 2y5 — no StopFailure above writes a reset.txt anywhere under the fixtures (E15-D229)',
+  resetFiles.status === 0 && resetFiles.stdout === '', JSON.stringify([resetFiles.status, resetFiles.stdout]))
+const noRunFx = fixture('limit-no-run')
+run(noRunFx, failure(LIMIT_TEXTS.session), { DCTR_NOW_MS: String(NOW) })
+const strayLimits = spawnSync('find', [tmp, '-name', 'limits.log', '-path', '*limit-no-run*'], { encoding: 'utf8' })
+clause('clause 2y6 — a StopFailure in a session with no DCTR_ROLE and no DCTR_RUN writes no limits.log anywhere, and still writes its R9 paused line (E15-D115)',
+  strayLimits.status === 0 && strayLimits.stdout === '' && !fs.existsSync(path.join(noRunFx.dir, 'run')) &&
+  JSON.stringify(paused(noRunFx)) === '["- auto-cycle paused: Claude API error: rate_limit"]', JSON.stringify([strayLimits.stdout, paused(noRunFx)]))
+
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
 const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
@@ -1434,6 +1485,17 @@ clause('clause 3c — without the hook: the Q1 stop file sits only in the record
 clause('clause 3d — without the hook: the no-progress record carries two cycle lines with the tree\'s own hash and only backup waves after them, and the progress fixture a changed file',
   fs.readFileSync(npF.record, 'utf8').split('\n').filter((l) => l === cyc(2, hNow) || l === cyc(1, hNow)).length === 2 &&
   git(pgF.proj, 'diff', '--name-only') === 'src.txt', 'progress fixtures wrong')
+
+// The limit fixtures, read without the hook: each text carries its kind's phrase by this suite's own pattern, the
+// server_error text neither, the no-run hook call's environment holds no DCTR_ROLE or DCTR_RUN, and its record is
+// active, so the R9 it must still write is reachable.
+const own = { account: /^You've hit your [^·]+ limit · resets /, model: /^You've reached your \w+ limit/ }
+const kindOf = (t) => (own.account.test(t) ? 'account' : own.model.test(t) ? 'model' : 'other')
+clause('clause 3y — without the hook: the five limit texts read account, account, account, model, other by this suite\'s own patterns; the no-run environment carries no DCTR_ROLE or DCTR_RUN; its record is Open with auto-cycle on; the reset fixtures\' clocks fall where each case says',
+  JSON.stringify(['session', 'fiveHour', 'weekly', 'fable', 'server'].map((k) => kindOf(LIMIT_TEXTS[k]))) === '["account","account","account","model","other"]' &&
+  !('DCTR_ROLE' in baseEnv) && !('DCTR_RUN' in baseEnv) && /- State: Open\n- auto-cycle: on cap 10/.test(fs.readFileSync(noRunFx.record, 'utf8')) &&
+  new Date(Date.parse('2026-11-09T13:00:00Z') + 9 * 3600000).getUTCHours() === 22 && new Date(NOW + 9 * 3600000).getUTCHours() === 13,
+  JSON.stringify(Object.values(LIMIT_TEXTS).map(kindOf)))
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

@@ -8,7 +8,8 @@
 // On Stop it does what cycleDecision in dctr-lib.mjs decides, which owns the order and every condition: it appends
 // one paused line, writes nothing, or launches dctr-typer.mjs detached with the facts it needs (pausing instead when
 // the transcript it would hand the typer cannot be read). On Notification and StopFailure it appends the paused line
-// notifyDecision returns, if any. Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
+// notifyDecision returns, if any; a StopFailure in a session of the run first appends its limits.log line (limitLine:
+// the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time). Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
 // StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
 // UserPromptSubmit does nothing else.
 //
@@ -24,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, inFlightIds, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  runRole, runRoot, limitLine,
   hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -62,6 +64,17 @@ try {
   }
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
+  // E15 Recovery: a StopFailure in a session of the run appends its limits.log line first, before any paused line and
+  // whatever auto-cycle says; outside a run nothing (E15-D114, D115). A failed append never stops the R9 below it.
+  if (event === 'StopFailure') {
+    const role = runRole(), run = role && runRoot(process.env, payload.cwd || process.cwd())
+    if (run) {
+      try {
+        fs.mkdirSync(run, { recursive: true })
+        fs.appendFileSync(path.join(run, 'limits.log'), limitLine({ nowMs: Number(process.env.DCTR_NOW_MS) || Date.now(), role, message: payload.last_assistant_message, error: payload.error }) + '\n')
+      } catch (e) { hookLog(payload.session_id || 'none', `StopFailure limits.log not written (${String(e.message).split('\n')[0]})`) }
+    }
+  }
   sessionId = payload.session_id || null
   if (!sessionId) stand_down('no session_id in the payload')
 

@@ -480,6 +480,24 @@ function pidAlive(raw) {
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
 }
 
+/** Take the single-instance lock `file`, a file holding this process's pid (wake-all.lock, lanewatch.lock): true when
+ *  taken, false while a live pid holds it. A lock whose pid has exited is replaced; one that cannot be read or holds no
+ *  pid counts as held, so a torn lock never lets two in. */
+export function takePidLock(file) {
+  for (let i = 0; i < 2; i++) {
+    try { fs.writeFileSync(file, String(process.pid), { flag: 'wx' }); return true } catch (e) { if (e.code !== 'EEXIST') throw e }
+    let raw
+    try { raw = fs.readFileSync(file, 'utf8').trim() } catch (e) { if (e.code === 'ENOENT') continue; return false }
+    if (!/^\d+$/.test(raw) || pidAlive(raw)) return false
+    fs.rmSync(file, { force: true })
+  }
+  return false
+}
+/** Remove `file` when this process holds it. */
+export function releasePidLock(file) {
+  try { if (fs.readFileSync(file, 'utf8').trim() === String(process.pid)) fs.rmSync(file, { force: true }) } catch { /* not ours or gone */ }
+}
+
 /** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false
  *  when the holder's namespace is the judge's, and **null** when it is another one, because a pid
  *  issued in another namespace names some other process here or none. A holder that published no
