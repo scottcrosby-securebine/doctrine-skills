@@ -4897,6 +4897,14 @@ const MUTATIONS = [
     clause: "clause 2ax — ownsRunLock renews a lock naming this pro…",
     from: "  if (!h || !sameHolder(h, selfHolder())) { heldLocks.delete(lock); return false }",
     to: "  if (!h) { heldLocks.delete(lock); return false }" },
+  { name: "the lock re-read only before the first two typing calls (WC1) (C-WC1)", file: "dctr-send.mjs",
+    clause: "clause 2x17b \u2014 a handed-off wake whose lock stops nami\u2026",
+    from: "  mayType = () => ownsRunLock(lock) || ((lost = true), false)",
+    to: "  mayType = () => (typing.calls < 2 ? ownsRunLock(lock) : true) || ((lost = true), false)" },
+  { name: "a lost lock overwrites a tried role's word (WC3) (C-WC3)", file: "dctr-send.mjs",
+    clause: "clause 2x20 \u2014 the lock lost on a\\'s nudge: a is report\u2026",
+    from: "for (const x of pending) if (!last.has(x.role)) last.set(x.role, 'retry')",
+    to: "for (const x of pending) last.set(x.role, 'retry')" },
 ]
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))

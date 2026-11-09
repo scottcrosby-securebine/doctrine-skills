@@ -707,6 +707,7 @@ let interleaveCounts = []
   const { Worker } = await import('node:worker_threads')
   const STATE = path.join(import.meta.dirname, 'dctr-state.mjs')
   const box = path.join(tmp, 'interleave'); fs.mkdirSync(box)
+  const { RUN_LOCK_GATE_MS: GATE_MS } = await import(STATE)
   const lockPath = path.join(box, 'run.lock')
   const workerFile = path.join(tmp, 'contender.mjs')
   write(workerFile, `import { workerData } from 'node:worker_threads'
@@ -723,7 +724,7 @@ const gate = () => { stop(); Atomics.store(phase, id, 1); Atomics.notify(phase, 
 const orig = {}
 for (const m of ['mkdirSync', 'writeFileSync', 'readFileSync', 'renameSync', 'rmSync', 'statSync', 'utimesSync', 'chmodSync', 'linkSync', 'openSync', 'writeSync', 'closeSync']) orig[m] = fs[m]
 // A stat's result enters the observation by what the code can judge from it: older than the gate's limit or not.
-const seenAs = (m, v) => (m === 'readFileSync' ? String(v) : m === 'statSync' ? (Date.now() - v.mtimeMs > 60000 ? 'old' : 'new') : 'ok')
+const seenAs = (m, v) => (m === 'readFileSync' ? String(v) : m === 'statSync' ? (Date.now() - v.mtimeMs > ${GATE_MS} ? 'old' : 'new') : 'ok')
 const step = (m, p, f) => { gate(); try { const v = f(); note(m + ':' + seenAs(m, v) + ';'); return v } catch (e) { note(m + ':' + e.code + ';'); throw e } }
 // A contender's own part file (<lock>.new.<pid>) is seen by no other until it is linked, so only the link is a step.
 const shared = (p) => String(p).startsWith(box) && !String(p).includes('.new.')
@@ -753,7 +754,7 @@ for (;;) {
   const deadPid = String(spawnSync('true').pid)
   const files = () => {
     const out = []
-    const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); const st = fs.statSync(p), old = Date.now() - st.mtimeMs > 60000 ? '@old' : ''; if (st.isDirectory()) { out.push(rel + '/' + old); walk(p) } else out.push(`${rel}${old}=${fs.readFileSync(p, 'utf8')}`) } }
+    const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); const st = fs.statSync(p), old = Date.now() - st.mtimeMs > GATE_MS ? '@old' : ''; if (st.isDirectory()) { out.push(rel + '/' + old); walk(p) } else out.push(`${rel}${old}=${fs.readFileSync(p, 'utf8')}`) } }
     walk(box); return out.join(',')
   }
   const plantDead = () => {
@@ -761,7 +762,7 @@ for (;;) {
     const fileShape = typeof (await0.state.runLockHolder) === 'function'
     if (fileShape) fs.writeFileSync(lockPath, `pid ${deadPid}\nns -\ntoken \n`)
     else { fs.mkdirSync(lockPath); fs.writeFileSync(path.join(lockPath, 'pid'), deadPid) }
-    const old = (Date.now() - 60000) / 1000; fs.utimesSync(lockPath, old, old)
+    const old = (Date.now() - 2 * GATE_MS) / 1000; fs.utimesSync(lockPath, old, old)
   }
   const await0 = { state: await import(STATE) }
   async function explore(N, initial, { kinds = [], clock = false } = {}) {

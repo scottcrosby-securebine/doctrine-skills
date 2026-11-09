@@ -827,11 +827,11 @@ clause('clause 2x16 — a wake-all whose lock stops naming it after its pane rea
 
 // WB42: the lock is re-read before every typing call, not only the first: lost after a /clear that took, no resume line
 // or nudge follows. Its twin, the lock kept, types all three.
-const handedWake = (onType) => {
+const handedWake = (onType, at = '/clear') => {
   const fx = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
   write(fx.record, '- State: Open\n- auto-cycle: warned S-a 20%\n')
   handed(fx, { latch: ['S-a'], warnedAt: H2 - 60000, handoffAt: H2, session: 'S-a', transcript: [asst(H2 - 120000), toolResult(H2 + 1000)] })
-  setShim(fx, { busyAfterType: 2, clearSession: 'S-next', ...(onType ? { onType: { text: '/clear', file: path.join(fx.run, 'wake-all.lock'), line: 'taken' } } : {}) })
+  setShim(fx, { busyAfterType: 2, clearSession: 'S-next', ...(onType ? { onType: { text: at, file: path.join(fx.run, 'wake-all.lock'), line: 'taken' } } : {}) })
   return fx
 }
 const keptFx = handedWake(false), lostFx = handedWake(true)
@@ -839,6 +839,21 @@ const rKept = await wakeAll(keptFx), rLost = await wakeAll(lostFx)
 clause('clause 2x17 — a handed-off wake whose lock stops naming it after its /clear types no resume line or nudge and exits non-zero; with the lock kept the same wake types all three (WB42)',
   typedTo(keptFx, 'a').length === 3 && rKept.code === 0 && JSON.stringify(typedTo(lostFx, 'a').map((e) => e.typed.text)) === '["/clear"]' && rLost.code !== 0 &&
   /no longer names this wake-all/.test(rLost.out), wshow(keptFx, rKept) + wshow(lostFx, rLost))
+
+// WC1: lost after the resume line, before the nudge: the nudge is not typed.
+const lostLate = handedWake(true, RESUME_LINE)
+const rLostLate = await wakeAll(lostLate)
+clause('clause 2x17b — a handed-off wake whose lock stops naming it after its resume line types no nudge and exits non-zero (WC1)',
+  JSON.stringify(typedTo(lostLate, 'a').map((e) => e.typed.text)) === JSON.stringify(['/clear', RESUME_LINE]) && rLostLate.code !== 0 &&
+  /no longer names this wake-all/.test(rLostLate.out), wshow(lostLate, rLostLate))
+
+// WC3: a role woken before the lock was lost keeps its word; the role after it, refused at its typing call, is retry.
+const kept = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
+setShim(kept, { onType: { text: NUDGE, file: path.join(kept.run, 'wake-all.lock'), line: 'taken' } })
+const rKeptWord = await wakeAll(kept)
+clause('clause 2x20 — the lock lost on a\'s nudge: a is reported woken, b, refused at its typing call, retry; exit 1 (WC3, E15-D241)',
+  JSON.stringify(rKeptWord.words.sort()) === '["a woken","b retry"]' && rKeptWord.code === 1 && typedTo(kept, 'a').length === 1 && typedTo(kept, 'b').length === 0,
+  wshow(kept, rKeptWord))
 
 // WB41: a role whose wake was never tried because the lock was lost still gets its report line, and the exit is non-zero.
 const cut = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
@@ -1186,6 +1201,21 @@ clause('clause 3l — without the sender: each class row carries its one defect 
     !JSON.parse(xg.stdout).result.pane.agent_session && nt.status === 1 && latest('e')[0] === L(6) && named('woken', 'e', L(5)) && !named('woken', 'e', L(6)) &&
     named('woken', 'b', latest('b')[0]) && named('unwoken', 'f', latest('f')[0]) && latest('c')[2] === 'model' && latest('d').length === 0,
     JSON.stringify([pg.map((g) => g.status), rg.stdout, xg.stdout, nt.status]))
+}
+
+// WC2: the onType trigger, without the sender: a /clear typed through the shim succeeds and writes onto the file named,
+// and another line leaves it as it was.
+{
+  const fx = wakeFx({ a: {} })
+  const lk = path.join(fx.run, 'wake-all.lock'); write(lk, 'pid 1\nns -\ntoken \n')
+  setShim(fx, { onType: { text: '/clear', file: lk, line: 'taken' } })
+  const other = spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'run', fx.pane.a, 'hello'], { encoding: 'utf8' })
+  const before = fs.readFileSync(lk, 'utf8')
+  const cleared = spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'run', fx.pane.a, '/clear'], { encoding: 'utf8' })
+  const after = fs.readFileSync(lk, 'utf8')
+  clause('clause 3y — without the sender: the shim answers a /clear with success and only then writes its line onto the lock; another line leaves the lock alone',
+    other.status === 0 && before === 'pid 1\nns -\ntoken \n' && cleared.status === 0 && JSON.parse(cleared.stdout).result !== undefined && after === `${before}taken\n`,
+    JSON.stringify([other.status, before, cleared.status, cleared.stdout, after]))
 }
 
 process.exit(bad ? 1 : 0)
