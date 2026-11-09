@@ -386,7 +386,7 @@ export const lockHolder = (lock) => {
 
 /** Whether two holder readings name the same holder: the pid and the namespace together. Two nulls
  *  (no pid file either time) are the same; an unreadable reading is never the same as anything. */
-const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
+export const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
 
 /** This process as a holder, in the shape lockHolder reads back. */
 const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
@@ -480,33 +480,42 @@ export function pidAlive(raw) {
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
 }
 
-/** How long a run lock (wake-all.lock, lanewatch.lock) whose holder cannot be judged by its pid, none published yet or
- *  one from another namespace, must sit before it is broken. A holder renews its lock at each herdr call and each poll. */
+/** How long a run lock (wake-all.lock, lanewatch.lock) with no pid file must sit before it is broken. A holder renews
+ *  its lock at each herdr call and each poll. */
 export const RUN_LOCK_PIDLESS_MS = 180000
+/** How long a break gate may sit before it is taken for a breaker that died inside its few steps. */
+export const RUN_LOCK_GATE_MS = 60000
 
-/** Take a run's single-instance lock, the directory lock acquireLock makes: true when taken, false while any holder that
- *  is alive, or cannot be judged, keeps it. A take that throws (a pid that could not be published) is false.
+/** Whether a run lock may be broken: its holder has exited, judged in this pid namespace, or it has no pid file and is
+ *  older than RUN_LOCK_PIDLESS_MS. A holder that cannot be read, or one from another pid namespace (holderAlive null),
+ *  is never broken. */
+function runLockBreakable(lock) {
+  const h = lockHolder(lock)
+  if (h) return holderAlive(h, ownPidNs()) === false
+  if (h === undefined) return false
+  try { return Date.now() - fs.statSync(lock).mtimeMs > RUN_LOCK_PIDLESS_MS } catch { return false }
+}
+
+/** Take a run's single-instance lock, the directory lock acquireLock makes: true when taken, false while it is held.
+ *  A take that throws (a pid that could not be published) is false.
  *
- *  A lock whose holder has exited is broken by moving its PID FILE aside, never the directory: the directory cannot be
- *  replaced while it exists, so the one pid file in it is the holder that was judged, and only one breaker can move it.
- *  What moved is compared with the pid judged dead; a mismatch (a replacement published since the judgement) is put back
- *  into its own directory, where nothing else can have written a pid. breakStaleLock moves the whole directory, and its
- *  put-back can lose the name to a third contender and drop a live holder's lock, so two enter (the interleaving clause
- *  in dctr-lanewatch.selftest.mjs found it). A pid-less lock is still broken through breakIfOrphaned, after
- *  RUN_LOCK_PIDLESS_MS. */
+ *  A breakable lock (runLockBreakable) is removed only under the gate `<lock>.break`, a directory one breaker at a time
+ *  makes, and judged again inside it. Only a breaker removes a lock nobody holds alive, so while the gate is held the
+ *  lock judged there cannot be replaced before it is removed, and no put-back is needed. Moving the directory aside
+ *  (breakStaleLock) or the pid file aside, then putting back what turned out live, both let two holders enter: the
+ *  put-back can land on a lock a third contender made meanwhile (clause 2ap in dctr-lanewatch.selftest.mjs). A gate
+ *  older than RUN_LOCK_GATE_MS is removed and the take refused; residual: a breaker stalled that long inside the gate
+ *  can run beside the next one. */
 export function takeRunLock(lock) {
   try {
     if (acquireLock(lock)) return true
-    const h = lockHolder(lock)
-    if (h === null) return breakIfOrphaned(lock, 0, RUN_LOCK_PIDLESS_MS) && acquireLock(lock)
-    if (h === undefined || holderAlive(h, ownPidNs()) !== false) return false
-    const pidFile = path.join(lock, 'pid'), aside = `${lock}.pid.${process.pid}`
-    try { fs.renameSync(pidFile, aside) } catch { return false }
-    let moved = null
-    try { moved = fs.readFileSync(aside, 'utf8').trim() } catch { /* could not look: put it back */ }
-    if (moved !== h.pid) { try { fs.renameSync(aside, pidFile) } catch { /* its directory is gone */ } return false }
-    fs.rmSync(aside, { force: true })
-    fs.rmSync(lock, { recursive: true, force: true })
+    if (!runLockBreakable(lock)) return false
+    const gate = `${lock}.break`
+    try { fs.mkdirSync(gate) } catch {
+      try { if (Date.now() - fs.statSync(gate).mtimeMs > RUN_LOCK_GATE_MS) fs.rmSync(gate, { recursive: true, force: true }) } catch { /* gone */ }
+      return false
+    }
+    try { if (runLockBreakable(lock)) fs.rmSync(lock, { recursive: true, force: true }) } finally { fs.rmSync(gate, { recursive: true, force: true }) }
     return acquireLock(lock)
   } catch { return false }
 }

@@ -575,10 +575,12 @@ let interleaveCounts = []
   const workerFile = path.join(tmp, 'contender.mjs')
   write(workerFile, `import { workerData } from 'node:worker_threads'
 import fs from 'node:fs'
-const { sab, id, n, statePath, box, pid } = workerData
+const { sab, id, n, statePath, box, pid, kind, watchPath } = workerData
 const turn = new Int32Array(sab, 0, n), phase = new Int32Array(sab, 4 * n, n), result = new Int32Array(sab, 8 * n, n), go = new Int32Array(sab, 12 * n, 2), seen = new Int32Array(sab, 16 * n, n)
 Object.defineProperty(process, 'pid', { value: pid })
 const { takeRunLock } = await import(statePath)
+// A 'stop' contender runs stop's dead-holder path; it never counts as entering.
+const { clearDeadLock } = kind === 'stop' ? await import(watchPath) : {}
 // What this contender has observed, as a running hash in shared memory: with the files, it decides every next step.
 const note = (t) => { let h = Atomics.load(seen, id); for (const c of t) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; Atomics.store(seen, id, h) }
 // go[1] set means the scheduler is abandoning this run: every step from here throws, so the contender unwinds untouched.
@@ -597,7 +599,7 @@ let at = 0
 for (;;) {
   Atomics.wait(go, 0, at); at = Atomics.load(go, 0)
   let r
-  try { r = takeRunLock(box + '/run.lock') ? 1 : 2 } catch { r = 3 }
+  try { r = kind === 'stop' ? (clearDeadLock(box + '/run.lock'), 2) : takeRunLock(box + '/run.lock') ? 1 : 2 } catch { r = 3 }
   if (Atomics.load(go, 1)) r = 0
   Atomics.store(result, id, r); Atomics.store(phase, id, 2); Atomics.notify(phase, id)
 }
@@ -610,11 +612,11 @@ for (;;) {
     const walk = (d) => { for (const f of fs.readdirSync(d).sort()) { const p = path.join(d, f), rel = path.relative(box, p).replace(/\.dead\.(\d+)\.\d+/, '.dead.$1'); if (fs.statSync(p).isDirectory()) { out.push(rel + '/'); walk(p) } else out.push(`${rel}=${fs.readFileSync(p, 'utf8')}`) } }
     walk(box); return out.join(',')
   }
-  async function explore(N, initial) {
+  async function explore(N, initial, kinds = []) {
     const sab = new SharedArrayBuffer(4 * 5 * N)
     const turn = new Int32Array(sab, 0, N), phase = new Int32Array(sab, 4 * N, N), result = new Int32Array(sab, 8 * N, N), go = new Int32Array(sab, 12 * N, 2), seen = new Int32Array(sab, 16 * N, N)
     for (let i = 0; i < N; i++) Atomics.store(phase, i, 2)
-    const workers = live.slice(0, N).map((p, id) => new Worker(workerFile, { workerData: { sab, id, n: N, statePath: STATE, box, pid: p.pid } }))
+    const workers = live.slice(0, N).map((p, id) => new Worker(workerFile, { workerData: { sab, id, n: N, statePath: STATE, box, pid: p.pid, kind: kinds[id] ?? 'take', watchPath: WATCH } }))
     await new Promise((r) => setTimeout(r, 500))
     // A contender that neither reaches its next step nor finishes within 30 s has died: the clause fails, never hangs.
     const stalled = (t0) => { if (Date.now() - t0 > 30000) throw new Error('a contender stalled in the interleaving clause') }
@@ -626,6 +628,7 @@ for (;;) {
       Atomics.store(go, 1, 1)
       for (let i = 0; i < N; i++) finished(i)
       fs.rmSync(box, { recursive: true, force: true }); fs.mkdirSync(box)
+      if (initial === 'pidless') { fs.mkdirSync(lockPath); const old = (Date.now() - 200000) / 1000; fs.utimesSync(lockPath, old, old) }
       if (initial === 'dead') { fs.mkdirSync(lockPath); fs.writeFileSync(path.join(lockPath, 'pid'), deadPid); const old = (Date.now() - 60000) / 1000; fs.utimesSync(lockPath, old, old) }
       for (let i = 0; i < N; i++) { Atomics.store(phase, i, 0); Atomics.store(result, i, 0); Atomics.store(turn, i, 0); Atomics.store(seen, i, 0) }
       Atomics.store(go, 1, 0); Atomics.add(go, 0, 1); Atomics.notify(go, 0)
@@ -643,7 +646,11 @@ for (;;) {
       if (visited.has(key)) return visited.get(key)
       let total = 0
       if (!enabled.length) {
-        if (Array.from(result).filter((r) => r === 1).length > 1) bad.push(prefix.join(''))
+        // Every contender that entered still holds the lock at the end, so at most one entered and nothing removed it.
+        const entered = Array.from(result).flatMap((r, i) => (r === 1 ? [i] : []))
+        let holder = null
+        try { holder = fs.readFileSync(path.join(lockPath, 'pid'), 'utf8') } catch { /* none */ }
+        if (entered.length > 1 || entered.some((i) => holder !== String(live[i].pid))) bad.push(prefix.join(''))
         total = 1
       } else for (const id of enabled) total += count([...prefix, id])
       visited.set(key, total)
@@ -653,12 +660,13 @@ for (;;) {
     Atomics.store(go, 1, 1)
     for (let i = 0; i < N; i++) finished(i)
     for (const w of workers) await w.terminate()
-    return { k: N, initial, schedules, states: visited.size, bad: bad.slice(0, 3), badCount: bad.length }
+    return { k: N, initial, kinds, schedules, states: visited.size, bad: bad.slice(0, 3), badCount: bad.length }
   }
-  const runs = [await explore(2, 'free'), await explore(2, 'dead'), await explore(3, 'free'), await explore(3, 'dead')]
+  const runs = [await explore(2, 'free'), await explore(2, 'dead'), await explore(3, 'free'), await explore(3, 'dead'), await explore(3, 'pidless'),
+    await explore(2, 'dead', ['stop']), await explore(3, 'dead', ['stop'])]
   for (const p of live) p.kill()
-  interleaveCounts = runs.map((r) => `${r.k} contenders, ${r.initial} lock: ${r.schedules} schedules, ${r.states} states`)
-  clause(`clause 2ap — the run lock under every schedule of two and of three contenders, on a free lock and on a dead holder's: at most one enters (${interleaveCounts.join('; ')}) (WB20, WB22-WB24)`,
+  interleaveCounts = runs.map((r) => `${r.k} contenders${r.kinds.length ? ' (one stop)' : ''}, ${r.initial} lock: ${r.schedules} schedules, ${r.states} states`)
+  clause(`clause 2ap — the run lock under every schedule of two and of three contenders, stop's dead-holder path among them, on a free lock, a dead holder's and a stale pid-less one: at most one enters and nothing removes its lock (${interleaveCounts.join('; ')}) (WB20, WB22-WB24)`,
     runs.every((r) => r.badCount === 0 && r.schedules > 1), JSON.stringify(runs))
 }
 

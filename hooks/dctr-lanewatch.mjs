@@ -11,7 +11,7 @@
 // TMPDIR=<tmp> node <this file>`, since a pane does not inherit the environment, makes a tab and runs `sh <that file>`
 // in its pane: herdr refuses a typed line over 1024 bytes, which an inlined PATH passes. The watcher takes
 // <run>/lanewatch.lock itself as its first act, the directory lock takeRunLock makes, and refuses while another holds
-// it. start waits up to START_WAIT_MS for a live holder of that lock, and only then writes its TMPDIR to <run>/tmpdir,
+// it. start waits up to WAIT_MS for a live holder of that lock, and only then writes its TMPDIR to <run>/tmpdir,
 // which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag `orchestrator`,
 // naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own environment. A
 // start whose tab, pane or wait fails closes the tab it made, releases its lock, writes neither, and exits 1 with one
@@ -49,7 +49,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { herdr } from './dctr-state.mjs'
-import { restoreFile, stateDir, takeRunLock, releaseLock, lockHolder, holderAlive, ownPidNs, breakStaleLock, sleepMs } from './dctr-state.mjs'
+import { restoreFile, stateDir, takeRunLock, releaseLock, lockHolder, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, pausingStates, resolveTier,
   lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
@@ -61,8 +61,7 @@ export const POLL_MS = 30000
 export const READY_LIMIT_MS = 600000
 export const BRIDGE_EXPIRY_MS = 300000
 /** How long start waits for its watcher to take the lock, and stop for a signalled watcher to release it. */
-export const START_WAIT_MS = 10000
-export const STOP_WAIT_MS = 10000
+const WAIT_MS = 10000
 
 const SELF = fileURLToPath(import.meta.url)
 const readText = (file) => { try { return fs.readFileSync(file, 'utf8') } catch { return null } }
@@ -268,11 +267,11 @@ function start(run) {
   const watcher = made?.root_pane?.pane_id
   if (!watcher) undo('no pane was made for the watcher')
   try { herdr(['pane', 'run', watcher, `sh ${shq(script)}`]) } catch (e) { undo(`the watcher's pane did not run it: ${why(e)}`) }
-  const until = Date.now() + START_WAIT_MS
+  const until = Date.now() + WAIT_MS
   for (;;) {
     const h = lockHolder(lock)
     if (h && holderAlive(h, ownPidNs()) === true) break
-    if (Date.now() > until) undo(`no watcher took ${lock} within ${START_WAIT_MS} ms`)
+    if (Date.now() > until) undo(`no watcher took ${lock} within ${WAIT_MS} ms`)
     sleepMs(100)
   }
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
@@ -283,22 +282,31 @@ function start(run) {
   process.stdout.write(`dctr-lanewatch: started in ${watcher}\n`)
 }
 
+/** Remove `lock` when its holder has exited, as any contender breaks it, by taking it and releasing it: true when it
+ *  judged the holder dead. */
+export function clearDeadLock(lock) {
+  const h = lockHolder(lock)
+  if (!(h && holderAlive(h, ownPidNs()) === false)) return false
+  if (takeRunLock(lock)) releaseLock(lock)
+  return true
+}
+
 /** `stop`: end the watcher that holds the lock. Only a live holder whose lock was renewed within 3 * POLL_MS is the
- *  watcher, and it is signalled and releases the lock itself; a lock whose holder has exited is removed, as
- *  breakStaleLock removes one, and any other is left. */
+ *  watcher, and it is signalled and releases the lock itself; a lock whose holder has exited is removed through
+ *  clearDeadLock, and any other is left. */
 function stop(run) {
   const lock = path.join(run, 'lanewatch.lock'), h = lockHolder(lock)
   if (!h) fail(`no watcher holds ${lock}`)
   let age = Infinity
   try { age = Date.now() - fs.statSync(lock).mtimeMs } catch { /* gone */ }
   const alive = holderAlive(h, ownPidNs())
-  if (alive === false) { breakStaleLock(lock, h); process.stdout.write(`dctr-lanewatch: pid ${h.pid} had exited; its lock is removed\n`); return }
+  if (alive === false && clearDeadLock(lock)) { process.stdout.write(`dctr-lanewatch: pid ${h.pid} had exited; its lock is removed\n`); return }
   if (alive !== true || !(age < 3 * POLL_MS)) fail(`pid ${h.pid} holds ${lock} but did not renew it within ${3 * POLL_MS} ms, so it is not taken for the watcher: nothing signalled or removed`)
   process.kill(Number(h.pid), 'SIGTERM')
-  const until = Date.now() + STOP_WAIT_MS
+  const until = Date.now() + WAIT_MS
   for (;;) {
     const now = lockHolder(lock)
-    if (now !== undefined && !(now && now.pid === h.pid && now.ns === h.ns)) break
+    if (now !== undefined && !sameHolder(now, h)) break
     if (Date.now() > until) fail(`pid ${h.pid} was signalled and still holds ${lock}`)
     sleepMs(100)
   }
