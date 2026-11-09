@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
-  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch,
+  autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -51,7 +51,8 @@ export const HERDR_TIMEOUT_MS = 30000
 export const PLACEMENT_STALE_MS = 10000
 // Every herdr call renews the locks this process holds first (renewHeldLocks), because a herdr call
 // is the one wait inside a lock section that can run to HERDR_TIMEOUT_MS.
-export const herdr = (args) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })) }
+// `timeout` lowers that bound for one call, as a caller with its own deadline needs (the sender's wake).
+export const herdr = (args, timeout = HERDR_TIMEOUT_MS) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout })) }
 /** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
 export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
 
@@ -767,14 +768,20 @@ export function claimHeld(file) {
   return pidAlive(String(c?.pid ?? ''))
 }
 
-/** Any held claim naming this pane, whatever session took it: the typer's claim is keyed by the old session id,
- *  and the Notification that asks comes from the new one (F9). */
-export function paneClaimHeld(paneId) {
+/** Any held claim naming this pane, whatever session or script took it: the typer's claim is keyed by the old
+ *  session id, and the Notification that asks comes from the new one (F9). `except` is the caller's own claim file,
+ *  which never counts, so the typer and the sender each ask about the others' claims only. A directory that cannot
+ *  be read, or a claim file that cannot be read or parsed, counts as held, so no caller types on a failed read; only
+ *  a directory or claim file that is absent counts as no claim. */
+export function paneClaimHeld(paneId, except = null) {
   let names
-  try { names = fs.readdirSync(autoCycleDir()) } catch { return false }
+  try { names = fs.readdirSync(autoCycleDir()) } catch (e) { return e.code !== 'ENOENT' }
   return names.filter((f) => f.endsWith('.claim')).some((f) => {
     const file = path.join(autoCycleDir(), f)
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')).pane === paneId && claimHeld(file) } catch { return false }
+    if (except && file === path.resolve(except)) return false
+    let c
+    try { c = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) { return e.code !== 'ENOENT' }
+    return c?.pane === paneId && pidAlive(String(c?.pid ?? ''))
   })
 }
 
@@ -958,21 +965,92 @@ export function treeHash(repos, excludes) {
 
 /**
  * Whether the handoff has landed since this session's warning (B2 step 5, E8-D7): the handoff file was written at
- * or after `warnedAt` (the gauge's latch records when it warned), and, unless git ignores the handoff, a commit
- * touching it was made at or after that second and it and the memory file carry no uncommitted change. Outside a
- * git work tree the file and the kickoff line naming it are the landing. False when `warnedAt` is unknown.
+ * or after `warnedAt` (the gauge's latch records when it warned), and every repository holding either file's own real
+ * path or a link met at any hop on the way to it reports that path landed there: the handoff's own file ignored by
+ * that repository or tracked and committed at or after that second with no uncommitted change, and every other path
+ * ignored there, or tracked (or, for the memory file, absent) with no uncommitted change. For the handoff's file and the
+ * links on its way, no uncommitted change means an index entry with neither assume-unchanged nor skip-worktree set
+ * and git's status reporting none; for the memory file's, that git's status reports none, so a memory file under
+ * skip-worktree is landed whatever its edits.
+ * Only the repository's own ignore rules count (its .gitignore files, info/exclude and local config), never the session's or
+ * the user's, so a user-level rule can only ever require a commit. A path with no .git entry above it is landed by
+ * the file alone; with one, git must answer from that repository's work tree, and any failure is not landed.
+ * False when `warnedAt` is unknown or either file's paths cannot be resolved.
  */
-export function handoffLanded({ handoffPath, memoryPath, warnedAt }) {
+export function handoffLanded({ handoffPath, memoryPath, warnedAt, timeoutMs = Infinity }) {
   if (!Number.isFinite(warnedAt)) return false
   let st
   try { st = fs.statSync(handoffPath) } catch { return false }
   if (st.mtimeMs < warnedAt) return false
-  const git = (args) => execFileSync('git', ['-C', path.dirname(handoffPath), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-  try { git(['rev-parse', '--is-inside-work-tree']) } catch { return true }
-  try { git(['check-ignore', '-q', handoffPath]); return true } catch { /* not ignored: it needs its commit */ }
+  // Given `timeoutMs`, every git call shares that budget, and one that runs out of it means not landed.
+  const end = Date.now() + timeoutMs, timedOut = new Error('git timed out')
+  // Outside any repository is read from the filesystem, never from git's message. A .git that cannot be looked at
+  // counts as present, so git then decides, and its failure is not landed.
+  const dotGit = (p) => { try { fs.lstatSync(p); return true } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR' } }
+  // A link lives in two places: the link itself, tracked where its directory is, and the file it reaches, which may
+  // itself be a link. So each path gives every link met at every hop of the kernel's walk to it (a link inside a
+  // link's target and a directory link included), each as the entry its real directory tracks, and its own real path.
+  // followLinks keeps a component it cannot read and stops following after `max` links, so any read failure but a
+  // missing component, and a walk that met that many links, is not landed. A memory file not yet written is resolved
+  // by its directory; one that exists and cannot be resolved is not landed, since the link alone would then read clean.
+  const forms = (p) => {
+    const links = []
+    let bad = null
+    const strict = (f) => (x) => { try { return f(x) } catch (e) { if (e.code !== 'ENOENT') bad = e; throw e } }
+    const lstat = strict((x) => { const s = fs.lstatSync(x); if (s.isSymbolicLink()) links.push(x); return s })
+    const max = 40
+    followLinks(path.isAbsolute(p) ? p : `${process.cwd()}/${p}`, { lstat, readlink: strict(fs.readlinkSync), max })
+    if (bad) throw bad
+    if (links.length >= max) throw new Error('too many links')
+    try { fs.lstatSync(p) } catch (e) { if (e.code === 'ENOENT') return { links, real: path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)) }; throw e }
+    return { links, real: fs.realpathSync.native(p) }
+  }
+  // Any inherited GIT_ variable (GIT_DIR and its kin, a ceiling, a config entry naming an excludes file) can point
+  // git away from that repository or its rules; a filesystem boundary under it would stop git short of the .git found.
+  // The system and global config and the default $XDG_CONFIG_HOME/git/ignore are the user's rules, not the repository's.
+  const env = { ...process.env }
+  for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k]
+  // A path given as a pathspec is a glob: an untracked h?.md would match a tracked h1.md beside it.
+  Object.assign(env, { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', XDG_CONFIG_HOME: '/dev/null', GIT_LITERAL_PATHSPECS: '1' })
+  // Whether `file` is landed in the repository holding it, if any: ignored there, or tracked (a memory file may be
+  // absent) with no uncommitted change, and with `handoff` committed at or after the warning. With `exact`, a tracked
+  // path's index entry must also carry no bit that hides it from git's status.
+  const landedIn = (file, handoff, exact) => {
+    const top = repoOf(file, dotGit)
+    if (!dotGit(path.join(top, '.git'))) return true
+    const git = (args) => {
+      const left = end - Date.now()
+      if (left <= 0) throw timedOut
+      try {
+        // check-ignore refuses literal pathspec magic, and reads its path as a name, never a glob.
+        return execFileSync('git', ['-C', top, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: args[0] === 'check-ignore' ? { ...env, GIT_LITERAL_PATHSPECS: '0' } : env, ...(left === Infinity ? {} : { timeout: left }) }).trim()
+      } catch (e) { throw e.code === 'ETIMEDOUT' ? timedOut : e }
+    }
+    // git must answer from the work tree of the repository the walk found: a .git it rejects lets it look further up.
+    if (git(['rev-parse', '--show-toplevel']) !== fs.realpathSync.native(top)) return false
+    // Exit 0 is ignored, 1 is not ignored and needs its tracking; anything else is not landed.
+    try { git(['check-ignore', '-q', file]); return true } catch (e) { if (e.status !== 1) throw e }
+    // Tracked is asked, never read from a quiet status: the repository's own config can keep an untracked path out of one.
+    let present = true
+    try { fs.lstatSync(file) } catch (e) { if (e.code !== 'ENOENT') throw e; present = false }
+    if (handoff || present) try { git(['ls-files', '--error-unmatch', '--', file]) } catch (e) { if (e.status === 1) return false; throw e }
+    if (handoff) {
+      const ct = Number(git(['log', '-1', '--format=%ct', '--', file]))
+      if (!ct || ct < Math.floor(warnedAt / 1000)) return false
+    }
+    // status skips a path whose index entry is assume-unchanged or skip-worktree, and one core.ignoreStat has marked,
+    // so the handoff's entry must be tagged H, which none of those is. Not the memory file: a lane's create sets
+    // skip-worktree on it so the lane's memory edits stay out of git.
+    if (exact) {
+      const [entry, ...more] = git(['ls-files', '-v', '-z', '--', file]).split('\0').filter(Boolean)
+      if (more.length || entry !== `H ${path.relative(top, file)}`) return false
+    }
+    // The repository's config can let status trust a core.fsmonitor or a coarse stat check that misses a modified file.
+    return git(['-c', 'core.fsmonitor=false', '-c', 'core.checkStat=default', '-c', 'core.trustctime=true', 'status', '--porcelain', '--ignored=no', '--', file]) === ''
+  }
   try {
-    const ct = Number(git(['log', '-1', '--format=%ct', '--', handoffPath]))
-    if (!ct || ct < Math.floor(warnedAt / 1000)) return false
-    return git(['status', '--porcelain', '--', handoffPath, memoryPath]) === ''
+    // A link must be unchanged where it lives, tracked or ignored there; only the handoff's own file needs its commit or an ignore.
+    const h = forms(handoffPath), m = forms(memoryPath)
+    return [...m.links, m.real].every((f) => landedIn(f, false, false)) && h.links.every((f) => landedIn(f, false, true)) && landedIn(h.real, true, true)
   } catch { return false }
 }

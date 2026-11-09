@@ -19,7 +19,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-typer-'))
 process.env.TMPDIR = tmp
 const { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
-const { restoreFile, claimFile, reserveMarker, autoCycleDir } = await import('./dctr-state.mjs')
+const { restoreFile, claimFile, reserveMarker, autoCycleDir, paneClaimHeld } = await import('./dctr-state.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 
 // ---------------------------------------------------------------- clause 1: typerStep (T4)
@@ -32,6 +32,10 @@ const NEW = { session: 'new', transcript: '/n.jsonl' }
 const NEWP = { ...idle, session: 'new' }
 clause('clause 1a — typerStep before /clear: idle, unfocused, the old session and no new entries clear',
   ts({}).act === 'clear', JSON.stringify(ts({})))
+// D148: another claim on the typer's pane, a sender's or the lane watcher's, holds the /clear on both hosts.
+clause('clause 1a2 — typerStep before /clear: another claim held on the pane waits, on both hosts, where the same observation without it clears (D148)',
+  ts({ otherClaim: true }).act === 'wait' && ts({ otherClaim: true, host: 'codex', composer: true }).act === 'wait' && ts({ otherClaim: false }).act === 'clear',
+  JSON.stringify([ts({ otherClaim: true }), ts({ otherClaim: true, host: 'codex', composer: true })]))
 clause('clause 1b — typerStep: auto-cycle no longer active, or a paused line since the claim, aborts before any other check',
   ts({ active: false, pane: { error: 'x' } }).act === 'abort' && ts({ pausedSinceClaim: true }).act === 'abort', 'did not abort')
 clause('clause 1c — typerStep: a focused pane waits, in every stage, and a pane whose focus is unknown waits too',
@@ -217,6 +221,7 @@ const logged = { args }
 if (args[0] === 'pane' && args[1] === 'get') {
   st.gets = (st.gets || 0) + 1
   if (st.appendAt && st.gets === st.appendAt.n) fs.appendFileSync(st.appendAt.file, st.appendAt.line + '\\n')
+  if (st.removeAt && st.gets === st.removeAt.n) { fs.rmSync(st.removeAt.file, { force: true }); logged.removed = true }
   save()
   if (st.fail || (st.failAfterClear && st.clearedAt)) { fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify(logged) + '\\n'); process.stderr.write('{"error":{"code":"server_error","message":"boom"}}\\n'); process.exit(1) }
   if (st.clearedAt) st.getsSinceClear = (st.getsSinceClear || 0) + 1
@@ -255,7 +260,7 @@ const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, D
 for (const k of ['HERDR_PANE_ID', 'HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete env[k]
 
 /** One typer run in its own project, session and pane. `st` is the shim's script; `pre` edits the fixture first. */
-function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noStopAt = false } = {}) {
+function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noStopAt = false, timeout = 20000 } = {}) {
   const dir = path.join(tmp, name)
   const proj = path.join(dir, 'proj'); fs.mkdirSync(path.join(proj, '.git'), { recursive: true })
   const recRoot = recordRepo === 'same' ? proj : path.join(dir, 'track')
@@ -274,7 +279,7 @@ function typerCase(name, st = {}, { pre, extraEnv = {}, recordRepo = 'same', noS
   fs.writeFileSync(shimState, JSON.stringify({ session, newSession: `${session}-new`, status: 'idle', restoreFile: restoreFile(pane), onClear: 'write', reply: true, newTranscript, ...st }))
   pre?.(f)
   const args = { pane, session, transcript, length, record, hash: 'abc123', project: proj, n: 3, phase: 'e8-fixture', keyLine: 5, ...(noStopAt ? {} : { stopAt }) }
-  const r = spawnSync('node', [typer, JSON.stringify(args)], { env: { ...env, SHIM_STATE: shimState, SHIM_LOG: shimLog, ...extraEnv }, encoding: 'utf8', timeout: 20000 })
+  const r = spawnSync('node', [typer, JSON.stringify(args)], { env: { ...env, SHIM_STATE: shimState, SHIM_LOG: shimLog, ...extraEnv }, encoding: 'utf8', timeout })
   const calls = fs.existsSync(shimLog) ? fs.readFileSync(shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
   const runs = calls.filter((c) => c.args[0] === 'pane' && c.args[1] === 'run')
   const lines = fs.readFileSync(record, 'utf8').split('\n')
@@ -348,6 +353,23 @@ clause('clause 2v — a half-written user entry in the new transcript holds the 
 const pausedBefore = typerCase('paused-before-first-read', {}, { pre: (f) => fs.appendFileSync(f.record, '- auto-cycle paused: waiting for your permission approval\n') })
 clause('clause 2r2 — a paused line written after the Stop\'s key line and before the typer\'s first read: nothing sent, no herdr read, no second paused line (RB8-1)',
   sends(pausedBefore) === '0,0' && pausedBefore.calls.length === 0 && pausedBefore.paused.length === 1, detail(pausedBefore))
+// D148, D195: a sender's claim naming the typer's pane, its pid live (this suite's own), which the shim removes on
+// the pane read after the last held poll. It runs at a hundredth of the default timings except the poll, held past
+// eight times the longest of them, so a typer that gave up its wait, or cleared once a wait ran out, is seen to.
+const senderClaim = (f) => path.join(autoCycleDir(), `sender-${process.pid}.${f.pane.replace(/[^A-Za-z0-9_-]/g, '_')}.claim`)
+const holdClaim = (n, body = (f) => JSON.stringify({ pid: process.pid, pane: f.pane })) => (f) => { write(senderClaim(f), body(f)); f.heldBefore = paneClaimHeld(f.pane); setShim(f, () => ({ removeAt: { n, file: senderClaim(f) } })) }
+const removedAt = (c) => c.calls.findIndex((x) => x.removed)
+const firstClear = (c) => c.calls.findIndex((x) => x.args[3] === '/clear')
+// D148: held for three polls at the default timings, and a claim file that cannot be parsed held the same way (SS3).
+const claimed = typerCase('claim-held', {}, { pre: holdClaim(4) })
+const torn = typerCase('claim-torn', {}, { pre: holdClaim(4, () => '{"pid": ') })
+clause('clause 2x — another claim on the pane held for three polls, and a claim file that cannot be parsed held as long: no /clear while it is there, then /clear once and resume once after it is removed (D148)',
+  [claimed, torn].every((c) => sends(c) === '1,1' && removedAt(c) >= 0 && firstClear(c) > removedAt(c) && c.paused.length === 0), `${detail(claimed)} | ${detail(torn)}`)
+const CLAIM_TIMES = Object.fromEntries(Object.entries(TYPER_TIMES).map(([k, v]) => [k, k === 'poll' ? 400 : v / 100]))
+const CLAIM_POLLS = 25
+const longClaim = typerCase('claim-held-long', {}, { pre: holdClaim(CLAIM_POLLS + 1), extraEnv: { DCTR_TYPER_TIMES: JSON.stringify(CLAIM_TIMES) }, timeout: 300000 })
+clause('clause 2x2 — another claim held for 25 polls of 400 ms, every other timing a hundredth of its default: no /clear and no exit while it is held, then /clear once after it is removed (D148, D195)',
+  sends(longClaim) === '1,1' && removedAt(longClaim) >= CLAIM_POLLS && firstClear(longClaim) > removedAt(longClaim) && longClaim.paused.length === 0 && longClaim.code === 0, detail(longClaim))
 const changed = typerCase('changed', { session: 'someone-else' })
 clause('clause 2d — herdr reports another session: nothing sent, paused with R16', sends(changed) === '0,0' &&
   JSON.stringify(changed.paused) === '["- auto-cycle paused: auto-cycle stopped: you typed in this pane"]', detail(changed))
@@ -613,6 +635,11 @@ clause('clause 3d — without the typer: the late-session shim answered the old 
   late.calls.filter((c, i) => i > late.calls.findIndex((x) => x.args[3] === '/clear') && c.session === late.session).length === 3 &&
   fs.readFileSync(silent.newTranscript, 'utf8') === '' && fs.readFileSync(normal.newTranscript, 'utf8').includes('"assistant"'), 'shim fixtures wrong')
 
+clause('clause 3x — without the typer: each claim fixture was held on its pane before the run, the shim removed it on the read after the held polls (the long one past eight times the longest of the other timings), the torn one does not parse, and no claim file is left',
+  [[claimed, 4], [torn, 4]].every(([c, n]) => c.heldBefore === true && c.calls.filter((x) => x.args[1] === 'get').findIndex((x) => x.removed) === n - 1 && !fs.existsSync(senderClaim(c)) && !paneClaimHeld(c.pane)) &&
+  (() => { try { JSON.parse('{"pid": '); return false } catch { return true } })() &&
+  longClaim.heldBefore === true && longClaim.calls.filter((x) => x.args[1] === 'get').findIndex((x) => x.removed) === CLAIM_POLLS && !fs.existsSync(senderClaim(longClaim)) && !paneClaimHeld(longClaim.pane) &&
+  CLAIM_POLLS * CLAIM_TIMES.poll > 8 * Math.max(...Object.entries(CLAIM_TIMES).filter(([k]) => k !== 'poll').map(([, v]) => v)), JSON.stringify([longClaim.heldBefore, removedAt(longClaim)]))
 clause('clause 3e — without the gate: on each host the resume payload carries the marker and a session other than the plain prompt\'s, the plain prompt carries no marker, and the TMPDIR stand-in is a regular file',
   HOSTS.every(([, plain, resume]) => resume.prompt.includes('(typed by doctrine auto-cycle, not a ruling)') && !plain.prompt.includes('typed by doctrine auto-cycle') &&
     resume.session_id !== plain.session_id && resume.hook_event_name === 'UserPromptSubmit' && plain.hook_event_name === 'UserPromptSubmit') &&

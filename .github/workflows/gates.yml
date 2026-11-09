@@ -152,6 +152,13 @@ jobs:
         # sets up. Needs only node and git.
         run: node hooks/dctr-lane.selftest.mjs
 
+      - name: sender tamper test
+        # Drives hooks/dctr-send.mjs on fixture runs with a herdr shim that plays the lane's pane: the held and
+        # inbox files byte for byte, the claim before the read, the nudge only on a ready, unwarned, unclaimed
+        # pane, the wake's three lines on a handed-off session, its give-up, the relay lines, and zero herdr
+        # calls when contained.
+        run: node hooks/dctr-send.selftest.mjs
+
       - name: Codex seams tamper test
         # The Codex host's pure readers and decisions (transcripts, usage, the typer's pane check, the watcher's
         # observations) on fixtures cut from real Codex 0.156.1 captures. Pure node.

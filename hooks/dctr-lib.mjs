@@ -1532,6 +1532,8 @@ function typerAct(o) {
     // herdr still on the old session: a draft in the pane merged with the /clear, which never ran (E8-D28).
     return s === o.oldSession ? pause('R18', o.oldSession) : pause('R14')
   }
+  // Another claim on the pane, a sender's or the lane watcher's, holds the /clear with no time limit (D148, SS-1).
+  if (o.stage === 'clear' && o.otherClaim) return { act: 'wait', reason: 'another claim on the pane is held' }
   const ready = typerReady(o, t, pause)
   if (ready) return ready
   if (o.stage === 'clear') {
@@ -2675,10 +2677,10 @@ export function roundGuardTarget(tool, input, { cwd = '/', home = '/' } = {}, le
  *  the prefix walked so far is always real, `.` is skipped, `..` drops the real prefix's last component, a link's
  *  target is put back on the front of the queue (an absolute target restarts at `/`), and a component that does not
  *  exist is kept as written and the walk goes on, so a link whose target is gone (a wiped scratchpad) is still
- *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after 40
- *  links a link is kept as written, so a cycle ends. With `strict`, an error that is not notThere throws instead of
- *  reading as a missing component. */
-export function followLinks(p, { lstat, readlink, strict = false }) {
+ *  followed. `lstat(p)` returns a stat with isSymbolicLink() or throws, `readlink(p)` returns the target; after `max`
+ *  links (40 by default) a link is kept as written, so a cycle ends. With `strict`, an error that is not notThere throws
+ *  instead of reading as a missing component. */
+export function followLinks(p, { lstat, readlink, strict = false, max = 40 }) {
   const queue = String(p).split('/')
   let real = '/'
   for (let hops = 0; queue.length;) {
@@ -2687,7 +2689,7 @@ export function followLinks(p, { lstat, readlink, strict = false }) {
     if (c === '..') { real = path.dirname(real); continue }
     const next = path.join(real, c)
     let target = null
-    try { if (hops < 40 && lstat(next).isSymbolicLink()) target = readlink(next) } catch (e) { if (strict && !notThere(e)) throw e /* else missing: kept as written */ }
+    try { if (hops < max && lstat(next).isSymbolicLink()) target = readlink(next) } catch (e) { if (strict && !notThere(e)) throw e /* else missing: kept as written */ }
     if (target === null) { real = next; continue }
     hops++
     if (target.startsWith('/')) real = '/'
