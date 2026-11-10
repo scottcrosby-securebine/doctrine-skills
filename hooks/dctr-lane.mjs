@@ -68,7 +68,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
 } from './dctr-lib.mjs'
 import { herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -208,7 +208,7 @@ function create() {
   try { repo = git(repoArg, 'rev-parse', '--show-toplevel') } catch { refuse(`${repoArg} is not a git repo`) }
   if (!gitOk(repo, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`)) refuse(`${base} is not a commit in ${repo}`)
   const wt = path.join(repo, '.claude', 'worktrees', role)
-  if (/\s/.test(wt)) refuse(`the worktree path ${JSON.stringify(wt)} holds whitespace, which a lane.log line cannot carry`)
+  if (laneLogPathRefusal(wt)) refuse(laneLogPathRefusal(wt))
   if (fs.existsSync(wt)) refuse(`${wt} already exists`)
   const merge = role === 'merge'
   if (merge) {

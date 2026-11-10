@@ -386,17 +386,19 @@ export const lockHolder = (lock) => {
 
 /** Whether two holder readings name the same holder: the pid and the namespace together. Two nulls
  *  (no pid file either time) are the same; an unreadable reading is never the same as anything. */
-const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
+export const sameHolder = (a, b) => (a === null && b === null) || (!!a && !!b && a.pid === b.pid && a.ns === b.ns)
 
 /** This process as a holder, in the shape lockHolder reads back. */
 const selfHolder = () => ({ pid: String(process.pid), ns: ownPidNs() })
 
-/** The locks this process holds, which renewHeldLocks keeps fresh. acquireLock adds, releaseLock removes. */
+/** The locks this process holds, which renewHeldLocks keeps fresh. acquireLock and acquireRunLock add; releaseLock,
+ *  releaseRunLock and ownsRunLock (on a lock no longer ours) remove. */
 const heldLocks = new Set()
 
-/** Renew every lock this process holds: set its mtime to now. A holder that cannot be judged by its
- *  pid (another namespace, or none published) is broken on AGE, past the pid-less window, so a live
- *  one must never age that far. herdr() calls this before every call, and a herdr call is the only
+/** Renew every lock this process holds: set its mtime to now. A directory lock whose holder cannot be
+ *  judged by its pid (another namespace, or none published) is broken on AGE, past the pid-less window,
+ *  so a live one must never age that far; a run lock is never broken on age, and its renewal only feeds
+ *  stop's freshness test. herdr() calls this before every call, and a herdr call is the only
  *  wait in any lock section that can approach the window. A holder that dies stops renewing, and its
  *  lock ages out as before. The renewal does not re-check that the lock is still ours: one stolen from
  *  us is renewed at most until our own section ends, which is already the stolen-lock residual
@@ -473,11 +475,76 @@ export function releaseLock(lock) {
 
 /** True only for a pid that reads back as a number and is running. EPERM means running under
  *  another user, which is still running. */
-function pidAlive(raw) {
+export function pidAlive(raw) {
   if (raw === null) return false
   const pid = Number(raw)
   if (!Number.isInteger(pid) || pid <= 0) return false
   try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
+}
+
+/** How long a break gate may sit before it is taken for a breaker that died inside its few steps. */
+export const RUN_LOCK_GATE_MS = 60000
+
+/** A run's single-instance lock (wake-all.lock, lanewatch.lock, lanewatch.start.lock) is one FILE, `pid <pid>\nns
+ *  <ns or ->\ntoken <token>\n`, written whole under a name of its own and linked into place, so it appears complete or
+ *  not at all: link fails on any name already there, file or directory, and no reader ever sees a holder half written
+ *  (WB29: an empty pid file read as pid '' was judged dead). `{ pid, ns, token }`, `null` when there is no lock, and
+ *  `undefined` when one is there and cannot be read as a holder, which is never broken. */
+export function runLockHolder(lock) {
+  let t
+  try { t = fs.readFileSync(lock, 'utf8') } catch (e) { return e.code === 'ENOENT' ? null : undefined }
+  const m = /^pid (\d+)\nns (.+)\ntoken (\S*)\n$/.exec(t)
+  return m ? { pid: m[1], ns: m[2] === '-' ? null : m[2], token: m[3] } : undefined
+}
+
+/** Take the run lock if nothing holds that name: true when taken. `token` is written beside the pid. */
+function acquireRunLock(lock, token) {
+  const me = selfHolder(), part = `${lock}.new.${process.pid}`
+  fs.writeFileSync(part, `pid ${me.pid}\nns ${me.ns ?? '-'}\ntoken ${token}\n`)
+  try { fs.linkSync(part, lock) } catch (e) { if (e.code === 'EEXIST') return false; throw e } finally { fs.rmSync(part, { force: true }) }
+  heldLocks.add(lock)
+  return true
+}
+
+/** Whether a run lock may be broken: its holder, read whole, has exited, judged in this pid namespace. A lock that
+ *  cannot be read, and a holder from another pid namespace (holderAlive null), are never broken. */
+export function runLockDead(lock) {
+  const h = runLockHolder(lock)
+  return !!h && holderAlive(h, ownPidNs()) === false
+}
+
+/** Take a run's lock: true when taken, false while it is held. A take that throws is false.
+ *
+ *  A dead holder's lock is removed only under the gate `<lock>.break`, a directory one breaker at a time makes, and
+ *  judged again inside it, so no put-back is needed. A gate older than RUN_LOCK_GATE_MS is removed and the take refused.
+ *  A breaker stalled that long inside the gate can remove a lock taken meanwhile (WB30). The watcher re-reads its lock
+ *  (ownsRunLock) before each poll and wake-all before each typing call, each stopping once it is not its own, which
+ *  bounds that window to one poll or one typing call; start's lanewatch.start.lock is never re-read. */
+export function takeRunLock(lock, token = '') {
+  try {
+    if (acquireRunLock(lock, token)) return true
+    if (!runLockDead(lock)) return false
+    const gate = `${lock}.break`
+    try { fs.mkdirSync(gate) } catch {
+      try { if (Date.now() - fs.statSync(gate).mtimeMs > RUN_LOCK_GATE_MS) fs.rmSync(gate, { recursive: true, force: true }) } catch { /* gone */ }
+      return false
+    }
+    try { if (runLockDead(lock)) fs.rmSync(lock, { force: true }) } finally { fs.rmSync(gate, { recursive: true, force: true }) }
+    return acquireRunLock(lock, token)
+  } catch { return false }
+}
+
+/** Whether this process holds the run lock now; when it does, its time is renewed. */
+export function ownsRunLock(lock) {
+  const h = runLockHolder(lock)
+  if (!h || !sameHolder(h, selfHolder())) { heldLocks.delete(lock); return false }
+  try { const now = new Date(); fs.utimesSync(lock, now, now) } catch { /* gone: the next read says so */ }
+  return true
+}
+
+/** Remove the run lock when this process holds it. */
+export function releaseRunLock(lock) {
+  heldLocks.delete(lock); if (sameHolder(runLockHolder(lock) ?? undefined, selfHolder())) fs.rmSync(lock, { force: true })
 }
 
 /** Whether `holder` is running, judged by a process whose pid namespace is `ownNs`: true or false

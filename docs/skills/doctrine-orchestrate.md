@@ -25,7 +25,7 @@ Three kinds of session, each a Claude Code session in its own herdr pane:
 - **One lane per phase**, each its own doctrine phase under its own wrapper, with its own record, Coverage line, worktree and gate. A lane is not a seat, so the orchestrator never waits on one. A lane asks the orchestrator for any project-file write it needs.
 - **The merge session**, in a worktree of the integration branch, merges one lane at a time with `git merge --no-ff` and runs the gate on the merged revision.
 
-Two scripts run beside them. The sender, `hooks/dctr-send.mjs`, is the only way a message reaches a session: it writes the message to that session's held folder and types at most a fixed nudge. The lane watcher, `hooks/dctr-lanewatch.mjs`, writes each event to the run's events log, which the orchestrator waits on, and after an account-wide usage-limit stop it restarts or wakes every session at the reset time. Worktrees are made, reset, archived and removed only by `hooks/dctr-lane.mjs`.
+Two scripts run beside them. The sender, `hooks/dctr-send.mjs`, is the only way a message reaches a session: it writes the message to that session's held folder and types at most a fixed nudge. The lane watcher, `hooks/dctr-lanewatch.mjs`, writes each event to the run's events log, which the orchestrator waits on, and types nothing. After an account-wide usage-limit stop the owner rolls, then runs the sender's `wake-all` once, which wakes every session that stop left idle. Worktrees are made, reset, archived and removed only by `hooks/dctr-lane.mjs`.
 
 ## What the gate is for this shape
 

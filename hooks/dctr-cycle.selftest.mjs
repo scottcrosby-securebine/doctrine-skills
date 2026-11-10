@@ -376,7 +376,7 @@ fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
 `)
 
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_TYPER_SCRIPT: stub, HERDR_PANE_ID: 'w9:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS']) delete baseEnv[k]
 const T0 = Date.parse('2026-09-24T01:00:00Z')
 
 /**
@@ -955,6 +955,134 @@ const offs = ['permission_prompt', 'idle_prompt', 'StopFailure'].map((t) => {
 clause('clause 2n — each with auto-cycle off does nothing and calls no herdr (E8-D18)',
   offs.every((f) => paused(f).length === 0 && calls(f).length === 0), offs.map((f) => JSON.stringify(calls(f))).join(' '))
 const nStop = fixture('n-stop'); write(path.join(nStop.proj, '.doctrine/auto-cycle.stop'), ''); note(nStop, 'permission_prompt')
+// E15 Recovery: the limit line (E15-D114, D115, D228, D229, D237). The texts are the 2.1.319 bundle read's
+// (.doctrine/records/e15-watcher/captures/bundle-read-2.1.319.md in the companion), the weekly one modelled on them.
+const LIMIT_TEXTS = {
+  session: "You've hit your session limit · resets 9pm (Asia/Seoul)",
+  fiveHour: "You've hit your 5-hour limit · resets 3:30am (Asia/Seoul)",
+  weekly: "You've hit your weekly limit · resets Nov 12, 7pm (Asia/Seoul)",
+  fable: "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.",
+  server: 'The server had an error while processing your request. Sorry about that!',
+}
+const NOW = Date.parse('2026-11-09T04:00:00Z') // 13:00 KST
+const limitsRun = (f) => path.join(f.dir, 'run')
+const limitsOf = (f) => { try { return fs.readFileSync(path.join(limitsRun(f), 'limits.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+const failure = (text, error = 'rate_limit') => ({ hook_event_name: 'StopFailure', error, ...(text === LIMIT_TEXTS.fable ? { error_details: '429 {"type":"error"}' } : {}), last_assistant_message: text })
+const laneEnv = (f, nowMs = NOW) => ({ DCTR_ROLE: 'a', DCTR_CALLER: 'a', DCTR_RUN: limitsRun(f), DCTR_NOW_MS: String(nowMs) })
+const kindsFx = fixture('limit-kinds')
+for (const k of ['session', 'fiveHour', 'weekly', 'fable']) run(kindsFx, failure(LIMIT_TEXTS[k]), laneEnv(kindsFx))
+run(kindsFx, failure(LIMIT_TEXTS.server, 'server_error'), laneEnv(kindsFx))
+const spacedErr = fixture('limit-spaced-error'); run(spacedErr, failure(LIMIT_TEXTS.server, 'bad gateway'), laneEnv(spacedErr))
+const kindLines = limitsOf(kindsFx).map((l) => l.split(' '))
+clause('clause 2y — a lane session\'s StopFailure appends one limits.log line each: account for the session-limit, 5-hour and weekly texts, model for the Fable text, other for a server_error, each naming the role and the hook clock\'s time (E15-D114)',
+  kindLines.length === 5 && JSON.stringify(kindLines.map((l) => l[2])) === '["account","account","account","model","other"]' &&
+  kindLines.every((l) => l[0] === new Date(NOW).toISOString() && l[1] === 'a'), JSON.stringify(limitsOf(kindsFx)))
+clause('clause 2y2 — a model line\'s field is -, an other line\'s the payload\'s error, its spaces written as _ so the line stays four fields (E15-D237)',
+  kindLines[3]?.[3] === '-' && kindLines[4]?.[3] === 'server_error' && kindLines.every((l) => l.length === 4) && JSON.stringify(limitsOf(spacedErr).map((l) => l.split(' ').slice(2))) === '[["other","bad_gateway"]]', JSON.stringify(limitsOf(kindsFx)))
+clause('clause 2y3 — in a lane session whose record is active the StopFailure still writes its R9 paused line beside its limits.log line (E15 Recovery)',
+  paused(kindsFx).length >= 1 && /API error: rate_limit/.test(paused(kindsFx)[0]) && kindLines.length === 5, show(kindsFx, { code: 0, msg: '', err: '' }))
+const RESETS = [
+  ['9pm at 13:00 KST', "You've hit your session limit · resets 9pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-09T12:00:00Z'],
+  ['9pm at 22:00 KST', "You've hit your session limit · resets 9pm (Asia/Seoul)", '2026-11-09T13:00:00Z', '2026-11-10T12:00:00Z'],
+  ['3:30am at 13:00 KST', "You've hit your 5-hour limit · resets 3:30am (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-09T18:30:00Z'],
+  ['Nov 12, 7pm on Nov 9', "You've hit your weekly limit · resets Nov 12, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-12T10:00:00Z'],
+  ['12pm UTC at 13:00 UTC', "You've hit your session limit · resets 12pm (UTC)", '2026-11-09T13:00:00Z', '2026-11-10T12:00:00Z'],
+  ['an unparseable time', "You've hit your session limit · resets whenever it likes", '2026-11-09T04:00:00Z', 'unknown'],
+  ['1pm at exactly 13:00 KST', "You've hit your session limit · resets 1pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2026-11-10T04:00:00Z'],
+  ['Jan 2, 7pm on Nov 9', "You've hit your weekly limit · resets Jan 2, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', '2027-01-02T10:00:00Z'],
+  ['1:30am New York in the fall-back hour, its second occurrence', "You've hit your session limit · resets 1:30am (America/New_York)", '2026-11-01T06:15:00Z', '2026-11-01T06:30:00Z'],
+  ['Feb 31, a date no year holds', "You've hit your weekly limit · resets Feb 31, 7pm (Asia/Seoul)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['1:30am New York before the fall-back hour, its first occurrence', "You've hit your session limit · resets 1:30am (America/New_York)", '2026-11-01T05:15:00Z', '2026-11-01T05:30:00Z'],
+  ['2:30am New York, a time the spring-forward gap skips', "You've hit your session limit · resets 2:30am (America/New_York)", '2027-03-14T05:00:00Z', '2027-03-14T07:30:00Z'],
+  ['Feb 29 from a year that has none', "You've hit your weekly limit · resets Feb 29, 7pm (UTC)", '2026-11-09T04:00:00Z', '2028-02-29T19:00:00Z'],
+  ['13pm, no clock time', "You've hit your session limit · resets 13pm (UTC)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['9:75pm, no clock time', "You've hit your session limit · resets 9:75pm (UTC)", '2026-11-09T04:00:00Z', 'unknown'],
+  ['a zone Intl does not know', "You've hit your session limit · resets 9pm (Mars/Base)", '2026-11-09T04:00:00Z', 'unknown'],
+]
+// WB21: from a date after Feb 29 2028 the next Feb 29 is four years on.
+RESETS.push(['Feb 29 from after Feb 29 2028, four years on', "You've hit your weekly limit · resets Feb 29, 7pm (UTC)", '2028-03-01T04:00:00Z', '2032-02-29T19:00:00Z'])
+// WB26: Auckland falls back at 03:00 NZDT on 2027-04-04; at 01:30 NZDT the first 02:30 is still in NZDT.
+RESETS.push(['2:30am Auckland before its April fall-back, its first occurrence', "You've hit your session limit · resets 2:30am (Pacific/Auckland)", '2027-04-03T12:30:00Z', '2027-04-03T13:30:00Z'])
+const resetBad = RESETS.filter(([label, text, now, want], i) => {
+  const f = fixture(`limit-reset-${i}`)
+  run(f, failure(text), laneEnv(f, Date.parse(now)))
+  const l = limitsOf(f)
+  return l.length !== 1 || l[0] !== `${new Date(Date.parse(now)).toISOString()} a account ${want}`
+}).map(([label]) => label)
+clause('clause 2y4 — an account line carries the reset time as ISO UTC: the first occurrence of the stated time in its zone strictly after the StopFailure (the same instant moves a day on), a dated text in the year that puts it after, unknown for a time that does not parse (E15-D228)',
+  resetBad.length === 0, JSON.stringify(resetBad))
+// WB26: a table over zones with DST, both hemispheres, the 30- and 45-minute offsets among them, and every transition
+// in the two years from 2026-11-10: for a stated time at each quarter hour around each transition and a clock before,
+// at and after it, the reset time reads the stated wall time in Intl and is the first such instant after the clock, found
+// here by walking every quarter hour. A stated time a spring-forward gap skips is passed over, its rule pinned above.
+const ZONES = ['America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Australia/Sydney', 'Australia/Adelaide',
+  'Pacific/Auckland', 'America/Santiago', 'Australia/Lord_Howe', 'Pacific/Chatham', 'America/St_Johns', 'Asia/Kathmandu']
+const Q = 900000
+const zoneTable = { cases: 0, transitions: 0, gaps: 0, bad: [] }
+for (const zone of ZONES) {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' })
+  const wall = (ms) => { const p = Object.fromEntries(fmt.formatToParts(ms).map((x) => [x.type, Number(x.value)])); return { day: Date.UTC(p.year, p.month - 1, p.day), min: p.hour * 60 + p.minute } }
+  const off = (ms) => { const w = wall(ms); return w.day + w.min * 60000 - ms }
+  const from = Date.parse('2026-11-10T00:00:00Z'), to = Date.parse('2028-11-10T00:00:00Z')
+  const marks = []
+  for (let t = from; t < to; t += 3600000) if (off(t) !== off(t + 3600000)) { let u = t; while (off(u) === off(t)) u += Q; marks.push(u) }
+  zoneTable.transitions += marks.length
+  if (!marks.length) marks.push(Date.parse('2027-04-04T00:00:00Z'), Date.parse('2027-10-03T00:00:00Z'))
+  for (const T of marks) {
+    for (const now of [T - 3 * 3600000 + 300000, T - Q + 60000, T + Q + 60000]) {
+      for (let k = -8; k <= 8; k++) {
+        const target = ((wall(T).min + k * 15) % 1440 + 1440) % 1440, h = Math.floor(target / 60), mi = target % 60
+        const text = `You've hit your session limit · resets ${(h % 12) || 12}${mi ? `:${String(mi).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'} (${zone})`
+        let want = null, skipped = false
+        for (let t = Math.ceil((now - 86400000) / Q) * Q; t < now + 50 * 3600000; t += Q) {
+          const a = wall(t - Q), b = wall(t), abs = (w) => w.day / 60000 + w.min
+          for (let m = abs(a) + 1; m < abs(b) && abs(b) - abs(a) > 15; m++) if (m % 1440 === target) skipped = true
+          if (b.min === target && t > now && want === null) want = t
+        }
+        const got = lib.resetTime(text, now)
+        zoneTable.cases += 1
+        const gotMs = Date.parse(got)
+        if (skipped && wall(gotMs).min !== target) { zoneTable.gaps += 1; continue }
+        if (got !== new Date(want).toISOString().replace(/\.\d{3}Z$/, 'Z') || wall(gotMs).min !== target) zoneTable.bad.push(`${zone} now ${new Date(now).toISOString()} ${h}:${mi} got ${got} want ${new Date(want).toISOString()}`)
+      }
+    }
+  }
+}
+clause('clause 2y9 — over twelve zones and each transition in two years, the reset time reads the stated wall time in its zone and is its first occurrence after the clock (E15-D228)',
+  zoneTable.bad.length === 0 && zoneTable.transitions >= 40 && zoneTable.cases - zoneTable.gaps >= 1000, JSON.stringify({ ...zoneTable, bad: zoneTable.bad.slice(0, 6), badCount: zoneTable.bad.length }))
+const resetFiles = spawnSync('find', [path.join(tmp, 'fx'), '-name', 'reset.txt'], { encoding: 'utf8' })
+clause('clause 2y5 — no StopFailure above writes a reset.txt anywhere under the fixtures (E15-D229)',
+  resetFiles.status === 0 && resetFiles.stdout === '', JSON.stringify([resetFiles.status, resetFiles.stdout]))
+// The order and the reach of the limit line: it is in limits.log at the moment the R9 line is appended, and it is
+// written with auto-cycle off and with no kickoff chain at all; a run with no role writes none (E15 Recovery).
+const ORDER = path.join(tmp, 'order-probe.mjs'), orderLog = path.join(tmp, 'order.log')
+fs.writeFileSync(ORDER, [
+  "import fs from 'node:fs'",
+  'const orig = fs.appendFileSync, NL = String.fromCharCode(10)',
+  'fs.appendFileSync = function (p, data, ...rest) {',
+  "  if (String(p).endsWith('.md') && String(data).includes('auto-cycle paused:')) { let n = 0; try { n = fs.readFileSync(process.env.DCTR_RUN + '/limits.log', 'utf8').split(NL).filter(Boolean).length } catch {} ; orig.call(fs, process.env.ORDER_LOG, 'limits=' + n + NL) }",
+  '  return orig.call(fs, p, data, ...rest)',
+  '}', ''].join('\n'))
+const orderFx = fixture('limit-order')
+run(orderFx, failure(LIMIT_TEXTS.session), { ...laneEnv(orderFx), NODE_OPTIONS: `--import=${ORDER}`, ORDER_LOG: orderLog })
+const offFx = fixture('limit-off', { lines: ['- auto-cycle: off'] })
+run(offFx, failure(LIMIT_TEXTS.session), laneEnv(offFx))
+const chainless = fixture('limit-chainless'); fs.rmSync(path.join(chainless.proj, 'SESSION_MEMORY.md'))
+run(chainless, failure(LIMIT_TEXTS.session), laneEnv(chainless))
+clause('clause 2y7 — the limits.log line is already written when the R9 paused line is appended, and it is written with auto-cycle off and with no kickoff chain, where no paused line is (E15 Recovery, D114)',
+  fs.existsSync(orderLog) && fs.readFileSync(orderLog, 'utf8') === 'limits=1\n' && paused(orderFx).length === 1 &&
+  limitsOf(offFx).length === 1 && paused(offFx).length === 0 && limitsOf(chainless).length === 1, JSON.stringify([fs.existsSync(orderLog) && fs.readFileSync(orderLog, 'utf8'), limitsOf(offFx), limitsOf(chainless)]))
+const roleless = fixture('limit-roleless')
+run(roleless, failure(LIMIT_TEXTS.session), { DCTR_RUN: limitsRun(roleless), DCTR_NOW_MS: String(NOW) })
+clause('clause 2y8 — DCTR_RUN set and no DCTR_ROLE: no limits.log (P3)',
+  !fs.existsSync(path.join(limitsRun(roleless), 'limits.log')), JSON.stringify(limitsOf(roleless)))
+const noRunFx = fixture('limit-no-run')
+run(noRunFx, failure(LIMIT_TEXTS.session), { DCTR_NOW_MS: String(NOW) })
+const strayLimits = spawnSync('find', [tmp, '-name', 'limits.log', '-path', '*limit-no-run*'], { encoding: 'utf8' })
+clause('clause 2y6 — a StopFailure in a session with no DCTR_ROLE and no DCTR_RUN writes no limits.log anywhere, and still writes its R9 paused line (E15-D115)',
+  strayLimits.status === 0 && strayLimits.stdout === '' && !fs.existsSync(path.join(noRunFx.dir, 'run')) &&
+  JSON.stringify(paused(noRunFx)) === '["- auto-cycle paused: Claude API error: rate_limit"]', JSON.stringify([strayLimits.stdout, paused(noRunFx)]))
+
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
 const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(iPaused, 'idle_prompt')
@@ -1434,6 +1562,17 @@ clause('clause 3c — without the hook: the Q1 stop file sits only in the record
 clause('clause 3d — without the hook: the no-progress record carries two cycle lines with the tree\'s own hash and only backup waves after them, and the progress fixture a changed file',
   fs.readFileSync(npF.record, 'utf8').split('\n').filter((l) => l === cyc(2, hNow) || l === cyc(1, hNow)).length === 2 &&
   git(pgF.proj, 'diff', '--name-only') === 'src.txt', 'progress fixtures wrong')
+
+// The limit fixtures, read without the hook: each text carries its kind's phrase by this suite's own pattern, the
+// server_error text neither, the no-run hook call's environment holds no DCTR_ROLE or DCTR_RUN, and its record is
+// active, so the R9 it must still write is reachable.
+const own = { account: /^You've hit your [^·]+ limit · resets /, model: /^You've reached your \w+ limit/ }
+const kindOf = (t) => (own.account.test(t) ? 'account' : own.model.test(t) ? 'model' : 'other')
+clause('clause 3y — without the hook: the five limit texts read account, account, account, model, other by this suite\'s own patterns; the no-run environment carries no DCTR_ROLE or DCTR_RUN; its record is Open with auto-cycle on; the reset fixtures\' clocks fall where each case says',
+  JSON.stringify(['session', 'fiveHour', 'weekly', 'fable', 'server'].map((k) => kindOf(LIMIT_TEXTS[k]))) === '["account","account","account","model","other"]' &&
+  !('DCTR_ROLE' in baseEnv) && !('DCTR_RUN' in baseEnv) && /- State: Open\n- auto-cycle: on cap 10/.test(fs.readFileSync(noRunFx.record, 'utf8')) &&
+  new Date(Date.parse('2026-11-09T13:00:00Z') + 9 * 3600000).getUTCHours() === 22 && new Date(NOW + 9 * 3600000).getUTCHours() === 13,
+  JSON.stringify(Object.values(LIMIT_TEXTS).map(kindOf)))
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)

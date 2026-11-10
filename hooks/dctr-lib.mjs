@@ -1327,6 +1327,100 @@ export function laneOf(laneLogText, role) {
   return found
 }
 
+/** Why `p` cannot stand in a lane.log line, whose args are split on spaces, or null: it holds whitespace. */
+export const laneLogPathRefusal = (p) => (/\s/.test(p) ? `the worktree path ${JSON.stringify(p)} holds whitespace, which a lane.log line cannot carry` : null)
+
+/** The roles lane.log's `create` lines name, in first-seen order: names only, since a role's pane and worktree come
+ *  from `laneOf` alone (E15-D214). */
+export function laneRoles(laneLogText) {
+  const roles = []
+  for (const l of String(laneLogText ?? '').split('\n')) {
+    const m = LANE_LINE.exec(l)
+    const r = m?.[3] === 'create' ? m[4].split(' ')[0] : null
+    if (r && !roles.includes(r)) roles.push(r)
+  }
+  return roles
+}
+
+// ---------------------------------------------------------------- the limit line and wake-all's lines (E15 Recovery)
+
+const ACCOUNT_LIMIT = /You[’']ve hit your .+? limit · resets (.+)$/m
+const MODEL_LIMIT = /You[’']ve reached your .+? limit/
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/** The limit kind a StopFailure's `last_assistant_message` states (E15-D114): `account` for the resets text, `model`
+ *  for the reached-your-model text, `other` for anything else. The payload's `error` cannot tell them apart. */
+export const limitKind = (message) => (ACCOUNT_LIMIT.test(String(message ?? '')) ? 'account' : MODEL_LIMIT.test(String(message ?? '')) ? 'model' : 'other')
+
+/** `zone`'s wall clock at `ms` as `{ y, mo, d, h, mi }`, mo from 1. Throws on a zone Intl does not know. */
+const wallFormats = new Map()
+function wallClock(ms, zone) {
+  if (!wallFormats.has(zone)) wallFormats.set(zone, new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }))
+  const parts = Object.fromEntries(wallFormats.get(zone).formatToParts(ms).map((p) => [p.type, Number(p.value)]))
+  return { y: parts.year, mo: parts.month, d: parts.day, h: parts.hour, mi: parts.minute }
+}
+
+/** Every instant `zone`'s wall clock reads y-mo-d h:mi (a day past the month's end rolls over), earliest first: two in
+ *  a fall-back hour, one otherwise, and for a time a spring-forward gap skips, the instant the offset before the gap
+ *  gives, which the clock after it reads an hour later. */
+function zonedInstants(y, mo, d, h, mi, zone) {
+  const wall = Date.UTC(y, mo - 1, d, h, mi)
+  const offset = (ms) => { const w = wallClock(ms, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / 60000) * 60000 }
+  // Every offset the zone takes at the instants that can read the wall time (offsets run from -12h to +14h), read each
+  // hour: two samples half a day apart missed an offset held only between them (WB26, Auckland's April fall-back).
+  const offsets = new Set()
+  for (let k = -15; k <= 13; k++) offsets.add(offset(wall + k * 3600000))
+  const tries = [...new Set([...offsets].map((o) => wall - o))].sort((a, b) => a - b)
+  const reads = tries.filter((at) => { const w = wallClock(at, zone); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) === wall })
+  return reads.length ? reads : [tries.at(-1)]
+}
+
+/** An account limit's reset time as ISO 8601 UTC (E15-D228): the stated clock time's first occurrence in its zone
+ *  strictly after `nowMs`; for a dated text that date and time in the year that puts it after `nowMs`; `unknown`
+ *  when the text does not parse. */
+export function resetTime(message, nowMs) {
+  const when = ACCOUNT_LIMIT.exec(String(message ?? ''))?.[1]?.trim()
+  const m = /^(?:([A-Za-z]{3})[a-z]* (\d{1,2}), )?(\d{1,2})(?::(\d{2}))? ?(am|pm) \(([^()\s]+)\)\.?$/i.exec(when ?? '')
+  if (!m) return 'unknown'
+  const [, mon, day, hh, mm = '0', ap, zone] = m
+  const h = (Number(hh) % 12) + (ap.toLowerCase() === 'pm' ? 12 : 0), mi = Number(mm)
+  if (Number(hh) < 1 || Number(hh) > 12 || mi > 59) return 'unknown'
+  let candidates
+  try {
+    const now = wallClock(nowMs, zone)
+    if (mon) {
+      const mo = MONTHS.indexOf(mon.toLowerCase()) + 1
+      // A date no year holds (Feb 31) gives no candidate and so `unknown`, never the day it rolls over to; Feb 29
+      // holds only in a leap year, so up to four years on.
+      const holds = (y) => new Date(Date.UTC(y, mo - 1, Number(day))).getUTCDate() === Number(day)
+      if (mo === 0) return 'unknown'
+      candidates = [0, 1, 2, 3, 4].map((k) => now.y + k).filter(holds).flatMap((y) => zonedInstants(y, mo, Number(day), h, mi, zone))
+    } else {
+      candidates = [...zonedInstants(now.y, now.mo, now.d, h, mi, zone), ...zonedInstants(now.y, now.mo, now.d + 1, h, mi, zone)]
+    }
+  } catch { return 'unknown' }
+  const at = candidates.find((c) => c > nowMs)
+  return at === undefined ? 'unknown' : new Date(at).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+/** The limits.log line a StopFailure appends (E15-D114, D228, D237): `<ISO ms> <role> <kind> <field>`, the field the
+ *  reset time for `account`, `-` for `model`, the payload's `error` for `other`. */
+export function limitLine({ nowMs, role, message, error }) {
+  const kind = limitKind(message)
+  const field = kind === 'account' ? resetTime(message, nowMs) : kind === 'model' ? '-' : String(error ?? 'unknown').replace(/\s+/g, '_') || 'unknown'
+  return `${new Date(nowMs).toISOString()} ${role} ${kind} ${field}`
+}
+
+/** limits.log's lines, in order, as `{ time, role, kind, field }`; a line outside the grammar is no line. */
+export const parseLimits = (text) => String(text ?? '').split('\n').map((l) => /^(\S+Z) (\S+) (account|model|other) (\S+)$/.exec(l))
+  .filter(Boolean).map(([, time, role, kind, field]) => ({ time, role, kind, field }))
+
+/** events.log's wake-all lines, each `<ISO time> <word> <role> <limit line's time>[ <rest>]`, in order, as `{ at, word, role, limit, rest, index }`; every other line is skipped. */
+export const parseWakeLines = (text) => String(text ?? '').split('\n').map((l, index) => {
+  const m = /^(\S+Z) (intent|woken|retry|skip|unfinished|unwoken) (\S+) (\S+)(?: (.*))?$/.exec(l)
+  return m && { at: m[1], word: m[2], role: m[3], limit: m[4], rest: m[5] ?? '', index }
+}).filter(Boolean)
+
 /**
  * B7's count and pause (E8-D17): `n` is the next cycle's number, the last cycle line's plus one wherever it sits,
  * so the count continues across session ids and across on lines; `cap` is the last on line's. It pauses with
