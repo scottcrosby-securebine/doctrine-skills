@@ -196,6 +196,13 @@ jobs:
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
         run: node hooks/dctr-mutations.mjs
+        env:
+          DCTR_DEBUG_LOG: ${{ runner.temp }}/clause-1d8.log
+
+      - name: clause 1d8 timing under the R2-B2 mutation
+        # Ruling R1: what clause 1d8 read in the R2-B2 mutation's tree, printed even when the gate failed.
+        if: always()
+        run: grep -F 'the-watcher-never-asks' "$RUNNER_TEMP/clause-1d8.log" || echo "no line recorded"
 
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null

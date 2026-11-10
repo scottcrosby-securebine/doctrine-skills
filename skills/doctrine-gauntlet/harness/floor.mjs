@@ -228,7 +228,7 @@ const cropNotes = new Set()
 const innerClip = new Set()
 /* 2560 is here because a whole defect class lives above 1440 and nothing below
    it can see the class at all: type authored at a fixed px size stays
-   byte-identical while the sheet keeps expanding, so the pictures grow and the
+   byte-identical while its reading column keeps widening, so the pictures grow and the
    words do not. Measured live at 13px nav and an 11px primary call to action,
    identical at 1440, 1920, 2560 and 3840, after seven gauntlet rounds at
    360/768/1440 had passed the page every time. */
@@ -626,7 +626,8 @@ try {
              reads 16x16, and no rectangle API can see a pseudo-element's box.
              Gating on 16 there is a WRONG number, not a conservative one.
              So ask the gate's own question instead of a proxy for it: is a 24x24
-             square centred on the control activated by the control at every point?
+             square centred on the control activated by the control at the eight points
+             of RING below?
              true = clears the minimum however it was built · false = it does not,
              whatever the box says · null = the probe could not reach it, which
              goes to a critic and never to the gate. */
@@ -1183,7 +1184,7 @@ if (loneTargets.size) {
 /* The layout grew and the type did not. Invisible at any single width: only the
    DELTA between two widths shows it, which is why a ladder ending at 1440 could
    not have found it however many rounds it ran. Measured live: nav 13px and an
-   11px card CTA byte-identical at 1440, 1920, 2560 and 3840 while the sheet
+   11px card CTA byte-identical at 1440, 1920, 2560 and 3840 while the layout
    expanded to 1848px and aspect-ratio figures grew to 674px tall.
    A JUDGE line, not a gate: a design may cap its type deliberately, and the
    harness cannot tell that from an oversight. The numbers make it answerable. */

@@ -483,9 +483,14 @@ const wgtGets0 = gets(wgt)
 const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3')
 const wgtPolled = await polled(wgt, wgtGets0)
 const wgtBefore = events(wgtLog)
+// Ruling R1 (2026-11-05), for the R2-B2 mutation CI alone misses: where the gate sets DCTR_DEBUG_LOG, record what this
+// read saw and what the same read sees 2 s later, so a late write from the watcher's child shows. It changes no verdict.
+const wgtDebug = process.env.DCTR_DEBUG_LOG
+const wgtLate = wgtDebug ? await new Promise((r) => { setTimeout(() => r(events(wgtLog).length), 2000) }) : null
 write(`${wgtOut}.result`, 'exit=0\n')
 await wgtRun
 const wgtEvents = events(wgtLog)
+if (wgtDebug) fs.appendFileSync(wgtDebug, `${JSON.stringify({ tree: path.basename(import.meta.dirname), polled: wgtPolled, before: wgtBefore.length, late: wgtLate, after: wgtEvents.length })}\n`)
 clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
   wgtPolled && wgtBefore.length === 0 && wgtEvents.length === 1 && wgtEvents[0].hook_event_name === 'Stop' && wgtEvents[0].turn_id === 'turn-v3',
   `polled ${wgtPolled} ${JSON.stringify(wgtBefore)} ${JSON.stringify(wgtEvents)}`)

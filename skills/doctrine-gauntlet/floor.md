@@ -231,7 +231,7 @@ The two markers that carry gate law:
   not `--fragment`, *and* the container grew over 5% from 1440 to 2560, *and* the median
   functional type did not grow at all; **a region `--crop` could not shoot** — `--crop`
   was passed and missed; **axe's other undecided rules** — its `incomplete` bucket held
-  something that was not contrast; **text hidden in the ordinary render too** — the
+  something that was neither contrast nor `frame-tested`; **text hidden in the ordinary render too** — the
   reduced-motion baseline was not empty, so something was subtracted; **targets whose hit
   area could not be probed** — there were some. **The printed line never gates; the
   critic's answer to it does** — non-text contrast, visible focus and a reachable second
@@ -306,8 +306,8 @@ The two markers that carry gate law:
   `::before { position: absolute; inset: -14px }` is the standard way to give a 16px glyph
   a 44px target — so the harness gated a compliant control at `16x16px`, which is a
   **wrong** number rather than a conservative one. It now asks the gate's own question
-  directly: is a 24x24 square centred on the control activated by that control at every
-  point? Yes exempts it however it was built; no gates whatever the box says; **and a probe
+  directly: is a 24x24 square centred on the control activated by that control at the
+  eight points it samples on that square's edge? Yes exempts it however it was built; no fails it where another target crowds it, whatever the box says; **and a probe
   that cannot reach the target — off-viewport after scrolling, or covered by something it
   could not resolve — is `[JUDGE]`, never the gate**, because the file does not fail what
   it did not measure. The probe descends through shadow hosts, or every control in a web
@@ -343,7 +343,9 @@ The two markers that carry gate law:
   at `max-w-3xl` and the reader's column never moved. The sample is block-level text
   elements, which fill their column, so what is measured is the box whose growth would
   actually force the type to follow. A page with no running text leaves it unmeasured
-  rather than guessed.
+  rather than guessed. Where that column spans at least 95% of the 2560 viewport, the line
+  names a missing max-width on the text column instead of frozen type, since capping the
+  column fixes it and scaling the type does not.
 
   **Content hidden inside scrollable components** exempts the visually-hidden pattern —
   an absolutely positioned ~1px box, or `clip-path: inset(50%)`. `.sr-only` hides its
