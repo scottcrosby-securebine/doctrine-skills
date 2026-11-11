@@ -202,6 +202,19 @@ function checkRollCall(rollCall, expected, words, key, who) {
   return seen
 }
 
+const needText = (f, who) => { if (!said(f)) malformed(`${who}: a finding on ${f.axis} carries no text — the word carries its finding below`) }
+// One critic recorded finding, judged alike on an accept and on a section's rejection: its axis, its text, its cause.
+// The axis test comes first, and a finding on an axis nobody named is never passed to fileRecorded: it must not
+// *also* be filed as a legitimate inherited record, and must not consume the ruling that would have excused it —
+// run as a second pass this check blocked the round and left both of those behind anyway, which is the defect it
+// exists to prevent. Its sentence differs from judgeCritic's `ret.blocking` check on purpose: that one is waivable,
+// this one is not, and two identical strings with opposite waivability cannot be read apart in the return.
+function judgeRecorded(f, axes, who, record = true) {
+  const named = axes.includes(f.axis)
+  if (!named) malformed(`${who} recorded finding names no axis: ${f.finding}`)
+  needText(f, who)
+  if (named) fileRecorded(f, who, f.axis, record)
+}
 // The integrated critic's return and a section critic's accept, read the same way: `ret` is a CRITIC
 // or SECTION_CRITIC return, `axes` the set the dispatcher fixed for it, `who` the name its reasons carry.
 function judgeCritic(ret, axes, who) {
@@ -249,7 +262,7 @@ function judgeCritic(ret, axes, who) {
     else if (inheritedExplained) recorded.push(`${who} roll call, inherited failure per its ruling: ${axis} BLOCKING`)
     else if (r.word !== 'CLEAR') block(`${who} roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
   }
-  for (const f of [...ret.blocking, ...ret.recorded]) if (!said(f)) malformed(`${who}: a finding on ${f.axis} carries no text — the word carries its finding below`)
+  for (const b of ret.blocking) needText(b, who)
   for (const b of ret.blocking) {
     if (!axes.includes(b.axis)) malformed(`${who} finding names no axis: ${b.finding}`)
     else block(`${who}: ${b.axis} — ${b.finding}`, [b.axis])
@@ -257,17 +270,7 @@ function judgeCritic(ret, axes, who) {
   // Inherited failures (SKILL.md, the Inherited failure row) and the run's marked-stale clause violations are recorded,
   // named as which they are, and do not block — the same per-finding rule as the red team's
   // recorded list, attributed by the same cause.
-  for (const r of ret.recorded) {
-    // The axis test comes first and short-circuits, and both halves of that matter. A finding on
-    // an axis nobody named must not *also* be filed as a legitimate inherited record, and must not
-    // consume the ruling that would have excused it — run as a second pass this check blocked the
-    // round and left both of those behind anyway, which is the defect it exists to prevent. Its
-    // sentence differs from the `ret.blocking` check above on purpose: that one is waivable,
-    // this one is not, and two identical strings with opposite waivability cannot be read apart
-    // in the return.
-    if (!axes.includes(r.axis)) { malformed(`${who} recorded finding names no axis: ${r.finding}`); continue }
-    fileRecorded(r, who, r.axis)
-  }
+  for (const r of ret.recorded) judgeRecorded(r, axes, who)
 }
 
 if (!DISPATCHED_AXES.length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
@@ -312,8 +315,9 @@ const sections = await pipeline(sectionArgs, async (s) => {
     }
     rejections += 1
     counters.sectionRejections[s.name] = rejections
-    // A rejection is the section's repair loop, so its blocking findings stay notes; a bad cause is a defect in the report.
-    for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)
+    // A rejection is the section's repair loop, so its blocking findings stay notes and its recorded findings are
+    // recorded nowhere; a recorded finding off the dispatched axes, without text or with a bad cause is a defect in the report.
+    for (const r of verdict.recorded) judgeRecorded(r, DISPATCHED_AXES, `section ${s.name} critic`, false)
     // A rejection's reasons are its notes, every blocking finding under its axis, and every CANNOT JUDGE line with
     // its text, the one reason item 8 puts only in the roll call; a BLOCKING line's finding is already in blocking, or
     // in recorded when a ruling excuses it, which the builder must never be told to fix. The next builder, the retry

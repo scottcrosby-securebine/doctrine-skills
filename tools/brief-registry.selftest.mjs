@@ -75,6 +75,17 @@ const splitRun = check({ ...repo, runner: `${repo.runner}\n${SPLIT}\n` })
 clause('clause 1k: and one whose paren opens the next line is reported, at the line the name is on',
   splitRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('split: a rule')), splitRun.join(' | '))
 
+// 1l, 1m and 3g: the same unregistered call with a block comment between the name and its paren,
+// spaced and unspaced, one comment spanning a line break. JavaScript calls both.
+const COMMENTED = "if (a.commented) malformed /* a report rule */ ('commented: a rule behind a block comment')"
+const TIGHT = "if (a.tight) block/* a work rule,\n  across two lines */('tight: a rule behind an unspaced block comment', ['tight'])"
+const commentedRun = check({ ...repo, runner: `${repo.runner}\n${COMMENTED}\n` })
+clause('clause 1l: an unregistered call with a block comment before its paren is reported, at the line the name is on',
+  commentedRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('commented: a rule')), commentedRun.join(' | '))
+const tightRun = check({ ...repo, runner: `${repo.runner}\n${TIGHT}\n` })
+clause('clause 1m: and so is one whose unspaced block comment spans a line break, at the line the name is on',
+  tightRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('tight: a rule')), tightRun.join(' | '))
+
 // 1d and 3d: each briefed row's anchor duplicated inside the target paragraph that holds it.
 const missedDup = []
 const unprovedDup = []
@@ -113,12 +124,17 @@ clause('clause 3b: the added call site really is a malformed( call, and no regis
 clause('clause 3d: each anchor-duplicated copy really carries the anchor twice on the target line, one more time than the original',
   unprovedDup.length === 0, unprovedDup.join(' | '))
 // Each form is executed with stub functions, so what proves it calls is JavaScript, not the scan.
-const calledBy = (src) => { const got = []; new Function('a', 'malformed', 'block', src)({ spaced: 1, split: 1 }, (m) => got.push(m), (m) => got.push(m)); return got }
+const calledBy = (src) => { const got = []; new Function('a', 'malformed', 'block', src)({ spaced: 1, split: 1, commented: 1, tight: 1 }, (m) => got.push(m), (m) => got.push(m)); return got }
 clause('clause 3f: both forms really call their function, proved by running them, and no registry stem occurs in either',
   calledBy(SPACED)[0] === 'spaced: a rule written with a space before its paren' &&
   calledBy(SPLIT)[0] === 'split: a rule whose paren opens the next line' &&
   !/malformed\(/.test(SPACED) && !/block\(/.test(SPLIT) && !REGISTRY.some((r) => SPACED.includes(r.stem) || SPLIT.includes(r.stem)),
   JSON.stringify([calledBy(SPACED), calledBy(SPLIT)]))
+clause('clause 3g: both block-comment forms really call their function, proved by running them, and no registry stem occurs in either',
+  calledBy(COMMENTED)[0] === 'commented: a rule behind a block comment' &&
+  calledBy(TIGHT)[0] === 'tight: a rule behind an unspaced block comment' &&
+  !/malformed\s*\(/.test(COMMENTED) && !/block\s*\(/.test(TIGHT) && !REGISTRY.some((r) => COMMENTED.includes(r.stem) || TIGHT.includes(r.stem)),
+  JSON.stringify([calledBy(COMMENTED), calledBy(TIGHT)]))
 clause('clause 3e: the duplicated call line really carries the stem, so the copy has two sites for it',
   !!dupSite && count(`${repo.runner}\n${dupSite}\n`, briefed[0].stem) === count(repo.runner, briefed[0].stem) + 1)
 

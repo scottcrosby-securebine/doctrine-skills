@@ -35,10 +35,11 @@
 //     orchestrator's; this reads the source texts, not any assembled prompt.
 //   - Rules the script enforces without either function: a schema the host rejects, an early
 //     return, a counter. Only `malformed(` and `block(` call sites are read.
-//   - Call sites it cannot see as text. It strips a `//` comment that follows whitespace on each
-//     line, reads the name then optional whitespace and line breaks then `(`, and skips the two
-//     function declarations. A call written through another name, through a block comment between
-//     the name and its paren, or a template string carrying ` //`, is misread.
+//   - Call sites it cannot see as text. It removes every `/* */` comment, strips a `//` comment
+//     that follows whitespace on each line, reads the name then optional whitespace and line breaks
+//     then `(`, and skips the two function declarations, so a block comment between the name and
+//     its paren is read through. A call written through another name, a string or template string
+//     carrying ` //` or `/*`, or a `//` comment carrying `/*`, is misread.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -128,7 +129,8 @@ export const REGISTRY = [
  *  the line the paren is on, with the gap before the paren closed so a stem reads either form.
  *  Comments and the two declarations are skipped. */
 export function callSites(src) {
-  const code = src.split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
+  // A block comment becomes the line breaks it spanned, so line numbers hold.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, '')).split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
   const calls = [...code.matchAll(/\b(malformed|block)\s*\(/g)].filter((m) => !/function\s+$/.test(code.slice(0, m.index)))
   return calls.map((m, k) => {
     const open = m.index + m[0].length

@@ -32,7 +32,7 @@ const NAMES = Object.keys(FIXTURES).filter((k) => !k.startsWith('_'))
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
 
-// The stand-in seat: the text after the stub's own "Return ... exactly" marker.
+// The stand-in seat: the text after the first "Return ... exactly" marker the prompt carries.
 const TEXT = 'Return exactly the text: '
 const JSONM = 'Return via StructuredOutput exactly: '
 function balanced(s) {
@@ -46,9 +46,9 @@ function balanced(s) {
   }
   return null
 }
+const jsonFirst = (prompt) => { const j = prompt.indexOf(JSONM), t = prompt.indexOf(TEXT); return j >= 0 && (t < 0 || j < t) }
 function stubReply(prompt) {
-  const j = prompt.indexOf(JSONM)
-  if (j >= 0) return balanced(prompt.slice(j + JSONM.length))
+  if (jsonFirst(prompt)) return balanced(prompt.slice(prompt.indexOf(JSONM) + JSONM.length))
   const t = prompt.indexOf(TEXT)
   if (t >= 0) return prompt.slice(t + TEXT.length).split('\n')[0]
   return null
@@ -103,7 +103,7 @@ const MUTANT = SCRIPT.replace(ANCHOR, "if (false) block('floor: not run")
   const unread = stubs.filter((s) => {
     const r = stubReply(s)
     if (r == null) return true
-    if (s.includes(JSONM)) { try { JSON.parse(r) } catch { return true } return !s.includes(JSONM + r) }
+    if (jsonFirst(s)) { try { JSON.parse(r) } catch { return true } return !s.includes(JSONM + r) }
     return !s.includes(TEXT + r)
   })
   clause(`3a every stub prompt (${stubs.length}) states the reply the stand-in gives, read as the prompt's own text`, stubs.length > 100 && !unread.length, unread[0])
@@ -403,11 +403,13 @@ async function until(script, args, label) {
   clause('3e the floor-report fixture\'s red-team prompt states no reply of its own, and its floor report states one', stubReply(FX.redTeamPrompt) === null && !!parsed && Array.isArray(parsed.rollCall), `own ${stubReply(FX.redTeamPrompt)}, report ${reply}`)
 }
 
+const FORM = /^(inherited|stale) [1-9][0-9]*$/   // the cause form, written here and not imported, since clause 3 must not call the code it proves
+const once1 = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace(anchor, to) : null
+
 // ---- The recorded cause: a recorded finding is attributed by its cause, never by its text ----
 {
   const recs = (n) => { const A = FIXTURES[n].args; return [A.criticPrompt, A.redTeamPrompt].flatMap((p) => JSON.parse(stubReply(p)).recorded) }
   const listOf = (n, c) => { const m = /^(\w+) (\d+)$/.exec(c || ''); return m && FIXTURES[n].args[m[1]] }
-  const FORM = /^(inherited|stale) [1-9][0-9]*$/   // the cause form, written here and not imported, since clause 3 must not call the code it proves
   const inRange = (n, c) => { const l = listOf(n, c); const k = Number((c || '').split(' ')[1]); return !!l && k >= 1 && k <= l.length }
   const VALID = ['cause-valid-critic-clean', 'cause-valid-redteam-clean']
   clause('3i each valid cause fixture files only causes naming a position its list has, and no finding there quotes the ruling its cause names',
@@ -436,7 +438,6 @@ async function until(script, args, label) {
   const FL = FIXTURES['broad-ruling-block-flagged-clean'].args, flagRoll = JSON.parse(stubReply(FL.criticPrompt)).rollCall
   clause('3l the quiet broad fixture files one inherited cause on three distinct axes, and the flagged one\'s single waived name is contained in two abstaining axes',
     quiet.length === 3 && new Set(quiet.map((r) => r.axis)).size === 3 && quiet.every((r) => r.cause === 'inherited 1') && FL.waived.length === 1 && flagRoll.filter((r) => r.word === 'CANNOT JUDGE' && r.axis.includes(FL.waived[0])).length === 2, 'not that case')
-  const once1 = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace(anchor, to) : null
   const broad = once1('citedRulings.add(c.ruling)', 'usedRulings.set(c.ruling, (usedRulings.get(c.ruling) || 0) + 1)')
   clause('1u the script counting a recorded cause toward the broad-ruling note fails the quiet broad fixture', !!broad && (await judge(broad, 'broad-ruling-recorded-quiet-clean')).length > 0, broad ? 'fixture still met its expect' : 'anchor not found exactly once')
   const noRange = once1('Number(m[2]) <= list.length ?', 'true ?')
@@ -452,10 +453,27 @@ async function until(script, args, label) {
   const diff = good.recorded.map((r, i) => JSON.stringify(r) !== JSON.stringify(bad.recorded[i]) ? i : -1).filter((i) => i >= 0)
   clause('3m the reject-path pair both reject, differ in one recorded finding\'s cause alone, and the bad one\'s cause is not of the form while the good one\'s is',
     !good.accept && !bad.accept && good.recorded.length === bad.recorded.length && diff.length === 1 && JSON.stringify({ ...good.recorded[diff[0]], cause: 0 }) === JSON.stringify({ ...bad.recorded[diff[0]], cause: 0 })
-      && /^(inherited|stale) [1-9][0-9]*$/.test(good.recorded[diff[0]].cause) && !/^(inherited|stale) [1-9][0-9]*$/.test(bad.recorded[diff[0]].cause), 'not that case')
-  const RJ = 'for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)'
-  const noReject = SCRIPT.split(RJ).length === 2 ? SCRIPT.replace(RJ, '') : null
-  clause('1x the script without the reject-path cause check fails the bad-cause rejection fixture', !!noReject && (await judge(noReject, 'section-rejection-cause-bad')).length > 0, noReject ? 'fixture still met its expect' : 'anchor not found exactly once')
+      && FORM.test(good.recorded[diff[0]].cause) && !FORM.test(bad.recorded[diff[0]].cause), 'not that case')
+  const axesOf = (n) => FIXTURES[n].args.criticAxes
+  clause('3n the reject-path pair files recorded findings on dispatched axes alone', [['section-rejection-cause-valid', good], ['section-rejection-cause-bad', bad]].every(([n, v]) => v.recorded.every((r) => axesOf(n).includes(r.axis))), 'a recorded finding on an undispatched axis')
+  const RJ = 'for (const r of verdict.recorded) judgeRecorded(r, DISPATCHED_AXES, `section ${s.name} critic`, false)'
+  const noReject = once1(RJ, '')
+  clause('1x the script without the reject-path recorded check fails the bad-cause rejection fixture', !!noReject && (await judge(noReject, 'section-rejection-cause-bad')).length > 0, noReject ? 'fixture still met its expect' : 'anchor not found exactly once')
+
+  // A rejection then an accept: the builder's return carries the rejection, whose first note carries the accept.
+  const turns = (n) => { const reject = JSON.parse(stubReply(stubReply(FIXTURES[n].args.sections[0].builderPrompt))); return { reject, accept: JSON.parse(stubReply(reject.notes[0])) } }
+  const TWIN = 'section-rejection-recorded-then-accept-clean', OFF = 'section-rejection-recorded-off-axis', EMPTY = 'section-rejection-recorded-no-text'
+  const t = turns(TWIN), off = turns(OFF), empty = turns(EMPTY)
+  const cleanAccept = (n, v) => v.accept.accept === true && !v.accept.blocking.length && !v.accept.recorded.length && axesOf(n).every((x) => v.accept.rollCall.some((r) => r.axis === x && r.word === 'CLEAR'))
+  const oneField = (v, field) => v.reject.recorded.length === 1 && JSON.stringify({ ...v.reject, recorded: [{ ...v.reject.recorded[0], [field]: 0 }] }) === JSON.stringify({ ...t.reject, recorded: [{ ...t.reject.recorded[0], [field]: 0 }] })
+  const own = [TWIN, OFF, EMPTY].every((n) => stubReply(FIXTURES[n].args.sections[0].criticPrompt) === null)
+  clause('3o each rejection-then-accept fixture rejects and then accepts cleanly, its critic prompt states no reply of its own, and its rejected recorded finding differs from the twin\'s in its axis, undispatched, or its text, empty, alone; the twin\'s is on a dispatched axis with text and a cause of the form',
+    own && [[TWIN, t], [OFF, off], [EMPTY, empty]].every(([n, v]) => v.reject.accept === false && cleanAccept(n, v))
+      && t.reject.recorded.every((r) => axesOf(TWIN).includes(r.axis) && r.finding.trim() && FORM.test(r.cause))
+      && oneField(off, 'axis') && !axesOf(OFF).includes(off.reject.recorded[0].axis)
+      && oneField(empty, 'finding') && empty.reject.recorded[0].finding === '', 'not that case')
+  const reverted = once1(RJ, 'for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)')
+  clause('1y the reject path reverted to the cause check alone fails both the undispatched-axis and the empty-text rejection fixtures', !!reverted && (await judge(reverted, OFF)).length > 0 && (await judge(reverted, EMPTY)).length > 0, reverted ? 'a fixture still met its expect' : 'anchor not found exactly once')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')
