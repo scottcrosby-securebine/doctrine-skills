@@ -41,6 +41,9 @@ export const meta = {
 const WORDS = { critic: ['CLEAR', 'BLOCKING', 'CANNOT JUDGE'], redTeam: ['BROKE', 'HELD', 'NOT RUN'] }
 
 const AXIS_FINDING = { type: 'object', properties: { axis: { type: 'string' }, finding: { type: 'string' } }, required: ['axis', 'finding'] }
+// A recorded finding's `cause` is declared and left out of `required` on purpose: a missing cause is a
+// defect in the report, so it reaches the script and blocks there instead of in a schema retry.
+const AXIS_RECORDED = { type: 'object', properties: { axis: { type: 'string' }, finding: { type: 'string' }, cause: { type: 'string' } }, required: ['axis', 'finding'] }
 const AXIS_ROLL_CALL = { type: 'array', items: { type: 'object', properties: { axis: { type: 'string' }, word: { type: 'string' }, line: { type: 'string' } }, required: ['axis', 'word'] } }
 // A section critic is a briefed critic answering the same axes, so its return carries the integrated
 // critic's roll call, blocking and recorded fields, the same objects, beside its verdict and notes.
@@ -51,7 +54,7 @@ const SECTION_CRITIC = {
     notes: { type: 'array', items: { type: 'string' } },
     rollCall: AXIS_ROLL_CALL,
     blocking: { type: 'array', items: AXIS_FINDING },
-    recorded: { type: 'array', items: AXIS_FINDING },
+    recorded: { type: 'array', items: AXIS_RECORDED },
   },
   required: ['accept', 'notes', 'rollCall', 'blocking', 'recorded'],
 }
@@ -76,18 +79,19 @@ const CRITIC = {
     rollCall: AXIS_ROLL_CALL,
     blocking: { type: 'array', items: AXIS_FINDING },
     polish: { type: 'array', items: { type: 'string' } },
-    recorded: { type: 'array', items: AXIS_FINDING },
+    recorded: { type: 'array', items: AXIS_RECORDED },
   },
   required: ['rollCall', 'blocking', 'polish', 'recorded'],
 }
 const ITEM_FINDING = { type: 'object', properties: { item: { type: 'integer' }, finding: { type: 'string' } }, required: ['item', 'finding'] }
+const ITEM_RECORDED = { type: 'object', properties: { item: { type: 'integer' }, finding: { type: 'string' }, cause: { type: 'string' } }, required: ['item', 'finding'] }
 const RED_TEAM = {
   type: 'object',
   properties: {
     rollCall: { type: 'array', items: { type: 'object', properties: { item: { type: 'integer' }, word: { type: 'string' }, line: { type: 'string' } }, required: ['item', 'word', 'line'] } },
     blocking: { type: 'array', items: ITEM_FINDING },
     polish: { type: 'array', items: ITEM_FINDING },
-    recorded: { type: 'array', items: ITEM_FINDING },
+    recorded: { type: 'array', items: ITEM_RECORDED },
     attackList: { type: 'array', items: { type: 'string' } },
   },
   required: ['rollCall', 'blocking', 'polish', 'recorded', 'attackList'],
@@ -122,7 +126,8 @@ const ROUND_ALARM = a.roundAlarm === undefined ? 4 : Number.isInteger(a.roundAla
   : (malformed('round alarm: present but not a positive integer — 4 is used instead and this round is not clean'), 4)
 const counters = { cleanPasses: 0, unresolvedRounds: 0, sectionRejections: {}, sectionResets: {}, ...(a.counters || {}) }
 const recorded = []   // reasons that would block but the run ruled inherited, stale or waived; named, never silent
-const usedRulings = new Map()   // ruling -> how many distinct reasons it excused
+const usedRulings = new Map()   // ruling -> how many distinct reasons block() excused by containment
+const citedRulings = new Set()   // rulings a recorded finding's cause named; used, never broad
 
 // A reason blocks unless the run already ruled it inherited (SKILL.md, the Inherited failure row) or waived it; a
 // roll-call BLOCKING whose only findings are recorded under a marked-stale clause or an inherited
@@ -161,6 +166,25 @@ function malformed(reason) { blocking.push(reason) }
 // both waivable and the shape check saw an object and called it filed.
 const said = (f) => !!(f && (f.finding || '').trim())
 
+// A recorded finding is attributed by its cause, `inherited N` or `stale N`, N the 1-based position of
+// that failure or clause in the list the prompt numbers; never by its text, which a seat paraphrases.
+const causeKind = (c) => (causeOf(c) || {}).kind
+function causeOf(f) {
+  const m = /^(inherited|stale) ([1-9][0-9]*)$/.exec(typeof f.cause === 'string' ? f.cause : '')
+  const list = m && (m[1] === 'inherited' ? INHERITED : STALE)
+  return m && Number(m[2]) <= list.length ? { kind: m[1], ruling: list[Number(m[2]) - 1] } : null
+}
+// One recorded finding, from either reviewer; `where` is its axis, or `item N`. A valid cause marks its
+// ruling cited either way; with `record` false (a rejecting section critic) nothing is recorded.
+function fileRecorded(f, who, where, record = true) {
+  const c = causeOf(f)
+  if (!c) malformed(`${who}: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${where}: ${f.finding} — its cause ${f.cause === undefined ? 'is missing' : `${JSON.stringify(f.cause)} is not "inherited N" or "stale N" for a position its prompt numbers`}`)
+  else {
+    citedRulings.add(c.ruling)
+    if (record) recorded.push(`${who}, ${c.kind === 'inherited' ? 'inherited' : 'stale clause'} per its prompt (${f.cause}): ${where} — ${f.finding}`)
+  }
+}
+
 // One line per axis or item the dispatcher fixed; a missing line, a duplicate, a line for
 // nothing the dispatcher named, or a word outside the vocabulary, blocks. Returns the map.
 function checkRollCall(rollCall, expected, words, key, who) {
@@ -178,6 +202,20 @@ function checkRollCall(rollCall, expected, words, key, who) {
   return seen
 }
 
+const needText = (f, who) => { if (!said(f)) malformed(`${who}: a finding on ${f.axis} carries no text — the word carries its finding below`) }
+// One critic recorded finding, judged alike on an accept and on a section's rejection: its axis, its text, its cause.
+// The axis test comes first, and a finding on an axis nobody named is never passed to fileRecorded: it must not
+// *also* be filed as a legitimate inherited record, and must not consume the ruling that would have excused it —
+// run as a second pass this check blocked the round and left both of those behind anyway, which is the defect it
+// exists to prevent. A finding with no text is kept out the same way: it is not a finding, so it neither records
+// nor cites. Its sentence differs from judgeCritic's `ret.blocking` check on purpose: that one is waivable,
+// this one is not, and two identical strings with opposite waivability cannot be read apart in the return.
+function judgeRecorded(f, axes, who, record = true) {
+  const named = axes.includes(f.axis)
+  if (!named) malformed(`${who} recorded finding names no axis: ${f.finding}`)
+  needText(f, who)
+  if (named && said(f)) fileRecorded(f, who, f.axis, record)
+}
 // The integrated critic's return and a section critic's accept, read the same way: `ret` is a CRITIC
 // or SECTION_CRITIC return, `axes` the set the dispatcher fixed for it, `who` the name its reasons carry.
 function judgeCritic(ret, axes, who) {
@@ -216,41 +254,24 @@ function judgeCritic(ret, axes, who) {
     // Item 8 rules an axis BLOCKING whose only findings are recorded, under a marked-stale clause
     // or an inherited failure. The ruling that excuses it names the clause or the failure, never
     // the axis, so block()'s axis-name containment cannot see it — the check reads the axis's own
-    // findings instead: no blocking finding, and at least one recorded finding naming a
+    // findings instead: no blocking finding, and at least one recorded finding whose cause names a
     // marked-stale clause or an inherited failure, means the word is explained.
     const onlyRecorded = r.word === 'BLOCKING' && !ret.blocking.some((b) => b.axis === axis)
-    const staleExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && match([c.finding], STALE))
-    const inheritedExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && match([c.finding], INHERITED))
+    const staleExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && causeKind(c) === 'stale')
+    const inheritedExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && causeKind(c) === 'inherited')
     if (staleExplained) recorded.push(`${who} roll call, stale clause per its prompt: ${axis} BLOCKING`)
     else if (inheritedExplained) recorded.push(`${who} roll call, inherited failure per its ruling: ${axis} BLOCKING`)
     else if (r.word !== 'CLEAR') block(`${who} roll call: ${axis} ${r.word}${(r.line || '').trim() ? ` — ${r.line.trim()}` : ''}`, [axis])
   }
-  for (const f of [...ret.blocking, ...ret.recorded]) if (!said(f)) malformed(`${who}: a finding on ${f.axis} carries no text — the word carries its finding below`)
+  for (const b of ret.blocking) needText(b, who)
   for (const b of ret.blocking) {
     if (!axes.includes(b.axis)) malformed(`${who} finding names no axis: ${b.finding}`)
     else block(`${who}: ${b.axis} — ${b.finding}`, [b.axis])
   }
   // Inherited failures (SKILL.md, the Inherited failure row) and the run's marked-stale clause violations are recorded,
   // named as which they are, and do not block — the same per-finding rule as the red team's
-  // recorded list, checked against the same two lists.
-  for (const r of ret.recorded) {
-    // The axis test comes first and short-circuits, and both halves of that matter. A finding on
-    // an axis nobody named must not *also* be filed as a legitimate inherited record, and must not
-    // consume the ruling that would have excused it — run as a second pass this check blocked the
-    // round and left both of those behind anyway, which is the defect it exists to prevent. Its
-    // sentence differs from the `ret.blocking` check above on purpose: that one is waivable,
-    // this one is not, and two identical strings with opposite waivability cannot be read apart
-    // in the return.
-    if (!axes.includes(r.axis)) { malformed(`${who} recorded finding names no axis: ${r.finding}`); continue }
-    const inh = match([r.finding], INHERITED)
-    const stale = inh ? null : match([r.finding], STALE)
-    const named = inh || stale
-    if (!named) malformed(`${who}: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${r.axis}: ${r.finding}`)
-    else {
-      usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
-      recorded.push(`${who}, ${inh ? 'inherited' : 'stale clause'} per its prompt: ${r.axis} — ${r.finding}`)
-    }
-  }
+  // recorded list, attributed by the same cause.
+  for (const r of ret.recorded) judgeRecorded(r, axes, who)
 }
 
 if (!DISPATCHED_AXES.length) malformed('critic axes: none named — a roll call against an empty set counts nothing')
@@ -295,6 +316,9 @@ const sections = await pipeline(sectionArgs, async (s) => {
     }
     rejections += 1
     counters.sectionRejections[s.name] = rejections
+    // A rejection is the section's repair loop, so its blocking findings stay notes and its recorded findings are
+    // recorded nowhere; a recorded finding off the dispatched axes, without text or with a bad cause is a defect in the report.
+    for (const r of verdict.recorded) judgeRecorded(r, DISPATCHED_AXES, `section ${s.name} critic`, false)
     // A rejection's reasons are its notes, every blocking finding under its axis, and every CANNOT JUDGE line with
     // its text, the one reason item 8 puts only in the roll call; a BLOCKING line's finding is already in blocking, or
     // in recorded when a ruling excuses it, which the builder must never be told to fix. The next builder, the retry
@@ -376,20 +400,10 @@ if (!redTeam) malformed('red team: no return')
 else {
   const seen = checkRollCall(redTeam.rollCall, ITEMS, WORDS.redTeam, 'item', 'red team')
   // A recorded finding exists only where the prompt named its failure inherited or marked its
-  // clause stale — the prompt's lines are exactly `inherited` and `stale` — so each recorded
-  // finding must name one of them,
-  // checked by the same containment rule; anything else is a defect parked where the counters
-  // cannot see it.
-  for (const r of redTeam.recorded) {
-    const inh = match([r.finding], INHERITED)
-    const stale = inh ? null : match([r.finding], STALE)
-    const named = inh || stale
-    if (!named) malformed(`red team: recorded finding names no inherited failure or marked-stale clause of this dispatch — item ${r.item}: ${r.finding}`)
-    else {
-      usedRulings.set(named, (usedRulings.get(named) || 0) + 1)
-      recorded.push(`red team, ${inh ? 'inherited' : 'stale clause'} per its prompt: item ${r.item} — ${r.finding}`)
-    }
-  }
+  // clause stale — the prompt numbers exactly `inherited` and `stale` — so each one's cause must
+  // name one of them; anything else is a defect parked where the counters cannot see it. One on an
+  // item nobody dispatched, or with no text, is filed below as such, and is neither recorded nor a ruling's use.
+  for (const r of redTeam.recorded) if (ITEMS.includes(r.item) && said(r)) fileRecorded(r, 'red team', `item ${r.item}`)
   for (const item of ITEMS) {
     const r = seen.get(item)
     if (!r || !WORDS.redTeam.includes(r.word)) continue
@@ -400,7 +414,7 @@ else {
     const filed = redTeam.blocking.some((b) => b.item === item && said(b))
     if (r.word === 'BROKE' && !filed && !redTeam.polish.some((p) => p.item === item && said(p)) && !redTeam.recorded.some((p) => p.item === item && said(p))) malformed(`red team roll call: item ${item} BROKE with no finding under it`)
     if (r.word === 'HELD' && filed) malformed(`red team roll call: item ${item} HELD with a blocking finding under it`)
-    if (r.word === 'HELD' && redTeam.recorded.some((p) => p.item === item && said(p))) malformed(`red team roll call: item ${item} HELD with a recorded finding under it — recorded is where a BROKE goes`)
+    if (r.word === 'HELD' && redTeam.recorded.some((p) => p.item === item && said(p))) malformed(`red team roll call: item ${item} HELD with a recorded finding under it — recorded is where a BROKE, or a partial-evidence NOT RUN, goes`)
     // **No `NOT RUN`-with-a-finding check here, and that is ruled, not an omission.** The
     // critic's `CANNOT JUDGE` equivalent above looks like it should mirror onto this loop and
     // must not: item 5 says that where only part of an item's evidence arrived the word is
@@ -420,10 +434,11 @@ else {
 
 // A ruling that matched nothing is a typo or a stale line the user believes took; one that
 // matched several distinct reasons may have excused a failure nobody meant it to. Neither
-// line is itself a failure — both are the script refusing to be quiet about a ruling.
+// line is itself a failure — both are the script refusing to be quiet about a ruling. A cause
+// names its ruling by position, so it marks the ruling used and is never a broad match.
 for (const r of [...INHERITED, ...STALE, ...WAIVED]) {
   const n = usedRulings.get(r) || 0
-  if (n === 0) recorded.push(`unused ruling (not a failure): "${r}" matched nothing this round — a fixed defect, or a spelling that matches nothing the script names`)
+  if (n === 0 && !citedRulings.has(r)) recorded.push(`unused ruling (not a failure): "${r}" matched nothing this round — a fixed defect, or a spelling that matches nothing the script names`)
   if (n > 1) recorded.push(`broad ruling (not a failure — check it): "${r}" excused ${n} reasons this round, listed above — if any was not meant, re-run without it`)
 }
 
