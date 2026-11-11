@@ -486,6 +486,22 @@ const once1 = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace
       && others.every((o) => !o.recorded.length && !o.blocking.length), 'not that case')
   const gated = once1('citedRulings.add(c.ruling)', 'if (record) citedRulings.add(c.ruling)')
   clause('1z the script marking a ruling cited only when it records fails the cited-ruling rejection fixture', !!gated && (await judge(gated, CITED)).length > 0, gated ? 'fixture still met its expect' : 'anchor not found exactly once')
+
+  // A recorded finding with a valid cause and no text, on the reject path, the accept path and the red team.
+  const NT_REJ = 'section-rejection-recorded-no-text-cited-ruling', NT_CRIT = 'critic-recorded-no-text-cited-ruling', NT_RT = 'redteam-recorded-no-text-cited-ruling'
+  const nr = turns(NT_REJ), crit = JSON.parse(stubReply(FIXTURES[NT_CRIT].args.criticPrompt)), rt = JSON.parse(stubReply(FIXTURES[NT_RT].args.redTeamPrompt))
+  const staleOne = (n, r) => r.cause === 'stale 1' && FIXTURES[n].args.stale.length === 1 && r.finding === ''
+  const quietElse = (n, keys) => keys.every((k) => { const o = JSON.parse(stubReply(FIXTURES[n].args[k])); return !o.recorded.length && !o.blocking.length })
+  clause('3q each no-text fixture files exactly one recorded finding citing `stale 1` with empty text where it says, on a dispatched axis or item, beside the run\'s only stale clause, and no other seat cites that clause; the rejection one differs from the cited-ruling fixture in that finding\'s text alone',
+    nr.reject.accept === false && cleanAccept(NT_REJ, nr) && staleOne(NT_REJ, nr.reject.recorded[0]) && axesOf(NT_REJ).includes(nr.reject.recorded[0].axis)
+      && JSON.stringify({ ...nr.reject, recorded: [{ ...nr.reject.recorded[0], finding: 0 }, ...nr.reject.recorded.slice(1)] }) === JSON.stringify({ ...c.reject, recorded: [{ ...c.reject.recorded[0], finding: 0 }, ...c.reject.recorded.slice(1)] })
+      && nr.reject.recorded.slice(1).every((r) => r.finding.trim() && !r.cause.startsWith('stale')) && quietElse(NT_REJ, ['criticPrompt', 'redTeamPrompt'])
+      && crit.recorded.length === 1 && staleOne(NT_CRIT, crit.recorded[0]) && axesOf(NT_CRIT).includes(crit.recorded[0].axis) && quietElse(NT_CRIT, ['redTeamPrompt'])
+      && rt.recorded.length === 1 && staleOne(NT_RT, rt.recorded[0]) && FIXTURES[NT_RT].args.redTeamItems.includes(rt.recorded[0].item) && quietElse(NT_RT, ['criticPrompt']), 'not that case')
+  const textless = once1('if (named && said(f)) fileRecorded', 'if (named) fileRecorded')
+  clause('1za the critic filing a recorded finding with no text fails the reject-path and accept-path no-text fixtures', !!textless && (await judge(textless, NT_REJ)).length > 0 && (await judge(textless, NT_CRIT)).length > 0, textless ? 'a fixture still met its expect' : 'anchor not found exactly once')
+  const rtTextless = once1('if (ITEMS.includes(r.item) && said(r)) fileRecorded', 'if (ITEMS.includes(r.item)) fileRecorded')
+  clause('1zb the red team filing a recorded finding with no text fails the red-team no-text fixture', !!rtTextless && (await judge(rtTextless, NT_RT)).length > 0, rtTextless ? 'fixture still met its expect' : 'anchor not found exactly once')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')

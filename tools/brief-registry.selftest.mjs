@@ -91,7 +91,7 @@ clause('clause 1m: and so is one whose unspaced block comment spans a line break
 const ELSE_JOINED = "if (!a.joined) {} else/* x */block('joined: a rule behind a comment after else', ['joined'])"
 const RETURN_JOINED = "(() => { return/* x */malformed('returned: a rule behind a comment after return') })()"
 const MULTI_JOINED = "if (!a.multi) {} else/* one,\n  two */block('multi: a rule behind a two-line comment after else', ['multi'])"
-const QUIET_JOINED = "if (!a.quiet) {} else/* x */xblock('quiet: a call to a name that only ends in block')"
+const QUIET_JOINED = "if (!a.quiet) {} else/* x */xblock('quiet: a call to a name that only ends in the word')"
 const elseRun = check({ ...repo, runner: `${repo.runner}\n${ELSE_JOINED}\n` })
 clause('clause 1n: an unregistered block( call after else and a one-line block comment is reported, at its line',
   elseRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('joined: a rule')), elseRun.join(' | '))
@@ -104,6 +104,24 @@ clause('clause 1p: and one after a comment spanning a line break, at the line th
 const quietRun = check({ ...repo, runner: `${repo.runner}\n${QUIET_JOINED}\n` })
 clause('clause 2c: a call to a name that only ends in block, behind the same comment, is no call site and stays quiet',
   quietRun.length === 0, quietRun.join(' | '))
+
+// 1q, 1r, 1s, 2d and 3i: fail-closed. Every `malformed` or `block` the scan cannot place as a call site
+// or one of the two declarations is reported, so a call form the scan cannot read is a finding, never a pass.
+const SLASHED = "if (a.surprise) block// a work-rule comment\n  ('surprise: an unbriefed failure', ['surprise'])"
+const ALIASED = "const f = block; if (a.alias) f('alias: a rule called through another name', ['alias'])"
+const REDECLARED = "{ function block(reason) { a.shadow.push(reason) } block('shadow: a rule its own declaration hides') }"
+const WORDS_ONLY = "const blocks = 1, unblock = 2, malformedCount = 3, blocking_ = [blocks, unblock, malformedCount]"
+const slashedRun = check({ ...repo, runner: `${repo.runner}\n${SLASHED}\n` })
+clause('clause 1q: a block name whose // comment follows it unspaced, its paren on the next line, is reported at the line the name is on',
+  slashedRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('cannot place')), slashedRun.join(' | '))
+const aliasedRun = check({ ...repo, runner: `${repo.runner}\n${ALIASED}\n` })
+clause('clause 1r: block read as a value, a call through another name, is reported at its line',
+  aliasedRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('cannot place')), aliasedRun.join(' | '))
+const redeclaredRun = check({ ...repo, runner: `${repo.runner}\n${REDECLARED}\n` })
+clause('clause 1s: a second declaration of block is no declaration the scan skips, and is reported at its line',
+  redeclaredRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('cannot place')), redeclaredRun.join(' | '))
+const wordsRun = check({ ...repo, runner: `${repo.runner}\n${WORDS_ONLY}\n` })
+clause('clause 2d: names that only contain block or malformed are not the names, and stay quiet', wordsRun.length === 0, wordsRun.join(' | '))
 
 // 1d and 3d: each briefed row's anchor duplicated inside the target paragraph that holds it.
 const missedDup = []
@@ -162,6 +180,13 @@ clause('clause 3h: the joined forms really call their function, proved by runnin
   (() => { const got = []; new Function('a', 'block', 'xblock', QUIET_JOINED)({ quiet: 1 }, () => got.push('block'), () => got.push('xblock')); return got.join() === 'xblock' })() &&
   ![ELSE_JOINED, RETURN_JOINED, MULTI_JOINED, QUIET_JOINED].some((t) => REGISTRY.some((r) => t.includes(r.stem))),
   JSON.stringify([calledBy(ELSE_JOINED), calledBy(RETURN_JOINED), calledBy(MULTI_JOINED)]))
+clause('clause 3i: the slashed and aliased forms really call block, proved by running them, the redeclared form calls its own declaration and never the outer block, the words-only line calls nothing, and no registry stem occurs in any',
+  (() => { const got = []; new Function('a', 'malformed', 'block', SLASHED)({ surprise: 1 }, () => got.push('malformed'), (m) => got.push(m)); return got.join() === 'surprise: an unbriefed failure' })() &&
+  (() => { const got = []; new Function('a', 'malformed', 'block', ALIASED)({ alias: 1 }, () => got.push('malformed'), (m) => got.push(m)); return got.join() === 'alias: a rule called through another name' })() &&
+  (() => { const got = [], shadow = []; new Function('a', 'malformed', 'block', REDECLARED)({ shadow }, () => got.push('malformed'), () => got.push('outer')); return !got.length && shadow.join() === 'shadow: a rule its own declaration hides' })() &&
+  (() => { const got = []; new Function('a', 'malformed', 'block', WORDS_ONLY)({}, () => got.push('malformed'), () => got.push('block')); return !got.length })() &&
+  !/\b(malformed|block)\s*\(/.test(SLASHED) && !/\b(malformed|block)\s*\(/.test(ALIASED) &&
+  ![SLASHED, ALIASED, REDECLARED, WORDS_ONLY].some((t) => REGISTRY.some((r) => t.includes(r.stem))))
 clause('clause 3e: the duplicated call line really carries the stem, so the copy has two sites for it',
   !!dupSite && count(`${repo.runner}\n${dupSite}\n`, briefed[0].stem) === count(repo.runner, briefed[0].stem) + 1)
 

@@ -21,9 +21,10 @@
 //
 // A row whose anchor is null is a rule no text states: it stays a finding until a brief states it.
 //
-// FINDINGS: a call site with no row; a row with no anchor; a row whose stem matches no call site or more than one; an
-// anchor that does not occur exactly once in its seat's text; a target text that cannot be found;
-// an excluded row with no reason; a row naming a seat that does not exist.
+// FINDINGS: a call site with no row; a `malformed` or `block` the scan cannot place; a row with no
+// anchor; a row whose stem matches no call site or more than one; an anchor that does not occur
+// exactly once in its seat's text; a target text that cannot be found; an excluded row with no
+// reason; a row naming a seat that does not exist.
 //
 // WHAT IT DOES NOT CATCH:
 //   - Meaning. It matches phrases. An anchor that occurs once passes even where the same brief
@@ -35,11 +36,17 @@
 //     orchestrator's; this reads the source texts, not any assembled prompt.
 //   - Rules the script enforces without either function: a schema the host rejects, an early
 //     return, a counter. Only `malformed(` and `block(` call sites are read.
-//   - Call sites it cannot see as text. It removes every `/* */` comment, strips a `//` comment
-//     that follows whitespace on each line, reads the name then optional whitespace and line breaks
-//     then `(`, and skips the two function declarations, so a block comment between the name and
-//     its paren is read through. A call written through another name, a string or template string
-//     carrying ` //` or `/*`, or a `//` comment carrying `/*`, is misread.
+//   - Call sites it cannot see as text. It replaces every `/* */` comment with a space, or with the
+//     line breaks it spans, and strips a `//` comment that starts a line or follows whitespace. In
+//     what is left, a call site is the name then optional whitespace and line breaks then `(`, and
+//     the first `function malformed` and `function block` are the two declarations. Fail-closed:
+//     every other `malformed` or `block` it finds, as the whole identifier, is reported as one it
+//     cannot place, so a call written through an alias, after an unspaced `//` comment, or under a
+//     second declaration is a finding, never a pass. It carries no exemption, since the runner has no
+//     other occurrence, so the word in a string's prose or as a property name is reported too.
+//     What it still cannot see: a name it never reads as the word (a computed property, a Unicode
+//     escape, `eval`), and text its comment handling removes, which is how a string or template
+//     string carrying ` //` or `/*`, or a `//` comment carrying `/*`, hides the code after it.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -128,17 +135,31 @@ export const REGISTRY = [
  *  included, at the line the name is on. Its text runs from the call to the next call or the end of
  *  the line the paren is on, with the gap before the paren closed so a stem reads either form.
  *  Comments and the two declarations are skipped. */
+// A block comment is whitespace to JavaScript: one on a single line becomes a space, so `else/* */block(`
+// keeps two words, and one spanning lines becomes the line breaks it spanned, so line numbers hold.
+const scanned = (src) => src.replace(/\/\*[\s\S]*?\*\//g, (c) => (c.includes('\n') ? c.replace(/[^\n]/g, '') : ' ')).split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
+const declared = (code, i) => /function\s+$/.test(code.slice(0, i))
+
 export function callSites(src) {
-  // A block comment is whitespace to JavaScript: one on a single line becomes a space, so `else/* */block(`
-  // keeps two words, and one spanning lines becomes the line breaks it spanned, so line numbers hold.
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, (c) => (c.includes('\n') ? c.replace(/[^\n]/g, '') : ' ')).split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
-  const calls = [...code.matchAll(/\b(malformed|block)\s*\(/g)].filter((m) => !/function\s+$/.test(code.slice(0, m.index)))
+  const code = scanned(src)
+  const calls = [...code.matchAll(/\b(malformed|block)\s*\(/g)].filter((m) => !declared(code, m.index))
   return calls.map((m, k) => {
     const open = m.index + m[0].length
     const eol = code.indexOf('\n', open)
     const end = Math.min(eol < 0 ? code.length : eol, k + 1 < calls.length ? calls[k + 1].index : code.length)
     return { line: code.slice(0, m.index).split('\n').length, text: `${m[1]}(${code.slice(open, end)}` }
   })
+}
+
+/** Every `malformed` or `block` that is neither a call site nor the first declaration of its name, at its line. */
+export function unplaced(src) {
+  const code = scanned(src), seen = new Set()
+  return [...code.matchAll(/\b(malformed|block)\b/g)].filter((m) => {
+    if (!/^\s*\(/.test(code.slice(m.index + m[0].length))) return true
+    if (!declared(code, m.index)) return false
+    if (seen.has(m[1])) return true
+    seen.add(m[1]); return false
+  }).map((m) => { const line = code.slice(0, m.index).split('\n').length; return { line, name: m[1], text: code.split('\n')[line - 1] } })
 }
 
 /** The paragraph a target names, or null when its heading or opening is gone. */
@@ -162,6 +183,7 @@ export function check(repo, registry = REGISTRY) {
   const out = []
   const sites = callSites(repo.runner)
   for (const s of sites) if (!registry.some((r) => s.text.includes(r.stem))) out.push(`round.workflow.mjs:${s.line}: call site with no registry row — ${s.text.trim()}`)
+  for (const u of unplaced(repo.runner)) out.push(`round.workflow.mjs:${u.line}: \`${u.name}\` the scan cannot place as a call site or its declaration — ${u.text.trim()}`)
   const texts = {}
   for (const key of Object.keys(TARGETS)) {
     texts[key] = targetText(repo, key)

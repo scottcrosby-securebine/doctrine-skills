@@ -207,13 +207,14 @@ const needText = (f, who) => { if (!said(f)) malformed(`${who}: a finding on ${f
 // The axis test comes first, and a finding on an axis nobody named is never passed to fileRecorded: it must not
 // *also* be filed as a legitimate inherited record, and must not consume the ruling that would have excused it —
 // run as a second pass this check blocked the round and left both of those behind anyway, which is the defect it
-// exists to prevent. Its sentence differs from judgeCritic's `ret.blocking` check on purpose: that one is waivable,
+// exists to prevent. A finding with no text is kept out the same way: it is not a finding, so it neither records
+// nor cites. Its sentence differs from judgeCritic's `ret.blocking` check on purpose: that one is waivable,
 // this one is not, and two identical strings with opposite waivability cannot be read apart in the return.
 function judgeRecorded(f, axes, who, record = true) {
   const named = axes.includes(f.axis)
   if (!named) malformed(`${who} recorded finding names no axis: ${f.finding}`)
   needText(f, who)
-  if (named) fileRecorded(f, who, f.axis, record)
+  if (named && said(f)) fileRecorded(f, who, f.axis, record)
 }
 // The integrated critic's return and a section critic's accept, read the same way: `ret` is a CRITIC
 // or SECTION_CRITIC return, `axes` the set the dispatcher fixed for it, `who` the name its reasons carry.
@@ -401,8 +402,8 @@ else {
   // A recorded finding exists only where the prompt named its failure inherited or marked its
   // clause stale — the prompt numbers exactly `inherited` and `stale` — so each one's cause must
   // name one of them; anything else is a defect parked where the counters cannot see it. One on an
-  // item nobody dispatched is filed below as naming no item, and is neither recorded nor a ruling's use.
-  for (const r of redTeam.recorded) if (ITEMS.includes(r.item)) fileRecorded(r, 'red team', `item ${r.item}`)
+  // item nobody dispatched, or with no text, is filed below as such, and is neither recorded nor a ruling's use.
+  for (const r of redTeam.recorded) if (ITEMS.includes(r.item) && said(r)) fileRecorded(r, 'red team', `item ${r.item}`)
   for (const item of ITEMS) {
     const r = seen.get(item)
     if (!r || !WORDS.redTeam.includes(r.word)) continue
