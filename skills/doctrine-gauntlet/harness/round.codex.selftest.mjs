@@ -9,10 +9,11 @@
 // runner failure and a throw, runs through a symlinked directory, resumes past a half-written record of its own, leaves the caller's args as given,
 // hands a schema call its schema, and pends every section's builder at once; that the section critic's
 // schema requires its roll call; and that the red-team call keeps its label, carries the floor report
-// and the critic's whole return and never the critic's prompt, each against a negative specimen. Clause 2 runs every
+// and the critic's whole return and never the critic's prompt, each against a negative specimen; and that a script reading a recorded
+// finding's cause loosely, by its text or toward the broad-ruling note fails a cause fixture. Clause 2 runs every
 // fixture through the runner and confirms each meets its expect, and runs one end to end through the
 // CLI. Clause 3 proves, without the CLI, that the stand-in's returns are the stub prompts' own text,
-// that the mutated script really lacks the check, that the throwing args really throw, and that only
+// that each cause fixture carries the cause its name says, that the mutated script really lacks the check, that the throwing args really throw, and that only
 // the floor report can supply the floor-report fixture's red-team reply.
 
 import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync, existsSync, symlinkSync, chmodSync, mkdirSync } from 'node:fs'
@@ -79,6 +80,7 @@ function misses(result, expect) {
   for (const [k, want] of Object.entries(expect)) {
     if (k === 'blocking_contains') { for (const s of want) if (!(result.blocking || []).some((l) => l.includes(s))) out.push(`blocking lacks "${s}"`) }
     else if (k === 'recorded_excludes') { for (const s of want) if ((result.recorded || []).some((l) => l.includes(s))) out.push(`recorded has "${s}"`) }
+    else if (k === 'recorded_contains') { for (const s of want) if (!(result.recorded || []).some((l) => l.includes(s))) out.push(`recorded lacks "${s}"`) }
     else leaf(k, want, result[k])
   }
   return out
@@ -398,6 +400,47 @@ async function until(script, args, label) {
   let parsed = null
   try { parsed = JSON.parse(reply) } catch {}
   clause('3e the floor-report fixture\'s red-team prompt states no reply of its own, and its floor report states one', stubReply(FX.redTeamPrompt) === null && !!parsed && Array.isArray(parsed.rollCall), `own ${stubReply(FX.redTeamPrompt)}, report ${reply}`)
+}
+
+// ---- The recorded cause: a recorded finding is attributed by its cause, never by its text ----
+{
+  const recs = (n) => { const A = FIXTURES[n].args; return [A.criticPrompt, A.redTeamPrompt].flatMap((p) => JSON.parse(stubReply(p)).recorded) }
+  const listOf = (n, c) => { const m = /^(\w+) (\d+)$/.exec(c || ''); return m && FIXTURES[n].args[m[1]] }
+  const inRange = (n, c) => { const l = listOf(n, c); return !!l && Number(c.split(' ')[1]) >= 1 && Number(c.split(' ')[1]) <= l.length }
+  const VALID = ['cause-valid-critic-clean', 'cause-valid-redteam-clean']
+  clause('3i each valid cause fixture files only causes naming a position its list has, and no finding there quotes the ruling its cause names',
+    VALID.every((n) => recs(n).length > 0 && recs(n).every((r) => inRange(n, r.cause) && !r.finding.includes(listOf(n, r.cause)[Number(r.cause.split(' ')[1]) - 1]))), 'a valid fixture carries a bad cause, or one its text could attribute')
+  // name -> [twin, what is wrong with the one cause that differs]
+  const BROKEN = {
+    'cause-missing-critic': ['cause-valid-critic-clean', (n, c) => c === undefined],
+    'cause-malformed-critic': ['cause-valid-critic-clean', (n, c) => typeof c === 'string' && !/^(inherited|stale) [1-9][0-9]*$/.test(c)],
+    'cause-out-of-range-critic': ['cause-valid-critic-clean', (n, c) => /^(inherited|stale) [1-9][0-9]*$/.test(c) && !inRange(n, c)],
+    'cause-missing-redteam': ['cause-valid-redteam-clean', (n, c) => c === undefined],
+    'cause-malformed-redteam': ['cause-valid-redteam-clean', (n, c) => typeof c === 'string' && !/^(inherited|stale) [1-9][0-9]*$/.test(c)],
+    'cause-out-of-range-redteam': ['cause-valid-redteam-clean', (n, c) => /^(inherited|stale) [1-9][0-9]*$/.test(c) && !inRange(n, c)],
+  }
+  const wrong = Object.entries(BROKEN).filter(([n, [twin, bad]]) => {
+    const a = recs(n), b = recs(twin)
+    const diff = a.map((r, i) => JSON.stringify(r) !== JSON.stringify(b[i]) ? i : -1).filter((i) => i >= 0)
+    const strip = (r) => JSON.stringify({ ...r, cause: null })
+    return a.length !== b.length || diff.length !== 1 || strip(a[diff[0]]) !== strip(b[diff[0]]) || !bad(n, a[diff[0]].cause)
+  }).map(([n]) => n)
+  clause('3j each broken cause fixture differs from its twin in one recorded finding\'s cause alone, and that cause is missing, malformed or out of range as its name says', !wrong.length, wrong.join(', '))
+  const two = recs('redteam-inherited-two-items-clean'), once = recs('redteam-inherited-two-items-filed-once')
+  const onceRoll = JSON.parse(stubReply(FIXTURES['redteam-inherited-two-items-filed-once'].args.redTeamPrompt)).rollCall
+  clause('3k the two-item twin files one inherited cause under items 1 and 2, and its broken half under item 1 alone with item 2 still BROKE',
+    two.length === 2 && two.every((r) => r.cause === 'inherited 1') && two.map((r) => r.item).join() === '1,2' && once.length === 1 && once[0].item === 1 && onceRoll.some((r) => r.item === 2 && r.word === 'BROKE'), 'not that case')
+  const quiet = recs('broad-ruling-recorded-quiet-clean')
+  const FL = FIXTURES['broad-ruling-block-flagged-clean'].args, flagRoll = JSON.parse(stubReply(FL.criticPrompt)).rollCall
+  clause('3l the quiet broad fixture files one inherited cause on three distinct axes, and the flagged one\'s single waived name is contained in two abstaining axes',
+    quiet.length === 3 && new Set(quiet.map((r) => r.axis)).size === 3 && quiet.every((r) => r.cause === 'inherited 1') && FL.waived.length === 1 && flagRoll.filter((r) => r.word === 'CANNOT JUDGE' && r.axis.includes(FL.waived[0])).length === 2, 'not that case')
+  const once1 = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace(anchor, to) : null
+  const broad = once1('citedRulings.add(c.ruling)', 'usedRulings.set(c.ruling, (usedRulings.get(c.ruling) || 0) + 1)')
+  clause('1u the script counting a recorded cause toward the broad-ruling note fails the quiet broad fixture', !!broad && (await judge(broad, 'broad-ruling-recorded-quiet-clean')).length > 0, broad ? 'fixture still met its expect' : 'anchor not found exactly once')
+  const noRange = once1('Number(m[2]) <= list.length ?', 'true ?')
+  clause('1v the script taking any position a cause names fails both out-of-range fixtures', !!noRange && (await judge(noRange, 'cause-out-of-range-critic')).length > 0 && (await judge(noRange, 'cause-out-of-range-redteam')).length > 0, noRange ? 'a fixture still met its expect' : 'anchor not found exactly once')
+  const byText = once1("causeKind(c) === 'stale')", 'match([c.finding], STALE))')
+  clause('1w the script excusing a stale BLOCKING by its finding\'s text fails the valid critic cause fixture', !!byText && (await judge(byText, 'cause-valid-critic-clean')).length > 0, byText ? 'fixture still met its expect' : 'anchor not found exactly once')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')

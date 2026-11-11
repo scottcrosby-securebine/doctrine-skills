@@ -1,5 +1,5 @@
 {
- "_readme": "Tamper test for round.workflow.mjs \u2014 three clauses per CLAUDE.md. Run each args set through the Workflow tool and compare with `expect`: `blocking_contains` entries match if each is a substring of some line of the returned `blocking`; `recorded_excludes` entries must match NO line of the returned `recorded`; every other key pins only the fields it names \u2014 `counters` listing `cleanPasses` checks that field alone \u2014 compared exactly at the leaves. A `_note` on a fixture is prose for the reader and is never compared.\n\n**Which fixture is which is derived, not listed here.** A fixture is known-good exactly when its `expect` carries `clean: true`; every other fixture is broken on purpose. Earlier versions of this file enumerated both sets and the enumerations went stale every time a fixture was added \u2014 reviews filed that repeatedly, so the lists are gone and the rule is what remains.\n\nClause 3 is yours and it covers every broken fixture, not just the first: for each one, read its stub prompts against its `_note` and confirm the defect is really in the fixture rather than only in the script's output. Most broken fixtures state the defect in a stub prompt, in their own words. **Where the defect is an absence there is no prose to state it** \u2014 `floor-not-run-blocks` carries an empty `floorPrompt` and otherwise ordinary clean stubs, so its `_note` and its `expect` are what carry the defect. Read the key, the stubs and the `expect` together, plus the `_note` where a fixture has one \u2014 several do not, because their stub prompts already say what they carry. No one of them is complete on its own.\n\n**The `waived` entries on broken fixtures are a convention, stated here once.** Several broken fixtures name their own axis or item in `waived`. The ruling would excuse that fixture's check if the check were routed through `block()` instead of `malformed()`, so the fixture fails the moment anyone makes it waivable again. **Those entries are chosen to be substrings the reason text actually contains, not the shape a real ruling would take**: containment is tested against the reason, so an item-shaped ruling like `red team item 1` matches nothing and the guard is decorative \u2014 two fixtures shipped exactly that way for a round before anyone checked. The guard is per-fixture: most `malformed()` sites carry no equivalent and no single fixture covers the class. This paragraph is the only statement of that rule; a copy in each fixture's `_note` is what it replaced, and the copies forked from it the first time the rule was corrected.",
+ "_readme": "Tamper test for round.workflow.mjs \u2014 three clauses per CLAUDE.md. Run each args set through the Workflow tool and compare with `expect`: `blocking_contains` entries match if each is a substring of some line of the returned `blocking`; `recorded_excludes` entries must match NO line of the returned `recorded`; `recorded_contains` entries match if each is a substring of some line of the returned `recorded`; every other key pins only the fields it names \u2014 `counters` listing `cleanPasses` checks that field alone \u2014 compared exactly at the leaves. A `_note` on a fixture is prose for the reader and is never compared.\n\n**Which fixture is which is derived, not listed here.** A fixture is known-good exactly when its `expect` carries `clean: true`; every other fixture is broken on purpose. Earlier versions of this file enumerated both sets and the enumerations went stale every time a fixture was added \u2014 reviews filed that repeatedly, so the lists are gone and the rule is what remains.\n\nClause 3 is yours and it covers every broken fixture, not just the first: for each one, read its stub prompts against its `_note` and confirm the defect is really in the fixture rather than only in the script's output. Most broken fixtures state the defect in a stub prompt, in their own words. **Where the defect is an absence there is no prose to state it** \u2014 `floor-not-run-blocks` carries an empty `floorPrompt` and otherwise ordinary clean stubs, so its `_note` and its `expect` are what carry the defect. Read the key, the stubs and the `expect` together, plus the `_note` where a fixture has one \u2014 several do not, because their stub prompts already say what they carry. No one of them is complete on its own.\n\n**The `waived` entries on broken fixtures are a convention, stated here once.** Several broken fixtures name their own axis or item in `waived`. The ruling would excuse that fixture's check if the check were routed through `block()` instead of `malformed()`, so the fixture fails the moment anyone makes it waivable again. **Those entries are chosen to be substrings the reason text actually contains, not the shape a real ruling would take**: containment is tested against the reason, so an item-shaped ruling like `red team item 1` matches nothing and the guard is decorative \u2014 two fixtures shipped exactly that way for a round before anyone checked. The guard is per-fixture: most `malformed()` sites carry no equivalent and no single fixture covers the class. This paragraph is the only statement of that rule; a copy in each fixture's `_note` is what it replaced, and the copies forked from it the first time the rule was corrected.",
  "broken": {
   "args": {
    "sections": [
@@ -148,7 +148,7 @@
    ],
    "tieIsPass": false,
    "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good fixture. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
-   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good half of the recorded pair. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the header contrast failure reproduced in the render\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner \u2014 the prompt names header contrast inherited\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good half of the recorded pair. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the header contrast failure reproduced in the render\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner \u2014 the prompt names header contrast inherited\", \"cause\": \"inherited 1\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
    "counters": {
     "cleanPasses": 0,
     "unresolvedRounds": 0,
@@ -187,7 +187,7 @@
    ],
    "tieIsPass": false,
    "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The critic half of this fixture is well-formed on purpose; the defect this fixture carries is in the red team's return, not here. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
-   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the broken half of the recorded pair: its recorded finding names a failure the inherited list does not carry, so the script's check must trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the header contrast failure reproduced in the render\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"footer overflow at 360 \u2014 a new failure this dispatch never named\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the broken half of the recorded pair: its recorded finding names a failure the inherited list does not carry and carries no cause, so the script's check must trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the header contrast failure reproduced in the render\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"footer overflow at 360 \u2014 a new failure this dispatch never named\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
    "counters": {
     "cleanPasses": 0,
     "unresolvedRounds": 0,
@@ -236,7 +236,7 @@
    "waived": [
     "the wall"
    ],
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call says CLEAR on the one axis while a recorded finding is filed under that same axis, so the script's contradiction check can be proven to trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"header contrast fails on the host page banner\"}]}"
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the roll call says CLEAR on the one axis while a recorded finding is filed under that same axis, so the script's contradiction check can be proven to trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}]}"
   },
   "expect": {
    "clean": false,
@@ -335,7 +335,7 @@
     "header contrast"
    ],
    "waived": [],
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the recorded finding names an axis the dispatcher never named, so the script's unnamed-axis check can be proven to trip. Note the finding text quotes the inherited failure, which is what makes this fixture also prove the check cannot be excused by a ruling. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"an axis nobody named\", \"finding\": \"header contrast fails on the host page banner\"}]}"
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the recorded finding names an axis the dispatcher never named, so the script's unnamed-axis check can be proven to trip. Note the finding text quotes the inherited failure, which is what makes this fixture also prove the check cannot be excused by a ruling. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"an axis nobody named\", \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}]}"
   },
   "expect": {
    "clean": false,
@@ -372,7 +372,7 @@
     "the wall"
    ],
    "waived": [],
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return for the critic roll-call shape checks that a non-CLEAR word reaches. The roll call's word, the finding filed under it and the recorded entry's axis all agree, and the axis is an inherited failure of this dispatch, so every shape check this return reaches must stay quiet and the round must be clean. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the wall still clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall still clips at 360 \\u2014 inherited by this dispatch\"}]}"
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return for the critic roll-call shape checks that a non-CLEAR word reaches. The roll call's word, the finding filed under it and the recorded entry's axis all agree, and the axis is an inherited failure of this dispatch, so every shape check this return reaches must stay quiet and the round must be clean. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the wall still clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall still clips at 360 \\u2014 inherited by this dispatch\", \"cause\": \"inherited 1\"}]}"
   },
   "expect": {
    "clean": true,
@@ -406,7 +406,7 @@
     "still clips at 360"
    ],
    "waived": [],
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return for the critic roll-call shape checks that a non-CLEAR word reaches. The roll call's word, the finding filed under it and the recorded entry's axis all agree, and the dispatch rules the failure inherited by naming the failure, never the axis, so every shape check this return reaches must stay quiet and the round must be clean. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the wall still clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall still clips at 360 \\u2014 inherited by this dispatch\"}]}"
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return for the critic roll-call shape checks that a non-CLEAR word reaches. The roll call's word, the finding filed under it and the recorded entry's axis all agree, and the dispatch rules the failure inherited by naming the failure, never the axis, so every shape check this return reaches must stay quiet and the round must be clean. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the wall still clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall still clips at 360 \\u2014 inherited by this dispatch\", \"cause\": \"inherited 1\"}]}"
   },
   "expect": {
    "clean": true,
@@ -771,7 +771,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the section critic rejects every attempt with one real defect beside a stale-clause BLOCKING line and an inherited BLOCKING line, each with its finding in recorded as item 8 rules, so three rejections deadlock the section; selftest clause 1p reads the deadlock entry. Return via StructuredOutput exactly: {\"accept\": false, \"notes\": [], \"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the focus ring breaks the retired focus-ring clause\"}, {\"axis\": \"reader and register\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"BLOCKING\", \"line\": \"the host banner clips at 360\"}], \"blocking\": [{\"axis\": \"reader and register\", \"finding\": \"REAL-DEFECT: the lede runs to four lines\"}], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the focus ring violates the retired focus-ring clause\"}, {\"axis\": \"what the composition asserts\", \"finding\": \"the host banner clips at 360, a host page the round does not own\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the section critic rejects every attempt with one real defect beside a stale-clause BLOCKING line and an inherited BLOCKING line, each with its finding in recorded as item 8 rules, so three rejections deadlock the section; selftest clause 1p reads the deadlock entry. Return via StructuredOutput exactly: {\"accept\": false, \"notes\": [], \"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the focus ring breaks the retired focus-ring clause\"}, {\"axis\": \"reader and register\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"BLOCKING\", \"line\": \"the host banner clips at 360\"}], \"blocking\": [{\"axis\": \"reader and register\", \"finding\": \"REAL-DEFECT: the lede runs to four lines\"}], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the focus ring violates the retired focus-ring clause\", \"cause\": \"stale 1\"}, {\"axis\": \"what the composition asserts\", \"finding\": \"the host banner clips at 360, a host page the round does not own\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -1159,7 +1159,7 @@
     1
    ],
    "tieIsPass": false,
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the critic files a recorded finding naming a failure the dispatch's inherited list does not carry, so the script's containment check must trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"it clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"footer overflow at 360 \\u2014 a new failure this dispatch never named\"}]}",
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the critic files a recorded finding naming a failure the dispatch's inherited list does not carry, under the cause `inherited 2` where that list has one entry, so the script's cause check must trip. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"it clips\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"footer overflow at 360 \\u2014 a new failure this dispatch never named\", \"cause\": \"inherited 2\"}]}",
    "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
    "counters": {
     "cleanPasses": 0,
@@ -1181,7 +1181,7 @@
     "critic: recorded finding names no inherited failure or marked-stale clause of this dispatch"
    ]
   },
-  "_note": "The critic mirror of `recorded-broken`. Without it the critic's containment check can be deleted and every other fixture still passes \u2014 the critic can then park any defect in `recorded` and the round stays clean."
+  "_note": "The critic mirror of `recorded-broken`. Without it the critic's cause check can be deleted and every other fixture still passes \u2014 the critic can then park any defect in `recorded` and the round stays clean."
  },
  "valve-not-at-two": {
   "args": {
@@ -1468,7 +1468,7 @@
    ],
    "tieIsPass": false,
    "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
-   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the red team reports HELD on its one item while filing a recorded finding under that same item. HELD means it tried and nothing broke; recorded is where a BROKE goes. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner\"}], \"attackList\": [\"wall at 360\"]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the red team reports HELD on its one item while filing a recorded finding under that same item. HELD means it tried and nothing broke; recorded is where a BROKE goes. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}], \"attackList\": [\"wall at 360\"]}",
    "counters": {
     "cleanPasses": 0,
     "unresolvedRounds": 0,
@@ -1649,7 +1649,7 @@
    ],
    "tieIsPass": false,
    "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the stale twin of recorded-clean; the critic side stays silent here. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
-   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the stale twin of recorded-clean, red-team side: the recorded finding names the marked-stale clause, no inherited ruling exists. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the focus-ring contrast failure reproduced in the render, under the clause the prompt marks stale\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"contrast fails only under the retired focus-ring clause, which this run marked stale\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the stale twin of recorded-clean, red-team side: the recorded finding names the marked-stale clause, no inherited ruling exists. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the focus-ring contrast failure reproduced in the render, under the clause the prompt marks stale\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill under the print stylesheet; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; all four present; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"contrast fails only under the retired focus-ring clause, which this run marked stale\", \"cause\": \"stale 1\"}], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
    "counters": {
     "cleanPasses": 0,
     "unresolvedRounds": 0,
@@ -1685,7 +1685,7 @@
     4
    ],
    "tieIsPass": false,
-   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the critic-stale twin: one axis BLOCKING per item 8, its only finding recorded against the marked-stale clause. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"BLOCKING\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"reader and register\", \"finding\": \"register drifts only where the retired focus-ring clause forces the label style, and this run marked that clause stale\"}]}",
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the critic-stale twin: one axis BLOCKING per item 8, its only finding recorded against the marked-stale clause. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"BLOCKING\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"reader and register\", \"finding\": \"register drifts only where the retired focus-ring clause forces the label style, and this run marked that clause stale\", \"cause\": \"stale 1\"}]}",
    "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the critic-stale twin, red-team side: nothing to record here, every item held. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"attacked the axes the critic cleared; nothing landed\"}, {\"item\": 2, \"word\": \"HELD\", \"line\": \"checked the eight renders as one set; one accent, used once; nothing to file\"}, {\"item\": 3, \"word\": \"HELD\", \"line\": \"print emulation reviewed; dark panels keep their fill; nothing to file\"}, {\"item\": 4, \"word\": \"HELD\", \"line\": \"every printed number matched to a ledger line; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the set\", \"print panels\", \"ledger numbers\"]}",
    "counters": {
     "cleanPasses": 0,
@@ -2283,7 +2283,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return. The section critic accepts with one axis BLOCKING whose only finding is recorded against the dispatch's inherited failure; every other axis is CLEAR. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return. The section critic accepts with one axis BLOCKING whose only finding is recorded against the dispatch's inherited failure; every other axis is CLEAR. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2327,7 +2327,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return. The section critic accepts with one axis BLOCKING whose only finding is recorded against the dispatch's inherited failure, which the dispatch names by the failure and never by the axis; every other axis is CLEAR. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is a known-good return. The section critic accepts with one axis BLOCKING whose only finding is recorded against the dispatch's inherited failure, which the dispatch names by the failure and never by the axis; every other axis is CLEAR. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2416,7 +2416,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: one axis BLOCKING with its inherited finding recorded, which alone is accepted, beside a CANNOT JUDGE on an axis no ruling names, which is not. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CANNOT JUDGE\", \"line\": \"no copy deck reached me\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: one axis BLOCKING with its inherited finding recorded, which alone is accepted, beside a CANNOT JUDGE on an axis no ruling names, which is not. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CANNOT JUDGE\", \"line\": \"no copy deck reached me\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2508,7 +2508,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: every dispatched axis reads CLEAR, blocking is empty, yet a recorded finding naming the dispatch's inherited failure is filed under a CLEAR axis. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: every dispatched axis reads CLEAR, blocking is empty, yet a recorded finding naming the dispatch's inherited failure is filed under a CLEAR axis. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2554,7 +2554,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: one axis BLOCKING whose recorded findings are one naming the dispatch's inherited failure and one new defect naming neither an inherited failure nor a marked-stale clause. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}, {\"axis\": \"the wall\", \"finding\": \"the gutter collapses at 768\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: one axis BLOCKING whose recorded findings are one naming the dispatch's inherited failure and one new defect whose cause, `stale 1`, names a clause the dispatch never marked stale. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}, {\"axis\": \"the wall\", \"finding\": \"the gutter collapses at 768\", \"cause\": \"stale 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2644,7 +2644,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: every dispatched axis reads CLEAR, blocking is empty, and a recorded finding naming the dispatch's inherited failure is filed under an axis the critic was not dispatched on. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the grid\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: every dispatched axis reads CLEAR, blocking is empty, and a recorded finding naming the dispatch's inherited failure is filed under an axis the critic was not dispatched on. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"CLEAR\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [], \"recorded\": [{\"axis\": \"the grid\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -2962,7 +2962,7 @@
     {
      "name": "hero",
      "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: stub build of hero",
-     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the wall reads BLOCKING with its inherited finding recorded, and blocking carries one more finding under the wall whose text is three spaces; the dispatch's inherited ruling names the wall, which must not excuse it. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [{\"axis\": \"the wall\", \"finding\": \"   \"}], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\"}]}"
+     "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the wall reads BLOCKING with its inherited finding recorded, and blocking carries one more finding under the wall whose text is three spaces; the dispatch's inherited ruling names the wall, which must not excuse it. Return via StructuredOutput exactly: {\"accept\": true, \"notes\": [], \"rollCall\": [{\"axis\": \"reader and register\", \"word\": \"CLEAR\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\"}, {\"axis\": \"what the composition asserts\", \"word\": \"CLEAR\"}], \"blocking\": [{\"axis\": \"the wall\", \"finding\": \"   \"}], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the wall clips at 360 on the host page banner, inherited from the predecessor\", \"cause\": \"inherited 1\"}]}"
     }
    ],
    "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
@@ -3044,5 +3044,503 @@
    }
   },
   "_note": "The red team's stub states no reply; only the floor report carries it, so the round is clean only when the script hands the red team this round's floor report. Without it the red team returns nothing and the round blocks on 'red team: no return'. The Codex selftest also reads this fixture's pending red-team call for its label, the critic's whole return and the absence of the critic's assembled prompt."
+ },
+ "cause-valid-critic-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "inherited 2",
+    "the wall",
+    "focus states"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good twin of the critic cause fixtures. Every axis is BLOCKING and its only finding is a recorded one whose cause numbers the inherited failure or the stale clause as the dispatch lists them, `inherited 2` and `stale 1`; no finding's text quotes either ruling, so only the cause can attribute it. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"inherited 2\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping is still there\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the same clipping, seen on the wall\"}, {\"axis\": \"focus states\", \"word\": \"BLOCKING\", \"line\": \"focus follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"inherited 2\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"the wall\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"focus states\", \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"stale 1\"}]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": []
+  },
+  "expect": {
+   "clean": true,
+   "counters": {
+    "cleanPasses": 1
+   },
+   "recorded_excludes": [
+    "\"still clips at 360\" matched nothing",
+    "\"retired focus-ring clause\" matched nothing",
+    "broad ruling"
+   ]
+  },
+  "_note": "Known-good: a recorded finding is attributed by its cause, never by its text. Each BLOCKING axis is excused through its recorded finding's cause, the ruling each cause names is marked used, and an inherited failure filed on two axes is no broad ruling."
+ },
+ "cause-missing-critic": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "inherited 2",
+    "the wall",
+    "focus states"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-critic-clean` with the focus states recorded finding's cause removed, so it names no position at all. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"inherited 2\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping is still there\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the same clipping, seen on the wall\"}, {\"axis\": \"focus states\", \"word\": \"BLOCKING\", \"line\": \"focus follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"inherited 2\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"the wall\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"focus states\", \"finding\": \"the focus outline is drawn as the old two-pixel ring\"}]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "focus states"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "critic: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 focus states: the focus outline is drawn as the old two-pixel ring",
+    "its cause is missing"
+   ]
+  },
+  "_note": "The critic twin of `cause-valid-critic-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names the axis, which the reason contains."
+ },
+ "cause-malformed-critic": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "inherited 2",
+    "the wall",
+    "focus states"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-critic-clean` whose focus states recorded finding quotes the stale clause as its cause instead of numbering it `stale 1`. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"inherited 2\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping is still there\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the same clipping, seen on the wall\"}, {\"axis\": \"focus states\", \"word\": \"BLOCKING\", \"line\": \"focus follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"inherited 2\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"the wall\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"focus states\", \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"retired focus-ring clause\"}]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "focus states"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "critic: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 focus states: the focus outline is drawn as the old two-pixel ring",
+    "its cause \"retired focus-ring clause\" is not"
+   ]
+  },
+  "_note": "The critic twin of `cause-valid-critic-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names the axis, which the reason contains."
+ },
+ "cause-out-of-range-critic": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "inherited 2",
+    "the wall",
+    "focus states"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-critic-clean` whose focus states recorded finding's cause is `stale 2`, a position the one-entry stale list does not have. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"inherited 2\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping is still there\"}, {\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the same clipping, seen on the wall\"}, {\"axis\": \"focus states\", \"word\": \"BLOCKING\", \"line\": \"focus follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"inherited 2\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"the wall\", \"finding\": \"the hero wall is cut off at the narrowest width\", \"cause\": \"inherited 2\"}, {\"axis\": \"focus states\", \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"stale 2\"}]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "focus states"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "critic: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 focus states: the focus outline is drawn as the old two-pixel ring",
+    "its cause \"stale 2\" is not"
+   ]
+  },
+  "_note": "The critic twin of `cause-valid-critic-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names the axis, which the reason contains."
+ },
+ "cause-valid-redteam-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good twin of the red team cause fixtures. Both items are BROKE with one recorded finding each whose cause numbers the inherited failure or the stale clause as the dispatch lists them, `inherited 2` and `stale 1`; neither finding's text quotes its ruling, so only the cause can attribute it. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited clipping reproduced at 360\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"focus ring follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"the banner is cut off at phone width\", \"cause\": \"inherited 2\"}, {\"item\": 2, \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"stale 1\"}], \"attackList\": [\"the banner at 360\", \"focus states\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": []
+  },
+  "expect": {
+   "clean": true,
+   "counters": {
+    "cleanPasses": 1
+   },
+   "recorded_excludes": [
+    "\"still clips at 360\" matched nothing",
+    "\"retired focus-ring clause\" matched nothing"
+   ]
+  },
+  "_note": "Known-good: the red team's recorded findings are attributed by their causes and mark the rulings they name used."
+ },
+ "cause-missing-redteam": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-redteam-clean` with item 2's recorded finding's cause removed. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited clipping reproduced at 360\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"focus ring follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"the banner is cut off at phone width\", \"cause\": \"inherited 2\"}, {\"item\": 2, \"finding\": \"the focus outline is drawn as the old two-pixel ring\"}], \"attackList\": [\"the banner at 360\", \"focus states\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "item 2"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "red team: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 item 2: the focus outline is drawn as the old two-pixel ring",
+    "its cause is missing"
+   ]
+  },
+  "_note": "The red team twin of `cause-valid-redteam-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names `item 2`, which the reason contains."
+ },
+ "cause-malformed-redteam": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-redteam-clean` whose item 2 recorded finding's cause is `inherited 0`, and positions count from 1. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited clipping reproduced at 360\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"focus ring follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"the banner is cut off at phone width\", \"cause\": \"inherited 2\"}, {\"item\": 2, \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"inherited 0\"}], \"attackList\": [\"the banner at 360\", \"focus states\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "item 2"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "red team: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 item 2: the focus outline is drawn as the old two-pixel ring",
+    "its cause \"inherited 0\" is not"
+   ]
+  },
+  "_note": "The red team twin of `cause-valid-redteam-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names `item 2`, which the reason contains."
+ },
+ "cause-out-of-range-redteam": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `cause-valid-redteam-clean` whose item 2 recorded finding's cause is `inherited 3`, a position the two-entry inherited list does not have. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited clipping reproduced at 360\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"focus ring follows the retired clause\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"the banner is cut off at phone width\", \"cause\": \"inherited 2\"}, {\"item\": 2, \"finding\": \"the focus outline is drawn as the old two-pixel ring\", \"cause\": \"inherited 3\"}], \"attackList\": [\"the banner at 360\", \"focus states\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast",
+    "still clips at 360"
+   ],
+   "stale": [
+    "retired focus-ring clause"
+   ],
+   "waived": [
+    "item 2"
+   ]
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "red team: recorded finding names no inherited failure or marked-stale clause of this dispatch \u2014 item 2: the focus outline is drawn as the old two-pixel ring",
+    "its cause \"inherited 3\" is not"
+   ]
+  },
+  "_note": "The red team twin of `cause-valid-redteam-clean`, differing in one recorded finding's cause. Unwaivable: `waived` names `item 2`, which the reason contains."
+ },
+ "redteam-inherited-two-items-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This is the known-good half of the two-item pair: one inherited failure lands on items 1 and 2, and the red team files one recorded line for it under each, both BROKE. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited header contrast failure reproduced on the banner\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"the same inherited contrast failure, seen across the set\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}, {\"item\": 2, \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}], \"attackList\": [\"banner contrast\", \"the set\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast"
+   ],
+   "stale": [],
+   "waived": []
+  },
+  "expect": {
+   "clean": true,
+   "counters": {
+    "cleanPasses": 1
+   },
+   "recorded_excludes": [
+    "broad ruling"
+   ]
+  },
+  "_note": "Known-good: one inherited failure on two red team items, filed once under each."
+ },
+ "redteam-inherited-two-items-filed-once": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1,
+    2
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\", \"line\": \"ran the wall at all four widths; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is broken on purpose: the twin of `redteam-inherited-two-items-clean` that files the inherited failure under item 1 only, leaving item 2 BROKE with nothing under it. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"BROKE\", \"line\": \"the inherited header contrast failure reproduced on the banner\"}, {\"item\": 2, \"word\": \"BROKE\", \"line\": \"the same inherited contrast failure, seen across the set\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"item\": 1, \"finding\": \"header contrast fails on the host page banner\", \"cause\": \"inherited 1\"}], \"attackList\": [\"banner contrast\", \"the set\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "header contrast"
+   ],
+   "stale": [],
+   "waived": []
+  },
+  "expect": {
+   "clean": false,
+   "blocking_contains": [
+    "red team roll call: item 2 BROKE with no finding under it"
+   ]
+  },
+  "_note": "The twin of `redteam-inherited-two-items-clean`: the second item's line is gone and its BROKE carries nothing."
+ },
+ "broad-ruling-recorded-quiet-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall",
+    "reader and register",
+    "what the composition asserts"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is known-good: one inherited failure lands on three axes and is filed once on each with the cause `inherited 1`; nothing else is wrong. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping lands here\"}, {\"axis\": \"reader and register\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping lands here\"}, {\"axis\": \"what the composition asserts\", \"word\": \"BLOCKING\", \"line\": \"the inherited clipping lands here\"}], \"blocking\": [], \"polish\": [], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the hero is cut off at the narrowest width\", \"cause\": \"inherited 1\"}, {\"axis\": \"reader and register\", \"finding\": \"the hero is cut off at the narrowest width\", \"cause\": \"inherited 1\"}, {\"axis\": \"what the composition asserts\", \"finding\": \"the hero is cut off at the narrowest width\", \"cause\": \"inherited 1\"}]}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "still clips at 360"
+   ],
+   "stale": [],
+   "waived": []
+  },
+  "expect": {
+   "clean": true,
+   "counters": {
+    "cleanPasses": 1
+   },
+   "recorded_excludes": [
+    "broad ruling",
+    "matched nothing"
+   ]
+  },
+  "_note": "Known-good: a recorded finding marks its ruling used and never counts toward the broad-ruling note, so one inherited failure filed on three axes raises no note. Its counterpart `broad-ruling-block-flagged-clean` shows the note still fires where `block()` excuses two reasons by containment."
+ },
+ "broad-ruling-block-flagged-clean": {
+  "args": {
+   "sections": [],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The floor is clean in this fixture. Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall",
+    "wall rhythm"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. This fixture is known-good for the counts: two axes each abstain with a named lack, and the dispatch's one waived name, `wall`, is contained in both axis names. Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CANNOT JUDGE\", \"line\": \"no 2560 render of the wall reached me\"}, {\"axis\": \"wall rhythm\", \"word\": \"CANNOT JUDGE\", \"line\": \"no 2560 render reached me\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. The return here is well-formed on purpose; the defect this fixture carries, if any, is in the other reviewer's return. Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the critic's inherited clipping against the 360 render; it is the inherited failure and nothing new; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"the wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [],
+   "stale": [],
+   "waived": [
+    "wall"
+   ]
+  },
+  "expect": {
+   "clean": true,
+   "counters": {
+    "cleanPasses": 1
+   },
+   "recorded_contains": [
+    "broad ruling (not a failure \u2014 check it): \"wall\" excused 2 reasons this round"
+   ]
+  },
+  "_note": "One waived name excuses two `block()` reasons by containment, so the broad-ruling note fires; the counterpart of `broad-ruling-recorded-quiet-clean`."
  }
 }
