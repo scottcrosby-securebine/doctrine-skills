@@ -138,19 +138,23 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
   for (let k = 0; k < 6; k++) for (const i of shardOf(`${k}/6`, N)) seen[i] += 1
   const joined = [...shardOf('0,1,2/4', N), ...shardOf('3/4', N)].sort((a, b) => a - b)
   const whole = shardOf(undefined, N), empty = shardOf('', N)
-  clause('clause 1sh1 — the shards k/6 cover every mutation index exactly once, 0,1,2/4 and 3/4 together are the whole list, and an unset or empty DCTR_SHARD keeps every index in order',
-    seen.every((c) => c === 1) && joined.length === N && joined.every((v, i) => v === i) && whole.length === N && whole.every((v, i) => v === i) && empty.length === N && shardOf('2/6', N)[0] === 2,
+  const exact = [0, 1, 2, 3, 4, 5].every((k) => { const got = shardOf(`${k}/6`, N); return got.length === Math.ceil((N - k) / 6) && got.every((v, j) => v === k + 6 * j) })
+  clause('clause 1sh1 — the shards k/6 cover every mutation index exactly once, shard k holding exactly k, k+6, k+12 and so on, 0,1,2/4 and 3/4 together are the whole list, and an unset or empty DCTR_SHARD keeps every index in order',
+    seen.every((c) => c === 1) && joined.length === N && joined.every((v, i) => v === i) && whole.length === N && whole.every((v, i) => v === i) && empty.length === N && exact,
     `counts ${[...new Set(seen)]} joined ${joined.length} whole ${whole.length} empty ${empty.length}`)
-  const BAD = { 'n zero': '0/0', 'k equal to n': '3/3', 'a repeated k': '0,0/2', 'no slash': '2', 'a letter': 'a/2', 'two slashes': '0/2/3', 'a negative k': '-1/2', 'a fractional n': '0/1.5', 'an empty k': ',1/2', 'a space': '0 /2' }
-  const thrown = Object.entries(BAD).filter(([, s]) => { try { shardOf(s, N); return false } catch { return true } })
-  clause('clause 1sh2 — every malformed DCTR_SHARD throws: n zero, k equal to n, a repeated k, no slash, a letter, two slashes, a negative k, a fractional n, an empty k, a space',
+  const BAD = { 'n zero': '0/0', 'k equal to n': '3/3', 'a k past n beside a valid one': '0,7/6', 'a repeated k': '0,0/2', 'no slash': '2', 'a letter': 'a/2', 'two slashes': '0/2/3', 'a negative k': '-1/2', 'a fractional n': '0/1.5', 'an empty k': ',1/2', 'a space': '0 /2', 'a shard that selects nothing': '5/6' }
+  const LEN = { 'a shard that selects nothing': 5 }, len = (name) => LEN[name] ?? N
+  const thrown = Object.entries(BAD).filter(([name, s]) => { try { shardOf(s, len(name)); return false } catch { return true } })
+  clause('clause 1sh2 — every malformed DCTR_SHARD throws: n zero, k equal to n, a k past n beside a valid one, a repeated k, no slash, a letter, two slashes, a negative k, a fractional n, an empty k, a space, and a well-formed shard that selects no index of the list',
     thrown.length === Object.keys(BAD).length, `threw on ${thrown.map(([n]) => n).join(', ')}`)
   // Proved without shardOf: each spec breaks the k[,k...]/n shape, or names a k at or past n, or repeats a k.
-  const proved = Object.values(BAD).filter((s) => {
+  const proved = Object.entries(BAD).filter(([name, s]) => {
     const parts = s.split('/'), ks = (parts[0] ?? '').split(','), n = Number(parts[1])
-    return parts.length !== 2 || !/^[1-9]\d*$/.test(parts[1]) || ks.some((k) => !/^\d+$/.test(k) || Number(k) >= n) || new Set(ks).size !== ks.length
+    let none = true
+    for (let i = 0; i < len(name); i++) if (ks.map(Number).includes(i % n)) none = false
+    return parts.length !== 2 || !/^[1-9]\d*$/.test(parts[1]) || ks.some((k) => !/^\d+$/.test(k) || Number(k) >= n) || new Set(ks).size !== ks.length || none
   })
-  clause('clause 3sh — each malformed DCTR_SHARD fixture really breaks the shape, the range or uniqueness, proved without shardOf',
+  clause('clause 3sh — each malformed DCTR_SHARD fixture really breaks the shape, the range or uniqueness, or selects no index, proved without shardOf',
     proved.length === Object.keys(BAD).length, `${proved.length} of ${Object.keys(BAD).length}`)
 }
 // e8-sessionend's pure seams. A running gate survives SessionEnd by moving, a moved marker takes a

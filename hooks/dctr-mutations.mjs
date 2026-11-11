@@ -462,10 +462,12 @@ const MUTATIONS = [
     from: "export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')",
     to: "export const anchorVerdict = (hits) => (hits === 0 ? 'missing' : 'apply')" },
   // A CI shard that kept a subset nobody named prints the same verdict as the shard it should have been.
-  { name: 'a DCTR_SHARD naming a k at or past n keeps nothing instead of refusing', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
+  { name: 'a DCTR_SHARD naming a k past n beside a valid one keeps a silent subset', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
     from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || new Set(ks).size !== ks.length) throw" },
   { name: 'a DCTR_SHARD repeating a k is accepted', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
     from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || ks.some((k) => k >= n)) throw" },
+  { name: 'a DCTR_SHARD that selects no mutation runs an empty gate that passes', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
+    from: "  if (kept.length === 0) throw", to: "  if (false) throw" },
   // The progress line's whole job is naming the item that is holding the output back. Naming the
   // newest instead still prints a plausible line, with a small elapsed time, which reads as a gate
   // that keeps restarting its work — worse than the silence it replaced.
@@ -5028,6 +5030,14 @@ const MUTATIONS = [
     to: "for (const x of pending) last.set(x.role, 'retry')" },
 ]
 
+// DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
+// disjoint part; a malformed or empty selection throws here, before the work tree exists. The baseline suites always all run.
+if (process.env.DCTR_SHARD) {
+  const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
+  console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
+  MUTATIONS.splice(0, MUTATIONS.length, ...keep)
+}
+
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
 // Every copy sits one level under `work`, so a suite reading a skill's text at ../skills (the cycle suite reads
 // doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets skills/, so a link will do;
@@ -5144,13 +5154,6 @@ fs.mkdirSync(baseline)
 for (const f of FILES) { fs.mkdirSync(path.dirname(path.join(baseline, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(baseline, f)) }
 // The baseline pool is the FIRST silence, not the mutation loop: it runs every suite once, including
 // the ~19s one, and printed nothing at all until it was done.
-// DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
-// disjoint part; a malformed value throws here, before any suite runs. The baseline suites always all run.
-if (process.env.DCTR_SHARD) {
-  const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
-  console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
-  MUTATIONS.splice(0, MUTATIONS.length, ...keep)
-}
 console.log(`running ${SUITES.length} suites against the baseline, then ${MUTATIONS.length} mutations ${JOBS} at a time`)
 let baselineDone = 0
 const stopBaselineTicker = ticking(() => baselineDone, SUITES.length)

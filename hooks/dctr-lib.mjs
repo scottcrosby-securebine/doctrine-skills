@@ -320,8 +320,8 @@ export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'mis
 
 /**
  * The mutation indices a gate run keeps under DCTR_SHARD `k[,k...]/n`: index i when i % n is one of the ks, in
- * order. Unset or empty keeps every index. Any other shape, a k at or past n, or a repeated k throws, since a
- * shard that kept the wrong subset would print the same verdict as the right one.
+ * order. Unset or empty keeps every index. Any other shape, a k at or past n, a repeated k, or a shard that keeps
+ * no index throws, since a shard that kept the wrong subset would print the same verdict as the right one.
  */
 export function shardOf(spec, length) {
   const all = Array.from({ length }, (_, i) => i)
@@ -329,7 +329,10 @@ export function shardOf(spec, length) {
   const m = /^(\d+(?:,\d+)*)\/([1-9]\d*)$/.exec(spec)
   const ks = m ? m[1].split(',').map(Number) : [], n = m ? Number(m[2]) : 0
   if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw new Error(`DCTR_SHARD must be k[,k...]/n, each k once and below n: ${JSON.stringify(spec)}`)
-  return all.filter((i) => ks.includes(i % n))
+  const kept = all.filter((i) => ks.includes(i % n))
+  // An empty shard would run no mutation and pass, the gate's shortfall check counting against the zero it was given.
+  if (kept.length === 0) throw new Error(`DCTR_SHARD ${JSON.stringify(spec)} selects none of ${length} mutations`)
+  return kept
 }
 
 /**

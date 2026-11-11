@@ -26,7 +26,7 @@ jobs:
           node-version: 22
 
       - name: bubblewrap for the pane selftest's namespace clauses
-        # The one install here. Without `bwrap --unshare-pid` the pane selftest skips its namespace
+        # The one install each job needs. Without `bwrap --unshare-pid` the pane selftest skips its namespace
         # clauses and the mutation gate fails on the repairs only they pin. The runner image
         # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
         # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
@@ -228,7 +228,7 @@ jobs:
           node-version: 22
 
       - name: bubblewrap for the pane selftest's namespace clauses
-        # The one install here. Without `bwrap --unshare-pid` the pane selftest skips its namespace
+        # The one install each job needs. Without `bwrap --unshare-pid` the pane selftest skips its namespace
         # clauses and the mutation gate fails on the repairs only they pin. The runner image
         # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
         # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
@@ -238,12 +238,13 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           bwrap --ro-bind / / --dev /dev --unshare-pid --die-with-parent --proc /proc sh -c 'readlink /proc/self/ns/pid'
 
-      - name: mutation gate over the hook selftests, shard ${{ matrix.shard }} of 6
+      - name: mutation gate over the hook selftests, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
         # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
         # check that answers whether the other checks pin anything.
         run: node hooks/dctr-mutations.mjs
         env:
-          DCTR_SHARD: ${{ matrix.shard }}/6
+          # n is the matrix's own size, so a shard added to or removed from the list above cannot drop indices.
+          DCTR_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           DCTR_DEBUG_LOG: ${{ runner.temp }}/clause-1d8.log
 
       - name: clause 1d8 timing under the R2-B2 mutation
