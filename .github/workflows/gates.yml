@@ -192,18 +192,6 @@ jobs:
         # The verdict over live captures from both hosts; the live doctor itself needs Codex, Claude Code and herdr.
         run: node hooks/dctr-doctor.selftest.mjs
 
-      - name: mutation gate over the hook selftests
-        # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
-        # check that answers whether the other checks pin anything.
-        run: node hooks/dctr-mutations.mjs
-        env:
-          DCTR_DEBUG_LOG: ${{ runner.temp }}/clause-1d8.log
-
-      - name: clause 1d8 timing under the R2-B2 mutation
-        # Ruling R1: what clause 1d8 read in the R2-B2 mutation's tree, printed even when the gate failed.
-        if: always()
-        run: grep -F 'the-watcher-never-asks' "$RUNNER_TEMP/clause-1d8.log" || echo "no line recorded"
-
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null
 
@@ -224,3 +212,42 @@ jobs:
         # Every fixture in round.tamper.json through round.codex.mjs, each seat a stand-in returning
         # the text its stub prompt states. Needs only node.
         run: node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs
+
+  mutations:
+    # The mutation gate, split by index across shards (DCTR_SHARD k/n in hooks/dctr-mutations.mjs): run whole in
+    # one job it outlasts GitHub's 6-hour job limit. Each shard runs every baseline suite and its own mutations.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: bubblewrap for the pane selftest's namespace clauses
+        # The one install here. Without `bwrap --unshare-pid` the pane selftest skips its namespace
+        # clauses and the mutation gate fails on the repairs only they pin. The runner image
+        # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
+        # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --ro-bind / / --dev /dev --unshare-pid --die-with-parent --proc /proc sh -c 'readlink /proc/self/ns/pid'
+
+      - name: mutation gate over the hook selftests, shard ${{ matrix.shard }} of 6
+        # Reverts each named repair in a copy of the tree and fails if no clause notices. This is the
+        # check that answers whether the other checks pin anything.
+        run: node hooks/dctr-mutations.mjs
+        env:
+          DCTR_SHARD: ${{ matrix.shard }}/6
+          DCTR_DEBUG_LOG: ${{ runner.temp }}/clause-1d8.log
+
+      - name: clause 1d8 timing under the R2-B2 mutation
+        # Ruling R1: what clause 1d8 read in the R2-B2 mutation's tree, printed even when the gate failed.
+        # Only the shard holding that mutation records a line; the others print "no line recorded".
+        if: always()
+        run: grep -F 'the-watcher-never-asks' "$RUNNER_TEMP/clause-1d8.log" || echo "no line recorded"

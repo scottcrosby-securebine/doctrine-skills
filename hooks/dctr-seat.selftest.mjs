@@ -18,7 +18,7 @@ import { spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, PLACEMENT_WAIT_MS } from './dctr-state.mjs'
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
@@ -131,6 +131,28 @@ const SEAT_TAB_ID = 'w4Z:t9'
 clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
   anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
   `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
+// DCTR_SHARD splits the mutation gate across CI jobs: the shards of one n must cover every index exactly once, and a
+// spec that is not that shape must throw rather than keep a subset nobody asked for.
+{
+  const N = 1417, seen = new Array(N).fill(0)
+  for (let k = 0; k < 6; k++) for (const i of shardOf(`${k}/6`, N)) seen[i] += 1
+  const joined = [...shardOf('0,1,2/4', N), ...shardOf('3/4', N)].sort((a, b) => a - b)
+  const whole = shardOf(undefined, N), empty = shardOf('', N)
+  clause('clause 1sh1 — the shards k/6 cover every mutation index exactly once, 0,1,2/4 and 3/4 together are the whole list, and an unset or empty DCTR_SHARD keeps every index in order',
+    seen.every((c) => c === 1) && joined.length === N && joined.every((v, i) => v === i) && whole.length === N && whole.every((v, i) => v === i) && empty.length === N && shardOf('2/6', N)[0] === 2,
+    `counts ${[...new Set(seen)]} joined ${joined.length} whole ${whole.length} empty ${empty.length}`)
+  const BAD = { 'n zero': '0/0', 'k equal to n': '3/3', 'a repeated k': '0,0/2', 'no slash': '2', 'a letter': 'a/2', 'two slashes': '0/2/3', 'a negative k': '-1/2', 'a fractional n': '0/1.5', 'an empty k': ',1/2', 'a space': '0 /2' }
+  const thrown = Object.entries(BAD).filter(([, s]) => { try { shardOf(s, N); return false } catch { return true } })
+  clause('clause 1sh2 — every malformed DCTR_SHARD throws: n zero, k equal to n, a repeated k, no slash, a letter, two slashes, a negative k, a fractional n, an empty k, a space',
+    thrown.length === Object.keys(BAD).length, `threw on ${thrown.map(([n]) => n).join(', ')}`)
+  // Proved without shardOf: each spec breaks the k[,k...]/n shape, or names a k at or past n, or repeats a k.
+  const proved = Object.values(BAD).filter((s) => {
+    const parts = s.split('/'), ks = (parts[0] ?? '').split(','), n = Number(parts[1])
+    return parts.length !== 2 || !/^[1-9]\d*$/.test(parts[1]) || ks.some((k) => !/^\d+$/.test(k) || Number(k) >= n) || new Set(ks).size !== ks.length
+  })
+  clause('clause 3sh — each malformed DCTR_SHARD fixture really breaks the shape, the range or uniqueness, proved without shardOf',
+    proved.length === Object.keys(BAD).length, `${proved.length} of ${Object.keys(BAD).length}`)
+}
 // e8-sessionend's pure seams. A running gate survives SessionEnd by moving, a moved marker takes a
 // name no other session's can take, and only an observed absence drops one.
 {

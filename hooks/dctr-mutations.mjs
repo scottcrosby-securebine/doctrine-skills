@@ -27,7 +27,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount, anchorVerdict, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict, shardOf, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
@@ -461,6 +461,11 @@ const MUTATIONS = [
   { name: 'the gate REFUSES a duplicated anchor rather than applying it', file: 'dctr-lib.mjs', clause: 'the gate applies an anchor that occurs exactly once',
     from: "export const anchorVerdict = (hits) => (hits === 1 ? 'apply' : hits === 0 ? 'missing' : 'ambiguous')",
     to: "export const anchorVerdict = (hits) => (hits === 0 ? 'missing' : 'apply')" },
+  // A CI shard that kept a subset nobody named prints the same verdict as the shard it should have been.
+  { name: 'a DCTR_SHARD naming a k at or past n keeps nothing instead of refusing', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
+    from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || new Set(ks).size !== ks.length) throw" },
+  { name: 'a DCTR_SHARD repeating a k is accepted', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
+    from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || ks.some((k) => k >= n)) throw" },
   // The progress line's whole job is naming the item that is holding the output back. Naming the
   // newest instead still prints a plausible line, with a small elapsed time, which reads as a gate
   // that keeps restarting its work — worse than the silence it replaced.
@@ -5139,6 +5144,13 @@ fs.mkdirSync(baseline)
 for (const f of FILES) { fs.mkdirSync(path.dirname(path.join(baseline, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(baseline, f)) }
 // The baseline pool is the FIRST silence, not the mutation loop: it runs every suite once, including
 // the ~19s one, and printed nothing at all until it was done.
+// DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
+// disjoint part; a malformed value throws here, before any suite runs. The baseline suites always all run.
+if (process.env.DCTR_SHARD) {
+  const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
+  console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
+  MUTATIONS.splice(0, MUTATIONS.length, ...keep)
+}
 console.log(`running ${SUITES.length} suites against the baseline, then ${MUTATIONS.length} mutations ${JOBS} at a time`)
 let baselineDone = 0
 const stopBaselineTicker = ticking(() => baselineDone, SUITES.length)
