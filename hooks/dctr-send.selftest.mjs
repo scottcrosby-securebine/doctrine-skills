@@ -26,7 +26,7 @@ const clause = (n, ok, detail) => { lastClause = n.split(' — ')[0]; console.lo
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-send-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
-const { RESUME_LINE, pausedLine, pauseReason, pauseCode, paneToken, laneOf, sessionWarned, transcriptEntries } = await import('./dctr-lib.mjs')
+const { RESUME_LINE, pausedLine, pauseReason, pauseCode, paneToken, laneOf, sessionWarned, transcriptEntries, mapPool } = await import('./dctr-lib.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 const { autoCycleDir, stateDir, restoreFile, paneClaimHeld, handoffLanded } = await import('./dctr-state.mjs')
 const SEND = path.join(import.meta.dirname, 'dctr-send.mjs')
@@ -638,7 +638,10 @@ const CLEARS = ['control', 'no git repository', 'the control, git stopping at a 
   'the control with its docs directory a committed link to a second repository', 'the control with its handoff and its memory file each reached through a chain of committed links',
   'the control with its tracked memory file marked skip-worktree and modified, the handoff committed and clean',
   'the control under a core.fsmonitor hook that reports nothing changed, nothing modified', 'the control under the repository\'s own core.checkStat=minimal and core.trustctime=false, nothing modified']
-const classRuns = await Promise.all([...classFxs, ['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx], [CLEARS[5], repoIgnoreFx], [CLEARS[6], fileLinkFx], [CLEARS[7], outLinkFx], [CLEARS[8], memOutFx], [CLEARS[9], docsLinkFx], [CLEARS[10], chainFx], [CLEARS[11], memSkipFx], [CLEARS[12], monitorFx], [CLEARS[13], statFx]].map(([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])))
+const wake2w = ([label, fx]) => sender(fx, ['wake', 'a'], { env: { PATH: fx.path, ...fx.env } }).then((r) => [label, fx, r])
+// The controls run after the defect fixtures and at most one per CPU this process may use: each must finish its git
+// calls inside the wake's fixed 10 s give-up, which every defect fixture's sender running at once leaves no room for on a small runner.
+const classRuns = [...await Promise.all(classFxs.map(wake2w)), ...await mapPool([['control', controlFx], [CLEARS[1], noRepoFx], [CLEARS[2], boundaryFx], [CLEARS[3], ceilingFx], [CLEARS[4], linkedFx], [CLEARS[5], repoIgnoreFx], [CLEARS[6], fileLinkFx], [CLEARS[7], outLinkFx], [CLEARS[8], memOutFx], [CLEARS[9], docsLinkFx], [CLEARS[10], chainFx], [CLEARS[11], memSkipFx], [CLEARS[12], monitorFx], [CLEARS[13], statFx]], os.availableParallelism(), wake2w)]
 // An existing memory file, a committed link to a file in the lane, whose real path cannot be read once its directory is
 // closed: landed while the target is clean and readable, and not landed once it is modified and its directory closed,
 // since the link alone then reads clean. Asked of handoffLanded itself, because the sender's kickoff read fails first.
