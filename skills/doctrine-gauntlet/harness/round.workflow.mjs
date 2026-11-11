@@ -174,11 +174,12 @@ function causeOf(f) {
   const list = m && (m[1] === 'inherited' ? INHERITED : STALE)
   return m && Number(m[2]) <= list.length ? { kind: m[1], ruling: list[Number(m[2]) - 1] } : null
 }
-// One recorded finding, from either reviewer; `where` is its axis, or `item N`.
-function fileRecorded(f, who, where) {
+// One recorded finding, from either reviewer; `where` is its axis, or `item N`. With `record` false
+// (a rejecting section critic) the cause is checked and nothing is recorded.
+function fileRecorded(f, who, where, record = true) {
   const c = causeOf(f)
   if (!c) malformed(`${who}: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${where}: ${f.finding} — its cause ${f.cause === undefined ? 'is missing' : `${JSON.stringify(f.cause)} is not "inherited N" or "stale N" for a position its prompt numbers`}`)
-  else {
+  else if (record) {
     citedRulings.add(c.ruling)
     recorded.push(`${who}, ${c.kind === 'inherited' ? 'inherited' : 'stale clause'} per its prompt (${f.cause}): ${where} — ${f.finding}`)
   }
@@ -311,6 +312,8 @@ const sections = await pipeline(sectionArgs, async (s) => {
     }
     rejections += 1
     counters.sectionRejections[s.name] = rejections
+    // A rejection is the section's repair loop, so its blocking findings stay notes; a bad cause is a defect in the report.
+    for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)
     // A rejection's reasons are its notes, every blocking finding under its axis, and every CANNOT JUDGE line with
     // its text, the one reason item 8 puts only in the roll call; a BLOCKING line's finding is already in blocking, or
     // in recorded when a ruling excuses it, which the builder must never be told to fix. The next builder, the retry

@@ -35,9 +35,10 @@
 //     orchestrator's; this reads the source texts, not any assembled prompt.
 //   - Rules the script enforces without either function: a schema the host rejects, an early
 //     return, a counter. Only `malformed(` and `block(` call sites are read.
-//   - Call sites it cannot see as text. It reads lines, strips a `//` comment that follows
-//     whitespace, and skips the two function declarations. A call written through another name, or
-//     a template string carrying ` //`, is misread.
+//   - Call sites it cannot see as text. It strips a `//` comment that follows whitespace on each
+//     line, reads the name then optional whitespace and line breaks then `(`, and skips the two
+//     function declarations. A call written through another name, through a block comment between
+//     the name and its paren, or a template string carrying ` //`, is misread.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -97,7 +98,7 @@ export const REGISTRY = [
   { stem: 'BLOCKING with no finding under it', seat: 'critic', anchor: 'a `BLOCKING` carrying no blocking or recorded finding' },
   { stem: 'CANNOT JUDGE with a finding under it', seat: 'critic', anchor: 'a `CANNOT JUDGE` beside a finding on that same axis' },
   { stem: 'block(`${who} roll call: ${axis} ${r.word}', seat: 'critic', anchor: 'it blocks exactly as an unmeasured floor item does' },
-  { stem: '${who}: a finding on ${f.axis} carries no text', seat: 'critic', anchor: 'A finding with empty text, in any list, is no finding and blocks' },
+  { stem: '${who}: a finding on ${f.axis} carries no text', seat: 'critic', anchor: 'A finding with empty text, in the blocking or recorded list, is no finding and blocks' },
   { stem: '${who} finding names no axis', seat: 'critic', anchor: 'or a finding naming an axis nobody dispatched' },
   { stem: 'block(`${who}: ${b.axis} — ${b.finding}`', seat: 'critic', anchor: 'A **`BLOCKING`** carries its finding below' },
   { stem: '${who} recorded finding names no axis', seat: 'critic', anchor: 'or that names an axis nobody dispatched' },
@@ -122,16 +123,19 @@ export const REGISTRY = [
   { stem: 'section deadlock', seat: 'excluded', reason: 'a counter firing: three rejections of one section, which no seat decides and no report carries' },
 ]
 
-/** Every `malformed(` and `block(` call in the runner, with the text from the call to the next call
- *  on its line or the line's end. Comments and the two declarations are skipped. */
+/** Every `malformed(` and `block(` call in the runner, whitespace and line breaks before the paren
+ *  included, at the line the name is on. Its text runs from the call to the next call or the end of
+ *  the line the paren is on, with the gap before the paren closed so a stem reads either form.
+ *  Comments and the two declarations are skipped. */
 export function callSites(src) {
-  const sites = []
-  src.split('\n').forEach((raw, n) => {
-    const line = raw.replace(/(^|\s)\/\/.*$/, '')
-    const calls = [...line.matchAll(/\b(malformed|block)\(/g)].filter((m) => !/function\s+$/.test(line.slice(0, m.index)))
-    calls.forEach((m, k) => sites.push({ line: n + 1, text: line.slice(m.index, k + 1 < calls.length ? calls[k + 1].index : undefined) }))
+  const code = src.split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
+  const calls = [...code.matchAll(/\b(malformed|block)\s*\(/g)].filter((m) => !/function\s+$/.test(code.slice(0, m.index)))
+  return calls.map((m, k) => {
+    const open = m.index + m[0].length
+    const eol = code.indexOf('\n', open)
+    const end = Math.min(eol < 0 ? code.length : eol, k + 1 < calls.length ? calls[k + 1].index : code.length)
+    return { line: code.slice(0, m.index).split('\n').length, text: `${m[1]}(${code.slice(open, end)}` }
   })
-  return sites
 }
 
 /** The paragraph a target names, or null when its heading or opening is gone. */

@@ -63,6 +63,18 @@ const NEW_BLOCK = "if (a.other) block('other: a work defect no row names', ['oth
 clause('clause 1c: and so is an unregistered block( call site',
   check({ ...repo, runner: `${repo.runner}\n${NEW_BLOCK}\n` }).some((x) => x.includes('no registry row') && x.includes('other: a work defect')))
 
+// 1j, 1k and 3f: the same unregistered call written with whitespace before its paren, on one line and
+// across a line break. JavaScript calls both; a scan that wants the name and the paren adjacent sees neither.
+const SPACED = "if (a.spaced) malformed ('spaced: a rule written with a space before its paren')"
+const SPLIT = "if (a.split) block\n  ('split: a rule whose paren opens the next line', ['split'])"
+const atLine = () => repo.runner.split('\n').length + 1   // the line the appended call starts on
+const spacedRun = check({ ...repo, runner: `${repo.runner}\n${SPACED}\n` })
+clause('clause 1j: an unregistered call with a space before its paren is reported, at the line it starts on',
+  spacedRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('spaced: a rule')), spacedRun.join(' | '))
+const splitRun = check({ ...repo, runner: `${repo.runner}\n${SPLIT}\n` })
+clause('clause 1k: and one whose paren opens the next line is reported, at the line the name is on',
+  splitRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('split: a rule')), splitRun.join(' | '))
+
 // 1d and 3d: each briefed row's anchor duplicated inside the target paragraph that holds it.
 const missedDup = []
 const unprovedDup = []
@@ -100,6 +112,13 @@ clause('clause 3b: the added call site really is a malformed( call, and no regis
   NEW_BLOCK.includes('block(') && !REGISTRY.some((r) => NEW_BLOCK.includes(r.stem)))
 clause('clause 3d: each anchor-duplicated copy really carries the anchor twice on the target line, one more time than the original',
   unprovedDup.length === 0, unprovedDup.join(' | '))
+// Each form is executed with stub functions, so what proves it calls is JavaScript, not the scan.
+const calledBy = (src) => { const got = []; new Function('a', 'malformed', 'block', src)({ spaced: 1, split: 1 }, (m) => got.push(m), (m) => got.push(m)); return got }
+clause('clause 3f: both forms really call their function, proved by running them, and no registry stem occurs in either',
+  calledBy(SPACED)[0] === 'spaced: a rule written with a space before its paren' &&
+  calledBy(SPLIT)[0] === 'split: a rule whose paren opens the next line' &&
+  !/malformed\(/.test(SPACED) && !/block\(/.test(SPLIT) && !REGISTRY.some((r) => SPACED.includes(r.stem) || SPLIT.includes(r.stem)),
+  JSON.stringify([calledBy(SPACED), calledBy(SPLIT)]))
 clause('clause 3e: the duplicated call line really carries the stem, so the copy has two sites for it',
   !!dupSite && count(`${repo.runner}\n${dupSite}\n`, briefed[0].stem) === count(repo.runner, briefed[0].stem) + 1)
 

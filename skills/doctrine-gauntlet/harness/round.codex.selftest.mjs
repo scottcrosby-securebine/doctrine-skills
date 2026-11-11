@@ -80,6 +80,7 @@ function misses(result, expect) {
   for (const [k, want] of Object.entries(expect)) {
     if (k === 'blocking_contains') { for (const s of want) if (!(result.blocking || []).some((l) => l.includes(s))) out.push(`blocking lacks "${s}"`) }
     else if (k === 'recorded_excludes') { for (const s of want) if ((result.recorded || []).some((l) => l.includes(s))) out.push(`recorded has "${s}"`) }
+    else if (k === 'blocking_excludes') { for (const s of want) if ((result.blocking || []).some((l) => l.includes(s))) out.push(`blocking has "${s}"`) }
     else if (k === 'recorded_contains') { for (const s of want) if (!(result.recorded || []).some((l) => l.includes(s))) out.push(`recorded lacks "${s}"`) }
     else leaf(k, want, result[k])
   }
@@ -442,6 +443,19 @@ async function until(script, args, label) {
   clause('1v the script taking any position a cause names fails both out-of-range fixtures', !!noRange && (await judge(noRange, 'cause-out-of-range-critic')).length > 0 && (await judge(noRange, 'cause-out-of-range-redteam')).length > 0, noRange ? 'a fixture still met its expect' : 'anchor not found exactly once')
   const byText = once1("causeKind(c) === 'stale')", 'match([c.finding], STALE))')
   clause('1w the script excusing a stale BLOCKING by its finding\'s text fails the valid critic cause fixture', !!byText && (await judge(byText, 'cause-valid-critic-clean')).length > 0, byText ? 'fixture still met its expect' : 'anchor not found exactly once')
+}
+
+// ---- A rejecting section critic's recorded causes are checked on the reject path ----
+{
+  const sec = (n) => JSON.parse(stubReply(FIXTURES[n].args.sections[0].criticPrompt))
+  const good = sec('section-rejection-cause-valid'), bad = sec('section-rejection-cause-bad')
+  const diff = good.recorded.map((r, i) => JSON.stringify(r) !== JSON.stringify(bad.recorded[i]) ? i : -1).filter((i) => i >= 0)
+  clause('3m the reject-path pair both reject, differ in one recorded finding\'s cause alone, and the bad one\'s cause is not of the form while the good one\'s is',
+    !good.accept && !bad.accept && good.recorded.length === bad.recorded.length && diff.length === 1 && JSON.stringify({ ...good.recorded[diff[0]], cause: 0 }) === JSON.stringify({ ...bad.recorded[diff[0]], cause: 0 })
+      && /^(inherited|stale) [1-9][0-9]*$/.test(good.recorded[diff[0]].cause) && !/^(inherited|stale) [1-9][0-9]*$/.test(bad.recorded[diff[0]].cause), 'not that case')
+  const RJ = 'for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)'
+  const noReject = SCRIPT.split(RJ).length === 2 ? SCRIPT.replace(RJ, '') : null
+  clause('1x the script without the reject-path cause check fails the bad-cause rejection fixture', !!noReject && (await judge(noReject, 'section-rejection-cause-bad')).length > 0, noReject ? 'fixture still met its expect' : 'anchor not found exactly once')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')
