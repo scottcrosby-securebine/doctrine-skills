@@ -474,6 +474,18 @@ const once1 = (anchor, to) => SCRIPT.split(anchor).length === 2 ? SCRIPT.replace
       && oneField(empty, 'finding') && empty.reject.recorded[0].finding === '', 'not that case')
   const reverted = once1(RJ, 'for (const r of verdict.recorded) fileRecorded(r, `section ${s.name} critic`, r.axis, false)')
   clause('1y the reject path reverted to the cause check alone fails both the undispatched-axis and the empty-text rejection fixtures', !!reverted && (await judge(reverted, OFF)).length > 0 && (await judge(reverted, EMPTY)).length > 0, reverted ? 'a fixture still met its expect' : 'anchor not found exactly once')
+
+  // A rejection whose valid causes cite rulings nothing else in the round cites, beside one ruling nothing cites.
+  const CITED = 'section-rejection-cited-ruling-used-clean', ca = FIXTURES[CITED].args, c = turns(CITED)
+  const others = [ca.criticPrompt, ca.redTeamPrompt].map((x) => JSON.parse(stubReply(x)))
+  const named = c.reject.recorded.map((r) => FORM.test(r.cause) && (r.cause.startsWith('stale') ? ca.stale : ca.inherited)[Number(r.cause.split(' ')[1]) - 1])
+  clause('3p the cited-ruling fixture rejects with well-formed recorded findings citing the first stale and first inherited rulings, then accepts cleanly, and no other seat files a recorded finding, so the second inherited ruling is cited by nothing',
+    stubReply(ca.sections[0].criticPrompt) === null && c.reject.accept === false && cleanAccept(CITED, c)
+      && c.reject.recorded.every((r) => axesOf(CITED).includes(r.axis) && r.finding.trim())
+      && JSON.stringify(named) === JSON.stringify([ca.stale[0], ca.inherited[0]]) && ca.inherited.length === 2
+      && others.every((o) => !o.recorded.length && !o.blocking.length), 'not that case')
+  const gated = once1('citedRulings.add(c.ruling)', 'if (record) citedRulings.add(c.ruling)')
+  clause('1z the script marking a ruling cited only when it records fails the cited-ruling rejection fixture', !!gated && (await judge(gated, CITED)).length > 0, gated ? 'fixture still met its expect' : 'anchor not found exactly once')
 }
 
 console.log(bad ? `${bad} clause(s) FAILED` : 'all clauses passed')

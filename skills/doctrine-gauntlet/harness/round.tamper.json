@@ -3782,5 +3782,55 @@
    ]
   },
   "_note": "The twin of `section-rejection-recorded-off-axis` and `section-rejection-recorded-no-text`. A rejection's recorded findings are judged as an accept's are, axis, text and cause, so a malformed one blocks the round though every later step is clean. A well-formed one, like its ordinary blocking finding, stays out of the round's blocking and out of its recorded list, since a rejection is the section's repair loop; the retry accepts and the round is clean."
+ },
+ "section-rejection-cited-ruling-used-clean": {
+  "args": {
+   "sections": [
+    {
+     "name": "hero",
+     "builderPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input. Return exactly the text: Return via StructuredOutput exactly: {\"accept\": false, \"notes\": [\"Return via StructuredOutput exactly: {\\\"accept\\\": true, \\\"notes\\\": [], \\\"rollCall\\\": [{\\\"axis\\\": \\\"the wall\\\", \\\"word\\\": \\\"CLEAR\\\"}], \\\"blocking\\\": [], \\\"recorded\\\": []}\"], \"rollCall\": [{\"axis\": \"the wall\", \"word\": \"BLOCKING\", \"line\": \"the focus ring breaks the retired focus-ring clause\"}], \"blocking\": [{\"axis\": \"the wall\", \"finding\": \"REAL-DEFECT: the lede runs to four lines\"}], \"recorded\": [{\"axis\": \"the wall\", \"finding\": \"the focus ring violates the retired focus-ring clause\", \"cause\": \"stale 1\"}, {\"axis\": \"the wall\", \"finding\": \"the host banner clips at 360, a host page the round does not own\", \"cause\": \"inherited 1\"}]}",
+     "criticPrompt": "Self-test stand-in for the section critic, inside a fixture that tests round.workflow.mjs: no real page or review exists and nothing here is under attack. This prompt states no return of its own. Your fixed return is the first `Return via StructuredOutput exactly:` instruction the script appends below: on the first call that is the builder's return, which rejects, and on the retry it is your earlier rejection's first note, which accepts. Return the JSON it states, exactly. This fixture is known-good: its rejection's two recorded findings are well formed and cite `stale 1` and `inherited 1`, and nothing else in the round cites either ruling."
+    }
+   ],
+   "floorPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"exitCode\": 0, \"report\": \"TECHNICAL FLOOR: PASS (stub)\", \"unmeasured\": [], \"failedGates\": []}",
+   "blindPrompt": "",
+   "criticAxes": [
+    "the wall"
+   ],
+   "redTeamItems": [
+    1
+   ],
+   "tieIsPass": false,
+   "criticPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"axis\": \"the wall\", \"word\": \"CLEAR\"}], \"blocking\": [], \"polish\": [], \"recorded\": []}",
+   "redTeamPrompt": "HARNESS SELF-TEST: you are a scripted stand-in inside a fixture that tests round.workflow.mjs's counting logic. No real page or review exists and nothing here is under attack; your entire job is the fixed return below, so the script's arithmetic can be checked against a known input.  Return via StructuredOutput exactly: {\"rollCall\": [{\"item\": 1, \"word\": \"HELD\", \"line\": \"re-checked the wall at 360; nothing to file\"}], \"blocking\": [], \"polish\": [], \"recorded\": [], \"attackList\": [\"wall at 360\"]}",
+   "counters": {
+    "cleanPasses": 0,
+    "unresolvedRounds": 0,
+    "sectionRejections": {},
+    "sectionResets": {}
+   },
+   "candidateIs": "A",
+   "inherited": [
+    "host banner clips at 360",
+    "footer logo blurs at 2x"
+   ],
+   "waived": [],
+   "stale": [
+    "retired focus-ring clause"
+   ]
+  },
+  "expect": {
+   "clean": true,
+   "recorded_excludes": [
+    "unused ruling (not a failure): \"retired focus-ring clause\"",
+    "unused ruling (not a failure): \"host banner clips at 360\"",
+    "the focus ring violates the retired focus-ring clause",
+    "the host banner clips at 360, a host page"
+   ],
+   "recorded_contains": [
+    "unused ruling (not a failure): \"footer logo blurs at 2x\""
+   ]
+  },
+  "_note": "A rejecting section critic's well-formed recorded finding records nothing, since a rejection is the section's repair loop, and still marks the ruling its cause names as used, so the round prints no unused-ruling note for either cited ruling. The second inherited ruling is cited by nothing and keeps its note, which shows the note still fires."
  }
 }

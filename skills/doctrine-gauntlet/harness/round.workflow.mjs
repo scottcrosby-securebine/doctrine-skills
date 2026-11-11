@@ -174,14 +174,14 @@ function causeOf(f) {
   const list = m && (m[1] === 'inherited' ? INHERITED : STALE)
   return m && Number(m[2]) <= list.length ? { kind: m[1], ruling: list[Number(m[2]) - 1] } : null
 }
-// One recorded finding, from either reviewer; `where` is its axis, or `item N`. With `record` false
-// (a rejecting section critic) the cause is checked and nothing is recorded.
+// One recorded finding, from either reviewer; `where` is its axis, or `item N`. A valid cause marks its
+// ruling cited either way; with `record` false (a rejecting section critic) nothing is recorded.
 function fileRecorded(f, who, where, record = true) {
   const c = causeOf(f)
   if (!c) malformed(`${who}: recorded finding names no inherited failure or marked-stale clause of this dispatch — ${where}: ${f.finding} — its cause ${f.cause === undefined ? 'is missing' : `${JSON.stringify(f.cause)} is not "inherited N" or "stale N" for a position its prompt numbers`}`)
-  else if (record) {
+  else {
     citedRulings.add(c.ruling)
-    recorded.push(`${who}, ${c.kind === 'inherited' ? 'inherited' : 'stale clause'} per its prompt (${f.cause}): ${where} — ${f.finding}`)
+    if (record) recorded.push(`${who}, ${c.kind === 'inherited' ? 'inherited' : 'stale clause'} per its prompt (${f.cause}): ${where} — ${f.finding}`)
   }
 }
 

@@ -86,6 +86,25 @@ const tightRun = check({ ...repo, runner: `${repo.runner}\n${TIGHT}\n` })
 clause('clause 1m: and so is one whose unspaced block comment spans a line break, at the line the name is on',
   tightRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('tight: a rule')), tightRun.join(' | '))
 
+// 1n, 1o, 1p, 2c and 3h: a block comment is whitespace to JavaScript, so one between a keyword and the
+// name still leaves a call. A scan that deletes the comment joins the two words and sees no call.
+const ELSE_JOINED = "if (!a.joined) {} else/* x */block('joined: a rule behind a comment after else', ['joined'])"
+const RETURN_JOINED = "(() => { return/* x */malformed('returned: a rule behind a comment after return') })()"
+const MULTI_JOINED = "if (!a.multi) {} else/* one,\n  two */block('multi: a rule behind a two-line comment after else', ['multi'])"
+const QUIET_JOINED = "if (!a.quiet) {} else/* x */xblock('quiet: a call to a name that only ends in block')"
+const elseRun = check({ ...repo, runner: `${repo.runner}\n${ELSE_JOINED}\n` })
+clause('clause 1n: an unregistered block( call after else and a one-line block comment is reported, at its line',
+  elseRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('joined: a rule')), elseRun.join(' | '))
+const returnRun = check({ ...repo, runner: `${repo.runner}\n${RETURN_JOINED}\n` })
+clause('clause 1o: and so is a malformed( call after return and a one-line block comment',
+  returnRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine()}:`) && x.includes('no registry row') && x.includes('returned: a rule')), returnRun.join(' | '))
+const multiRun = check({ ...repo, runner: `${repo.runner}\n${MULTI_JOINED}\n` })
+clause('clause 1p: and one after a comment spanning a line break, at the line the name is on, one below the else',
+  multiRun.some((x) => x.startsWith(`round.workflow.mjs:${atLine() + 1}:`) && x.includes('no registry row') && x.includes('multi: a rule')), multiRun.join(' | '))
+const quietRun = check({ ...repo, runner: `${repo.runner}\n${QUIET_JOINED}\n` })
+clause('clause 2c: a call to a name that only ends in block, behind the same comment, is no call site and stays quiet',
+  quietRun.length === 0, quietRun.join(' | '))
+
 // 1d and 3d: each briefed row's anchor duplicated inside the target paragraph that holds it.
 const missedDup = []
 const unprovedDup = []
@@ -124,7 +143,7 @@ clause('clause 3b: the added call site really is a malformed( call, and no regis
 clause('clause 3d: each anchor-duplicated copy really carries the anchor twice on the target line, one more time than the original',
   unprovedDup.length === 0, unprovedDup.join(' | '))
 // Each form is executed with stub functions, so what proves it calls is JavaScript, not the scan.
-const calledBy = (src) => { const got = []; new Function('a', 'malformed', 'block', src)({ spaced: 1, split: 1, commented: 1, tight: 1 }, (m) => got.push(m), (m) => got.push(m)); return got }
+const calledBy = (src) => { const got = []; new Function('a', 'malformed', 'block', src)({ spaced: 1, split: 1, commented: 1, tight: 1, joined: 1, multi: 1 }, (m) => got.push(m), (m) => got.push(m)); return got }
 clause('clause 3f: both forms really call their function, proved by running them, and no registry stem occurs in either',
   calledBy(SPACED)[0] === 'spaced: a rule written with a space before its paren' &&
   calledBy(SPLIT)[0] === 'split: a rule whose paren opens the next line' &&
@@ -135,6 +154,14 @@ clause('clause 3g: both block-comment forms really call their function, proved b
   calledBy(TIGHT)[0] === 'tight: a rule behind an unspaced block comment' &&
   !/malformed\s*\(/.test(COMMENTED) && !/block\s*\(/.test(TIGHT) && !REGISTRY.some((r) => COMMENTED.includes(r.stem) || TIGHT.includes(r.stem)),
   JSON.stringify([calledBy(COMMENTED), calledBy(TIGHT)]))
+clause('clause 3h: the joined forms really call their function, proved by running them, the quiet twin calls only its own name, and no registry stem occurs in any',
+  calledBy(ELSE_JOINED)[0] === 'joined: a rule behind a comment after else' &&
+  calledBy(RETURN_JOINED)[0] === 'returned: a rule behind a comment after return' &&
+  calledBy(MULTI_JOINED)[0] === 'multi: a rule behind a two-line comment after else' &&
+  MULTI_JOINED.split('\n')[1].includes('block(') && !MULTI_JOINED.split('\n')[0].includes('block(') &&
+  (() => { const got = []; new Function('a', 'block', 'xblock', QUIET_JOINED)({ quiet: 1 }, () => got.push('block'), () => got.push('xblock')); return got.join() === 'xblock' })() &&
+  ![ELSE_JOINED, RETURN_JOINED, MULTI_JOINED, QUIET_JOINED].some((t) => REGISTRY.some((r) => t.includes(r.stem))),
+  JSON.stringify([calledBy(ELSE_JOINED), calledBy(RETURN_JOINED), calledBy(MULTI_JOINED)]))
 clause('clause 3e: the duplicated call line really carries the stem, so the copy has two sites for it',
   !!dupSite && count(`${repo.runner}\n${dupSite}\n`, briefed[0].stem) === count(repo.runner, briefed[0].stem) + 1)
 

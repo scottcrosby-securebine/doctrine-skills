@@ -129,8 +129,9 @@ export const REGISTRY = [
  *  the line the paren is on, with the gap before the paren closed so a stem reads either form.
  *  Comments and the two declarations are skipped. */
 export function callSites(src) {
-  // A block comment becomes the line breaks it spanned, so line numbers hold.
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, '')).split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
+  // A block comment is whitespace to JavaScript: one on a single line becomes a space, so `else/* */block(`
+  // keeps two words, and one spanning lines becomes the line breaks it spanned, so line numbers hold.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, (c) => (c.includes('\n') ? c.replace(/[^\n]/g, '') : ' ')).split('\n').map((raw) => raw.replace(/(^|\s)\/\/.*$/, '')).join('\n')
   const calls = [...code.matchAll(/\b(malformed|block)\s*\(/g)].filter((m) => !/function\s+$/.test(code.slice(0, m.index)))
   return calls.map((m, k) => {
     const open = m.index + m[0].length
