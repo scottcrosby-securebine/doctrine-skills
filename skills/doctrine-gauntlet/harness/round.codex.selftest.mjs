@@ -406,18 +406,19 @@ async function until(script, args, label) {
 {
   const recs = (n) => { const A = FIXTURES[n].args; return [A.criticPrompt, A.redTeamPrompt].flatMap((p) => JSON.parse(stubReply(p)).recorded) }
   const listOf = (n, c) => { const m = /^(\w+) (\d+)$/.exec(c || ''); return m && FIXTURES[n].args[m[1]] }
-  const inRange = (n, c) => { const l = listOf(n, c); return !!l && Number(c.split(' ')[1]) >= 1 && Number(c.split(' ')[1]) <= l.length }
+  const FORM = /^(inherited|stale) [1-9][0-9]*$/   // the cause form, written here and not imported, since clause 3 must not call the code it proves
+  const inRange = (n, c) => { const l = listOf(n, c); const k = Number((c || '').split(' ')[1]); return !!l && k >= 1 && k <= l.length }
   const VALID = ['cause-valid-critic-clean', 'cause-valid-redteam-clean']
   clause('3i each valid cause fixture files only causes naming a position its list has, and no finding there quotes the ruling its cause names',
     VALID.every((n) => recs(n).length > 0 && recs(n).every((r) => inRange(n, r.cause) && !r.finding.includes(listOf(n, r.cause)[Number(r.cause.split(' ')[1]) - 1]))), 'a valid fixture carries a bad cause, or one its text could attribute')
   // name -> [twin, what is wrong with the one cause that differs]
   const BROKEN = {
     'cause-missing-critic': ['cause-valid-critic-clean', (n, c) => c === undefined],
-    'cause-malformed-critic': ['cause-valid-critic-clean', (n, c) => typeof c === 'string' && !/^(inherited|stale) [1-9][0-9]*$/.test(c)],
-    'cause-out-of-range-critic': ['cause-valid-critic-clean', (n, c) => /^(inherited|stale) [1-9][0-9]*$/.test(c) && !inRange(n, c)],
+    'cause-malformed-critic': ['cause-valid-critic-clean', (n, c) => typeof c === 'string' && !FORM.test(c)],
+    'cause-out-of-range-critic': ['cause-valid-critic-clean', (n, c) => FORM.test(c) && !inRange(n, c)],
     'cause-missing-redteam': ['cause-valid-redteam-clean', (n, c) => c === undefined],
-    'cause-malformed-redteam': ['cause-valid-redteam-clean', (n, c) => typeof c === 'string' && !/^(inherited|stale) [1-9][0-9]*$/.test(c)],
-    'cause-out-of-range-redteam': ['cause-valid-redteam-clean', (n, c) => /^(inherited|stale) [1-9][0-9]*$/.test(c) && !inRange(n, c)],
+    'cause-malformed-redteam': ['cause-valid-redteam-clean', (n, c) => typeof c === 'string' && !FORM.test(c)],
+    'cause-out-of-range-redteam': ['cause-valid-redteam-clean', (n, c) => FORM.test(c) && !inRange(n, c)],
   }
   const wrong = Object.entries(BROKEN).filter(([n, [twin, bad]]) => {
     const a = recs(n), b = recs(twin)

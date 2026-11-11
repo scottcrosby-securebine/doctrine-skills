@@ -168,6 +168,7 @@ const said = (f) => !!(f && (f.finding || '').trim())
 
 // A recorded finding is attributed by its cause, `inherited N` or `stale N`, N the 1-based position of
 // that failure or clause in the list the prompt numbers; never by its text, which a seat paraphrases.
+const causeKind = (c) => (causeOf(c) || {}).kind
 function causeOf(f) {
   const m = /^(inherited|stale) ([1-9][0-9]*)$/.exec(typeof f.cause === 'string' ? f.cause : '')
   const list = m && (m[1] === 'inherited' ? INHERITED : STALE)
@@ -241,7 +242,6 @@ function judgeCritic(ret, axes, who) {
     // findings instead: no blocking finding, and at least one recorded finding whose cause names a
     // marked-stale clause or an inherited failure, means the word is explained.
     const onlyRecorded = r.word === 'BLOCKING' && !ret.blocking.some((b) => b.axis === axis)
-    const causeKind = (c) => (causeOf(c) || {}).kind
     const staleExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && causeKind(c) === 'stale')
     const inheritedExplained = onlyRecorded && ret.recorded.some((c) => c.axis === axis && causeKind(c) === 'inherited')
     if (staleExplained) recorded.push(`${who} roll call, stale clause per its prompt: ${axis} BLOCKING`)
