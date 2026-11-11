@@ -67,17 +67,17 @@ export const REGISTRY = [
   // Orchestrator: the arguments it passes.
   { stem: '${label}: present but not an array', seat: 'orchestrator', anchor: 'A truthy non-array files a blocking finding' },
   { stem: 'round alarm: present but not a positive integer', seat: 'orchestrator', anchor: 'a value that is not a positive integer is a miscall' },
-  { stem: 'critic axes: none named', seat: 'orchestrator', anchor: null },
-  { stem: 'red team items: none named', seat: 'orchestrator', anchor: null },
+  { stem: 'critic axes: none named', seat: 'orchestrator', anchor: 'an empty `criticAxes` blocks too' },
+  { stem: 'red team items: none named', seat: 'orchestrator', anchor: 'an empty `redTeamItems` blocks' },
   { stem: 'sections: missing or not an array', seat: 'orchestrator', anchor: 'Omitting the key is a miscall, not a way to ask for that round, and it blocks' },
   { stem: "block('floor: not run", seat: 'orchestrator', anchor: '`\'\'` is not a skip — the round blocks on a floor nobody ran' },
   { stem: 'blind pass: candidateIs must be A or B', seat: 'orchestrator', anchor: '`\'A\'` or `\'B\'` — which neutral filename is the build' },
   // The floor and blind seats' returns, whose contract is the argument row the orchestrator writes their prompt from.
-  { stem: 'floor: returned an empty unmeasured entry', seat: 'orchestrator', anchor: null },
+  { stem: 'floor: returned an empty unmeasured entry', seat: 'orchestrator', anchor: 'an empty `unmeasured` entry' },
   { stem: 'floor: [UNMEASURED] ${u}', seat: 'orchestrator', anchor: 'an `[UNMEASURED]` item\'s text, a critic axis' },
   { stem: 'but the return\'s unmeasured list does not', seat: 'orchestrator', anchor: 'a tagged line there re-enters the cross-check' },
   { stem: 'native check failed: ${g}', seat: 'orchestrator', anchor: 'a failed gate, unmeasured item' },
-  { stem: 'floor: exit ${floor.exitCode} with no failed gate', seat: 'orchestrator', anchor: null },
+  { stem: 'floor: exit ${floor.exitCode} with no failed gate', seat: 'orchestrator', anchor: 'a nonzero exit with no failed gate and no unmeasured item named' },
   { stem: 'blind pass: candidate lost', seat: 'orchestrator', anchor: '`blind pass`, `red team item 3`' },
   // Shared by both reviewers.
   { stem: 'recorded finding names no inherited failure or marked-stale clause', seat: 'critic', anchor: 'whose cause is missing or numbers no inherited failure or marked-stale clause your prompt numbers' },
