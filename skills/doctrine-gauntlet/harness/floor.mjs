@@ -1043,57 +1043,99 @@ try {
 
   /* Visible focus: a padded 1:1 shot of every keyboard focus stop, so the critic
      judging the ring has a focused state to look at rather than an instruction to
-     go and make one. Tab and activeElement, never el.focus(): a programmatic
-     focus does not arm :focus-visible once the run has clicked anything.
+     go and make one. Tab and activeElement, never el.focus() on a control: a
+     programmatic focus does not arm :focus-visible once the run has clicked
+     anything.
      Best-effort the way --crop is: a failure becomes the JUDGE line's wording
      and never ends the floor, since JUDGE never gates. */
   const FOCUS_PAD = 16, FOCUS_CAP = 40
+  /* A Tab-triggered handler can wedge the renderer, and then a press or an
+     evaluate waits forever; every call the pass makes gets a deadline, so a
+     wedged page becomes the JUDGE line's failure wording and the floor returns. */
+  const within = (p, what, ms = 10_000) => {
+    let t
+    return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} did not return within ${ms / 1000}s`)), ms) })])
+      .finally(() => clearTimeout(t))
+  }
   const focusParts = []
   let focusShots = 0
   for (const theme of themes) {
     const shots = [], unshot = []
-    let why = null, ctx
+    let why = null, stayed = null, last = null, ctx
     try {
       ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 })
       await ctx.addInitScript(INSTRUMENT)
       const page = await ctx.newPage()
       await page.goto(url, { waitUntil: 'load' })
-      await applyTheme(page, theme)
-      await page.addStyleTag({ content: HIDE_OVERLAYS })
-      await SETTLE(page)
+      await within(applyTheme(page, theme), 'applying the theme')
+      /* Smooth scrolling lets the box be read before the scroll that focus starts
+         has landed, which shoots a misplaced strip and counts it as the stop. */
+      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; }` }), 'adding the overlay style')
+      await within(SETTLE(page), 'the settle scroll', 60_000)
       await page.waitForTimeout(1200)
+      /* An autofocused control, or a #fragment, moves the point sequential focus
+         starts from, and Tab would skip everything before it. A tabindex=-1 span
+         focused just before <body> puts that point at the top of the document: it
+         is out of the Tab order so it adds no stop, fixed and zero-size so it
+         changes no layout, and focusing it arms nothing a real control would. */
+      await within(page.evaluate(() => {
+        const s = document.createElement('span')
+        s.tabIndex = -1
+        s.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0'
+        document.documentElement.insertBefore(s, document.body)
+        s.focus({ preventScroll: true })
+        window.__focusStart = s
+      }), 'resetting the focus start')
       for (let n = 0; n < FOCUS_CAP; n++) {
-        await page.keyboard.press('Tab')
-        const stop = await page.evaluate(pad => {
+        await within(page.keyboard.press('Tab'), 'a Tab press')
+        const stop = await within(page.evaluate(pad => {
+          if (window.__focusStart) { window.__focusStart.remove(); window.__focusStart = null }
+          /* A closed root is not reachable through .shadowRoot, and without it two
+             stops inside one component read as the same host. */
           let a = document.activeElement
-          while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement
+          for (;;) {
+            const root = a && (a.shadowRoot || window.__closedRoots.find(r => r.host === a))
+            if (!root || !root.activeElement) break
+            a = root.activeElement
+          }
           if (!a || a === document.body || a === document.documentElement) return { done: true }
           const seen = window.__focusSeen || (window.__focusSeen = [])
-          if (seen.includes(a)) return { done: true }
+          /* The last stop again means focus did not move (a frame, or a widget that
+             keeps Tab); an earlier one means it came back round. */
+          if (seen.includes(a)) return { done: true, stayed: a === seen[seen.length - 1] }
           seen.push(a)
+          const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
           let r = a.getBoundingClientRect()
+          /* A padded box bigger than the viewport cannot fit in a viewport shot, so
+             it is clipped in page coordinates from a full-page shot instead. */
+          if (r.height + 2 * pad > innerHeight || r.width + 2 * pad > innerWidth) {
+            const de = document.documentElement
+            const x = Math.max(0, r.left + scrollX - pad), y = Math.max(0, r.top + scrollY - pad)
+            const width = Math.min(de.scrollWidth, r.right + scrollX + pad) - x, height = Math.min(de.scrollHeight, r.bottom + scrollY + pad) - y
+            return { name, full: true, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
+          }
           /* Keyboard focus scrolls only far enough to show the box, which leaves a
              ring drawn outside it past the viewport edge — the clipped-ring shot
              this pass exists to replace. */
           if (r.top - pad < 0 || r.left - pad < 0 || r.bottom + pad > innerHeight || r.right + pad > innerWidth) {
-            a.scrollIntoView({ block: 'center', inline: 'center' })
+            a.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
             r = a.getBoundingClientRect()
           }
           const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad)
           const width = Math.min(innerWidth, r.right + pad) - x, height = Math.min(innerHeight, r.bottom + pad) - y
-          const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
           return { name, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
-        }, FOCUS_PAD)
-        if (stop.done) break
+        }, FOCUS_PAD), 'reading the focused element')
+        if (stop.done) { if (stop.stayed) stayed = last; break }
+        last = stop.name
         if (!stop.clip) { unshot.push(stop.name); continue }
         const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
-        await page.screenshot({ path: file, clip: stop.clip, timeout: 5000 })
+        await page.screenshot({ path: file, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
         shots.push(file)
       }
     } catch (e) {
       why = String(e).split('\n')[0].slice(0, 120)
     } finally {
-      if (ctx) await ctx.close().catch(() => {})
+      if (ctx) await within(ctx.close(), 'closing the focus pass').catch(() => {})
     }
     focusShots += shots.length
     const capped = shots.length + unshot.length === FOCUS_CAP   // a press either ends the pass or adds one stop to a list
@@ -1103,6 +1145,7 @@ try {
     focusParts.push(why
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
       : capped ? `${shots.length ? shot : `no ${theme} focus shot was written`} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
+: stayed ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus stayed on ${stayed} when Tab was pressed again, so no stop after it was shot${offscreen}`
       : shots.length ? `${shot}${offscreen}`
       : unshot.length ? `no ${theme} focus shot was written${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
