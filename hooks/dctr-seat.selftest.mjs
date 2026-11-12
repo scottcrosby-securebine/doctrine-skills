@@ -18,7 +18,7 @@ import { spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, PLACEMENT_WAIT_MS } from './dctr-state.mjs'
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf, failLines, baselineVerdict,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
@@ -131,6 +131,22 @@ const SEAT_TAB_ID = 'w4Z:t9'
 clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
   anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
   `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
+// A red baseline names its clauses, and a suite red only under the pool's load is rerun alone before the gate stops.
+{
+  const RED = 'PASS  clause 1a — ok\nFAIL  clause 2w — the control typed nothing\n        {"typed":[]}\nPASS  clause 3a — ok\n  FAIL  clause 9 — indented\n        detail nine\n'
+  const lines = failLines(RED), quiet = failLines('PASS  clause 1a — ok\nfailed to FAIL nothing\n')
+  clause('clause 1bl1 — failLines returns each FAIL line with the detail line under it, indented ones included, and nothing for output without one',
+    lines.length === 4 && lines[0] === 'FAIL  clause 2w — the control typed nothing' && lines[1] === '{"typed":[]}' && lines[2] === 'FAIL  clause 9 — indented' && lines[3] === 'detail nine' && quiet.length === 0,
+    JSON.stringify({ lines, quiet }))
+  const ok = { code: 0, out: 'PASS  x\n' }, red = { code: 1, out: RED }, gone = { code: 'EAGAIN', out: '' }, silent = { code: 1, out: 'boom\n' }
+  const V = { green: baselineVerdict(ok), flaky: baselineVerdict(red, ok), red: baselineVerdict(red, red), never: baselineVerdict(gone, ok), silentAgain: baselineVerdict(silent, ok), noRerun: baselineVerdict(red) }
+  clause('clause 1bl2 — a baseline suite green in the pool is green; red in the pool and green alone is flaky; red twice, never run, or not rerun is red',
+    V.green === 'green' && V.flaky === 'flaky' && V.red === 'red' && V.never === 'red' && V.noRerun === 'red' && V.silentAgain === 'flaky', JSON.stringify(V))
+  // Proved without the helpers: the red fixture carries two FAIL lines, each followed by a detail line, and the never-run one has no numeric code.
+  const raw = RED.split('\n'), at = raw.flatMap((l, i) => (/^ *FAIL /.test(l) ? [i] : []))
+  clause('clause 3bl — the red fixture really holds two FAIL lines each with a detail line after it, and the never-run fixture really has no exit status',
+    at.length === 2 && at.every((i) => raw[i + 1] && !/^ *(PASS|FAIL) /.test(raw[i + 1])) && typeof gone.code !== 'number', JSON.stringify(at))
+}
 // DCTR_SHARD splits the mutation gate across CI jobs: the shards of one n must cover every index exactly once, and a
 // spec that is not that shape must throw rather than keep a subset nobody asked for.
 {

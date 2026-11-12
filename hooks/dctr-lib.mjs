@@ -358,6 +358,20 @@ export const suiteOutcome = ({ code, out }) =>
     : code === 0 ? 'clean'
       : /^ *FAIL /m.test(String(out ?? '')) ? 'noticed' : 'silent')
 
+/** Each FAIL line of a suite's output with the line under it, which is where a clause prints its detail, trimmed. */
+export const failLines = (out) => {
+  const lines = String(out ?? '').split('\n')
+  return lines.flatMap((l, i) => (/^ *FAIL /.test(l) ? [l.trim(), ...(lines[i + 1]?.trim() && !/^ *(PASS|FAIL) /.test(lines[i + 1]) ? [lines[i + 1].trim()] : [])] : []))
+}
+
+/**
+ * What the mutation gate does with one baseline suite: `green` when it passed in the pool; `flaky` when it ran and went
+ * red in the pool and then passed when rerun alone, so the pool's load and not the tree turned it red; `red` otherwise,
+ * a suite that never ran included, since a rerun of something that did not start says nothing about load.
+ */
+export const baselineVerdict = (first, again) =>
+  (first.code === 0 ? 'green' : suiteOutcome(first) !== 'error' && again?.code === 0 ? 'flaky' : 'red')
+
 export const TOKEN_TTL_MS = 3600000
 
 /** How often a long run reports where it is (user ruling, 2026-09-07: a long gate must show where it
