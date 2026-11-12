@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, pauseCode, EVENT_PAUSES, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -865,31 +865,7 @@ export function appendRecordLine(recordPath, line) {
 export function appendPaused(recordPath, reason, sessionId = null) {
   if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0)) return { written: false }
   appendRecordLine(recordPath, pausedLine(reason))
-  if (sessionId && EVENT_PAUSES.includes(pauseCode(reason))) {
-    const file = eventPausesFile(sessionId)
-    writeMarker(file, { record: path.resolve(recordPath), lines: [...readEventPauses(file, recordPath), recordLineCount(recordPath)] })
-  }
   return { written: true }
-}
-
-/** Where a session keeps the record lines of the R7, R8 and R9 pauses it wrote, so another session's step 3 can tell
- *  them from its own on a record they share (pausedAfterWarned). */
-export const eventPausesFile = (sessionId) => path.join(autoCycleDir(), `event-pauses-${sessionId}.json`)
-
-const readEventPauses = (file, recordPath) => {
-  try {
-    const f = JSON.parse(fs.readFileSync(file, 'utf8'))
-    return f.record === path.resolve(recordPath) && Array.isArray(f.lines) ? f.lines : []
-  } catch { return [] }
-}
-
-/** The record lines of the R7, R8 and R9 pauses every session but `sessionId` wrote to `recordPath`, as a Set. A file
- *  that cannot be read adds nothing, so its lines still count against this session. */
-export function foreignEventPauses(sessionId, recordPath) {
-  let names = []
-  try { names = fs.readdirSync(autoCycleDir()) } catch { return new Set() }
-  const own = path.basename(eventPausesFile(sessionId))
-  return new Set(names.filter((n) => n.startsWith('event-pauses-') && n !== own).flatMap((n) => readEventPauses(path.join(autoCycleDir(), n), recordPath)))
 }
 
 /** Publish the autocycle token only when its value differs from the one last published for this pane (LB2). A

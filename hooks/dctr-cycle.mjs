@@ -24,14 +24,14 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, inFlightIds, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, otherSessionWarned, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
   runRole, runRoot, limitLine,
   hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, stopHeldFile, paneClaimHeld,
-  appendPaused, foreignEventPauses, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded, processListing,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded, processListing,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
@@ -147,7 +147,7 @@ try {
       stopRepo,
       ...pausingStates(record.entries),
       warned,
-      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId, foreignEventPauses(sessionId, recordPath)),
+      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
       backgroundTasks: backgroundLive(payload.background_tasks),
       liveWork: live,
       sessionCrons: nonEmpty(payload.session_crons),
@@ -197,11 +197,12 @@ try {
     const kind = event === 'StopFailure' ? 'StopFailure' : payload.notification_type
     let lastStop = null
     try { lastStop = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')) } catch { /* no Stop yet in this session */ }
-    const reason = notifyDecision(kind, {
+    const other = otherSessionWarned(record.entries, sessionId, sessionStartLine(recordPath))
+    const reason = other ? null : notifyDecision(kind, {
       error: payload.error, claimHeld: paneId ? paneClaimHeld(paneId) : false, host, why: payload.dctr_why,
       liveWork: liveWork(sessionId, Array.isArray(lastStop?.inFlight) ? new Set(lastStop.inFlight) : null, payload.cwd), lastStop,
     })
-    log(`${kind} decided ${reason ? `pause: ${reason}` : 'nothing'}`)
+    log(`${kind} decided ${reason ? `pause: ${reason}` : other ? "nothing: another session's warning is outstanding on this record" : 'nothing'}`)
     if (reason) pause(reason)
   } else {
     log(`auto-cycle is not active (the stop file in ${stopRepo})`)
