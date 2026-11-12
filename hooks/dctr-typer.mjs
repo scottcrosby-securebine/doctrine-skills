@@ -154,7 +154,8 @@ try {
     }
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     // An abort writes nothing because its stop is already recorded: the user's own off line, a state line no longer
-    // Open or Blocked (with or without a stop file), or a paused line written since the claim. A confirm is success.
+    // Open or Blocked (with or without a stop file), or a paused line written since the claim other than an R7, R8 or
+    // R9 tagged with a session that is neither the one it clears nor the one its /clear started. A confirm is success.
     // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R18 for a failure (RN3-3, RB4-1).
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)

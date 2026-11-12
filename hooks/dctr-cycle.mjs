@@ -13,7 +13,8 @@
 // StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
 // UserPromptSubmit does nothing else.
 //
-// Every other event past the stand-down alerts each standing pause once (standingPauses, the one pause model): the
+// Every other event past the stand-down alerts each standing pause once (standingPauses, the one pause model), but an
+// R7, R8 or R9 tagged with another session, which that session's own hook alerts (ownPauses): the
 // toast and the pane's systemMessage, each tracked by its own marker; while auto-cycle is active it publishes the
 // `autocycle` sidebar token (autocycleToken). With DCTR_VIEW_REQUEST_DIR set it calls herdr zero times. It always
 // exits 0.

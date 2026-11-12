@@ -910,7 +910,8 @@ export function alertPaused({ recordPath, repo, phase, paneId, sessionId = null,
 /**
  * The pane message for each standing pause not yet shown (E8-R23), one line each: `doctrine auto-cycle paused:
  * <reason>. <what to do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of
- * them to run after the line is written. Its own marker, apart from the toast's: the detached typer raises the toast
+ * them to run after the line is written in a session that pause is not foreign to: an R7, R8 or R9 tagged with another
+ * session is skipped (ownPauses) and left for that session's own hook. Its own marker, apart from the toast's: the detached typer raises the toast
  * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
  * there is nothing to print.
  */

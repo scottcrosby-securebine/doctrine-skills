@@ -27,7 +27,9 @@
 //   deadline <role> <seat> line <n>  a seat past the deadline of its wave line, record line n, whose handle file did not
 //                                grow between two polls
 //   pause <role> line <n> <reason>  a record newly showing a standing pause, at record line n: an auto-cycle paused
-//                                line, a Blocked state, an unanswered question or an alarm with no ruling after it
+//                                line other than an R7, R8 or R9 tagged with a session other than the role's last
+//                                read one (every tagged one before any is read), a Blocked state, an unanswered
+//                                question or an alarm with no ruling after it
 //   ready <role> <session> <at>  a last assistant message, timestamped at, ending with the ready line for longer than
 //                                READY_LIMIT_MS, with no cycle line since the poll that first saw it
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
