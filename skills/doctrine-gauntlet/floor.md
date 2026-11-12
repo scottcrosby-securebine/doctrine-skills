@@ -23,7 +23,9 @@ scale across widths, and runs axe when it can resolve it. Two more checks **gate
 missing from this list: **uncaught page errors** — a `pageerror` fails that configuration,
 while console errors are printed as noise and never gate — and a **reduced-motion pass**,
 which fails on text reduced motion took away and on any CSS or WAAPI animation still
-running.
+running. A **focus pass** runs last, once per theme at 1440: it presses Tab from the top of
+the document, up to 40 times, and shoots each element that takes focus at 1:1 with 16px of
+padding, so a critic judging visible focus has a focused state to look at. It never gates.
 
 **Every DOM walk crosses shadow boundaries, and none of them crosses a frame.**
 `document.querySelectorAll` stops at a shadow root, so heading structure, target size,
@@ -50,7 +52,12 @@ configuration writes a full-page PNG to `<outPrefix>-<theme>-<width>.png` — so
 `<outPrefix>-dark-360.png`, `-768`, `-1440`, `-2560`, and the same four in `light` —
 plus `<outPrefix>-reducedmotion-<theme>.png` per theme, and
 `<outPrefix>-<theme>-<width>-crop.png` for every configuration where `--crop` matched
-something. The critic brief requires the orchestrator to hand over this round's renders
+something, and `<outPrefix>-focus-<theme>-NN.png` for each keyboard focus stop the focus pass
+shot, numbered from 01. The `[JUDGE]` visible-focus line names those files and their count,
+and says why the pass stopped: the body reached, a stop focus stayed on or came back to, the
+40-stop cap, a new document, or a failure. It also names any shot taken while an animation was
+still running after its 2s wait, or while an endless one ran on the focused element, so a
+part-drawn ring is not read as a missing one. The critic brief requires the orchestrator to hand over this round's renders
 at 360/768/1440/2560 in every theme the run claims: the four files per theme above
 are it — eight on a two-theme run, four under `--single-theme`.
 
@@ -424,7 +431,7 @@ honest instrument for late-arriving content is a longer look: one configuration 
 five seconds past settle. That is ~5s on a ~20s run, and eight of them would cost more
 than the rest of the run to say the same thing.
 
-**If you ever add a focus check, do not use `el.focus()`.** A programmatic focus does not
+**The focus pass never uses `el.focus()` on a control.** A programmatic focus does not
 arm `:focus-visible` once the run has clicked anything, and this harness clicks. A sibling
 battery reported all 32 tiles ringless on light — it had clicked the theme toggle to get
 there — while the identical dark pass passed and nothing was wrong with the page. Drive
