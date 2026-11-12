@@ -26,7 +26,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, otherSessionWarned, autocycleToken, pauseActionAt } = lib
+const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt, pausedLine } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -415,7 +415,9 @@ function run(f, more = {}, extraEnv = {}) {
   return { code: r.status, out: r.stdout, err: r.stderr, msg: j?.systemMessage || '' }
 }
 const calls = (f) => (fs.existsSync(f.shimLog) ? fs.readFileSync(f.shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
-const paused = (f) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => l.startsWith('- auto-cycle paused: '))
+const pausedRaw = (f) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => l.startsWith('- auto-cycle paused: '))
+// The paused lines as most clauses compare them, the writer's ` [session <id>]` tag dropped; 2b9 reads them raw.
+const paused = (f) => pausedRaw(f).map((l) => l.replace(/ \[session [^\s\]]+\]$/, ''))
 const launched = (r) => r.msg.includes(LAUNCH_MESSAGE)
 const reads = (f) => calls(f).filter((c) => c[1] === 'get').length
 const metas = (f) => calls(f).filter((c) => c[1] === 'report-metadata')
@@ -433,25 +435,29 @@ clause('clause 2a3 — all true, the message ending in the ready line wrapped in
   launched(codeReadyR) && paused(codeReady).length === 0, show(codeReady, codeReadyR))
 clause('clause 2b — all true with the handoff and memory file tracked and committed, and with the record in a second repo: launched (E8-D7)',
   launched(goodTR) && launched(goodSR), `${show(goodT, goodTR)} | ${show(goodS, goodSR)}`)
-// A second session in the same repo follows the same kickoff to the same record. While this session's warning is
-// outstanding, the second session's idle prompt, permission prompt and API error write no paused line, so this
-// session's Stop launches; this session's own permission prompt still pauses and holds it, and before any warning the
-// second session's idle prompt is written as before.
-const fe = fixture('foreign-event'), feLane = { session_id: 's-lane' }
-run(fe, { ...feLane, last_assistant_message: 'lane turn done' })
-run(fe, { ...feLane, hook_event_name: 'Notification', notification_type: 'idle_prompt' })
-run(fe, { ...feLane, hook_event_name: 'Notification', notification_type: 'permission_prompt' })
-run(fe, { ...feLane, hook_event_name: 'StopFailure', error: 'overloaded' })
+// A second session in the same repo follows the same kickoff to the same record. Its idle prompt, permission prompt
+// and API error are written tagged with its session, and none of them holds this session's cycle, names itself in
+// this session's pane token or shows in this session's pane message; this session's own permission prompt, written
+// after the other session's, is not refused by the dedup and holds it (EP1-B1, B5, EP2-B2 to B4).
+const LANE = { HERDR_PANE_ID: 'w9:plane' }, feLane = { session_id: 's-lane' }
+const lanePauses = (f) => {
+  run(f, { ...feLane, last_assistant_message: 'lane turn done' }, LANE)
+  run(f, { ...feLane, hook_event_name: 'Notification', notification_type: 'idle_prompt' }, LANE)
+  run(f, { ...feLane, hook_event_name: 'Notification', notification_type: 'permission_prompt' }, LANE)
+  run(f, { ...feLane, hook_event_name: 'StopFailure', error: 'overloaded' }, LANE)
+}
+const fe = fixture('foreign-event'); lanePauses(fe)
 const feR = run(fe)
-const oe = fixture('own-event')
-run(oe, { hook_event_name: 'Notification', notification_type: 'permission_prompt' })
+const feMine = metas(fe).filter((c) => c[2] === 'w9:p1').map((c) => c[6])
+const oe = fixture('own-after-foreign'); lanePauses(oe)
+const oePerm = run(oe, { hook_event_name: 'Notification', notification_type: 'permission_prompt' })
 const oeR = run(oe)
-const pw = fixture('foreign-before-warning', { warned: false })
-run(pw, { ...feLane, last_assistant_message: 'lane turn done' })
-run(pw, { ...feLane, hook_event_name: 'Notification', notification_type: 'idle_prompt' })
-clause('clause 2b9 — while this session\'s warning is outstanding another session\'s idle prompt, permission prompt and API error write no paused line and its Stop launches; its own permission prompt is written and holds it; before any warning the other session\'s idle prompt is written',
-  paused(fe).length === 0 && launched(feR) && paused(oe).length === 1 && !launched(oeR) && JSON.stringify(paused(pw)) === '["- auto-cycle paused: session idle, waiting for you"]',
-  `${show(fe, feR)} | ${show(oe, oeR)} | ${JSON.stringify(paused(pw))}`)
+clause('clause 2b9 — another session\'s idle prompt, permission prompt and API error are written tagged with it and do not hold this session\'s cycle, name themselves in its pane token or show in its pane message; its own permission prompt after them is written and holds it',
+  JSON.stringify(pausedRaw(fe)) === JSON.stringify(['- auto-cycle paused: session idle, waiting for you [session s-lane]', '- auto-cycle paused: waiting for your permission approval [session s-lane]', '- auto-cycle paused: Claude API error: overloaded [session s-lane]']) &&
+  launched(feR) && !feR.msg.includes('auto-cycle paused') && feMine.every((v) => !v.includes('paused')) &&
+  pausedRaw(oe).at(-1) === `- auto-cycle paused: waiting for your permission approval [session ${oe.session}]` && paused(oe).length === 4 &&
+  oePerm.msg.includes('waiting for your permission approval') && !launched(oeR),
+  `${show(fe, feR)} | mine ${JSON.stringify(feMine)} | ${show(oe, oeR)}`)
 // A git that stops at a filesystem boundary unless told to cross one, in a project whose .git the walk finds (SR5).
 const boundaryBin = path.join(tmp, 'boundary-bin'), realGitPath = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 write(path.join(boundaryBin, 'git'), `#!/bin/sh\n[ -n "$GIT_DISCOVERY_ACROSS_FILESYSTEM" ] || case " $* " in *" rev-parse "*) printf 'fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n' >&2; exit 128;; esac\nexec ${realGitPath} "$@"\n`)
@@ -829,14 +835,22 @@ clause('clause 1t — pauseActionAt: a question after the warned line asks for t
 clause('clause 1u — step 3 reads this session\'s own warned line: behind another session\'s later warned line a pause still holds it, and the later session is not held by it (E8-D7, DS-1)',
   pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sA') === true &&
   pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sB') === false, 'another session\'s warned line was read')
-const OW = (...ls) => rec(...ls)
-clause('clause 1u2 — otherSessionWarned: true when the latest warned, cycle or on line is another session\'s warned line; false for this session\'s own, after a cycle or on line, at or before a recorded session start, and with no anchor',
-  otherSessionWarned(OW('- auto-cycle: on cap 8 tier 60%', '- auto-cycle: warned sB 60%', R10P), 'sA') === true &&
-  otherSessionWarned(OW('- auto-cycle: warned sA 60%'), 'sA') === false &&
-  otherSessionWarned(OW('- auto-cycle: warned sB 60%', '- auto-cycle: cycle 1 tree aa'), 'sA') === false &&
-  otherSessionWarned(OW('- auto-cycle: warned sB 60%', '- auto-cycle: on cap 8 tier 60%'), 'sA') === false &&
-  otherSessionWarned(OW(R10P), 'sA') === false && otherSessionWarned(OW('- auto-cycle: warned sB 60%', R10P), 'sA', 1) === false &&
-  otherSessionWarned(OW('- auto-cycle: warned sB 60%', R10P), 'sA', 0) === true, 'wrong')
+const tg = (r, id) => `- auto-cycle paused: ${r}${id ? ` [session ${id}]` : ''}`
+const W_A = '- auto-cycle: warned sA 60%'
+clause('clause 1u2 — step 3, the dedup and the token skip an R7, R8 or R9 line tagged with another session, and only that: untagged or tagged with this session it counts, and another session\'s R10 counts',
+  pausedAfterWarned(rec(W_A, tg('waiting for your permission approval', 'sB')), 'sA') === false &&
+  pausedAfterWarned(rec(W_A, tg('session idle, waiting for you', 'sB')), 'sA') === false &&
+  pausedAfterWarned(rec(W_A, tg('Claude API error: overloaded', 'sB')), 'sA') === false &&
+  pausedAfterWarned(rec(W_A, tg('waiting for your permission approval')), 'sA') === true &&
+  pausedAfterWarned(rec(W_A, tg('waiting for your permission approval', 'sA')), 'sA') === true &&
+  pausedAfterWarned(rec(W_A, tg('could not cycle: handoff not written', 'sB')), 'sA') === true &&
+  pauseStands(rec(W_A, tg('waiting for your permission approval', 'sB')), 0, 'waiting for your permission approval', 0, 'sA') === false &&
+  pauseStands(rec(W_A, tg('waiting for your permission approval', 'sB')), 0, 'waiting for your permission approval', 0) === true &&
+  pauseStands(rec(W_A, tg('waiting for your permission approval', 'sB')), 0, 'session idle, waiting for you', 0, 'sA') === false &&
+  pauseStands(rec(W_A, tg('waiting for your permission approval', 'sA')), 0, 'waiting for your permission approval', 0, 'sA') === true &&
+  autocycleToken(rec('- auto-cycle: on cap 8 tier 60%', tg('waiting for your permission approval', 'sB')), 0, 'sA') === 'auto-cycle on·cycle 0 of 8' &&
+  autocycleToken(rec('- auto-cycle: on cap 8 tier 60%', tg('waiting for your permission approval', 'sB')), 0) === pausedToken('waiting for your permission approval') &&
+  pausedLine('session idle, waiting for you', 'sA') === tg('session idle, waiting for you', 'sA') && pausedLine('x') === tg('x'), 'wrong')
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
 const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')
@@ -1250,7 +1264,7 @@ const evCode = (r) => (r === 'waiting for your permission approval' ? 'R7' : r =
 const evRead = () => {
   const lines = fs.readFileSync(ev.record, 'utf8').replace(/\n$/, '').split('\n')
   const anchor = lines.reduce((a, l, i) => (/^- auto-cycle: (on|warned) /.test(l) ? i + 1 : a), 0)
-  const pauses = lines.map((l, i) => ({ l, line: i + 1 })).filter(({ l }) => l.startsWith('- auto-cycle paused: ')).map(({ l, line }) => ({ line, reason: l.slice(21), code: evCode(l.slice(21)) }))
+  const pauses = lines.map((l, i) => ({ l, line: i + 1 })).filter(({ l }) => l.startsWith('- auto-cycle paused: ')).map(({ l, line }) => { const t = / \[session ([^\s\]]+)\]$/.exec(l), reason = l.slice(21, t ? -t[0].length : undefined); return { line, reason, tag: t?.[1] ?? null, code: evCode(reason) } })
   const ruled = (p) => lines.some((l, i) => i + 1 > p.line && l.startsWith('- ruling: '))
   return { count: lines.length, pauses, standing: pauses.filter((p) => p.line > anchor && !(p.code === 'R3' && ruled(p))) }
 }
@@ -1273,6 +1287,7 @@ const walk = (seq, model) => {
       evCount++
       const after = evRead(), wrote = after.pauses.filter((p) => p.line > before.count)
       const standsSince = (code) => before.standing.some((p) => p.code === code && p.line > m.turnEnd)
+      for (const p of wrote) if (['R7', 'R8', 'R9'].includes(p.code) !== (p.tag === ev.session)) evNote('a', s, `wrote ${p.reason} tagged ${p.tag}`)
       if (name === 'P' || name === 'F') {
         const code = name === 'P' ? 'R7' : 'R9', want = !standsSince(code)
         if ((wrote.length === 1 && wrote[0].code === code) !== want || wrote.length > 1) evNote('a', s, `wrote ${JSON.stringify(wrote.map((p) => p.reason))}, expected ${want ? code : 'nothing'}`)

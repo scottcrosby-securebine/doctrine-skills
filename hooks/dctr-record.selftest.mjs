@@ -141,7 +141,7 @@ const EXPECTED = [
   { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: 'unknown' },
   { kind: 'auto-cycle', sub: 'cycle', n: 2, hash: '9f2c1ab' },
   { kind: 'auto-cycle', sub: 'ready' },
-  { kind: 'auto-cycle', sub: 'paused', reason: 'waiting on Scott' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'waiting on Scott', session: null },
   { kind: 'state', raw: '- State: Blocked. Q1 open', value: 'Blocked. Q1 open' },
   { kind: 'state', raw: '- State: Open', value: 'Open' },
   { kind: 'round', n: 4, time: T, revision: '4b241fd', blockers: 0, alarm: 1 },
@@ -149,7 +149,7 @@ const EXPECTED = [
   { kind: 'ruling', id: 'D7', time: T, text: 'append, never edit' },
   { kind: 'question-opened', id: 'Q3', time: T, text: 'which layout' },
   { kind: 'question-answered', id: 'Q3', time: T, text: 'both' },
-  { kind: 'auto-cycle', sub: 'paused', reason: 'cap reached' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'cap reached', session: null },
   { kind: 'auto-cycle', sub: 'on', cap: 10, tier: '120000' },
   { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: '60%' },
   { kind: 'auto-cycle', sub: 'cycle', n: 3, hash: '0f2c1ab' },
@@ -328,6 +328,17 @@ clause('clause 1v \u2014 a relay line is one entry of kind relay with its time, 
 const relayNear = parseRecord(RELAY_NEAR.join('\n')).entries
 clause('clause 1w \u2014 a relay line missing its ref or its to, or with a time that is not a form time, is not an entry (E15-D1)',
   relayNear.length === 0, JSON.stringify(relayNear))
+
+// A paused line a hook writes ends with its writer, ` [session <id>]`: the parser returns the reason without it and
+// the id as `session`. A line with no tag has no session; a bracket that is not that tag at the end stays reason text.
+const tagged = parseRecord(['- auto-cycle paused: session idle, waiting for you [session s-1]', '- auto-cycle paused: Claude API error: overloaded [session 1e90ba4f-0082]',
+  '- auto-cycle paused: waiting on Scott', '- auto-cycle paused: question: [session x] first?', '- `auto-cycle paused: waiting for your permission approval [session s-2]`'].join('\n')).entries
+clause('clause 1t2 — a paused line\'s writer tag: the reason without it and the id as session; no tag, no session; a bracket elsewhere stays reason text',
+  tagged.length === 5 && tagged[0].reason === 'session idle, waiting for you' && tagged[0].session === 's-1' &&
+  tagged[1].reason === 'Claude API error: overloaded' && tagged[1].session === '1e90ba4f-0082' &&
+  tagged[2].reason === 'waiting on Scott' && tagged[2].session === null &&
+  tagged[3].reason === 'question: [session x] first?' && tagged[3].session === null &&
+  tagged[4].reason === 'waiting for your permission approval' && tagged[4].session === 's-2', JSON.stringify(tagged))
 
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 

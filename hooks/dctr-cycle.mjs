@@ -24,7 +24,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, inFlightIds, treeExcludes,
-  cycleDecision, cycleProgress, notifyDecision, otherSessionWarned, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
+  cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
   runRole, runRoot, limitLine,
   hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY,
 } from './dctr-lib.mjs'
@@ -197,12 +197,11 @@ try {
     const kind = event === 'StopFailure' ? 'StopFailure' : payload.notification_type
     let lastStop = null
     try { lastStop = JSON.parse(fs.readFileSync(stopFactsFile(sessionId), 'utf8')) } catch { /* no Stop yet in this session */ }
-    const other = otherSessionWarned(record.entries, sessionId, sessionStartLine(recordPath))
-    const reason = other ? null : notifyDecision(kind, {
+    const reason = notifyDecision(kind, {
       error: payload.error, claimHeld: paneId ? paneClaimHeld(paneId) : false, host, why: payload.dctr_why,
       liveWork: liveWork(sessionId, Array.isArray(lastStop?.inFlight) ? new Set(lastStop.inFlight) : null, payload.cwd), lastStop,
     })
-    log(`${kind} decided ${reason ? `pause: ${reason}` : other ? "nothing: another session's warning is outstanding on this record" : 'nothing'}`)
+    log(`${kind} decided ${reason ? `pause: ${reason}` : 'nothing'}`)
     if (reason) pause(reason)
   } else {
     log(`auto-cycle is not active (the stop file in ${stopRepo})`)
@@ -212,7 +211,7 @@ try {
   const shown = pauseMessageOnce(recordPath)
   if (shown) messages.push(shown)
   // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
-  if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath)), log)
+  if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), sessionId), log)
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)
 } catch (e) {

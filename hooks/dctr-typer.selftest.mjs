@@ -18,7 +18,7 @@ const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-typer-'))
 process.env.TMPDIR = tmp
-const { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, RESUME_LINE, R17_WHY } = await import('./dctr-lib.mjs')
+const { typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, RESUME_LINE, R17_WHY, pausedSinceClaim } = await import('./dctr-lib.mjs')
 const { restoreFile, claimFile, reserveMarker, autoCycleDir, paneClaimHeld } = await import('./dctr-state.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 
@@ -26,6 +26,18 @@ const { parseRecord } = await import('./dctr-record.mjs')
 
 const T = { poll: 20, idle: 150, restore: 400, session: 400, firstTurn: 300 }
 const idle = { status: 'idle', focused: false, session: 'old' }
+// The typer's own half of the claim check: a paused line after the claim's key line stops it, except an R7, R8 or R9
+// tagged with a session that is neither the session it clears nor the one its /clear started (EP2-B3).
+const pr = (...ls) => parseRecord(['- auto-cycle: warned old 60%', ...ls].join('\n')).entries
+clause('clause 1a2 — pausedSinceClaim: an untagged pause, the old or new session\'s event pause, or another session\'s R10 after the key line stops the typer; another session\'s idle, permission or API-error pause does not; a line at or before the key does not',
+  pausedSinceClaim(pr('- auto-cycle paused: waiting for your permission approval'), 1, ['old', 'new']) === true &&
+  pausedSinceClaim(pr('- auto-cycle paused: waiting for your permission approval [session old]'), 1, ['old', 'new']) === true &&
+  pausedSinceClaim(pr('- auto-cycle paused: session idle, waiting for you [session new]'), 1, ['old', 'new']) === true &&
+  pausedSinceClaim(pr('- auto-cycle paused: could not cycle: handoff not written [session lane]'), 1, ['old', 'new']) === true &&
+  pausedSinceClaim(pr('- auto-cycle paused: session idle, waiting for you [session lane]'), 1, ['old', 'new']) === false &&
+  pausedSinceClaim(pr('- auto-cycle paused: waiting for your permission approval [session lane]'), 1, ['old']) === false &&
+  pausedSinceClaim(pr('- auto-cycle paused: Claude API error: overloaded [session lane]'), 1, ['old']) === false &&
+  pausedSinceClaim(pr('- auto-cycle paused: waiting for your permission approval'), 2, ['old']) === false, 'wrong')
 const base = { stage: 'clear', active: true, pausedSinceClaim: false, pane: idle, oldSession: 'old', grew: false, restore: null, waited: 0, notIdle: 0, sessionWait: 0, resumes: 0, firstTurn: false, times: T }
 const ts = (o) => typerStep({ ...base, ...o })
 const NEW = { session: 'new', transcript: '/n.jsonl' }
@@ -412,6 +424,11 @@ clause('clause 2g — focused, then unfocused: it waits, then sends /clear once 
 const offWhile = typerCase('off-while-focused', { focusedGets: 100000 }, { pre: (f) => setShim(f, () => ({ appendAt: { n: 3, file: f.record, line: '- auto-cycle: off' } })) })
 clause('clause 2h — the record switched off while the pane is focused: nothing sent, no paused line', sends(offWhile) === '0,0' &&
   offWhile.paused.length === 0 && offWhile.cycled.length === 0 && offWhile.code === 0, detail(offWhile))
+// Another session's idle prompt written while the typer waits on focus does not stop it; the same line untagged does.
+const laneIdle = typerCase('foreign-idle-while-focused', { focusedGets: 3 }, { pre: (f) => setShim(f, () => ({ appendAt: { n: 2, file: f.record, line: '- auto-cycle paused: session idle, waiting for you [session s-lane]' } })) })
+const anyIdle = typerCase('untagged-idle-while-focused', { focusedGets: 3 }, { pre: (f) => setShim(f, () => ({ appendAt: { n: 2, file: f.record, line: '- auto-cycle paused: session idle, waiting for you' } })) })
+clause('clause 2h2 — another session\'s idle pause written while the pane is focused: /clear once and resume once; the same pause untagged: nothing sent (EP2-B3)',
+  sends(laneIdle) === '1,1' && sends(anyIdle) === '0,0', `${detail(laneIdle)} | ${detail(anyIdle)}`)
 const sys = typerCase('system-entries', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'system', subtype: 'stop_hook_summary' }, { type: 'system', subtype: 'turn_duration' })) })
 clause('clause 2i — stop_hook_summary and turn_duration entries after the Stop do not count: /clear once, resume once', sends(sys) === '1,1', detail(sys))
 // Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear, and the

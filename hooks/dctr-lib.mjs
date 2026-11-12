@@ -945,7 +945,8 @@ const CODEX_ACTIONS = [
   { match: /^could not cycle: this pane now runs a different Codex session$/, action: 'check the pane, then /clear and type resume by hand' },
 ]
 const CODEX_R9 = /^Codex API error: /
-export const pausedLine = (reason) => `- auto-cycle paused: ${reason}`
+/** The paused line; a hook passes the session the pause is about, written as ` [session <id>]` after the reason. */
+export const pausedLine = (reason, session = null) => `- auto-cycle paused: ${reason}${session ? ` [session ${session}]` : ''}`
 /** The pane message and the toast body for a paused line (E8-R23): the reason, then what to do. */
 export const pauseMessage = (reason, action = pauseAction(reason)) => `doctrine auto-cycle paused: ${reason}. ${action}`
 export const pausedToken = (reason) => `auto-cycle paused·${String(reason).slice(0, TOKEN_REASON_MAX)}`
@@ -996,7 +997,7 @@ const latestMark = (entries, before = Infinity) =>
  * them itself. With no anchor at all, the latest auto-cycle line when it is an unresolved paused line. A ready line after a pause hides
  * nothing. The dedup (pauseStands), the token (autocycleToken, paused while any stands, naming the last) and the
  * alerts (each line once) read this one set; step 3 (pausedAfterWarned) refuses on every one of them after this
- * session's warned line.
+ * session's warned line but an R7, R8 or R9 tagged with another session, which it, the dedup and the pane token skip.
  */
 export function standingPauses(entries, startLine = 0) {
   const es = entries || []
@@ -1007,29 +1008,27 @@ export function standingPauses(entries, startLine = 0) {
 }
 
 /** The event pauses (E8-D18): a permission prompt, an idle stop and an API error, each answered by the session going on. */
-const EVENT_PAUSES = ['R7', 'R8', 'R9']
+export const EVENT_PAUSES = ['R7', 'R8', 'R9']
+
+/** Whether paused line `p` is an R7, R8 or R9 about a session not in `sessions`: a permission prompt, an idle stop or
+ *  an API error is about the session that raised it alone, so on a record two sessions share it never holds the
+ *  other's Stop or typer, refuses the other's own pause in the dedup, or names itself in the other's pane token.
+ *  An untagged line is never foreign. */
+const foreignEvent = (p, sessions) => Boolean(p.session) && EVENT_PAUSES.includes(pauseCode(p.reason)) && !sessions.includes(p.session)
+const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !foreignEvent(p, [sessionId])) : ps)
 
 /** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
  *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for
  *  that reason; any other pause that differs from every standing one is written. `turnEnd` is the record's line count
  *  at this session's latest turn end (a Stop, a StopFailure or the next submitted prompt, E8-R31), 0 when none is
  *  known: an R7, R8 or R9 line at or before it was answered by the turn that ended there, so it counts for neither
- *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Every other
- *  pause counts whatever the Stop, and step 3, the token and the alerts read standingPauses unchanged. */
-export const pauseStands = (entries, startLine, reason, turnEnd = 0) => {
-  const standing = standingPauses(entries, startLine).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))
+ *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Given `sessionId`, an R7, R8 or R9
+ *  tagged with another session counts for neither rule either (foreignEvent). Every other
+ *  pause counts whatever the Stop. The alerts read standingPauses unchanged; step 3 and the pane token skip the same
+ *  foreign lines. */
+export const pauseStands = (entries, startLine, reason, turnEnd = 0, sessionId = null) => {
+  const standing = ownPauses(standingPauses(entries, startLine), sessionId).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))
   return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
-}
-
-/** Whether another session's warning is outstanding on this record: its latest warned, cycle or on line is a warned
- *  line naming a session other than `sessionId`, after `startLine`, the record's line count at the session start the
- *  restore hook recorded (0 when none was). That session is handing off, and every Stop of it is held by any paused
- *  line written after its warned line (pausedAfterWarned), so a Notification or StopFailure of a second session
- *  following the same kickoff, which is about that second session alone, writes none. A /clear ends the warning as
- *  a cycle line does. */
-export const otherSessionWarned = (entries, sessionId, startLine = 0) => {
-  const m = latestMark(entries)
-  return m?.sub === 'warned' && m.session !== sessionId && m.line > startLine
 }
 
 /** This session's latest warned line, or null: B2 step 2's warning and step 3's anchor both read it. */
@@ -1041,8 +1040,13 @@ export const sessionWarned = (entries, sessionId) =>
  *  Every pause standingPauses returns after that warned line is one of these. */
 export function pausedAfterWarned(entries, sessionId) {
   const mine = sessionWarned(entries, sessionId)
-  return Boolean(mine) && unresolvedPausesAfter(entries, mine.line).length > 0
+  return Boolean(mine) && ownPauses(unresolvedPausesAfter(entries, mine.line), sessionId).length > 0
 }
+
+/** The typer's claim check (RB8-1): a paused line after the claim's key line, other than an R7, R8 or R9 about a
+ *  session outside `sessions` (the session it clears and, once known, the one its /clear started). */
+export const pausedSinceClaim = (entries, keyLine, sessions) =>
+  (entries || []).some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > keyLine && !foreignEvent(e, sessions))
 
 /** The action for paused line `p` of `entries` (RB5-1). The D2 table's for a reason it knows. The skills' question
  *  never resolves, so where the latest anchor before it is a warned line of the session still running (no session
@@ -1059,8 +1063,8 @@ export function pauseActionAt(p, entries, startLine = 0) {
 
 /** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, else the latest cycle line's
  *  count (0 with none) of the last on line's cap. */
-export function autocycleToken(entries, startLine = 0) {
-  const es = entries || [], standing = standingPauses(es, startLine)
+export function autocycleToken(entries, startLine = 0, sessionId = null) {
+  const es = entries || [], standing = ownPauses(standingPauses(es, startLine), sessionId)
   if (standing.length) return pausedToken(standing.at(-1).reason)
   return onToken(es.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, lastOnOffEntry(es)?.cap ?? 10)
 }

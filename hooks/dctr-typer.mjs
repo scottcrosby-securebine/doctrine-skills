@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   typerStep, typedAfter, userTyped, transcriptEntries, TYPER_TIMES, READY_STATUSES, RESUME_LINE, autoCycleActive, stopFileRepo, repoOf, pauseReason, R17_WHY,
-  CODEX_RESUME_LINE, composerIdle, codexAborted,
+  CODEX_RESUME_LINE, composerIdle, codexAborted, pausedSinceClaim as pausedSinceClaimOf,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -118,7 +118,7 @@ try {
     const active = autoCycleActive(rec.entries, false)
     // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
     // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
-    const pausedSinceClaim = rec.entries.some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > a.keyLine)
+    const pausedSinceClaim = pausedSinceClaimOf(rec.entries, a.keyLine, [a.session, restore?.session].filter(Boolean))
     // Claude Code writes the restore file before the resume is typed; Codex only once it is sent (its SessionStart
     // fires at the new chat's first prompt), so on Codex it is read while confirming.
     if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }

@@ -157,6 +157,8 @@ const work = () => {
   return { pid: c.pid, end: () => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) r(); else { c.on('exit', r); c.kill() } }) }
 }
 const recLines = (f, re) => fs.readFileSync(f.record, 'utf8').split('\n').filter((l) => re.test(l))
+// A hook's R7, R8 and R9 lines end with their writer's ` [session <id>]`; most clauses compare them without it.
+const untag = (ls) => ls.map((l) => l.replace(/ \[session [^\s\]]+\]$/, ''))
 const calls = (f) => (fs.existsSync(f.shimLog) ? fs.readFileSync(f.shimLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
 const shim = (f, st) => write(f.shimState, JSON.stringify(st))
 /** A CONDITION, not a duration: until `pred` holds, at most 30 s, so a loaded host only slows the clause. */
@@ -259,7 +261,7 @@ const pr = project('perm')
 const prT = rollout(pr, 'k1', F.TUI_TURN)
 const pr1 = hook('dctr-cycle.mjs', pr, as(F.PERMISSION, pr, 'k1', prT))
 clause('clause 1c — a Codex PermissionRequest stands for Notification permission_prompt: the paused line, a herdr notification with the reason and the autocycle token, and no decision printed that could answer the prompt (E8-D18, E8-D26)',
-  pr1.code === 0 && JSON.stringify(recLines(pr, /^- auto-cycle paused: /)) === '["- auto-cycle paused: waiting for your permission approval"]' &&
+  pr1.code === 0 && recLines(pr, /^- auto-cycle paused: /)[0]?.endsWith(' [session k1]') && JSON.stringify(untag(recLines(pr, /^- auto-cycle paused: /))) === '["- auto-cycle paused: waiting for your permission approval"]' &&
   calls(pr).some((c) => c[0] === 'notification' && c.includes('--body') && String(c[c.indexOf('--body') + 1]).startsWith('waiting for your permission approval')) &&
   calls(pr).some((c) => c[1] === 'report-metadata' && c.includes('autocycle=auto-cycle paused·waiting for your permission approval')) && !/"decision"|permissionDecision/.test(pr1.out),
   `${pr1.out} ${pr1.err} ${JSON.stringify(recLines(pr, /paused/))} ${JSON.stringify(calls(pr))}`)
@@ -273,7 +275,7 @@ clause('clause 1c2 — a Codex PermissionRequest with auto-cycle off does nothin
 const sf = project('stopfail')
 const sf1 = hook('dctr-cycle.mjs', sf, as(F.STOP_MAIN, sf, 'e1', rollout(sf, 'e1', F.API_ERROR), { hook_event_name: 'StopFailure', error: 'internal_server_error', dctr_watch: true }))
 clause('clause 1c3 — the StopFailure the watcher hands the hook for a Codex API error writes the paused line naming Codex (E8-D18, E10 table)',
-  JSON.stringify(recLines(sf, /^- auto-cycle paused: /)) === '["- auto-cycle paused: Codex API error: internal_server_error"]', `${sf1.out} ${sf1.err}`)
+  JSON.stringify(untag(recLines(sf, /^- auto-cycle paused: /))) === '["- auto-cycle paused: Codex API error: internal_server_error"]', `${sf1.out} ${sf1.err}`)
 
 // The Stop's background half (E8-D7 through the table): every other precondition true, a background terminal running.
 const stub = path.join(tmp, 'stub.mjs')
@@ -398,7 +400,7 @@ const we = project('watch-err')
 const weT = rollout(we, 'x1', [F.TUI_TURN, F.API_ERROR])
 await watcher(we, 'x1', weT, Buffer.byteLength(jl(F.TUI_TURN)))
 clause('clause 1d — the watcher, on a turn a provider 500 ended with no Stop, hands the hook a StopFailure: the paused line names the Codex API error and herdr raises its notification (E8-D18, D26 through the table)',
-  JSON.stringify(recLines(we, /^- auto-cycle paused: /)) === '["- auto-cycle paused: Codex API error: internal_server_error"]' &&
+  JSON.stringify(untag(recLines(we, /^- auto-cycle paused: /))) === '["- auto-cycle paused: Codex API error: internal_server_error"]' &&
   calls(we).some((c) => c[0] === 'notification' && String(c[c.indexOf('--body') + 1]).startsWith('Codex API error: internal_server_error')),
   `${JSON.stringify(recLines(we, /paused/))} ${JSON.stringify(calls(we))}`)
 const wi = project('watch-idle')
@@ -407,7 +409,7 @@ shim(wi, { session: 'y1', status: 'done' })
 hook('dctr-cycle.mjs', wi, as(F.STOP_MAIN, wi, 'y1', wiT, { last_assistant_message: 'alpha' }))
 await watcher(wi, 'y1', wiT, Buffer.byteLength(jl(F.TUI_TURN.slice(0, 2))))
 clause('clause 1d2 — the watcher, on a turn ended with a prose answer and no ready line while herdr reads done, hands the hook an idle_prompt past the grace: the idle paused line (E8-D18 through the table)',
-  JSON.stringify(recLines(wi, /^- auto-cycle paused: /)) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify(recLines(wi, /paused/)))
+  JSON.stringify(untag(recLines(wi, /^- auto-cycle paused: /))) === '["- auto-cycle paused: session idle, waiting for you"]', JSON.stringify(recLines(wi, /paused/)))
 // A session whose Stop reaches the live-work step (warned, its latch, herdr naming it): the real Stop runs first, as
 // Codex runs it before writing the turn's task_complete, and persists that it held.
 function heldProject(name, id) {
@@ -567,7 +569,7 @@ const wslFrom = Buffer.byteLength(jl(F.PRIOR_TURN_0160, F.STALLED_TURN.slice(0, 
 await watcher(wsl, 's1', wslT, wslFrom, { DCTR_WATCH_TIMES: STALL_WT })
 const wslNotes = calls(wsl).filter((c) => c[0] === 'notification')
 clause('clause 1d17 — the watcher, on an unfinished turn whose rollout has not grown past the stall time, hands the hook a StopFailure: the paused line names the stall, written once and alerted once, and the watcher exits (E10-R29, E8-D18 through the table)',
-  JSON.stringify(recLines(wsl, /^- auto-cycle paused: /)) === JSON.stringify([STALL_LINE]) && wslNotes.length === 1 &&
+  JSON.stringify(untag(recLines(wsl, /^- auto-cycle paused: /))) === JSON.stringify([STALL_LINE]) && wslNotes.length === 1 &&
     String(wslNotes[0][wslNotes[0].indexOf('--body') + 1]).startsWith(STALL_LINE.slice('- auto-cycle paused: '.length)),
   `${JSON.stringify(recLines(wsl, /paused/))} ${JSON.stringify(wslNotes)}`)
 const wsc = project('watch-stall-contained')
@@ -575,7 +577,7 @@ shim(wsc, { session: 's2', status: 'working' })
 const wscT = rollout(wsc, 's2', [F.PRIOR_TURN_0160, F.STALLED_TURN])
 await watcher(wsc, 's2', wscT, wslFrom, { DCTR_WATCH_TIMES: STALL_WT, DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') }, null, undefined, null)
 clause('clause 1d18 — contained, the stalled turn writes the same paused line and herdr is called zero times (E10-R29, E8-D15)',
-  JSON.stringify(recLines(wsc, /^- auto-cycle paused: /)) === JSON.stringify([STALL_LINE]) && calls(wsc).length === 0,
+  JSON.stringify(untag(recLines(wsc, /^- auto-cycle paused: /))) === JSON.stringify([STALL_LINE]) && calls(wsc).length === 0,
   `${JSON.stringify(recLines(wsc, /paused/))} ${JSON.stringify(calls(wsc))}`)
 // A slow turn whose rollout keeps growing, each gap inside the stall time and the whole run past it, then ended by a
 // provider error: the watcher hands on that error, never a stall. Each append moves the rollout's mtime every 100 ms,
