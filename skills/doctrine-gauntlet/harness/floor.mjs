@@ -1048,7 +1048,7 @@ try {
      anything.
      Best-effort the way --crop is: a failure becomes the JUDGE line's wording
      and never ends the floor, since JUDGE never gates. */
-  const FOCUS_PAD = 16, FOCUS_CAP = 40
+  const FOCUS_PAD = 16, FOCUS_CAP = 40, FOCUS_SETTLE = 2000
   /* A Tab-triggered handler can wedge the renderer, and then a press or an
      evaluate waits forever; so every call the pass makes has a deadline, goto
      and the screenshot through Playwright's own timeouts and the rest through
@@ -1062,7 +1062,7 @@ try {
   const focusParts = []
   let focusShots = 0
   for (const theme of themes) {
-    const shots = [], unshot = []
+    const shots = [], unshot = [], late = []
     let why = null, stayed = null, back = null, last = null, ctx
     try {
       ctx = await within(browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 }), 'opening the focus context')
@@ -1072,10 +1072,9 @@ try {
       await within(applyTheme(page, theme), 'applying the theme')
       /* Smooth scrolling lets the box be read before the scroll that focus starts
          has landed, which shoots a misplaced strip and counts it as the stop. A
-         transition does the same to the focused state itself: a ring drawn by
-         one is shot before it is drawn, and a skip link that slides in is read
-         part-way there, so its box is wrong as well. */
-      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; } *, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }` }), 'adding the overlay style')
+         scroll is not an animation getAnimations reports, so the settle wait
+         below cannot see it and this rule is what stops it. */
+      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; }` }), 'adding the overlay style')
       await within(SETTLE(page), 'the settle scroll', 60_000)
       await page.waitForTimeout(1200)
       /* An autofocused control, or a #fragment, moves the point sequential focus
@@ -1093,6 +1092,20 @@ try {
       }), 'resetting the focus start')
       for (let n = 0; n < FOCUS_CAP; n++) {
         await within(page.keyboard.press('Tab'), 'a Tab press')
+        /* A ring drawn by a transition or a finite @keyframes animation is shot
+           before it is drawn, and a skip link that slides in is read part-way
+           there. A style override cannot fix that, since no stylesheet in the
+           document reaches into a shadow root, so the pass waits for every finite
+           running animation instead. Chromium's document.getAnimations stops at
+           the document's own tree, so each shadow root, open or closed, is asked
+           as well; asking starts any transition the press has just triggered.
+           Infinite ones never finish and are skipped; one that outlasts the wait
+           is shot anyway and the line says so. */
+        const settled = await within(page.evaluate(ms => {
+          const roots = new Set([document, ...window.__deep('*').map(e => e.shadowRoot).filter(Boolean), ...window.__closedRoots.filter(r => r.host.isConnected)])
+          const running = [...roots].flatMap(r => r.getAnimations()).filter(a => a.playState === 'running' && a.effect && Number.isFinite(a.effect.getComputedTiming().endTime))
+          return Promise.race([Promise.all(running.map(a => a.finished.catch(() => {}))).then(() => true), new Promise(r => setTimeout(() => r(false), ms))])
+        }, FOCUS_SETTLE), 'waiting for the focused state to settle')
         const stop = await within(page.evaluate(pad => {
           if (window.__focusStart) { window.__focusStart.remove(); window.__focusStart = null }
           /* A closed root is not reachable through .shadowRoot, and without it two
@@ -1135,6 +1148,7 @@ try {
         const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
         await page.screenshot({ path: file, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
         shots.push(file)
+        if (!settled) late.push(String(shots.length).padStart(2, '0'))
       }
     } catch (e) {
       why = String(e).split('\n')[0].slice(0, 120)
@@ -1145,6 +1159,7 @@ try {
     const capped = shots.length + unshot.length === FOCUS_CAP   // a press either ends the pass or adds one stop to a list
     const nn = String(shots.length).padStart(2, '0')
     const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
+    const unsettled = late.length ? ` — ${late.length > 1 ? 'shots' : 'shot'} ${late.slice(0, 5).join(', ')}${late.length > 5 ? ', …' : ''} in ${theme} ${late.length > 1 ? 'were' : 'was'} taken while an animation was still running ${FOCUS_SETTLE / 1000}s after Tab, so the ring there may be part-drawn` : ''
     const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
     focusParts.push(why
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
@@ -1154,6 +1169,7 @@ try {
       : shots.length ? `${shot}${offscreen}`
       : unshot.length ? `no ${theme} focus shot was written${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
+    focusParts[focusParts.length - 1] += unsettled
   }
   handoff.splice(1, 0, `visible focus on every interactive element — ${focusParts.join('; ')}; ${focusShots ? 'look at each and judge the ring' : 'tab through and look'}`)
 } catch (e) {
