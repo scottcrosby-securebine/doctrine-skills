@@ -470,7 +470,11 @@ const MUTATIONS = [
   { name: 'a red baseline echoes its clause lines as FAIL lines of the gate', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a red baseline suite reports one FAIL line',
     from: "...failLines(first.out).map((l) => `      · ${l}`)", to: "...failLines(first.out).map((l) => `      ${l}`)" },
   { name: 'a red baseline green alone reads as red again', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a red baseline suite reports one FAIL line',
-    from: "again.code === 0 ? 'green alone (load-sensitive)' :", to: "false ? 'green alone (load-sensitive)' :" },
+    from: "again.code === 0 ? 'green alone' :", to: "false ? 'green alone' :" },
+  { name: 'a FAIL or PASS line straight after a FAIL line is printed as its detail', file: 'dctr-lib.mjs', clause: 'clause 1bl1 — failLines returns each FAIL line',
+    from: "lines[i + 1]?.trim() && !/^ *(PASS|FAIL) /.test(lines[i + 1])", to: "lines[i + 1]?.trim()" },
+  { name: 'a red baseline echoes the suite name in place of its clause lines', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a red baseline suite reports one FAIL line',
+    from: "...failLines(first.out).map((l) => `      · ${l}`)", to: "...failLines(first.out).map((l) => `      · ${suite}`)" },
   { name: 'a red baseline prints its FAIL lines without the detail under them', file: 'dctr-lib.mjs', clause: 'clause 1bl1 — failLines returns each FAIL line',
     from: "[l.trim(), ...(lines[i + 1]?.trim() && !/^ *(PASS|FAIL) /.test(lines[i + 1]) ? [lines[i + 1].trim()] : [])]", to: "[l.trim()]" },
   { name: 'a DCTR_SHARD that selects no mutation runs an empty gate that passes', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
@@ -5185,7 +5189,7 @@ for (const r of baselineResults) {
     console.log(`  FAIL baseline ${r.suite} ${whyUnrun(r.res)}; nothing can be judged against a suite that did not run`)
     failures += 1
   } else if (r && r.res.code !== 0) {
-    // Rerun alone after the pool, as a diagnosis only: green alone shows sensitivity to load, never a sound tree.
+    // Rerun alone after the pool, as a diagnosis only: green alone shows only that it passed alone, never a sound tree.
     for (const l of baselineReport(r.suite, r.res, await runSuite(baseline, r.suite))) console.log(l)
     failures += 1
   }

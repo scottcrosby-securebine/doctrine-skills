@@ -134,22 +134,27 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
 // A red baseline names its clauses, and a suite red only under the pool's load is rerun alone before the gate stops.
 {
   const RED = 'PASS  clause 1a — ok\nFAIL  clause 2w — the control typed nothing\n        {"typed":[]}\nPASS  clause 3a — ok\n  FAIL  clause 9 — indented\n        detail nine\n'
-  const lines = failLines(RED), quiet = failLines('PASS  clause 1a — ok\nfailed to FAIL nothing\n')
-  clause('clause 1bl1 — failLines returns each FAIL line with the detail line under it, indented ones included, and nothing for output without one',
-    lines.length === 4 && lines[0] === 'FAIL  clause 2w — the control typed nothing' && lines[1] === '{"typed":[]}' && lines[2] === 'FAIL  clause 9 — indented' && lines[3] === 'detail nine' && quiet.length === 0,
-    JSON.stringify({ lines, quiet }))
+  const ADJ = 'FAIL  clause 4 — first\nPASS  clause 5 — next\nFAIL  clause 6 — second\nFAIL  clause 7 — third\n'
+  const lines = failLines(RED), quiet = failLines('PASS  clause 1a — ok\nfailed to FAIL nothing\n'), adj = failLines(ADJ)
+  clause('clause 1bl1 — failLines returns each FAIL line with the detail line under it, indented ones included, never a PASS or FAIL line that follows as detail, and nothing for output without one',
+    lines.length === 4 && lines[0] === 'FAIL  clause 2w — the control typed nothing' && lines[1] === '{"typed":[]}' && lines[2] === 'FAIL  clause 9 — indented' && lines[3] === 'detail nine' && quiet.length === 0 &&
+      JSON.stringify(adj) === JSON.stringify(['FAIL  clause 4 — first', 'FAIL  clause 6 — second', 'FAIL  clause 7 — third']),
+    JSON.stringify({ lines, quiet, adj }))
   const ok = { code: 0, out: 'PASS  x\n' }, red = { code: 1, out: RED }, gone = { code: 'EAGAIN', out: '' }
   const R = { flaky: baselineReport('s.mjs', red, ok), twice: baselineReport('s.mjs', red, red), unrun: baselineReport('s.mjs', red, gone) }
   const shapes = (ls) => ls.filter((l) => /^ *(FAIL|ok|ERROR) /.test(l)).length
-  clause('clause 1bl2 — a red baseline suite reports one FAIL line whatever its lone rerun did, naming green alone as load-sensitive, red again, or a rerun that never started, with every echoed clause line behind a dot',
+  clause('clause 1bl2 — a red baseline suite reports one FAIL line whatever its lone rerun did, naming green alone, red again, or a rerun that never started, with every echoed clause line behind a dot',
     Object.values(R).every((ls) => shapes(ls) === 1 && ls[0].startsWith('  FAIL baseline s.mjs') && ls.slice(1).every((l) => l.startsWith('      · '))) &&
-      /green alone \(load-sensitive\)/.test(R.flaky[0]) && /red again alone/.test(R.twice[0]) && /not rerun alone \(EAGAIN\)/.test(R.unrun[0]) &&
-      R.flaky.length === 5 && R.twice.length === 9 && R.twice.some((l) => l === '      · alone: FAIL  clause 2w — the control typed nothing'),
+      R.flaky[0].endsWith('; green alone:') && R.twice[0].endsWith('; red again alone:') && R.unrun[0].endsWith('; not rerun alone (EAGAIN):') &&
+      JSON.stringify(R.flaky.slice(1)) === JSON.stringify(['      · FAIL  clause 2w — the control typed nothing', '      · {"typed":[]}', '      · FAIL  clause 9 — indented', '      · detail nine']) &&
+      JSON.stringify(R.twice.slice(5)) === JSON.stringify(['      · alone: FAIL  clause 2w — the control typed nothing', '      · alone: {"typed":[]}', '      · alone: FAIL  clause 9 — indented', '      · alone: detail nine']),
     JSON.stringify(R))
   // Proved without the helpers: the red fixture carries two FAIL lines, each followed by a detail line, and the never-run one has no numeric code.
   const raw = RED.split('\n'), at = raw.flatMap((l, i) => (/^ *FAIL /.test(l) ? [i] : []))
-  clause('clause 3bl — the red fixture really holds two FAIL lines each with a detail line after it, and the never-run fixture really has no exit status',
-    at.length === 2 && at.every((i) => raw[i + 1] && !/^ *(PASS|FAIL) /.test(raw[i + 1])) && typeof gone.code !== 'number', JSON.stringify(at))
+  const adjRaw = ADJ.split('\n').filter(Boolean), adjNext = adjRaw.flatMap((l, i) => (/^FAIL /.test(l) ? [adjRaw[i + 1] ?? ''] : []))
+  clause('clause 3bl — the red fixture really holds two FAIL lines each with a detail line after it, the adjacent fixture really puts a PASS line and a FAIL line straight after a FAIL line, and the never-run fixture really has no exit status',
+    at.length === 2 && at.every((i) => raw[i + 1] && !/^ *(PASS|FAIL) /.test(raw[i + 1])) && typeof gone.code !== 'number' &&
+      adjNext.filter((n) => /^(PASS|FAIL) /.test(n)).length === 2, JSON.stringify({ at, adjNext }))
 }
 // DCTR_SHARD splits the mutation gate across CI jobs: the shards of one n must cover every index exactly once, and a
 // spec that is not that shape must throw rather than keep a subset nobody asked for.
