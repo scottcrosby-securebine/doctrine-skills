@@ -4,9 +4,10 @@
  *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
  *
  * Renders 360/768/1440/2560 in the themes asked for (360 as a phone), writes
- * full-page screenshots, and reports the floor: horizontal scroll, a missing
- * mobile viewport at 360, heading structure, axe serious/critical, target
- * size, page errors, reduced motion.
+ * full-page screenshots and a padded shot of each keyboard focus stop, and
+ * reports the floor: horizontal scroll, a missing mobile viewport at 360,
+ * heading structure, axe serious/critical, target size, page errors, reduced
+ * motion.
  *
  * Exit codes:  0 clean · 1 failing configurations · 2 could not run ·
  *              3 nothing failed but something went unmeasured (NOT a pass).
@@ -285,7 +286,7 @@ const show = (list, n, line) => {
 const unmeasured = []
 const handoff = [
   'non-text contrast, WCAG 1.4.11 (charts, icons, focus rings) — axe does not check it',
-  'visible focus on every interactive element — tab through and look',
+  // visible focus is spliced in second once the focus pass below has run
 ]
 const fingerprint = {}   // theme -> width -> computed-style signature
 let identity = null      // what this run actually looked at
@@ -1039,6 +1040,75 @@ try {
      or canvas is invisible to it. Pushed once, outside the loop - inside it, a
      two-theme run printed the same JUDGE line twice. */
   handoff.push('rAF/canvas-driven motion under prefers-reduced-motion — watch the page and judge')
+
+  /* Visible focus: a padded 1:1 shot of every keyboard focus stop, so the critic
+     judging the ring has a focused state to look at rather than an instruction to
+     go and make one. Tab and activeElement, never el.focus(): a programmatic
+     focus does not arm :focus-visible once the run has clicked anything.
+     Best-effort the way --crop is: a failure becomes the JUDGE line's wording
+     and never ends the floor, since JUDGE never gates. */
+  const FOCUS_PAD = 16, FOCUS_CAP = 40
+  const focusParts = []
+  let focusShots = 0
+  for (const theme of themes) {
+    const shots = [], unshot = []
+    let why = null, capped = false, ctx
+    try {
+      ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 })
+      await ctx.addInitScript(INSTRUMENT)
+      const page = await ctx.newPage()
+      await page.goto(url, { waitUntil: 'load' })
+      await applyTheme(page, theme)
+      await page.addStyleTag({ content: HIDE_OVERLAYS })
+      await SETTLE(page)
+      await page.waitForTimeout(1200)
+      capped = true
+      for (let n = 0; n < FOCUS_CAP; n++) {
+        await page.keyboard.press('Tab')
+        const stop = await page.evaluate(pad => {
+          let a = document.activeElement
+          while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement
+          if (!a || a === document.body || a === document.documentElement) return { done: true }
+          const seen = window.__focusSeen || (window.__focusSeen = [])
+          if (seen.includes(a)) return { done: true }
+          seen.push(a)
+          let r = a.getBoundingClientRect()
+          /* Keyboard focus scrolls only far enough to show the box, which leaves a
+             ring drawn outside it past the viewport edge — the clipped-ring shot
+             this pass exists to replace. */
+          if (r.top - pad < 0 || r.left - pad < 0 || r.bottom + pad > innerHeight || r.right + pad > innerWidth) {
+            a.scrollIntoView({ block: 'center', inline: 'center' })
+            r = a.getBoundingClientRect()
+          }
+          const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad)
+          const width = Math.min(innerWidth, r.right + pad) - x, height = Math.min(innerHeight, r.bottom + pad) - y
+          const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
+          return { name, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
+        }, FOCUS_PAD)
+        if (stop.done) { capped = false; break }
+        if (!stop.clip) { unshot.push(stop.name); continue }
+        const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
+        await page.screenshot({ path: file, clip: stop.clip, timeout: 5000 })
+        shots.push(file)
+      }
+    } catch (e) {
+      why = String(e).split('\n')[0].slice(0, 120)
+      capped = false
+    } finally {
+      if (ctx) await ctx.close().catch(() => {})
+    }
+    focusShots += shots.length
+    const nn = String(shots.length).padStart(2, '0')
+    const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
+    const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
+    focusParts.push(why
+      ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
+      : capped ? `${shot} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
+      : shots.length ? `${shot}${offscreen}`
+      : unshot.length ? `no ${theme} focus shot was written${offscreen}`
+      : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
+  }
+  handoff.splice(1, 0, `visible focus on every interactive element — ${focusParts.join('; ')}; ${focusShots ? 'look at each and judge the ring' : 'tab through and look'}`)
 } catch (e) {
   fatal = e            // a bad URL, a dead server, a navigation timeout
 } finally {
