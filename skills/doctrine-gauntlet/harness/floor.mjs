@@ -1052,7 +1052,7 @@ try {
   let focusShots = 0
   for (const theme of themes) {
     const shots = [], unshot = []
-    let why = null, capped = false, ctx
+    let why = null, ctx
     try {
       ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 })
       await ctx.addInitScript(INSTRUMENT)
@@ -1062,7 +1062,6 @@ try {
       await page.addStyleTag({ content: HIDE_OVERLAYS })
       await SETTLE(page)
       await page.waitForTimeout(1200)
-      capped = true
       for (let n = 0; n < FOCUS_CAP; n++) {
         await page.keyboard.press('Tab')
         const stop = await page.evaluate(pad => {
@@ -1085,7 +1084,7 @@ try {
           const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
           return { name, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
         }, FOCUS_PAD)
-        if (stop.done) { capped = false; break }
+        if (stop.done) break
         if (!stop.clip) { unshot.push(stop.name); continue }
         const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
         await page.screenshot({ path: file, clip: stop.clip, timeout: 5000 })
@@ -1093,17 +1092,17 @@ try {
       }
     } catch (e) {
       why = String(e).split('\n')[0].slice(0, 120)
-      capped = false
     } finally {
       if (ctx) await ctx.close().catch(() => {})
     }
     focusShots += shots.length
+    const capped = shots.length + unshot.length === FOCUS_CAP   // a press either ends the pass or adds one stop to a list
     const nn = String(shots.length).padStart(2, '0')
     const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
     const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
     focusParts.push(why
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
-      : capped ? `${shot} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
+      : capped ? `${shots.length ? shot : `no ${theme} focus shot was written`} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
       : shots.length ? `${shot}${offscreen}`
       : unshot.length ? `no ${theme} focus shot was written${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
