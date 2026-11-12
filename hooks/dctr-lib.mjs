@@ -365,12 +365,16 @@ export const failLines = (out) => {
 }
 
 /**
- * What the mutation gate does with one baseline suite: `green` when it passed in the pool; `flaky` when it ran and went
- * red in the pool and then passed when rerun alone, so the pool's load and not the tree turned it red; `red` otherwise,
- * a suite that never ran included, since a rerun of something that did not start says nothing about load.
+ * The lines the mutation gate prints for a baseline suite that went red in the pool, given its lone rerun after the
+ * pool. The suite stops the gate whatever the rerun did: green alone shows the failure is sensitive to load, never that
+ * the tree is sound, and the mutations that follow run under the same load. Echoed lines sit behind a dot, so the
+ * summary is the only FAIL-shaped line.
  */
-export const baselineVerdict = (first, again) =>
-  (first.code === 0 ? 'green' : suiteOutcome(first) !== 'error' && again?.code === 0 ? 'flaky' : 'red')
+export const baselineReport = (suite, first, again) => {
+  const alone = again.code === 0 ? 'green alone (load-sensitive)' : typeof again.code === 'number' ? 'red again alone' : `not rerun alone (${again.signal || again.code})`
+  return [`  FAIL baseline ${suite} — every suite must pass before any mutation means anything; ${alone}:`,
+    ...failLines(first.out).map((l) => `      · ${l}`), ...(again.code === 0 ? [] : failLines(again.out).map((l) => `      · alone: ${l}`))]
+}
 
 export const TOKEN_TTL_MS = 3600000
 

@@ -18,7 +18,7 @@ import { spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, PLACEMENT_WAIT_MS } from './dctr-state.mjs'
 import {
-  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf, failLines, baselineVerdict,
+  agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf, failLines, baselineReport,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
   seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
@@ -138,10 +138,14 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
   clause('clause 1bl1 — failLines returns each FAIL line with the detail line under it, indented ones included, and nothing for output without one',
     lines.length === 4 && lines[0] === 'FAIL  clause 2w — the control typed nothing' && lines[1] === '{"typed":[]}' && lines[2] === 'FAIL  clause 9 — indented' && lines[3] === 'detail nine' && quiet.length === 0,
     JSON.stringify({ lines, quiet }))
-  const ok = { code: 0, out: 'PASS  x\n' }, red = { code: 1, out: RED }, gone = { code: 'EAGAIN', out: '' }, silent = { code: 1, out: 'boom\n' }
-  const V = { green: baselineVerdict(ok), flaky: baselineVerdict(red, ok), red: baselineVerdict(red, red), never: baselineVerdict(gone, ok), silentAgain: baselineVerdict(silent, ok), noRerun: baselineVerdict(red) }
-  clause('clause 1bl2 — a baseline suite green in the pool is green; red in the pool and green alone is flaky; red twice, never run, or not rerun is red',
-    V.green === 'green' && V.flaky === 'flaky' && V.red === 'red' && V.never === 'red' && V.noRerun === 'red' && V.silentAgain === 'flaky', JSON.stringify(V))
+  const ok = { code: 0, out: 'PASS  x\n' }, red = { code: 1, out: RED }, gone = { code: 'EAGAIN', out: '' }
+  const R = { flaky: baselineReport('s.mjs', red, ok), twice: baselineReport('s.mjs', red, red), unrun: baselineReport('s.mjs', red, gone) }
+  const shapes = (ls) => ls.filter((l) => /^ *(FAIL|ok|ERROR) /.test(l)).length
+  clause('clause 1bl2 — a red baseline suite reports one FAIL line whatever its lone rerun did, naming green alone as load-sensitive, red again, or a rerun that never started, with every echoed clause line behind a dot',
+    Object.values(R).every((ls) => shapes(ls) === 1 && ls[0].startsWith('  FAIL baseline s.mjs') && ls.slice(1).every((l) => l.startsWith('      · '))) &&
+      /green alone \(load-sensitive\)/.test(R.flaky[0]) && /red again alone/.test(R.twice[0]) && /not rerun alone \(EAGAIN\)/.test(R.unrun[0]) &&
+      R.flaky.length === 5 && R.twice.length === 9 && R.twice.some((l) => l === '      · alone: FAIL  clause 2w — the control typed nothing'),
+    JSON.stringify(R))
   // Proved without the helpers: the red fixture carries two FAIL lines, each followed by a detail line, and the never-run one has no numeric code.
   const raw = RED.split('\n'), at = raw.flatMap((l, i) => (/^ *FAIL /.test(l) ? [i] : []))
   clause('clause 3bl — the red fixture really holds two FAIL lines each with a detail line after it, and the never-run fixture really has no exit status',

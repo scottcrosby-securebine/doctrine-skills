@@ -27,7 +27,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { mapPool, poolShortfall, anchorCount, anchorVerdict, shardOf, failLines, baselineVerdict, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
+import { mapPool, poolShortfall, anchorCount, anchorVerdict, shardOf, baselineReport, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // Everything a suite READS, not only what a mutation targets. hooks.json is here because a clause
@@ -466,11 +466,11 @@ const MUTATIONS = [
     from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || new Set(ks).size !== ks.length) throw" },
   { name: 'a DCTR_SHARD repeating a k is accepted', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
     from: "  if (!m || ks.some((k) => k >= n) || new Set(ks).size !== ks.length) throw", to: "  if (!m || ks.some((k) => k >= n)) throw" },
-  // A baseline red twice, or never run, must stop the gate; only a suite that ran and passed alone may go on.
-  { name: 'a baseline suite red in the pool counts as flaky with no rerun at all', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a baseline suite green in the pool is green',
-    from: "suiteOutcome(first) !== 'error' && again?.code === 0 ? 'flaky' : 'red'", to: "suiteOutcome(first) !== 'error' ? 'flaky' : 'red'" },
-  { name: 'a baseline suite that never ran counts as flaky when its rerun passes', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a baseline suite green in the pool is green',
-    from: "suiteOutcome(first) !== 'error' && again?.code === 0 ? 'flaky' : 'red'", to: "again?.code === 0 ? 'flaky' : 'red'" },
+  // A red baseline's report must stay one FAIL line and say what the lone rerun showed.
+  { name: 'a red baseline echoes its clause lines as FAIL lines of the gate', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a red baseline suite reports one FAIL line',
+    from: "...failLines(first.out).map((l) => `      · ${l}`)", to: "...failLines(first.out).map((l) => `      ${l}`)" },
+  { name: 'a red baseline green alone reads as red again', file: 'dctr-lib.mjs', clause: 'clause 1bl2 — a red baseline suite reports one FAIL line',
+    from: "again.code === 0 ? 'green alone (load-sensitive)' :", to: "false ? 'green alone (load-sensitive)' :" },
   { name: 'a red baseline prints its FAIL lines without the detail under them', file: 'dctr-lib.mjs', clause: 'clause 1bl1 — failLines returns each FAIL line',
     from: "[l.trim(), ...(lines[i + 1]?.trim() && !/^ *(PASS|FAIL) /.test(lines[i + 1]) ? [lines[i + 1].trim()] : [])]", to: "[l.trim()]" },
   { name: 'a DCTR_SHARD that selects no mutation runs an empty gate that passes', file: 'dctr-lib.mjs', clause: 'clause 1sh2 — every malformed DCTR_SHARD throws',
@@ -5185,18 +5185,9 @@ for (const r of baselineResults) {
     console.log(`  FAIL baseline ${r.suite} ${whyUnrun(r.res)}; nothing can be judged against a suite that did not run`)
     failures += 1
   } else if (r && r.res.code !== 0) {
-    // Rerun alone, after the pool: a suite red only under the pool's load is flaky, not a red tree. Its lines are
-    // echoed behind a `·` so the gate's own output carries no FAIL line for a suite that then passed.
-    const again = await runSuite(baseline, r.suite)
-    const verdict = baselineVerdict(r.res, again)
-    console.log(verdict === 'flaky'
-      ? `  flaky baseline ${r.suite} — red in the pool, green rerun alone; what it printed in the pool:`
-      : `  FAIL baseline ${r.suite} — every suite must pass before any mutation means anything; red in the pool and again alone:`)
-    for (const l of failLines(r.res.out)) console.log(`      · ${l}`)
-    if (verdict !== 'flaky') {
-      for (const l of failLines(again.out)) console.log(`      · alone: ${l}`)
-      failures += 1
-    }
+    // Rerun alone after the pool, as a diagnosis only: green alone shows sensitivity to load, never a sound tree.
+    for (const l of baselineReport(r.suite, r.res, await runSuite(baseline, r.suite))) console.log(l)
+    failures += 1
   }
 }
 // STOP HERE. Every mutation below compares against a suite that is already red, so all of them
