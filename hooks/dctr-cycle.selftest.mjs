@@ -447,17 +447,27 @@ const lanePauses = (f) => {
   run(f, { ...feLane, hook_event_name: 'StopFailure', error: 'overloaded' }, LANE)
 }
 const fe = fixture('foreign-event'); lanePauses(fe)
-const feR = run(fe)
-const feMine = metas(fe).filter((c) => c[2] === 'w9:p1').map((c) => c[6])
+const feR = run(fe, {}, { HERDR_PANE_ID: 'w9:pfe' })
+const feMine = metas(fe).filter((c) => c[2] === 'w9:pfe').map((c) => c[6])
 const oe = fixture('own-after-foreign'); lanePauses(oe)
 const oePerm = run(oe, { hook_event_name: 'Notification', notification_type: 'permission_prompt' })
 const oeR = run(oe)
 clause('clause 2b9 — another session\'s idle prompt, permission prompt and API error are written tagged with it and do not hold this session\'s cycle, name themselves in its pane token or show in its pane message; its own permission prompt after them is written and holds it',
   JSON.stringify(pausedRaw(fe)) === JSON.stringify(['- auto-cycle paused: session idle, waiting for you [session s-lane]', '- auto-cycle paused: waiting for your permission approval [session s-lane]', '- auto-cycle paused: Claude API error: overloaded [session s-lane]']) &&
-  launched(feR) && !feR.msg.includes('auto-cycle paused') && feMine.every((v) => !v.includes('paused')) &&
+  launched(feR) && !feR.msg.includes('auto-cycle paused') && feMine.length > 0 && feMine.every((v) => !v.includes('paused')) &&
   pausedRaw(oe).at(-1) === `- auto-cycle paused: waiting for your permission approval [session ${oe.session}]` && paused(oe).length === 4 &&
   oePerm.msg.includes('waiting for your permission approval') && !launched(oeR),
   `${show(fe, feR)} | mine ${JSON.stringify(feMine)} | ${show(oe, oeR)}`)
+// The other session's hook has appended its permission pause but not yet alerted or shown it when this session's Stop
+// runs: this session neither shows it, publishes it as its token, nor takes the markers, so the writer's own next
+// event still shows it in its pane (RT3-3).
+const il = fixture('interleaved-foreign')
+fs.appendFileSync(il.record, '- auto-cycle paused: waiting for your permission approval [session s-lane]\n')
+const ilR = run(il, {}, { HERDR_PANE_ID: 'w9:pil' }), ilMine = metas(il).filter((c) => c[2] === 'w9:pil').map((c) => c[6]), ilToasts = toasts(il).length
+const ilLane = run(il, { ...feLane, last_assistant_message: 'lane turn done' }, LANE)
+clause('clause 2b10 — another session\'s pause appended but not yet alerted: this session\'s Stop launches, shows nothing, publishes no paused token and raises no toast; the writer\'s next event shows and toasts it in its own pane',
+  launched(ilR) && !ilR.msg.includes('waiting for your permission') && ilMine.length > 0 && ilMine.every((v) => !v.includes('paused')) && ilToasts === 0 && toasts(il).length === 1 &&
+  ilLane.msg.includes('waiting for your permission approval'), `${show(il, ilR)} | lane ${JSON.stringify(ilLane.msg)} | mine ${JSON.stringify(ilMine)}`)
 // A git that stops at a filesystem boundary unless told to cross one, in a project whose .git the walk finds (SR5).
 const boundaryBin = path.join(tmp, 'boundary-bin'), realGitPath = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 write(path.join(boundaryBin, 'git'), `#!/bin/sh\n[ -n "$GIT_DISCOVERY_ACROSS_FILESYSTEM" ] || case " $* " in *" rev-parse "*) printf 'fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n' >&2; exit 128;; esac\nexec ${realGitPath} "$@"\n`)

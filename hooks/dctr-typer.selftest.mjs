@@ -253,6 +253,7 @@ if (args[0] === 'pane' && args[1] === 'run') {
   if (args[3] === '/clear') {
     st.clearedAt = Date.now(); save()
     if (st.onClear === 'write' || st.onClear === 'stale') fs.writeFileSync(st.restoreFile, JSON.stringify({ session_id: st.onClear === 'stale' ? st.session : st.newSession, transcript_path: st.newTranscript }))
+    if (st.appendOnClear) fs.appendFileSync(st.appendOnClear.file, st.appendOnClear.line + '\\n')
   } else if (st.reply) {
     // What Claude Code writes when a slash command with arguments is typed (read from host transcripts): the command
     // entry, the skill's loaded text as a meta entry, then the reply.
@@ -429,6 +430,11 @@ const laneIdle = typerCase('foreign-idle-while-focused', { focusedGets: 3 }, { p
 const anyIdle = typerCase('untagged-idle-while-focused', { focusedGets: 3 }, { pre: (f) => setShim(f, () => ({ appendAt: { n: 2, file: f.record, line: '- auto-cycle paused: session idle, waiting for you' } })) })
 clause('clause 2h2 — another session\'s idle pause written while the pane is focused: /clear once and resume once; the same pause untagged: nothing sent (EP2-B3)',
   sends(laneIdle) === '1,1' && sends(anyIdle) === '0,0', `${detail(laneIdle)} | ${detail(anyIdle)}`)
+// The new session's own permission pause, written as its /clear takes and before the typer has read the restore file
+// naming that session: no resume is typed past it (RT3-1).
+const newPerm = typerCase('new-session-pause-at-clear', {}, { pre: (f) => setShim(f, () => ({ appendOnClear: { file: f.record, line: `- auto-cycle paused: waiting for your permission approval [session ${f.session}-new]` } })) })
+clause('clause 2h3 — the new session\'s permission pause written as the /clear takes: /clear once and no resume',
+  newPerm.clears === 1 && newPerm.resumes === 0, detail(newPerm))
 const sys = typerCase('system-entries', {}, { pre: (f) => fs.appendFileSync(f.transcript, jl({ type: 'system', subtype: 'stop_hook_summary' }, { type: 'system', subtype: 'turn_duration' })) })
 clause('clause 2i — stop_hook_summary and turn_duration entries after the Stop do not count: /clear once, resume once', sends(sys) === '1,1', detail(sys))
 // Counted in reads, not milliseconds: herdr answers the old session for the first three reads after /clear, and the

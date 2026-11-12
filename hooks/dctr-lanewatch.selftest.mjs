@@ -169,6 +169,18 @@ clause('clause 2h — each record newly showing a paused line, a Blocked state, 
   quiet === 0 && one('p', /auto-cycle paused: session idle/) && one('b', /Blocked\. waits on Q2/) && one('q', /question Q1 unanswered: which way\?/) &&
   one('al', /round alarm with no ruling/) && !pe.some((e) => e.startsWith('pause ok ')) && pe.length === 4, show(pauses))
 
+// A pause another session sharing a role's record wrote is about that session, not the role's pane: no event. The
+// role's own tagged pause gives one.
+const owners = fixture({ fp: {}, op: {} })
+const wo = watcher(owners)
+polls(owners, wo)
+fs.appendFileSync(owners.record.fp, '- auto-cycle paused: waiting for your permission approval [session S-other]\n')
+fs.appendFileSync(owners.record.op, '- auto-cycle paused: waiting for your permission approval [session S-op]\n')
+polls(owners, wo, 2)
+const oev = events(owners)
+clause('clause 2h2 — a permission pause tagged with another session in a role\'s record gives no event; the role\'s own tagged pause gives one',
+  !oev.some((e) => e.startsWith('pause fp ')) && oev.filter((e) => e.startsWith('pause op ') && /waiting for your permission approval/.test(e)).length === 1, show(owners))
+
 // E15-D107: a held ready line.
 const asst = (at, text, usage) => JSON.stringify({ type: 'assistant', timestamp: at, uuid: `u-${at}`, message: { role: 'assistant', content: [{ type: 'text', text }], ...(usage ? { usage } : {}) } })
 const transcript = (fx, r, lines) => {

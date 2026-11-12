@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, pauseCode, EVENT_PAUSES, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, pauseCode, EVENT_PAUSES, standingPauses, ownPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -893,12 +893,12 @@ const pauseMarker = (kind, recordPath, line) =>
  * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
  * one guard keeping herdr out of it. True when this call raised any.
  */
-export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
+export function alertPaused({ recordPath, repo, phase, paneId, sessionId = null, log = () => {} }) {
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
-  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
+  const fresh = ownPauses(standingPauses(entries, start), sessionId).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
   if (!fresh.length) return false
   if (paneId) {
-    publishToken(paneId, autocycleToken(entries, start), log)
+    publishToken(paneId, autocycleToken(entries, start, sessionId), log)
     for (const p of fresh) {
       try { herdr(pauseToastArgs(repo, phase, p.reason, pauseActionAt(p, entries, start))) } // herdr-lint: display only; the paused line and the pane message stand without it
       catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
@@ -914,9 +914,9 @@ export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} })
  * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
  * there is nothing to print.
  */
-export function pauseMessageOnce(recordPath) {
+export function pauseMessageOnce(recordPath, sessionId = null) {
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
-  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
+  const fresh = ownPauses(standingPauses(entries, start), sessionId).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
   return fresh.length ? fresh.map((p) => pauseMessage(p.reason, pauseActionAt(p, entries, start))).join('\n') : null
 }
 

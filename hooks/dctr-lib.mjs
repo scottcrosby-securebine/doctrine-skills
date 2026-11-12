@@ -1015,7 +1015,7 @@ export const EVENT_PAUSES = ['R7', 'R8', 'R9']
  *  other's Stop or typer, refuses the other's own pause in the dedup, or names itself in the other's pane token.
  *  An untagged line is never foreign. */
 const foreignEvent = (p, sessions) => Boolean(p.session) && EVENT_PAUSES.includes(pauseCode(p.reason)) && !sessions.includes(p.session)
-const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !foreignEvent(p, [sessionId])) : ps)
+export const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !foreignEvent(p, [sessionId])) : ps)
 
 /** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
  *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for

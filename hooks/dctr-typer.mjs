@@ -65,7 +65,7 @@ function entriesFrom(file, from = 0) {
 function pausing(reason) {
   const { written } = appendPaused(a.record, reason)
   // The toast and token only: the pane message is printed by the next Stop, Notification or StopFailure hook (SP1).
-  const alerted = alertPaused({ recordPath: a.record, repo: path.basename(path.resolve(a.project || '.')), phase: a.phase, paneId: a.pane, log })
+  const alerted = alertPaused({ recordPath: a.record, repo: path.basename(path.resolve(a.project || '.')), phase: a.phase, paneId: a.pane, sessionId: a.session, log })
   log(`${written ? 'paused' : 'pause not written, the same pause already stands'}: ${reason}${alerted ? '; alerted' : ''}`)
   process.exit(0)
 }
@@ -116,12 +116,13 @@ try {
     // The record's own half of B1, without the stop file: an off or closed record aborts whether or not the stop file
     // exists too, and only an active one pauses on it (RB4-1).
     const active = autoCycleActive(rec.entries, false)
-    // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
-    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
-    const pausedSinceClaim = pausedSinceClaimOf(rec.entries, a.keyLine, [a.session, restore?.session].filter(Boolean))
     // Claude Code writes the restore file before the resume is typed; Codex only once it is sent (its SessionStart
     // fires at the new chat's first prompt), so on Codex it is read while confirming.
     if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
+    // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
+    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
+    // Read after the restore file, so the poll that first finds the new session counts its pauses as that session's.
+    const pausedSinceClaim = pausedSinceClaimOf(rec.entries, a.keyLine, [a.session, restore?.session].filter(Boolean))
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
     notIdleSince = pane && !pane.error && pane.focused === false && !READY_STATUSES.includes(pane.status) ? (notIdleSince ?? now) : null
     // The old transcript before the /clear, the new session's after it, read once per poll: typing into either (K2-R16,

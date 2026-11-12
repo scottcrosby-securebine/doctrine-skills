@@ -207,8 +207,8 @@ try {
     log(`auto-cycle is not active (the stop file in ${stopRepo})`)
   }
 
-  alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, log })
-  const shown = pauseMessageOnce(recordPath)
+  alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, sessionId, log })
+  const shown = pauseMessageOnce(recordPath, sessionId)
   if (shown) messages.push(shown)
   // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
   if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), sessionId), log)
