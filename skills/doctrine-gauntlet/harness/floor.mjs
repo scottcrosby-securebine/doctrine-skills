@@ -1060,6 +1060,8 @@ try {
       .finally(() => clearTimeout(t))
   }
   const focusParts = []
+  // a cleanup that cannot remove its shot (a directory at that path) must not end the floor
+  const drop = file => { try { rmSync(file, { force: true }) } catch {} }
   const pad2 = n => String(n).padStart(2, '0')
   let focusShots = 0
   for (const theme of themes) {
@@ -1176,7 +1178,7 @@ try {
         await page.screenshot({ path: pending, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
         /* A load that lands after the read may have put the new document in the
            shot, so that shot is dropped rather than named. */
-        if (await fresh()) { rmSync(pending, { force: true }); end = 'reloaded'; break }
+        if (await fresh()) { drop(pending); end = 'reloaded'; break }
         shots.push(pending)
         pending = null
         if (!settled) late.push(shots.length)
@@ -1184,7 +1186,7 @@ try {
       }
     } catch (e) {
       why = String(e).split('\n')[0].slice(0, 120)
-      if (pending) rmSync(pending, { force: true })
+      if (pending) drop(pending)
       /* A load that lands during a call destroys the context it ran in, which
          is the new document and not a broken pass. */
       end = await fresh() ? 'reloaded' : 'failed'
@@ -1201,14 +1203,17 @@ try {
     const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
     const lead = shots.length ? shot : `no ${theme} focus shot was written`
     focusParts.push((end === 'reloaded'
-      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document on keyboard Tab before any stop was shot`)
+      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document before any stop was shot`)
       : end === 'failed'
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
       : end === 'cap' ? `${lead} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot`
       : end === 'stayed' ? `${lead} — focus stayed on ${last} when Tab was pressed again, so no stop after it was shot`
       : end === 'back' ? `${lead} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot`
-      : last ? `${lead} — focus returned to the body when Tab was pressed after ${last}, the end of the page's Tab order`
-      : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
+      /* A stop that blurs, hides or removes itself on focus also sends focus to
+         the body, part-way through the page, so the line says what was read and
+         never that the Tab order ended or that nothing took focus. */
+      : last ? `${lead} — focus went to the body when Tab was pressed after ${last}, so no stop after it was shot`
+      : `${lead} — focus went to the body when Tab was first pressed, so no stop was shot`)
       + (end === 'failed' ? '' : offscreen) + unsettled)
   }
   handoff.splice(1, 0, `visible focus on every interactive element — ${focusParts.join('; ')}; ${focusShots ? 'look at each and judge the ring' : 'tab through and look'}`)
