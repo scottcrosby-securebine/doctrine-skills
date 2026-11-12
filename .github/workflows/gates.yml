@@ -54,6 +54,15 @@ jobs:
         # doc-check's own selftest guards against.
         run: node tools/herdr-lint.mjs --selftest
 
+      - name: gauntlet brief registry
+        # Each malformed() and block() site in the round script against the brief phrase that
+        # tells the judged seat its rule. Pure text, so it needs nothing installed.
+        run: node tools/brief-registry.mjs
+
+      - name: brief registry tamper test
+        # Exit 2 means the sidecar did not load and no clause ran.
+        run: node tools/brief-registry.mjs --selftest
+
       - name: herdr seat hook tamper test
         # Every decision in hooks/dctr-lib.mjs is pure, so this needs no herdr server, no codex
         # plugin and no Claude Code. What it cannot cover is the live path: the first real run
