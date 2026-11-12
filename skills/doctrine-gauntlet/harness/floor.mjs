@@ -1050,8 +1050,10 @@ try {
      and never ends the floor, since JUDGE never gates. */
   const FOCUS_PAD = 16, FOCUS_CAP = 40
   /* A Tab-triggered handler can wedge the renderer, and then a press or an
-     evaluate waits forever; every call the pass makes gets a deadline, so a
-     wedged page becomes the JUDGE line's failure wording and the floor returns. */
+     evaluate waits forever; so every call the pass makes has a deadline, goto
+     and the screenshot through Playwright's own timeouts and the rest through
+     this, and a wedged page becomes the JUDGE line's failure wording while the
+     floor returns. */
   const within = (p, what, ms = 10_000) => {
     let t
     return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} did not return within ${ms / 1000}s`)), ms) })])
@@ -1061,16 +1063,19 @@ try {
   let focusShots = 0
   for (const theme of themes) {
     const shots = [], unshot = []
-    let why = null, stayed = null, last = null, ctx
+    let why = null, stayed = null, back = null, last = null, ctx
     try {
-      ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 })
-      await ctx.addInitScript(INSTRUMENT)
-      const page = await ctx.newPage()
+      ctx = await within(browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 }), 'opening the focus context')
+      await within(ctx.addInitScript(INSTRUMENT), 'installing the instrument')
+      const page = await within(ctx.newPage(), 'opening the focus page')
       await page.goto(url, { waitUntil: 'load' })
       await within(applyTheme(page, theme), 'applying the theme')
       /* Smooth scrolling lets the box be read before the scroll that focus starts
-         has landed, which shoots a misplaced strip and counts it as the stop. */
-      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; }` }), 'adding the overlay style')
+         has landed, which shoots a misplaced strip and counts it as the stop. A
+         transition does the same to the focused state itself: a ring drawn by
+         one is shot before it is drawn, and a skip link that slides in is read
+         part-way there, so its box is wrong as well. */
+      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; } *, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }` }), 'adding the overlay style')
       await within(SETTLE(page), 'the settle scroll', 60_000)
       await page.waitForTimeout(1200)
       /* An autofocused control, or a #fragment, moves the point sequential focus
@@ -1100,11 +1105,12 @@ try {
           }
           if (!a || a === document.body || a === document.documentElement) return { done: true }
           const seen = window.__focusSeen || (window.__focusSeen = [])
-          /* The last stop again means focus did not move (a frame, or a widget that
-             keeps Tab); an earlier one means it came back round. */
-          if (seen.includes(a)) return { done: true, stayed: a === seen[seen.length - 1] }
-          seen.push(a)
           const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
+          /* The last stop again means focus did not move (a frame, or a widget that
+             keeps Tab); an earlier one means it came back round, a trap or a loop,
+             since a run that reaches the end of the page goes back to <body>. */
+          if (seen.includes(a)) return { done: true, again: name, stayed: a === seen[seen.length - 1] }
+          seen.push(a)
           let r = a.getBoundingClientRect()
           /* A padded box bigger than the viewport cannot fit in a viewport shot, so
              it is clipped in page coordinates from a full-page shot instead. */
@@ -1123,7 +1129,7 @@ try {
           const width = Math.min(maxX, r.right + ox + pad) - x, height = Math.min(maxY, r.bottom + oy + pad) - y
           return { name, full, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
         }, FOCUS_PAD), 'reading the focused element')
-        if (stop.done) { if (stop.stayed) stayed = last; break }
+        if (stop.done) { if (stop.stayed) stayed = last; else if (stop.again) back = stop.again; break }
         last = stop.name
         if (!stop.clip) { unshot.push(stop.name); continue }
         const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
@@ -1144,6 +1150,7 @@ try {
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
       : capped ? `${shots.length ? shot : `no ${theme} focus shot was written`} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
       : stayed ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus stayed on ${stayed} when Tab was pressed again, so no stop after it was shot${offscreen}`
+      : back ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot${offscreen}`
       : shots.length ? `${shot}${offscreen}`
       : unshot.length ? `no ${theme} focus shot was written${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
