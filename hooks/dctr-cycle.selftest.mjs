@@ -433,6 +433,19 @@ clause('clause 2a3 — all true, the message ending in the ready line wrapped in
   launched(codeReadyR) && paused(codeReady).length === 0, show(codeReady, codeReadyR))
 clause('clause 2b — all true with the handoff and memory file tracked and committed, and with the record in a second repo: launched (E8-D7)',
   launched(goodTR) && launched(goodSR), `${show(goodT, goodTR)} | ${show(goodS, goodSR)}`)
+// A second session in the same repo follows the same kickoff to the same record. Its idle and permission pauses are
+// about it alone, so written after this session's warned line they never hold this session's cycle; this session's
+// own permission pause still does.
+const fe = fixture('foreign-event'), feLane = { session_id: 's-lane' }
+run(fe, { ...feLane, last_assistant_message: 'lane turn done' })
+run(fe, { ...feLane, hook_event_name: 'Notification', notification_type: 'idle_prompt' })
+run(fe, { ...feLane, hook_event_name: 'Notification', notification_type: 'permission_prompt' })
+const feR = run(fe)
+const oe = fixture('own-event')
+run(oe, { hook_event_name: 'Notification', notification_type: 'permission_prompt' })
+const oeR = run(oe)
+clause('clause 2b9 — another session\'s idle and permission pauses after this session\'s warned line do not hold its cycle, and its own permission pause does',
+  paused(fe).length === 2 && launched(feR) && paused(oe).length === 1 && !launched(oeR), `${show(fe, feR)} | ${show(oe, oeR)}`)
 // A git that stops at a filesystem boundary unless told to cross one, in a project whose .git the walk finds (SR5).
 const boundaryBin = path.join(tmp, 'boundary-bin'), realGitPath = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 write(path.join(boundaryBin, 'git'), `#!/bin/sh\n[ -n "$GIT_DISCOVERY_ACROSS_FILESYSTEM" ] || case " $* " in *" rev-parse "*) printf 'fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n' >&2; exit 128;; esac\nexec ${realGitPath} "$@"\n`)
@@ -810,6 +823,10 @@ clause('clause 1t — pauseActionAt: a question after the warned line asks for t
 clause('clause 1u — step 3 reads this session\'s own warned line: behind another session\'s later warned line a pause still holds it, and the later session is not held by it (E8-D7, DS-1)',
   pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sA') === true &&
   pausedAfterWarned(rec('- auto-cycle: warned sA 60%', R10P, '- auto-cycle: warned sB 60%'), 'sB') === false, 'another session\'s warned line was read')
+const R7W = rec('- auto-cycle: warned sA 60%', '- auto-cycle paused: waiting for your permission approval'), R10W = rec('- auto-cycle: warned sA 60%', R10P)
+clause('clause 1u2 — step 3 skips an R7, R8 or R9 line another session wrote, and only that: the same R7 with no writer known, or this session\'s, still holds, and another session\'s R10 holds',
+  pausedAfterWarned(R7W, 'sA', new Set([2])) === false && pausedAfterWarned(R7W, 'sA') === true && pausedAfterWarned(R7W, 'sA', new Set([9])) === true &&
+  pausedAfterWarned(R10W, 'sA', new Set([2])) === true, 'wrong')
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
 const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')

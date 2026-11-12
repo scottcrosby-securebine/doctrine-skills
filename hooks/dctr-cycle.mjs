@@ -31,7 +31,7 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, stopHeldFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded, processListing,
+  appendPaused, foreignEventPauses, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded, processListing,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
@@ -147,7 +147,7 @@ try {
       stopRepo,
       ...pausingStates(record.entries),
       warned,
-      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
+      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId, foreignEventPauses(sessionId, recordPath)),
       backgroundTasks: backgroundLive(payload.background_tasks),
       liveWork: live,
       sessionCrons: nonEmpty(payload.session_crons),

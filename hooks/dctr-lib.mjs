@@ -1007,7 +1007,7 @@ export function standingPauses(entries, startLine = 0) {
 }
 
 /** The event pauses (E8-D18): a permission prompt, an idle stop and an API error, each answered by the session going on. */
-const EVENT_PAUSES = ['R7', 'R8', 'R9']
+export const EVENT_PAUSES = ['R7', 'R8', 'R9']
 
 /** The dedup (E8-D18, E8-R27, E8-R28, E8-R29): no new paused line for `reason` while a standing pause names the same
  *  pause (samePause), and no idle pause (R8) while any pause stands, since a session waiting on any pause is idle for
@@ -1027,10 +1027,13 @@ export const sessionWarned = (entries, sessionId) =>
 
 /** B2 step 3 (E8-R25): an unresolved paused line follows this session's latest warned line, whatever anchor follows
  *  it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False with no such line.
- *  Every pause standingPauses returns after that warned line is one of these. */
-export function pausedAfterWarned(entries, sessionId) {
+ *  `foreignEvents` is the set of record lines holding R7, R8 and R9 pauses another session following the same kickoff
+ *  wrote: such a pause is about that session alone and does not count. Every other pause counts, one whose writer is
+ *  unknown included. */
+export function pausedAfterWarned(entries, sessionId, foreignEvents = new Set()) {
   const mine = sessionWarned(entries, sessionId)
-  return Boolean(mine) && unresolvedPausesAfter(entries, mine.line).length > 0
+  const counts = (p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && foreignEvents.has(p.line))
+  return Boolean(mine) && unresolvedPausesAfter(entries, mine.line).some(counts)
 }
 
 /** The action for paused line `p` of `entries` (RB5-1). The D2 table's for a reason it knows. The skills' question
