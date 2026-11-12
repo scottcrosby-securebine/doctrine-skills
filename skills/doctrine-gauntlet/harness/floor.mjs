@@ -1108,22 +1108,20 @@ try {
           let r = a.getBoundingClientRect()
           /* A padded box bigger than the viewport cannot fit in a viewport shot, so
              it is clipped in page coordinates from a full-page shot instead. */
-          if (r.height + 2 * pad > innerHeight || r.width + 2 * pad > innerWidth) {
-            const de = document.documentElement
-            const x = Math.max(0, r.left + scrollX - pad), y = Math.max(0, r.top + scrollY - pad)
-            const width = Math.min(de.scrollWidth, r.right + scrollX + pad) - x, height = Math.min(de.scrollHeight, r.bottom + scrollY + pad) - y
-            return { name, full: true, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
-          }
+          const full = r.height + 2 * pad > innerHeight || r.width + 2 * pad > innerWidth
           /* Keyboard focus scrolls only far enough to show the box, which leaves a
              ring drawn outside it past the viewport edge — the clipped-ring shot
              this pass exists to replace. */
-          if (r.top - pad < 0 || r.left - pad < 0 || r.bottom + pad > innerHeight || r.right + pad > innerWidth) {
+          if (!full && (r.top - pad < 0 || r.left - pad < 0 || r.bottom + pad > innerHeight || r.right + pad > innerWidth)) {
             a.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
             r = a.getBoundingClientRect()
           }
-          const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad)
-          const width = Math.min(innerWidth, r.right + pad) - x, height = Math.min(innerHeight, r.bottom + pad) - y
-          return { name, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
+          const de = document.documentElement
+          const ox = full ? scrollX : 0, oy = full ? scrollY : 0
+          const maxX = full ? de.scrollWidth : innerWidth, maxY = full ? de.scrollHeight : innerHeight
+          const x = Math.max(0, r.left + ox - pad), y = Math.max(0, r.top + oy - pad)
+          const width = Math.min(maxX, r.right + ox + pad) - x, height = Math.min(maxY, r.bottom + oy + pad) - y
+          return { name, full, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
         }, FOCUS_PAD), 'reading the focused element')
         if (stop.done) { if (stop.stayed) stayed = last; break }
         last = stop.name
@@ -1145,7 +1143,7 @@ try {
     focusParts.push(why
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
       : capped ? `${shots.length ? shot : `no ${theme} focus shot was written`} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
-: stayed ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus stayed on ${stayed} when Tab was pressed again, so no stop after it was shot${offscreen}`
+      : stayed ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus stayed on ${stayed} when Tab was pressed again, so no stop after it was shot${offscreen}`
       : shots.length ? `${shot}${offscreen}`
       : unshot.length ? `no ${theme} focus shot was written${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
