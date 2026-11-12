@@ -888,7 +888,7 @@ const pauseMarker = (kind, recordPath, line) =>
 
 /**
  * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
- * whoever wrote the line, and publish the paused token naming the last of them. Each line's alerted marker is taken
+ * but an R7, R8 or R9 tagged with a session other than `sessionId` (ownPauses), and publish the paused token naming the last of them. Each line's alerted marker is taken
  * first, exclusively, and outlives the session, so a later session, a concurrent hook or the typer never raises
  * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
  * one guard keeping herdr out of it. True when this call raised any.

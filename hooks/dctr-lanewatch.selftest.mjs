@@ -181,6 +181,22 @@ const oev = events(owners)
 clause('clause 2h2 — a permission pause tagged with another session in a role\'s record gives no event; the role\'s own tagged pause gives one',
   !oev.some((e) => e.startsWith('pause fp ')) && oev.filter((e) => e.startsWith('pause op ') && /waiting for your permission approval/.test(e)).length === 1, show(owners))
 
+// EP4-B1: a pane lookup that fails, comes back empty or names no session never makes another session's tagged pause
+// the role's. A role whose session was read once keeps it: its own tagged pause stays raised once, through the failure.
+const unk = fixture({ uf: { shim: { fail: true } }, ue: { shim: { empty: true } }, un: { session: null }, uk: { record: '- State: Open\n- auto-cycle: on cap 10 tier 60%\n' } })
+const wun = watcher(unk)
+polls(unk, wun)
+setPanes(unk, { [unk.pane.uk]: { fail: true } })
+for (const r of ['uf', 'ue', 'un', 'uk']) fs.appendFileSync(unk.record[r], '- auto-cycle paused: waiting for your permission approval [session S-other]\n')
+fs.appendFileSync(unk.record.uk, '- auto-cycle paused: session idle, waiting for you [session S-uk]\n')
+polls(unk, wun, 2)
+const umid = events(unk).filter((e) => e.startsWith('pause '))
+setPanes(unk, { [unk.pane.uk]: { fail: false } })
+polls(unk, wun)
+const uev = events(unk).filter((e) => e.startsWith('pause '))
+clause('clause 2h3 — with the pane lookup failed, empty or naming no session, another session\'s tagged pause gives no event; a role read once keeps its session, so its own tagged pause gives one event while the lookup fails and none more once it recovers',
+  umid.length === 1 && /^pause uk line \d+ auto-cycle paused: session idle/.test(umid[0]) && uev.length === 1 && uev[0] === umid[0], show(unk))
+
 // E15-D107: a held ready line.
 const asst = (at, text, usage) => JSON.stringify({ type: 'assistant', timestamp: at, uuid: `u-${at}`, message: { role: 'assistant', content: [{ type: 'text', text }], ...(usage ? { usage } : {}) } })
 const transcript = (fx, r, lines) => {

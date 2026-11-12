@@ -995,9 +995,10 @@ const latestMark = (entries, before = Infinity) =>
  * because R5's action appends one; a session start is, because a /clear and a resume start a new session, which must
  * not inherit the old one's pauses, whoever typed them: many pause actions ask the user for them, and the typer types
  * them itself. With no anchor at all, the latest auto-cycle line when it is an unresolved paused line. A ready line after a pause hides
- * nothing. The dedup (pauseStands), the token (autocycleToken, paused while any stands, naming the last) and the
- * alerts (each line once) read this one set; step 3 (pausedAfterWarned) refuses on every one of them after this
- * session's warned line but an R7, R8 or R9 tagged with another session, which it, the dedup and the pane token skip.
+ * nothing. The dedup (pauseStands), the token (autocycleToken, paused while any stands, naming the last), the
+ * alerts and pane message (each line once) and the lane watcher read this one set, and each skips an R7, R8 or R9
+ * tagged with another session (ownPauses); step 3 (pausedAfterWarned) refuses on every other one after this
+ * session's warned line.
  */
 export function standingPauses(entries, startLine = 0) {
   const es = entries || []
@@ -1024,7 +1025,7 @@ export const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !forei
  *  known: an R7, R8 or R9 line at or before it was answered by the turn that ended there, so it counts for neither
  *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Given `sessionId`, an R7, R8 or R9
  *  tagged with another session counts for neither rule either (foreignEvent). Every other
- *  pause counts whatever the Stop. The alerts read standingPauses unchanged; step 3 and the pane token skip the same
+ *  pause counts whatever the Stop. The alerts, the pane message, step 3 and the pane token skip the same
  *  foreign lines. */
 export const pauseStands = (entries, startLine, reason, turnEnd = 0, sessionId = null) => {
   const standing = ownPauses(standingPauses(entries, startLine), sessionId).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))

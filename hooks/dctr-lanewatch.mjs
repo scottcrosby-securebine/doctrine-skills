@@ -112,7 +112,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = i }
   }
   const exited = new Set(), pauses = new Map(), grew = new Map(), late = new Set(), readySeen = new Map(), readyRaised = new Set()
-  const past = new Map(), contextRaised = new Set(), staleRaised = new Set()
+  const past = new Map(), contextRaised = new Set(), staleRaised = new Set(), sessionOf = new Map()
+  // Holds a space, so no `[session <id>]` tag, whose id is one token, ever names it.
+  const NO_SESSION = '(no session)'
 
   function inbox() {
     let names = []
@@ -155,7 +157,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     const s = paneSession(lane.pane)
     if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) { exited.delete(role); restored.delete(`exit ${role} ${lane.pane}`) }
     const rec = recordOf(lane.worktree)
-    if (rec) { standing(role, rec.record.entries, typeof s === 'string' ? s : null); seats(role, rec.record.entries, lane.worktree) }
+    if (typeof s === 'string') sessionOf.set(role, s)
+    // A lookup that failed or named no session keeps the role's last read session; with none, NO_SESSION matches no tag.
+    if (rec) { standing(role, rec.record.entries, sessionOf.get(role) ?? NO_SESSION); seats(role, rec.record.entries, lane.worktree) }
     if (!s || !rec) return
     const rf = (() => { try { const r = JSON.parse(fs.readFileSync(restoreFile(lane.pane), 'utf8')); return r?.session_id === s ? r : null } catch { return null } })()
     const transcript = rf?.transcript_path ? readText(rf.transcript_path) : null
