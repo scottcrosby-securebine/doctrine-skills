@@ -1060,6 +1060,7 @@ try {
       .finally(() => clearTimeout(t))
   }
   const focusParts = []
+  const pad2 = n => String(n).padStart(2, '0')
   let focusShots = 0
   for (const theme of themes) {
     const shots = [], unshot = [], late = [], endless = []
@@ -1171,7 +1172,7 @@ try {
         if (stop.done) { end = stop.again ? (stop.stayed ? 'stayed' : 'back') : 'body'; back = stop.again; break }
         last = stop.name
         if (!stop.clip) { unshot.push(stop.name); continue }
-        pending = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
+        pending = `${outPrefix}-focus-${theme}-${pad2(shots.length + 1)}.png`
         await page.screenshot({ path: pending, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
         /* A load that lands after the read may have put the new document in the
            shot, so that shot is dropped rather than named. */
@@ -1191,7 +1192,6 @@ try {
       if (ctx) await within(ctx.close(), 'closing the focus pass').catch(() => {})
     }
     focusShots += shots.length
-    const pad2 = n => String(n).padStart(2, '0')
     const nn = pad2(shots.length)
     const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
     // every shot is named, consecutive ones as a range, so none reads as settled by omission
@@ -1200,16 +1200,16 @@ try {
       + (endless.length ? ` — ${named(endless)} taken while an endless animation was running on the focused element, so the ring there may be mid-cycle` : '')
     const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
     const lead = shots.length ? shot : `no ${theme} focus shot was written`
-    focusParts.push(end === 'reloaded'
-      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document on keyboard Tab before any stop was shot`) + offscreen
+    focusParts.push((end === 'reloaded'
+      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document on keyboard Tab before any stop was shot`)
       : end === 'failed'
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
-      : end === 'cap' ? `${lead} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
-      : end === 'stayed' ? `${lead} — focus stayed on ${last} when Tab was pressed again, so no stop after it was shot${offscreen}`
-      : end === 'back' ? `${lead} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot${offscreen}`
-      : last ? `${lead} — focus returned to the body when Tab was pressed after ${last}, the end of the page's Tab order${offscreen}`
+      : end === 'cap' ? `${lead} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot`
+      : end === 'stayed' ? `${lead} — focus stayed on ${last} when Tab was pressed again, so no stop after it was shot`
+      : end === 'back' ? `${lead} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot`
+      : last ? `${lead} — focus returned to the body when Tab was pressed after ${last}, the end of the page's Tab order`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
-    focusParts[focusParts.length - 1] += unsettled
+      + (end === 'failed' ? '' : offscreen) + unsettled)
   }
   handoff.splice(1, 0, `visible focus on every interactive element — ${focusParts.join('; ')}; ${focusShots ? 'look at each and judge the ring' : 'tab through and look'}`)
 } catch (e) {
