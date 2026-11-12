@@ -18,7 +18,7 @@
  */
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { resolve, dirname, join, delimiter } from 'node:path'
 
@@ -1062,12 +1062,19 @@ try {
   const focusParts = []
   let focusShots = 0
   for (const theme of themes) {
-    const shots = [], unshot = [], late = []
-    let why = null, stayed = null, back = null, last = null, ctx
+    const shots = [], unshot = [], late = [], endless = []
+    /* Every way out of the loop sets `end`, so the line can always say why the
+       pass stopped; a pass that ran out of presses is the cap. */
+    let why = null, end = 'cap', back = null, last = null, ctx, page, armed = false, loaded = false, pending = null
+    /* A stop whose focus loads a new document can read back as that document's
+       body, which would end the pass looking complete. The start reset marks the
+       document the pass began in, and a domcontentloaded after it catches a load
+       that lands between reads. */
+    const fresh = async () => armed && (loaded || await within(page.evaluate(() => !window.__focusDoc), 'checking for a new document', 3000).catch(() => false))
     try {
       ctx = await within(browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 }), 'opening the focus context')
       await within(ctx.addInitScript(INSTRUMENT), 'installing the instrument')
-      const page = await within(ctx.newPage(), 'opening the focus page')
+      page = await within(ctx.newPage(), 'opening the focus page')
       await page.goto(url, { waitUntil: 'load' })
       await within(applyTheme(page, theme), 'applying the theme')
       /* Smooth scrolling lets the box be read before the scroll that focus starts
@@ -1089,7 +1096,10 @@ try {
         document.documentElement.insertBefore(s, document.body)
         s.focus({ preventScroll: true })
         window.__focusStart = s
+        window.__focusDoc = true
       }), 'resetting the focus start')
+      page.on('domcontentloaded', () => { loaded = true })
+      armed = true
       for (let n = 0; n < FOCUS_CAP; n++) {
         await within(page.keyboard.press('Tab'), 'a Tab press')
         /* A ring drawn by a transition or a finite @keyframes animation is shot
@@ -1099,12 +1109,23 @@ try {
            running animation instead. Chromium's document.getAnimations stops at
            the document's own tree, so each shadow root, open or closed, is asked
            as well; asking starts any transition the press has just triggered.
-           Infinite ones never finish and are skipped; one that outlasts the wait
-           is shot anyway and the line says so. */
-        const settled = await within(page.evaluate(ms => {
-          const roots = new Set([document, ...window.__deep('*').map(e => e.shadowRoot).filter(Boolean), ...window.__closedRoots.filter(r => r.host.isConnected)])
-          const running = [...roots].flatMap(r => r.getAnimations()).filter(a => a.playState === 'running' && a.effect && Number.isFinite(a.effect.getComputedTiming().endTime))
-          return Promise.race([Promise.all(running.map(a => a.finished.catch(() => {}))).then(() => true), new Promise(r => setTimeout(() => r(false), ms))])
+           One animation's finish can start another, a chained ring, so the
+           running set is asked again after each round finishes, all inside one
+           bound. A finished promise resolves before the animationend handlers
+           run, so two frames pass before the next ask. Infinite ones never finish
+           and are skipped here, and the read below marks a shot whose focused
+           element runs one; one that outlasts the wait is shot anyway and the
+           line says so. */
+        const settled = await within(page.evaluate(async ms => {
+          const end = performance.now() + ms
+          const timeout = () => new Promise(r => setTimeout(r, Math.max(0, end - performance.now())))
+          for (;;) {
+            const roots = new Set([document, ...window.__deep('*').map(e => e.shadowRoot).filter(Boolean), ...window.__closedRoots.filter(r => r.host.isConnected)])
+            const running = [...roots].flatMap(r => r.getAnimations()).filter(a => a.playState === 'running' && a.effect && Number.isFinite(a.effect.getComputedTiming().endTime))
+            if (!running.length) return true
+            if (performance.now() >= end) return false
+            await Promise.race([Promise.all(running.map(a => a.finished.catch(() => {}))).then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))), timeout()])
+          }
         }, FOCUS_SETTLE), 'waiting for the focused state to settle')
         const stop = await within(page.evaluate(pad => {
           if (window.__focusStart) { window.__focusStart.remove(); window.__focusStart = null }
@@ -1116,6 +1137,7 @@ try {
             if (!root || !root.activeElement) break
             a = root.activeElement
           }
+          if (!window.__focusDoc) return { fresh: true }
           if (!a || a === document.body || a === document.documentElement) return { done: true }
           const seen = window.__focusSeen || (window.__focusSeen = [])
           const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
@@ -1140,34 +1162,52 @@ try {
           const maxX = full ? de.scrollWidth : innerWidth, maxY = full ? de.scrollHeight : innerHeight
           const x = Math.max(0, r.left + ox - pad), y = Math.max(0, r.top + oy - pad)
           const width = Math.min(maxX, r.right + ox + pad) - x, height = Math.min(maxY, r.bottom + oy + pad) - y
-          return { name, full, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
+          /* Scoped to the focused element, so a page spinner elsewhere does not
+             mark every shot. */
+          const endless = a.getAnimations({ subtree: true }).some(x => x.playState === 'running' && x.effect && !Number.isFinite(x.effect.getComputedTiming().endTime))
+          return { name, full, endless, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
         }, FOCUS_PAD), 'reading the focused element')
-        if (stop.done) { if (stop.stayed) stayed = last; else if (stop.again) back = stop.again; break }
+        if (stop.fresh || loaded) { end = 'reloaded'; break }
+        if (stop.done) { end = stop.again ? (stop.stayed ? 'stayed' : 'back') : 'body'; back = stop.again; break }
         last = stop.name
         if (!stop.clip) { unshot.push(stop.name); continue }
-        const file = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
-        await page.screenshot({ path: file, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
-        shots.push(file)
-        if (!settled) late.push(String(shots.length).padStart(2, '0'))
+        pending = `${outPrefix}-focus-${theme}-${String(shots.length + 1).padStart(2, '0')}.png`
+        await page.screenshot({ path: pending, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
+        /* A load that lands after the read may have put the new document in the
+           shot, so that shot is dropped rather than named. */
+        if (await fresh()) { rmSync(pending, { force: true }); end = 'reloaded'; break }
+        shots.push(pending)
+        pending = null
+        if (!settled) late.push(shots.length)
+        if (stop.endless) endless.push(shots.length)
       }
     } catch (e) {
       why = String(e).split('\n')[0].slice(0, 120)
+      if (pending) rmSync(pending, { force: true })
+      /* A load that lands during a call destroys the context it ran in, which
+         is the new document and not a broken pass. */
+      end = await fresh() ? 'reloaded' : 'failed'
     } finally {
       if (ctx) await within(ctx.close(), 'closing the focus pass').catch(() => {})
     }
     focusShots += shots.length
-    const capped = shots.length + unshot.length === FOCUS_CAP   // a press either ends the pass or adds one stop to a list
-    const nn = String(shots.length).padStart(2, '0')
+    const pad2 = n => String(n).padStart(2, '0')
+    const nn = pad2(shots.length)
     const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
-    const unsettled = late.length ? ` — ${late.length > 1 ? 'shots' : 'shot'} ${late.slice(0, 5).join(', ')}${late.length > 5 ? ', …' : ''} in ${theme} ${late.length > 1 ? 'were' : 'was'} taken while an animation was still running ${FOCUS_SETTLE / 1000}s after Tab, so the ring there may be part-drawn` : ''
+    // every shot is named, consecutive ones as a range, so none reads as settled by omission
+    const named = ns => `${ns.length > 1 ? 'shots' : 'shot'} ${ns.reduce((o, n, i) => (i && n === ns[i - 1] + 1 ? (o[o.length - 1][1] = n) : o.push([n, n]), o), []).map(([a, b]) => a === b ? pad2(a) : `${pad2(a)}-${pad2(b)}`).join(', ')} in ${theme} ${ns.length > 1 ? 'were' : 'was'}`
+    const unsettled = (late.length ? ` — ${named(late)} taken while an animation was still running ${FOCUS_SETTLE / 1000}s after Tab, so the ring there may be part-drawn` : '')
+      + (endless.length ? ` — ${named(endless)} taken while an endless animation was running on the focused element, so the ring there may be mid-cycle` : '')
     const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
-    focusParts.push(why
+    const lead = shots.length ? shot : `no ${theme} focus shot was written`
+    focusParts.push(end === 'reloaded'
+      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document on keyboard Tab before any stop was shot`) + offscreen
+      : end === 'failed'
       ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
-      : capped ? `${shots.length ? shot : `no ${theme} focus shot was written`} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
-      : stayed ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus stayed on ${stayed} when Tab was pressed again, so no stop after it was shot${offscreen}`
-      : back ? `${shots.length ? shot : `no ${theme} focus shot was written`} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot${offscreen}`
-      : shots.length ? `${shot}${offscreen}`
-      : unshot.length ? `no ${theme} focus shot was written${offscreen}`
+      : end === 'cap' ? `${lead} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot${offscreen}`
+      : end === 'stayed' ? `${lead} — focus stayed on ${last} when Tab was pressed again, so no stop after it was shot${offscreen}`
+      : end === 'back' ? `${lead} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot${offscreen}`
+      : last ? `${lead} — focus returned to the body when Tab was pressed after ${last}, the end of the page's Tab order${offscreen}`
       : `nothing took focus on keyboard Tab in ${theme}, so no ${theme} focus shot was written`)
     focusParts[focusParts.length - 1] += unsettled
   }
