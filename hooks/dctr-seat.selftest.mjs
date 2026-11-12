@@ -131,7 +131,7 @@ const SEAT_TAB_ID = 'w4Z:t9'
 clause('clause 1aw — the gate applies an anchor that occurs exactly once, and refuses both other counts',
   anchorVerdict(1) === 'apply' && anchorVerdict(0) === 'missing' && anchorVerdict(2) === 'ambiguous' && anchorVerdict(7) === 'ambiguous',
   `${anchorVerdict(1)} / ${anchorVerdict(0)} / ${anchorVerdict(2)}`)
-// A red baseline names its clauses, and a suite red only under the pool's load is rerun alone before the gate stops.
+// A red baseline names its clauses, and is rerun alone as a diagnosis before the gate stops.
 {
   const RED = 'PASS  clause 1a — ok\nFAIL  clause 2w — the control typed nothing\n        {"typed":[]}\nPASS  clause 3a — ok\n  FAIL  clause 9 — indented\n        detail nine\n'
   const ADJ = 'FAIL  clause 4 — first\nPASS  clause 5 — next\nFAIL  clause 6 — second\nFAIL  clause 7 — third\n'
@@ -149,12 +149,12 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
       JSON.stringify(R.flaky.slice(1)) === JSON.stringify(['      · FAIL  clause 2w — the control typed nothing', '      · {"typed":[]}', '      · FAIL  clause 9 — indented', '      · detail nine']) &&
       JSON.stringify(R.twice.slice(5)) === JSON.stringify(['      · alone: FAIL  clause 2w — the control typed nothing', '      · alone: {"typed":[]}', '      · alone: FAIL  clause 9 — indented', '      · alone: detail nine']),
     JSON.stringify(R))
-  // Proved without the helpers: the red fixture carries two FAIL lines, each followed by a detail line, and the never-run one has no numeric code.
+  // Proved without the helpers: the red fixture carries two FAIL lines each with a detail line, the adjacent fixture a PASS line and a FAIL line each straight after a FAIL line, and the never-run one no numeric code.
   const raw = RED.split('\n'), at = raw.flatMap((l, i) => (/^ *FAIL /.test(l) ? [i] : []))
-  const adjRaw = ADJ.split('\n').filter(Boolean), adjNext = adjRaw.flatMap((l, i) => (/^FAIL /.test(l) ? [adjRaw[i + 1] ?? ''] : []))
+  const adjRaw = ADJ.split('\n'), adjNext = adjRaw.flatMap((l, i) => (/^FAIL /.test(l) ? [adjRaw[i + 1]] : []))
   clause('clause 3bl — the red fixture really holds two FAIL lines each with a detail line after it, the adjacent fixture really puts a PASS line and a FAIL line straight after a FAIL line, and the never-run fixture really has no exit status',
     at.length === 2 && at.every((i) => raw[i + 1] && !/^ *(PASS|FAIL) /.test(raw[i + 1])) && typeof gone.code !== 'number' &&
-      adjNext.filter((n) => /^(PASS|FAIL) /.test(n)).length === 2, JSON.stringify({ at, adjNext }))
+      adjNext.some((n) => /^PASS /.test(n)) && adjNext.some((n) => /^FAIL /.test(n)), JSON.stringify({ at, adjNext }))
 }
 // DCTR_SHARD splits the mutation gate across CI jobs: the shards of one n must cover every index exactly once, and a
 // spec that is not that shape must throw rather than keep a subset nobody asked for.
