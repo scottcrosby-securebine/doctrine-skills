@@ -4,9 +4,10 @@
  *          [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
  *
  * Renders 360/768/1440/2560 in the themes asked for (360 as a phone), writes
- * full-page screenshots, and reports the floor: horizontal scroll, a missing
- * mobile viewport at 360, heading structure, axe serious/critical, target
- * size, page errors, reduced motion.
+ * full-page screenshots and a padded shot of each keyboard focus stop, and
+ * reports the floor: horizontal scroll, a missing mobile viewport at 360,
+ * heading structure, axe serious/critical, target size, page errors, reduced
+ * motion.
  *
  * Exit codes:  0 clean · 1 failing configurations · 2 could not run ·
  *              3 nothing failed but something went unmeasured (NOT a pass).
@@ -17,7 +18,7 @@
  */
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { resolve, dirname, join, delimiter } from 'node:path'
 
@@ -285,7 +286,7 @@ const show = (list, n, line) => {
 const unmeasured = []
 const handoff = [
   'non-text contrast, WCAG 1.4.11 (charts, icons, focus rings) — axe does not check it',
-  'visible focus on every interactive element — tab through and look',
+  // visible focus is spliced in second once the focus pass below has run
 ]
 const fingerprint = {}   // theme -> width -> computed-style signature
 let identity = null      // what this run actually looked at
@@ -1039,6 +1040,183 @@ try {
      or canvas is invisible to it. Pushed once, outside the loop - inside it, a
      two-theme run printed the same JUDGE line twice. */
   handoff.push('rAF/canvas-driven motion under prefers-reduced-motion — watch the page and judge')
+
+  /* Visible focus: a padded 1:1 shot of every keyboard focus stop, so the critic
+     judging the ring has a focused state to look at rather than an instruction to
+     go and make one. Tab and activeElement, never el.focus() on a control: a
+     programmatic focus does not arm :focus-visible once the run has clicked
+     anything.
+     Best-effort the way --crop is: a failure becomes the JUDGE line's wording
+     and never ends the floor, since JUDGE never gates. */
+  const FOCUS_PAD = 16, FOCUS_CAP = 40, FOCUS_SETTLE = 2000
+  /* A Tab-triggered handler can wedge the renderer, and then a press or an
+     evaluate waits forever; so every call the pass makes has a deadline, goto
+     and the screenshot through Playwright's own timeouts and the rest through
+     this, and a wedged page becomes the JUDGE line's failure wording while the
+     floor returns. */
+  const within = (p, what, ms = 10_000) => {
+    let t
+    return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} did not return within ${ms / 1000}s`)), ms) })])
+      .finally(() => clearTimeout(t))
+  }
+  const focusParts = []
+  // a cleanup that cannot remove its shot (a directory at that path) must not end the floor
+  const drop = file => { try { rmSync(file, { force: true }) } catch {} }
+  const pad2 = n => String(n).padStart(2, '0')
+  let focusShots = 0
+  for (const theme of themes) {
+    const shots = [], unshot = [], late = [], endless = []
+    /* Every way out of the loop sets `end`, so the line can always say why the
+       pass stopped; a pass that ran out of presses is the cap. */
+    let why = null, end = 'cap', back = null, last = null, ctx, page, armed = false, loaded = false, pending = null
+    /* A stop whose focus loads a new document can read back as that document's
+       body, which would end the pass looking complete. The start reset marks the
+       document the pass began in, and a domcontentloaded after it catches a load
+       that lands between reads. */
+    const fresh = async () => armed && (loaded || await within(page.evaluate(() => !window.__focusDoc), 'checking for a new document', 3000).catch(() => false))
+    try {
+      ctx = await within(browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, deviceScaleFactor: 1 }), 'opening the focus context')
+      await within(ctx.addInitScript(INSTRUMENT), 'installing the instrument')
+      page = await within(ctx.newPage(), 'opening the focus page')
+      await page.goto(url, { waitUntil: 'load' })
+      await within(applyTheme(page, theme), 'applying the theme')
+      /* Smooth scrolling lets the box be read before the scroll that focus starts
+         has landed, which shoots a misplaced strip and counts it as the stop. A
+         scroll is not an animation getAnimations reports, so the settle wait
+         below cannot see it and this rule is what stops it. */
+      await within(page.addStyleTag({ content: `${HIDE_OVERLAYS} * { scroll-behavior: auto !important; }` }), 'adding the overlay style')
+      await within(SETTLE(page), 'the settle scroll', 60_000)
+      await page.waitForTimeout(1200)
+      /* An autofocused control, or a #fragment, moves the point sequential focus
+         starts from, and Tab would skip everything before it. A tabindex=-1 span
+         focused just before <body> puts that point at the top of the document: it
+         is out of the Tab order so it adds no stop, fixed and zero-size so it
+         changes no layout, and focusing it arms nothing a real control would. */
+      await within(page.evaluate(() => {
+        const s = document.createElement('span')
+        s.tabIndex = -1
+        s.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0'
+        document.documentElement.insertBefore(s, document.body)
+        s.focus({ preventScroll: true })
+        window.__focusStart = s
+        window.__focusDoc = true
+      }), 'resetting the focus start')
+      page.on('domcontentloaded', () => { loaded = true })
+      armed = true
+      for (let n = 0; n < FOCUS_CAP; n++) {
+        await within(page.keyboard.press('Tab'), 'a Tab press')
+        /* A ring drawn by a transition or a finite @keyframes animation is shot
+           before it is drawn, and a skip link that slides in is read part-way
+           there. A style override cannot fix that, since no stylesheet in the
+           document reaches into a shadow root, so the pass waits for every finite
+           running animation instead. Chromium's document.getAnimations stops at
+           the document's own tree, so each shadow root, open or closed, is asked
+           as well; asking starts any transition the press has just triggered.
+           One animation's finish can start another, a chained ring, so the
+           running set is asked again after each round finishes, all inside one
+           bound. A finished promise resolves before the animationend handlers
+           run, so two frames pass before the next ask. Infinite ones never finish
+           and are skipped here, and the read below marks a shot whose focused
+           element runs one; one that outlasts the wait is shot anyway and the
+           line says so. */
+        const settled = await within(page.evaluate(async ms => {
+          const end = performance.now() + ms
+          const timeout = () => new Promise(r => setTimeout(r, Math.max(0, end - performance.now())))
+          for (;;) {
+            const roots = new Set([document, ...window.__deep('*').map(e => e.shadowRoot).filter(Boolean), ...window.__closedRoots.filter(r => r.host.isConnected)])
+            const running = [...roots].flatMap(r => r.getAnimations()).filter(a => a.playState === 'running' && a.effect && Number.isFinite(a.effect.getComputedTiming().endTime))
+            if (!running.length) return true
+            if (performance.now() >= end) return false
+            await Promise.race([Promise.all(running.map(a => a.finished.catch(() => {}))).then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))), timeout()])
+          }
+        }, FOCUS_SETTLE), 'waiting for the focused state to settle')
+        const stop = await within(page.evaluate(pad => {
+          if (window.__focusStart) { window.__focusStart.remove(); window.__focusStart = null }
+          /* A closed root is not reachable through .shadowRoot, and without it two
+             stops inside one component read as the same host. */
+          let a = document.activeElement
+          for (;;) {
+            const root = a && (a.shadowRoot || window.__closedRoots.find(r => r.host === a))
+            if (!root || !root.activeElement) break
+            a = root.activeElement
+          }
+          if (!window.__focusDoc) return { fresh: true }
+          if (!a || a === document.body || a === document.documentElement) return { done: true }
+          const seen = window.__focusSeen || (window.__focusSeen = [])
+          const name = `${a.tagName.toLowerCase()} "${(a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 28)}"`
+          /* The last stop again means focus did not move (a frame, or a widget that
+             keeps Tab); an earlier one means it came back round, a trap or a loop,
+             since a run that reaches the end of the page goes back to <body>. */
+          if (seen.includes(a)) return { done: true, again: name, stayed: a === seen[seen.length - 1] }
+          seen.push(a)
+          let r = a.getBoundingClientRect()
+          /* A padded box bigger than the viewport cannot fit in a viewport shot, so
+             it is clipped in page coordinates from a full-page shot instead. */
+          const full = r.height + 2 * pad > innerHeight || r.width + 2 * pad > innerWidth
+          /* Keyboard focus scrolls only far enough to show the box, which leaves a
+             ring drawn outside it past the viewport edge — the clipped-ring shot
+             this pass exists to replace. */
+          if (!full && (r.top - pad < 0 || r.left - pad < 0 || r.bottom + pad > innerHeight || r.right + pad > innerWidth)) {
+            a.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+            r = a.getBoundingClientRect()
+          }
+          const de = document.documentElement
+          const ox = full ? scrollX : 0, oy = full ? scrollY : 0
+          const maxX = full ? de.scrollWidth : innerWidth, maxY = full ? de.scrollHeight : innerHeight
+          const x = Math.max(0, r.left + ox - pad), y = Math.max(0, r.top + oy - pad)
+          const width = Math.min(maxX, r.right + ox + pad) - x, height = Math.min(maxY, r.bottom + oy + pad) - y
+          /* Scoped to the focused element, so a page spinner elsewhere does not
+             mark every shot. */
+          const endless = a.getAnimations({ subtree: true }).some(x => x.playState === 'running' && x.effect && !Number.isFinite(x.effect.getComputedTiming().endTime))
+          return { name, full, endless, clip: r.width > 0 && r.height > 0 && width > 0 && height > 0 ? { x, y, width, height } : null }
+        }, FOCUS_PAD), 'reading the focused element')
+        if (stop.fresh || loaded) { end = 'reloaded'; break }
+        if (stop.done) { end = stop.again ? (stop.stayed ? 'stayed' : 'back') : 'body'; back = stop.again; break }
+        last = stop.name
+        if (!stop.clip) { unshot.push(stop.name); continue }
+        pending = `${outPrefix}-focus-${theme}-${pad2(shots.length + 1)}.png`
+        await page.screenshot({ path: pending, clip: stop.clip, fullPage: !!stop.full, timeout: 5000 })
+        /* A load that lands after the read may have put the new document in the
+           shot, so that shot is dropped rather than named. */
+        if (await fresh()) { drop(pending); end = 'reloaded'; break }
+        shots.push(pending)
+        pending = null
+        if (!settled) late.push(shots.length)
+        if (stop.endless) endless.push(shots.length)
+      }
+    } catch (e) {
+      why = String(e).split('\n')[0].slice(0, 120)
+      if (pending) drop(pending)
+      /* A load that lands during a call destroys the context it ran in, which
+         is the new document and not a broken pass. */
+      end = await fresh() ? 'reloaded' : 'failed'
+    } finally {
+      if (ctx) await within(ctx.close(), 'closing the focus pass').catch(() => {})
+    }
+    focusShots += shots.length
+    const nn = pad2(shots.length)
+    const shot = `${shots.length} focus stops shot by keyboard Tab at ${outPrefix}-focus-${theme}-01..${nn}.png (${FOCUS_PAD}px padding, 1:1)`
+    // every shot is named, consecutive ones as a range, so none reads as settled by omission
+    const named = ns => `${ns.length > 1 ? 'shots' : 'shot'} ${ns.reduce((o, n, i) => (i && n === ns[i - 1] + 1 ? (o[o.length - 1][1] = n) : o.push([n, n]), o), []).map(([a, b]) => a === b ? pad2(a) : `${pad2(a)}-${pad2(b)}`).join(', ')} in ${theme} ${ns.length > 1 ? 'were' : 'was'}`
+    const unsettled = (late.length ? ` — ${named(late)} taken while an animation was still running ${FOCUS_SETTLE / 1000}s after Tab, so the ring there may be part-drawn` : '')
+      + (endless.length ? ` — ${named(endless)} taken while an endless animation was running on the focused element, so the ring there may be mid-cycle` : '')
+    const offscreen = unshot.length ? ` — ${unshot.length} stop(s) in ${theme} took focus with no box on screen and were not shot: ${unshot.slice(0, 3).join(', ')}${unshot.length > 3 ? ', …' : ''}` : ''
+    const lead = shots.length ? shot : `no ${theme} focus shot was written`
+    focusParts.push((end === 'reloaded'
+      ? (shots.length ? `${shot} — the page loaded a new document after shot ${nn}, so no stop after shot ${nn} was shot` : `${lead} — the page loaded a new document before any stop was shot`)
+      : end === 'failed'
+      ? (shots.length ? `${shot} before the ${theme} focus pass failed (${why}), so no stop after shot ${nn} was shot` : `the ${theme} focus pass could not run (${why}), so no ${theme} focus shot was written`)
+      : end === 'cap' ? `${lead} — the pass stopped at its ${FOCUS_CAP}-stop cap, so any stop after the ${FOCUS_CAP}th was not shot`
+      : end === 'stayed' ? `${lead} — focus stayed on ${last} when Tab was pressed again, so no stop after it was shot`
+      : end === 'back' ? `${lead} — focus came back to ${back} when Tab was pressed after ${last}, so no stop after ${last} was shot`
+      /* A stop that blurs, hides or removes itself on focus also sends focus to
+         the body, part-way through the page, so the line says what was read and
+         never that the Tab order ended or that nothing took focus. */
+      : last ? `${lead} — focus went to the body when Tab was pressed after ${last}, so no stop after it was shot`
+      : `${lead} — focus went to the body when Tab was first pressed, so no stop was shot`)
+      + (end === 'failed' ? '' : offscreen) + unsettled)
+  }
+  handoff.splice(1, 0, `visible focus on every interactive element — ${focusParts.join('; ')}; ${focusShots ? 'look at each and judge the ring' : 'tab through and look'}`)
 } catch (e) {
   fatal = e            // a bad URL, a dead server, a navigation timeout
 } finally {
