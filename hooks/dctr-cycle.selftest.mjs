@@ -26,7 +26,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt, pausedLine } = lib
+const { pausedSinceClaim, autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt, pausedLine } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -861,6 +861,17 @@ clause('clause 1u2 — step 3, the dedup and the token skip an R7, R8 or R9 line
   autocycleToken(rec('- auto-cycle: on cap 8 tier 60%', tg('waiting for your permission approval', 'sB')), 0, 'sA') === 'auto-cycle on·cycle 0 of 8' &&
   autocycleToken(rec('- auto-cycle: on cap 8 tier 60%', tg('waiting for your permission approval', 'sB')), 0) === pausedToken('waiting for your permission approval') &&
   pausedLine('session idle, waiting for you', 'sA') === tg('session idle, waiting for you', 'sA') && pausedLine('x') === tg('x'), 'wrong')
+// EP9-B1: an API error's message can hold a newline (Codex's error.message); its paused line is still one record line,
+// so its tag stays on the line the parser reads and another session's multiline error holds nothing of this one.
+{
+  const multi = pausedLine(pauseReason('R9', 'upstream unavailable\nretry later', 'codex'), 'sH')
+  const es = rec(W_A, multi), paused = es.filter((e) => e.sub === 'paused')
+  clause('clause 1u3 — a reason holding a newline is written as one record line ending with its tag, so another session\'s multiline API error neither holds this session\'s Stop nor counts for its claim',
+    !multi.includes('\n') && paused.length === 1 && paused[0].session === 'sH' && /^Codex API error: upstream unavailable retry later$/.test(paused[0].reason) &&
+    pausedAfterWarned(es, 'sA') === false && pausedSinceClaim(es, 0, ['sA']) === false &&
+    pausedAfterWarned(rec(W_A, pausedLine(pauseReason('R9', 'upstream unavailable\nretry later', 'codex'), 'sA')), 'sA') === true,
+    JSON.stringify({ multi, paused }))
+}
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
 const restoreHook = path.join(import.meta.dirname, 'dctr-restore.mjs')

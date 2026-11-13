@@ -945,8 +945,10 @@ const CODEX_ACTIONS = [
   { match: /^could not cycle: this pane now runs a different Codex session$/, action: 'check the pane, then /clear and type resume by hand' },
 ]
 const CODEX_R9 = /^Codex API error: /
-/** The paused line; a hook passes the session the pause is about, written as ` [session <id>]` after the reason. */
-export const pausedLine = (reason, session = null) => `- auto-cycle paused: ${reason}${session ? ` [session ${session}]` : ''}`
+/** The paused line, always one record line (a newline in the reason, as an API error's message can hold, becomes a
+ *  space, so the tag stays on the line the parser reads); given a session, the one an R7, R8 or R9 is about
+ *  (appendPaused), it ends with ` [session <id>]`. */
+export const pausedLine = (reason, session = null) => `- auto-cycle paused: ${String(reason).replace(/\s*\n\s*/g, ' ')}${session ? ` [session ${session}]` : ''}`
 /** The pane message and the toast body for a paused line (E8-R23): the reason, then what to do. */
 export const pauseMessage = (reason, action = pauseAction(reason)) => `doctrine auto-cycle paused: ${reason}. ${action}`
 export const pausedToken = (reason) => `auto-cycle paused·${String(reason).slice(0, TOKEN_REASON_MAX)}`

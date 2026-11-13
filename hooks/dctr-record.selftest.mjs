@@ -329,7 +329,7 @@ const relayNear = parseRecord(RELAY_NEAR.join('\n')).entries
 clause('clause 1w \u2014 a relay line missing its ref or its to, or with a time that is not a form time, is not an entry (E15-D1)',
   relayNear.length === 0, JSON.stringify(relayNear))
 
-// A paused line a hook writes ends with its writer, ` [session <id>]`: the parser returns the reason without it and
+// A hook's R7, R8 or R9 paused line ends with its writer, ` [session <id>]`: the parser returns the reason without it and
 // the id as `session`. A line with no tag has no session; a bracket that is not that tag at the end stays reason text.
 const tagged = parseRecord(['- auto-cycle paused: session idle, waiting for you [session s-1]', '- auto-cycle paused: Claude API error: overloaded [session 1e90ba4f-0082]',
   '- auto-cycle paused: waiting on Scott', '- auto-cycle paused: question: [session x] first?', '- `auto-cycle paused: waiting for your permission approval [session s-2]`'].join('\n')).entries

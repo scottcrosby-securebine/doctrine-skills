@@ -71,7 +71,7 @@ const FORMS = [
   [form('auto-cycle:\\s+warned\\s+(\\S+)\\s+(\\S+?)'), (m) => ({ kind: 'auto-cycle', sub: 'warned', session: m[1], tier: m[2] })],
   [form('auto-cycle:\\s+cycle\\s+(\\d+)\\s+tree\\s+([0-9a-f]+)'), (m) => ({ kind: 'auto-cycle', sub: 'cycle', n: num(m[1]), hash: m[2] })],
   [form('auto-cycle:\\s+ready'), () => ({ kind: 'auto-cycle', sub: 'ready' }), AGENT],
-  // A hook writes its session after the reason, ` [session <id>]` (pausedLine); an agent's line carries none.
+  // A hook's R7, R8 or R9 line ends with ` [session <id>]` (pausedLine, appendPaused); every other line carries none.
   [form('auto-cycle paused:\\s+(\\S.*?)(?:\\s+\\[session\\s+([^\\s\\]]+)\\])?\\s*', ''), (m) => ({ kind: 'auto-cycle', sub: 'paused', reason: m[1].trim(), session: m[2] ?? null }), AGENT],
 ]
 
