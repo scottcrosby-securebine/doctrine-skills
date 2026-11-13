@@ -27,9 +27,8 @@
 //   deadline <role> <seat> line <n>  a seat past the deadline of its wave line, record line n, whose handle file did not
 //                                grow between two polls
 //   pause <role> line <n> <reason>  a record newly showing a standing pause, at record line n: an auto-cycle paused
-//                                line other than an R7, R8 or R9 tagged with a session other than the role's last
-//                                read one (every tagged one before any is read), a Blocked state, an unanswered
-//                                question or an alarm with no ruling after it
+//                                line the session skip (ownPauses in dctr-lib.mjs) leaves for the role's last read session, a Blocked
+//                                state, an unanswered question or an alarm with no ruling after it
 //   ready <role> <session> <at>  a last assistant message, timestamped at, ending with the ready line for longer than
 //                                READY_LIMIT_MS, with no cycle line since the poll that first saw it
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
@@ -172,7 +171,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   function standing(role, entries, paneSessionId) {
     // Each pause is named by the record line that stands for it, so a new pause with the same reason is a new event.
     const now = new Set(), last = (pred) => entries.filter(pred).at(-1)?.line
-    // A permission, idle or API-error pause another session sharing this record wrote is not the role's.
+    // The session skip (ownPauses in dctr-lib.mjs), for the role's last read session.
     for (const p of ownPauses(standingPauses(entries), paneSessionId)) now.add(`pause ${role} line ${p.line} auto-cycle paused: ${p.reason}`)
     const st = pausingStates(entries)
     if (st.blocked) now.add(`pause ${role} line ${last((e) => e.kind === 'state')} ${st.blocked}`)

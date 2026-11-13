@@ -996,9 +996,8 @@ const latestMark = (entries, before = Infinity) =>
  * not inherit the old one's pauses, whoever typed them: many pause actions ask the user for them, and the typer types
  * them itself. With no anchor at all, the latest auto-cycle line when it is an unresolved paused line. A ready line after a pause hides
  * nothing. The dedup (pauseStands), the token (autocycleToken, paused while any stands, naming the last), the
- * alerts and pane message (each line once) and the lane watcher read this one set, and each skips an R7, R8 or R9
- * tagged with another session (ownPauses); step 3 (pausedAfterWarned) refuses on every other one after this
- * session's warned line.
+ * alerts and pane message (each line once) and the lane watcher read this one set after the session skip (below);
+ * step 3 (pausedAfterWarned) refuses on every one the skip leaves after this session's warned line.
  */
 export function standingPauses(entries, startLine = 0) {
   const es = entries || []
@@ -1011,10 +1010,18 @@ export function standingPauses(entries, startLine = 0) {
 /** The event pauses (E8-D18): a permission prompt, an idle stop and an API error, each answered by the session going on. */
 export const EVENT_PAUSES = ['R7', 'R8', 'R9']
 
-/** Whether paused line `p` is an R7, R8 or R9 about a session not in `sessions`: a permission prompt, an idle stop or
- *  an API error is about the session that raised it alone, so on a record two sessions share it never holds the
- *  other's Stop or typer, refuses the other's own pause in the dedup, or names itself in the other's pane token.
- *  An untagged line is never foreign. */
+/**
+ * THE SESSION SKIP (EP-R1), stated once: every reader of paused lines that names a session applies it, and points
+ * here as "the session skip".
+ *
+ * A permission prompt, an idle stop or an API error (R7, R8, R9) is about the session that raised it alone, so the
+ * hook writing one ends it with ` [session <id>]` (appendPaused). A reader owning the sessions in `sessions` treats a
+ * tagged R7, R8 or R9 naming a session outside them as foreign: it never holds that reader's Stop or typer, counts
+ * in its dedup, or shows in its alerts, pane message, token or lane watcher event; that session's own hook raises it.
+ * An untagged line, and every other pause, is never foreign. ownPauses owns one session and, given none, skips
+ * nothing; the typer's claim check owns two, the session it clears and, once known, the one its /clear started; the
+ * lane watcher, having read no session for a role, passes one no tag names, so every tagged event pause is foreign.
+ */
 const foreignEvent = (p, sessions) => Boolean(p.session) && EVENT_PAUSES.includes(pauseCode(p.reason)) && !sessions.includes(p.session)
 export const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !foreignEvent(p, [sessionId])) : ps)
 
@@ -1023,10 +1030,8 @@ export const ownPauses = (ps, sessionId) => (sessionId ? ps.filter((p) => !forei
  *  that reason; any other pause that differs from every standing one is written. `turnEnd` is the record's line count
  *  at this session's latest turn end (a Stop, a StopFailure or the next submitted prompt, E8-R31), 0 when none is
  *  known: an R7, R8 or R9 line at or before it was answered by the turn that ended there, so it counts for neither
- *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Given `sessionId`, an R7, R8 or R9
- *  tagged with another session counts for neither rule either (foreignEvent). Every other
- *  pause counts whatever the Stop. The alerts, the pane message, step 3 and the pane token skip the same
- *  foreign lines. */
+ *  rule (E8-R29, E8-R30), and a second prompt, idle stop or error is written. Given `sessionId`, the session skip
+ *  applies first. Every other pause counts whatever the Stop. */
 export const pauseStands = (entries, startLine, reason, turnEnd = 0, sessionId = null) => {
   const standing = ownPauses(standingPauses(entries, startLine), sessionId).filter((p) => !(EVENT_PAUSES.includes(pauseCode(p.reason)) && p.line <= turnEnd))
   return pauseCode(reason) === 'R8' ? standing.length > 0 : standing.some((p) => samePause(p.reason, reason))
@@ -1036,17 +1041,16 @@ export const pauseStands = (entries, startLine, reason, turnEnd = 0, sessionId =
 export const sessionWarned = (entries, sessionId) =>
   (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1) || null
 
-/** B2 step 3 (E8-R25): an unresolved paused line follows this session's latest warned line, whatever anchor follows
- *  it, other than an R7, R8 or R9 tagged with another session (ownPauses), since only an R2, R3 or R4 pause that
- *  resolves lets the same session cycle again. False with no such line. Every pause standingPauses returns after that
- *  warned line, but such a foreign one, is one of these. */
+/** B2 step 3 (E8-R25): an unresolved paused line the session skip leaves follows this session's latest warned line,
+ *  whatever anchor follows it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False
+ *  with no such line. Every pause standingPauses returns after that warned line and the skip leaves is one of these. */
 export function pausedAfterWarned(entries, sessionId) {
   const mine = sessionWarned(entries, sessionId)
   return Boolean(mine) && ownPauses(unresolvedPausesAfter(entries, mine.line), sessionId).length > 0
 }
 
-/** The typer's claim check (RB8-1): a paused line after the claim's key line, other than an R7, R8 or R9 about a
- *  session outside `sessions` (the session it clears and, once known, the one its /clear started). */
+/** The typer's claim check (RB8-1): a paused line after the claim's key line that the session skip leaves, owning
+ *  `sessions` (the session it clears and, once known, the one its /clear started). */
 export const pausedSinceClaim = (entries, keyLine, sessions) =>
   (entries || []).some((e) => e.kind === 'auto-cycle' && e.sub === 'paused' && e.line > keyLine && !foreignEvent(e, sessions))
 
@@ -1063,9 +1067,8 @@ export function pauseActionAt(p, entries, startLine = 0) {
   return mark?.sub === 'warned' && mark.line > startLine ? `${first}, then /clear and type resume` : first
 }
 
-/** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, an R7, R8 or R9 tagged with a
- *  session other than `sessionId` skipped (ownPauses), else the latest cycle line's count (0 with none) of the last on
- *  line's cap. */
+/** The autocycle token's value (E8-D26, LB2): the last standing pause the session skip leaves while any stands, else
+ *  the latest cycle line's count (0 with none) of the last on line's cap. */
 export function autocycleToken(entries, startLine = 0, sessionId = null) {
   const es = entries || [], standing = ownPauses(standingPauses(es, startLine), sessionId)
   if (standing.length) return pausedToken(standing.at(-1).reason)
@@ -1475,7 +1478,7 @@ export function cycleDecision(f) {
   if (f.blocked) return pause('R2', f.blocked)
   if (f.alarm) return pause('R3', f.alarm)
   if (f.question) return pause('R4', f.question)
-  // 2, 3. An ordinary turn, or an unresolved pause after this session's warning (E8-R25).
+  // 2, 3. An ordinary turn, or an unresolved pause the session skip leaves after this session's warning (E8-R25).
   if (!f.warned) return { act: 'none', reason: 'no warned line for this session' }
   if (f.pausedAfterWarned) return { act: 'none', reason: "an unresolved paused line follows this session's warned line" }
   // A Stop after this record state's typer launched, carrying stop_hook_active: another Stop hook blocked the Stop that
@@ -1577,7 +1580,8 @@ export const TYPER_TIMES = { poll: 1000, idle: 10000, restore: 60000, session: 3
  * `clear`, `resume`, `confirm` (the first turn is there: done), `abort` and `pause`. `o.active` is the record's
  * own half of B1, its last on/off line on and its last state line Open or Blocked, without the stop file. An abort
  * writes nothing, and each is a stop someone else already recorded: the record switched off or no longer Open or
- * Blocked, whether or not a stop file exists too, or a paused line written since the claim. Only on a record still
+ * Blocked, whether or not a stop file exists too, or a paused line written since the claim that the session skip
+ * leaves (pausedSinceClaim). Only on a record still
  * active does a stop file pause with R1 (RN3-3, E8-D16, RB4-1). Ready means an agent_status in READY_STATUSES.
  *
  * After the /clear, with `o.cycled` false, any step but an abort also carries `cycle: true` when this observation is
@@ -1597,8 +1601,8 @@ export function typerStep(o) {
 const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' && pane.session !== '' ? pane.session : null)
 
 /** The checks every typer observation passes first, on both hosts: auto-cycle still active, no stop file, no pause
- *  since the claim (pausedSinceClaim, which skips an R7, R8 or R9 tagged with another session), no transcript line
- *  mid-write. A step, or null to go on. */
+ *  since the claim that the session skip leaves (pausedSinceClaim, owning the session it clears and the one its
+ *  /clear started), no transcript line mid-write. A step, or null to go on. */
 function typerGuard(o, t, pause) {
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
   if (o.stopRepo) return pause('R1', o.stopRepo)
@@ -1671,8 +1675,8 @@ function typerAct(o) {
  * one completed, failed or killed, E8-R33), its session crons were empty (E8-D7's live-work test, E8-R22) and its
  * message did not end with the ready line; a missing record of the last
  * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then written only while no paused
- * line stands but a permission prompt, idle stop or API error the session has ended a turn since, or one tagged with
- * another session, which the dedup decides (pauseStands, E8-R28, E8-R30).
+ * line stands but a permission prompt, idle stop or API error the session has ended a turn since, after the session
+ * skip, which the dedup decides (pauseStands, E8-R28, E8-R30).
  */
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown', f.host)

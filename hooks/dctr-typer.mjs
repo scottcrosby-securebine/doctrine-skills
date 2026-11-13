@@ -120,8 +120,8 @@ try {
     // fires at the new chat's first prompt), so on Codex it is read while confirming.
     if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
-    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1), other
-    // than an R7, R8 or R9 tagged with a session that is neither the one it clears nor the one its /clear started.
+    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1), after the
+    // session skip (pausedSinceClaim in dctr-lib.mjs).
     // Read after the restore file, so the poll that first finds the new session counts its pauses as that session's.
     const pausedSinceClaim = pausedSinceClaimOf(rec.entries, a.keyLine, [a.session, restore?.session].filter(Boolean))
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null
@@ -155,8 +155,8 @@ try {
     }
     if (step.act === 'wait') { sleepMs(times.poll); now += times.poll; continue }
     // An abort writes nothing because its stop is already recorded: the user's own off line, a state line no longer
-    // Open or Blocked (with or without a stop file), or a paused line written since the claim other than an R7, R8 or
-    // R9 tagged with a session that is neither the one it clears nor the one its /clear started. A confirm is success.
+    // Open or Blocked (with or without a stop file), or a paused line written since the claim that the session skip
+    // leaves (pausedSinceClaim in dctr-lib.mjs). A confirm is success.
     // Every other stop is a pause: R1 for a stop file on a record still active, R14 to R18 for a failure (RN3-3, RB4-1).
     if (step.act === 'abort' || step.act === 'confirm') { log(`${step.act}: ${step.reason}`); process.exit(0) }
     if (step.act === 'pause') pausing(step.reason)

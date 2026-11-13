@@ -13,8 +13,8 @@
 // StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
 // UserPromptSubmit does nothing else.
 //
-// Every other event past the stand-down alerts each standing pause once (standingPauses, the one pause model), but an
-// R7, R8 or R9 tagged with another session, which that session's own hook alerts (ownPauses): the
+// Every other event past the stand-down alerts each standing pause once (standingPauses, the one pause model), after
+// the session skip (ownPauses in dctr-lib.mjs): the
 // toast and the pane's systemMessage, each tracked by its own marker; while auto-cycle is active it publishes the
 // `autocycle` sidebar token (autocycleToken). With DCTR_VIEW_REQUEST_DIR set it calls herdr zero times. It always
 // exits 0.
@@ -211,8 +211,8 @@ try {
   alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, sessionId, log })
   const shown = pauseMessageOnce(recordPath, sessionId)
   if (shown) messages.push(shown)
-  // Paused while a pause stands, an R7, R8 or R9 tagged with another session aside (ownPauses), the cycle count once
-  // none does, so a resolved pause stops showing paused (LB2, E8-R25).
+  // Paused while a pause stands after the session skip (ownPauses in dctr-lib.mjs), the cycle count once none does, so a resolved
+  // pause stops showing paused (LB2, E8-R25).
   if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), sessionId), log)
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)

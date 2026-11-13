@@ -861,8 +861,8 @@ export function appendRecordLine(recordPath, line) {
 /** Append `auto-cycle paused: <reason>` to the record (E8-D16), an R7, R8 or R9 ending ` [session <id>]` given the
  *  hook's session (pausedLine), unless a standing pause names the same pause, or,
  *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
- *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31), nor does one tagged with
- *  another session (ownPauses); the typer passes none, so its
+ *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31), and the session skip
+ *  (ownPauses in dctr-lib.mjs) applies; the typer passes none, so its
  *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
 export function appendPaused(recordPath, reason, sessionId = null) {
   if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0, sessionId)) return { written: false }
@@ -889,7 +889,7 @@ const pauseMarker = (kind, recordPath, line) =>
 
 /**
  * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
- * but an R7, R8 or R9 tagged with a session other than `sessionId` (ownPauses), and publish the paused token naming the last of them. Each line's alerted marker is taken
+ * after the session skip (ownPauses in dctr-lib.mjs), and publish the paused token naming the last of them. Each line's alerted marker is taken
  * first, exclusively, and outlives the session, so a later session, a concurrent hook or the typer never raises
  * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
  * one guard keeping herdr out of it. True when this call raised any.
@@ -911,8 +911,7 @@ export function alertPaused({ recordPath, repo, phase, paneId, sessionId = null,
 /**
  * The pane message for each standing pause not yet shown (E8-R23), one line each: `doctrine auto-cycle paused:
  * <reason>. <what to do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of
- * them to run after the line is written in a session that pause is not foreign to: an R7, R8 or R9 tagged with another
- * session is skipped (ownPauses) and left for that session's own hook. Its own marker, apart from the toast's: the detached typer raises the toast
+ * them to run after the line is written in a session the session skip (ownPauses in dctr-lib.mjs) leaves it to. Its own marker, apart from the toast's: the detached typer raises the toast
  * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
  * there is nothing to print.
  */
