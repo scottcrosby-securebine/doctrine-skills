@@ -861,7 +861,8 @@ export function appendRecordLine(recordPath, line) {
 /** Append `auto-cycle paused: <reason>` to the record (E8-D16), an R7, R8 or R9 ending ` [session <id>]` given the
  *  hook's session (pausedLine), unless a standing pause names the same pause, or,
  *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
- *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31); the typer passes none, so its
+ *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31), nor does one tagged with
+ *  another session (ownPauses); the typer passes none, so its
  *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
 export function appendPaused(recordPath, reason, sessionId = null) {
   if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0, sessionId)) return { written: false }

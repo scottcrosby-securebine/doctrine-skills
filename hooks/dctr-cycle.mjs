@@ -211,7 +211,8 @@ try {
   alertPaused({ recordPath, repo: path.basename(path.resolve(projectDir)), phase: header.phase, paneId, sessionId, log })
   const shown = pauseMessageOnce(recordPath, sessionId)
   if (shown) messages.push(shown)
-  // Paused while a pause stands, the cycle count once none does, so a resolved pause stops showing paused (LB2, E8-R25).
+  // Paused while a pause stands, an R7, R8 or R9 tagged with another session aside (ownPauses), the cycle count once
+  // none does, so a resolved pause stops showing paused (LB2, E8-R25).
   if (active && paneId) publishToken(paneId, autocycleToken(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), sessionId), log)
   if (messages.length) process.stdout.write(JSON.stringify({ systemMessage: messages.join('\n') }))
   process.exit(0)

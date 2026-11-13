@@ -1597,7 +1597,8 @@ export function typerStep(o) {
 const paneSession = (pane) => (pane && !pane.error && typeof pane.session === 'string' && pane.session !== '' ? pane.session : null)
 
 /** The checks every typer observation passes first, on both hosts: auto-cycle still active, no stop file, no pause
- *  since the claim, no transcript line mid-write. A step, or null to go on. */
+ *  since the claim (pausedSinceClaim, which skips an R7, R8 or R9 tagged with another session), no transcript line
+ *  mid-write. A step, or null to go on. */
 function typerGuard(o, t, pause) {
   if (!o.active) return { act: 'abort', reason: 'auto-cycle is no longer active' }
   if (o.stopRepo) return pause('R1', o.stopRepo)
@@ -1670,8 +1671,8 @@ function typerAct(o) {
  * one completed, failed or killed, E8-R33), its session crons were empty (E8-D7's live-work test, E8-R22) and its
  * message did not end with the ready line; a missing record of the last
  * Stop, or one missing a field, is not a known-empty one (RB6-3). Its R8 line is then written only while no paused
- * line stands but a permission prompt, idle stop or API error the session has ended a turn since, which the dedup
- * decides (pauseStands, E8-R28, E8-R30).
+ * line stands but a permission prompt, idle stop or API error the session has ended a turn since, or one tagged with
+ * another session, which the dedup decides (pauseStands, E8-R28, E8-R30).
  */
 export function notifyDecision(event, f = {}) {
   if (event === 'StopFailure') return pauseReason('R9', f.error || 'unknown', f.host)
