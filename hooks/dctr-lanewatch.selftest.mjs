@@ -206,6 +206,8 @@ const transcript = (fx, r, lines) => {
 const held = fixture({ old: {}, young: {}, cyc: {} })
 for (const r of ['old', 'cyc']) transcript(held, r, [asst(ago(READY_LIMIT_MS + 60000), 'Handoff written.\nauto-cycle: ready')])
 transcript(held, 'young', [asst(ago(READY_LIMIT_MS / 2), 'Handoff written.\nauto-cycle: ready')])
+// Clause 3b proves the two ages as written, so a suite slowed by load never ages the young one past the limit.
+const heldWritten = Date.now()
 const wh = watcher(held)
 polls(held, wh)
 fs.appendFileSync(held.record.cyc, '- auto-cycle: cycle 1 tree abc\n')
@@ -878,10 +880,10 @@ for (;;) {
   const size = (s) => fs.statSync(path.join(waves.wt.a, `${s}.out`)).size
   const rec = fs.readFileSync(waves.record.a, 'utf8')
   const dl = [...rec.matchAll(/seat (s\d) handle \S+(?: deadline (\S+))?/g)].map((m) => [m[1], m[2] ? Date.parse(m[2]) : null])
-  clause('clause 3b — without the watcher: s1 and s2 are past their deadlines, s3 has none, s4\'s is ahead; s1\'s handle never grew while s2\'s did; the old transcript\'s ready line is past the ready limit and the young one within it',
+  clause('clause 3b — without the watcher: s1 and s2 are past their deadlines, s3 has none, s4\'s is ahead; s1\'s handle never grew while s2\'s did; the old transcript\'s ready line was past the ready limit when written and the young one within it',
     dl[0][1] < Date.now() && dl[1][1] < Date.now() && dl[2][1] === null && dl[3][1] > Date.now() && size('s1') === 1 && size('s2') === 9 &&
-    Date.now() - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'old.jsonl'), 'utf8')).timestamp) > READY_LIMIT_MS &&
-    Date.now() - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'young.jsonl'), 'utf8')).timestamp) < READY_LIMIT_MS, JSON.stringify(dl))
+    heldWritten - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'old.jsonl'), 'utf8')).timestamp) > READY_LIMIT_MS &&
+    heldWritten - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'young.jsonl'), 'utf8')).timestamp) < READY_LIMIT_MS, JSON.stringify(dl))
 }
 clause('clause 3c — without the watcher: 150,000 plus the 65,000 handoff cost is 215,000, above 205,000 and below 216,000; the stale bridge file is older than the expiry and the fresh one younger; the twin\'s record warns S-w',
   150000 + 65000 === 215000 && 205000 < 215000 && 216000 > 215000 && Date.now() - fs.statSync(bridgeFile('S-x')).mtimeMs > BRIDGE_EXPIRY_MS &&
