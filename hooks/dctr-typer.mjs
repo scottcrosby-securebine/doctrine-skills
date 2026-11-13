@@ -120,7 +120,8 @@ try {
     // fires at the new chat's first prompt), so on Codex it is read while confirming.
     if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
     // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
-    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1).
+    // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1), other
+    // than an R7, R8 or R9 tagged with a session that is neither the one it clears nor the one its /clear started.
     // Read after the restore file, so the poll that first finds the new session counts its pauses as that session's.
     const pausedSinceClaim = pausedSinceClaimOf(rec.entries, a.keyLine, [a.session, restore?.session].filter(Boolean))
     const pane = active && !stopRepo && !pausedSinceClaim ? readPane() : null

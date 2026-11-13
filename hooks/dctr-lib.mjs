@@ -1037,8 +1037,9 @@ export const sessionWarned = (entries, sessionId) =>
   (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1) || null
 
 /** B2 step 3 (E8-R25): an unresolved paused line follows this session's latest warned line, whatever anchor follows
- *  it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False with no such line.
- *  Every pause standingPauses returns after that warned line is one of these. */
+ *  it, other than an R7, R8 or R9 tagged with another session (ownPauses), since only an R2, R3 or R4 pause that
+ *  resolves lets the same session cycle again. False with no such line. Every pause standingPauses returns after that
+ *  warned line, but such a foreign one, is one of these. */
 export function pausedAfterWarned(entries, sessionId) {
   const mine = sessionWarned(entries, sessionId)
   return Boolean(mine) && ownPauses(unresolvedPausesAfter(entries, mine.line), sessionId).length > 0
@@ -1062,8 +1063,9 @@ export function pauseActionAt(p, entries, startLine = 0) {
   return mark?.sub === 'warned' && mark.line > startLine ? `${first}, then /clear and type resume` : first
 }
 
-/** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, else the latest cycle line's
- *  count (0 with none) of the last on line's cap. */
+/** The autocycle token's value (E8-D26, LB2): the last standing pause while any stands, an R7, R8 or R9 tagged with a
+ *  session other than `sessionId` skipped (ownPauses), else the latest cycle line's count (0 with none) of the last on
+ *  line's cap. */
 export function autocycleToken(entries, startLine = 0, sessionId = null) {
   const es = entries || [], standing = ownPauses(standingPauses(es, startLine), sessionId)
   if (standing.length) return pausedToken(standing.at(-1).reason)
