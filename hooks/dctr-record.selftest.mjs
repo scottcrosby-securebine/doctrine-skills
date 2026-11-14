@@ -340,6 +340,20 @@ clause('clause 1t2 — a paused line\'s writer tag: the reason without it and th
   tagged[3].reason === 'question: [session x] first?' && tagged[3].session === null &&
   tagged[4].reason === 'waiting for your permission approval' && tagged[4].session === 's-2', JSON.stringify(tagged))
 
+// EP11-B1: a raw paused line holding a carriage return or a Unicode line or paragraph separator, as an old record or
+// an agent's line can, parses as it did before the tag, its reason cut at the break; a tagged line keeps its tag.
+{
+  const seps = ['\r', ' ', ' ']
+  const raw = seps.map((s) => parseRecord(`- auto-cycle paused: Claude API error: upstream unavailable${s}retry later\n`).entries.filter((e) => e.sub === 'paused'))
+  const ask = seps.map((s) => parseRecord(`- auto-cycle paused: question: Q1 which way?${s}more\n`).entries.filter((e) => e.sub === 'paused'))
+  const tag = parseRecord('- auto-cycle paused: session idle, waiting for you [session s-1]  \n').entries.filter((e) => e.sub === 'paused')
+  clause('clause 1t3 — a raw paused line holding a carriage return, U+2028 or U+2029 is still a paused entry, its reason cut at the break and untagged, and a tagged line with trailing spaces keeps its tag',
+    raw.every((p) => p.length === 1 && p[0].reason === 'Claude API error: upstream unavailable' && p[0].session === null) &&
+    ask.every((p) => p.length === 1 && p[0].reason === 'question: Q1 which way?') &&
+    tag.length === 1 && tag[0].reason === 'session idle, waiting for you' && tag[0].session === 's-1',
+    JSON.stringify({ raw, ask, tag }))
+}
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)

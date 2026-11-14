@@ -72,7 +72,9 @@ const FORMS = [
   [form('auto-cycle:\\s+cycle\\s+(\\d+)\\s+tree\\s+([0-9a-f]+)'), (m) => ({ kind: 'auto-cycle', sub: 'cycle', n: num(m[1]), hash: m[2] })],
   [form('auto-cycle:\\s+ready'), () => ({ kind: 'auto-cycle', sub: 'ready' }), AGENT],
   // A hook's R7, R8 or R9 line ends with ` [session <id>]` (pausedLine, appendPaused); every other line carries none.
-  [form('auto-cycle paused:\\s+(\\S.*?)(?:\\s+\\[session\\s+([^\\s\\]]+)\\])?\\s*', ''), (m) => ({ kind: 'auto-cycle', sub: 'paused', reason: m[1].trim(), session: m[2] ?? null }), AGENT],
+  // A carriage return or a Unicode line or paragraph separator ends the reason, as TAIL ended it before the tag: an
+  // old record or an agent's line can hold one, and pausedLine never writes one.
+  [form('auto-cycle paused:\\s+(\\S.*?)(?:\\s+\\[session\\s+([^\\s\\]]+)\\])?[^\\S\\r\\u2028\\u2029]*(?:[\\r\\u2028\\u2029][\\s\\S]*)?', ''), (m) => ({ kind: 'auto-cycle', sub: 'paused', reason: m[1].trim(), session: m[2] ?? null }), AGENT],
 ]
 
 /** `wrapper: <name>`, key in any case, as a list item or bare, optionally bold. The value is the first
