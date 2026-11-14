@@ -897,7 +897,7 @@ export const PAUSES = {
   R6: { reason: () => 'no progress in 2 cycles', action: "read the record's last work, then /clear and type resume" },
   R7: { reason: () => 'waiting for your permission approval', action: 'approve or deny in the pane' },
   R8: { reason: () => 'session idle, waiting for you', action: 'reply in the pane' },
-  R9: { reason: (error, host) => `${hostName(host)} API error: ${error}`, action: 'retry in the pane', match: /^(Claude|Codex) API error: / },
+  R9: { reason: (error, host) => `${hostName(host)} API error: ${String(error ?? '').trim() || 'unknown'}`, action: 'retry in the pane', match: /^(Claude|Codex) API error: / },
   R10: { reason: () => 'could not cycle: handoff not written', action: 'run doctrine-handoff, then /clear and type resume' },
   R11: { reason: () => 'could not cycle: another Stop hook kept the session running', action: '/clear and type resume by hand' },
   R12: { reason: (_, host) => `could not cycle: this pane now runs a different ${hostName(host)} session`, action: 'check the pane', match: /^could not cycle: this pane now runs a different (Claude|Codex) session$/ },
@@ -945,10 +945,10 @@ const CODEX_ACTIONS = [
   { match: /^could not cycle: this pane now runs a different Codex session$/, action: 'check the pane, then /clear and type resume by hand' },
 ]
 const CODEX_R9 = /^Codex API error: /
-/** The paused line, always one record line (a newline in the reason, as an API error's message can hold, becomes a
- *  space, so the tag stays on the line the parser reads); given a session, the one an R7, R8 or R9 is about
+/** The paused line, always one record line (a line break in the reason, \n, \r, U+2028 or U+2029, as an API error's
+ *  message can hold, becomes a space, so the tag stays on the line the parser reads); given a session, the one an R7, R8 or R9 is about
  *  (appendPaused), it ends with ` [session <id>]`. */
-export const pausedLine = (reason, session = null) => `- auto-cycle paused: ${String(reason).replace(/\s*\n\s*/g, ' ')}${session ? ` [session ${session}]` : ''}`
+export const pausedLine = (reason, session = null) => `- auto-cycle paused: ${String(reason).replace(/\s*[\r\n\u2028\u2029]\s*/g, ' ')}${session ? ` [session ${session}]` : ''}`
 /** The pane message and the toast body for a paused line (E8-R23): the reason, then what to do. */
 export const pauseMessage = (reason, action = pauseAction(reason)) => `doctrine auto-cycle paused: ${reason}. ${action}`
 export const pausedToken = (reason) => `auto-cycle paused·${String(reason).slice(0, TOKEN_REASON_MAX)}`

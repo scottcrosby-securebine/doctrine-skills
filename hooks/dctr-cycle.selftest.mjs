@@ -26,7 +26,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-cycle-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 process.env.TMPDIR = tmp
 const lib = await import('./dctr-lib.mjs')
-const { pausedSinceClaim, autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt, pausedLine } = lib
+const { pausedSinceClaim, pauseCode, autoCycleActive, pausingStates, cycleDecision, cycleProgress, notifyDecision, pauseReason, pauseAction, pauseMessage, pausedToken, PAUSES, stopFileRepo, repoOf, LAUNCH_MESSAGE, endsReady, nonEmpty, seatLive, treeExcludes, pauseResolved, standingPauses, pauseStands, unresolvedPausesAfter, claimKey, typerStep, pausedAfterWarned, autocycleToken, pauseActionAt, pausedLine } = lib
 const { parseRecord } = await import('./dctr-record.mjs')
 const state = await import('./dctr-state.mjs')
 const { appendPaused, claimHeld, claimFile, treeHash, stateDir, seatsDir, stopFactsFile, autoCycleDir } = state
@@ -871,6 +871,26 @@ clause('clause 1u2 — step 3, the dedup and the token skip an R7, R8 or R9 line
     pausedAfterWarned(es, 'sA') === false && pausedSinceClaim(es, 0, ['sA']) === false &&
     pausedAfterWarned(rec(W_A, pausedLine(pauseReason('R9', 'upstream unavailable\nretry later', 'codex'), 'sA')), 'sA') === true,
     JSON.stringify({ multi, paused }))
+}
+// EP10-B2: a lone carriage return or a Unicode line or paragraph separator is a line break too; the parser reads no
+// entry from a line holding one, so this session's own API error would hold nothing of its own Stop.
+{
+  const own = ['\r', ' ', ' '].map((sep) => rec(W_A, pausedLine(pauseReason('R9', `upstream unavailable${sep}retry later`, 'codex'), 'sA')))
+  clause('clause 1u3b — a reason holding a lone carriage return, U+2028 or U+2029 is still a paused line the parser reads, tagged, so this session\'s own API error holds its Stop and its claim',
+    own.every((es) => es.filter((e) => e.sub === 'paused').length === 1 && es.find((e) => e.sub === 'paused').session === 'sA' &&
+      pausedAfterWarned(es, 'sA') === true && pausedSinceClaim(es, 0, ['sA']) === true),
+    JSON.stringify(own.map((es) => es.filter((e) => e.sub === 'paused'))))
+}
+// EP10-B1: an API error whose message is only whitespace keeps its R9 code, so another session's holds nothing of this
+// one, and this session's own still holds it.
+{
+  const blank = (err, s) => rec(W_A, pausedLine(pauseReason('R9', err, 'codex'), s))
+  const cases = [' ', '\n', '\t \r\n']
+  clause('clause 1u4 — an API error whose message is only whitespace is still an R9 paused line, so another session\'s holds neither this session\'s Stop nor its claim and this session\'s own holds both',
+    cases.every((err) => { const f = blank(err, 'sH'), o = blank(err, 'sA'), p = f.find((e) => e.sub === 'paused')
+      return p && pauseCode(p.reason) === 'R9' && pausedAfterWarned(f, 'sA') === false && pausedSinceClaim(f, 0, ['sA']) === false &&
+        pausedAfterWarned(o, 'sA') === true && pausedSinceClaim(o, 0, ['sA']) === true }),
+    JSON.stringify(cases.map((err) => blank(err, 'sH').filter((e) => e.sub === 'paused'))))
 }
 // The manual /clear and resume R10 asks for: the restore hook records the new session's start, then the new session's
 // ordinary turn shows the cycle count, and its own permission prompt is written, alerted and shown paused.
