@@ -941,7 +941,7 @@ clause('clause 2c6 — once the pause resolves, the next event republishes the o
 // RB2-2, RB3-1: the claim is single use per record state, keyed by the record's latest auto-cycle line. A typer that
 // used the claim (its pid now dead) and then a resolved R4 pause: the agent's next turn ends ready with no new record
 // ready line, and still launches, under the paused line's key. The same record state never launches twice.
-const keyOf = (f) => claimKey(parseRecord(fs.readFileSync(f.record, 'utf8')).entries)
+const keyOf = (f) => claimKey(parseRecord(fs.readFileSync(f.record, 'utf8')).entries, f.session)
 const stubLog = (f) => (fs.existsSync(f.stubLog) ? fs.readFileSync(f.stubLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [])
 const waitStub = async (f, n) => { for (const end = Date.now() + 30000; Date.now() < end && stubLog(f).length < n; ) await new Promise((r) => setTimeout(r, 50)) }
 const cl = fixture('claim-per-ready', { lines: [RDY] })
@@ -960,6 +960,16 @@ clause('clause 2c9 — a used claim holds its own record state only: after a typ
   !launched(clUsed) && launched(clNew) && stubLog(cl).length === 1 && stubLog(cl)[0].keyLine === clPausedLine && clPausedLine > firstKey &&
   launched(tw1) && !launched(tw2) && stubLog(tw).length === 1 && fs.existsSync(claimFile(tw.session, keyOf(tw))),
   `${show(cl, clUsed)} || ${show(cl, clNew)} || ${show(tw, tw2)}`)
+// EP13-B1: another session's tagged event pause, written while this session's typer waits, holds nothing, so it must
+// not make a new claim key either: a second ready Stop would launch a second typer, and each waits on the other's claim.
+const tf = fixture('same-ready-foreign', { lines: [RDY] })
+const tf1 = run(tf)
+await waitStub(tf, 1)
+const tfKey = keyOf(tf)
+fs.appendFileSync(tf.record, '- auto-cycle paused: session idle, waiting for you [session s-lane]\n')
+const tf2 = run(tf)
+clause('clause 2c9b — another session\'s tagged idle pause after this session\'s typer launched keeps the claim key, so a second ready Stop launches no second typer (EP13-B1)',
+  launched(tf1) && !launched(tf2) && stubLog(tf).length === 1 && keyOf(tf) === tfKey, `${show(tf, tf1)} || ${show(tf, tf2)}`)
 
 // SP1: a pause the detached typer wrote gets its toast from the typer and its pane message from the next hook event.
 const sp1 = fixture('typer-pause', { lines: ['- auto-cycle paused: resume typed twice, no reply from the new session'] })

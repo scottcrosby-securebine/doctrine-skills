@@ -773,7 +773,8 @@ export const autoCycleDir = () => {
   return dir
 }
 /** The typer's claim, single use per record state (RB3-1): keyed by the session id and claimKey, the line number of
- *  the record's latest auto-cycle line at launch, so a pause written after a claim gives the resolved session a new
+ *  the record's latest auto-cycle line at launch after the session skip, so a pause written after a claim that the
+ *  skip keeps for this session gives the resolved session a new
  *  claim while the same record state never launches twice. */
 export const claimFile = (sessionId, key) => path.join(autoCycleDir(), `${sessionId}.${key}.claim`)
 

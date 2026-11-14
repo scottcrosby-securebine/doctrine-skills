@@ -138,7 +138,7 @@ try {
       inFlight: inFlight && [...inFlight],
     })
 
-    const keyLine = claimKey(record.entries)
+    const keyLine = claimKey(record.entries, sessionId)
     const warned = Boolean(sessionWarned(record.entries, sessionId))
     const live = liveWork(sessionId, inFlight, payload.cwd)
     let hash = null

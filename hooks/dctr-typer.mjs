@@ -119,7 +119,7 @@ try {
     // Claude Code writes the restore file before the resume is typed; Codex only once it is sent (its SessionStart
     // fires at the new chat's first prompt), so on Codex it is read while confirming.
     if ((stage === 'resume' || (codex && stage === 'confirm')) && !restore) { restore = readRestore(); if (restore) restoreSeen = now }
-    // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line), never
+    // Since the claim means after the key line the Stop computed at launch (claimKey, its latest auto-cycle line after the session skip), never
     // after a fresh read, so a pause written between the Stop and this typer's start still stops it (RB8-1), after the
     // session skip (pausedSinceClaim in dctr-lib.mjs).
     // Read after the restore file, so the poll that first finds the new session counts its pauses as that session's.

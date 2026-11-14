@@ -1077,10 +1077,12 @@ export function autocycleToken(entries, startLine = 0, sessionId = null) {
   return onToken(es.filter((e) => e.kind === 'auto-cycle' && e.sub === 'cycle').at(-1)?.n ?? 0, lastOnOffEntry(es)?.cap ?? 10)
 }
 
-/** The typer's claim key (RB3-1): the line number of the record's latest auto-cycle line of any kind at launch, 0
- *  with none. Any auto-cycle line written after a claim, a pause included, makes a new key, so a session whose pause
- *  resolved can launch again, while the same record state launches once. */
-export const claimKey = (entries) => latestAutoCycle(entries)?.line ?? 0
+/** The typer's claim key (RB3-1): the line number of the record's latest auto-cycle line of any kind at launch after
+ *  the session skip for `sessionId`, 0 with none. Any such line written after a claim, a pause included, makes a new
+ *  key, so a session whose pause resolved can launch again, while the same record state launches once. Another
+ *  session's tagged event pause makes none: it never holds this session, and a new key would launch a second typer. */
+export const claimKey = (entries, sessionId) =>
+  latestAutoCycle((entries || []).filter((e) => !(e.kind === 'auto-cycle' && e.sub === 'paused' && sessionId && foreignEvent(e, [sessionId]))))?.line ?? 0
 
 /** The directory holding `.git` at or above `file`'s directory, or that directory when none does. `exists` is
  *  injected so this stays pure. The record's repo is found this way, with no git process. */
