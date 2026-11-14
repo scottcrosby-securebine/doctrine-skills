@@ -872,8 +872,8 @@ clause('clause 1u2 — step 3, the dedup and the token skip an R7, R8 or R9 line
     pausedAfterWarned(rec(W_A, pausedLine(pauseReason('R9', 'upstream unavailable\nretry later', 'codex'), 'sA')), 'sA') === true,
     JSON.stringify({ multi, paused }))
 }
-// EP10-B2: a lone carriage return or a Unicode line or paragraph separator is a line break too; the parser reads no
-// entry from a line holding one, so this session's own API error would hold nothing of its own Stop.
+// EP10-B2: a lone carriage return or a Unicode line or paragraph separator is a line break too; the parser ends the
+// reason at one, so a tag written after it would be lost and this session's own API error would read as untagged.
 {
   const own = ['\r', ' ', ' '].map((sep) => rec(W_A, pausedLine(pauseReason('R9', `upstream unavailable${sep}retry later`, 'codex'), 'sA')))
   clause('clause 1u3b — a reason holding a lone carriage return, U+2028 or U+2029 is still a paused line the parser reads, tagged, so this session\'s own API error holds its Stop and its claim',

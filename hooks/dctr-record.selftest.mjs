@@ -354,6 +354,29 @@ clause('clause 1t2 — a paused line\'s writer tag: the reason without it and th
     JSON.stringify({ raw, ask, tag }))
 }
 
+// EP12-B1, B2: the paused form reads every raw line as c2ab490's form did, apart from a writer tag it ends with. The
+// oracle is c2ab490's paused form, verbatim; the lines are every sequence of up to four pieces, line breaks and tag
+// fragments among them. A line c2ab490 did not read is no entry; one it read is one entry, with the same reason when
+// untagged, and when tagged a reason that is c2ab490's minus spaces or tabs and that one tag.
+{
+  const OLD = /^(?:-\s+)?auto-cycle paused:\s+(\S.*)(?:[.,;:]?(?:\s.*)?)$/i
+  const PIECES = ['a', 'b c', ' ', '\t', '.', ':', '\r', '\u2028', '\u2029', '[session s1]', ' [session s2]', '[session', 'x]', 'question: Q1 ']
+  const lines = [], all = [[]]
+  for (let n = 1; n <= 4; n++) { const next = []; for (const s of all.filter((x) => x.length === n - 1)) for (const p of PIECES) next.push(s.concat(p)); all.push(...next) }
+  for (const s of all) if (s.length) lines.push('- auto-cycle paused: ' + s.join(''))
+  const bad = []
+  for (const L of lines) {
+    const m = OLD.exec(L.trim()), o = m ? m[1].trim() : null
+    const n = parseRecord(L + '\n').entries.filter((e) => e.sub === 'paused')
+    const ok = o === null ? n.length === 0
+      : n.length === 1 && (n[0].session === null ? n[0].reason === o
+        : o.startsWith(n[0].reason) && new RegExp(`^[ \\t]+\\[session[ \\t]+${n[0].session.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]$`).test(o.slice(n[0].reason.length)))
+    if (!ok) bad.push({ L, o, n: n.map((e) => [e.reason, e.session]) })
+  }
+  clause(`clause 1t4 — over ${lines.length} raw paused lines, the form reads each as c2ab490's form did, apart from a writer tag it ends with (the oracle needs no parser)`,
+    lines.length > 10000 && bad.length === 0, JSON.stringify(bad.slice(0, 5)))
+}
+
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 
 const g = parseRecord(GOOD)
