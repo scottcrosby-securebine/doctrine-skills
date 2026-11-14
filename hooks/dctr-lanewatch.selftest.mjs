@@ -169,6 +169,34 @@ clause('clause 2h — each record newly showing a paused line, a Blocked state, 
   quiet === 0 && one('p', /auto-cycle paused: session idle/) && one('b', /Blocked\. waits on Q2/) && one('q', /question Q1 unanswered: which way\?/) &&
   one('al', /round alarm with no ruling/) && !pe.some((e) => e.startsWith('pause ok ')) && pe.length === 4, show(pauses))
 
+// A pause another session sharing a role's record wrote is about that session, not the role's pane: no event. The
+// role's own tagged pause gives one.
+const owners = fixture({ fp: {}, op: {} })
+const wo = watcher(owners)
+polls(owners, wo)
+fs.appendFileSync(owners.record.fp, '- auto-cycle paused: waiting for your permission approval [session S-other]\n')
+fs.appendFileSync(owners.record.op, '- auto-cycle paused: waiting for your permission approval [session S-op]\n')
+polls(owners, wo, 2)
+const oev = events(owners)
+clause('clause 2h2 — a permission pause tagged with another session in a role\'s record gives no event; the role\'s own tagged pause gives one',
+  !oev.some((e) => e.startsWith('pause fp ')) && oev.filter((e) => e.startsWith('pause op ') && /waiting for your permission approval/.test(e)).length === 1, show(owners))
+
+// EP4-B1: a pane lookup that fails, comes back empty or names no session never makes another session's tagged pause
+// the role's. A role whose session was read once keeps it: its own tagged pause stays raised once, through the failure.
+const unk = fixture({ uf: { shim: { fail: true } }, ue: { shim: { empty: true } }, un: { session: null }, uk: { record: '- State: Open\n- auto-cycle: on cap 10 tier 60%\n' } })
+const wun = watcher(unk)
+polls(unk, wun)
+setPanes(unk, { [unk.pane.uk]: { fail: true } })
+for (const r of ['uf', 'ue', 'un', 'uk']) fs.appendFileSync(unk.record[r], '- auto-cycle paused: waiting for your permission approval [session S-other]\n')
+fs.appendFileSync(unk.record.uk, '- auto-cycle paused: session idle, waiting for you [session S-uk]\n')
+polls(unk, wun, 2)
+const umid = events(unk).filter((e) => e.startsWith('pause '))
+setPanes(unk, { [unk.pane.uk]: { fail: false } })
+polls(unk, wun)
+const uev = events(unk).filter((e) => e.startsWith('pause '))
+clause('clause 2h3 — with the pane lookup failed, empty or naming no session, another session\'s tagged pause gives no event; a role read once keeps its session, so its own tagged pause gives one event while the lookup fails and none more once it recovers',
+  umid.length === 1 && /^pause uk line \d+ auto-cycle paused: session idle/.test(umid[0]) && uev.length === 1 && uev[0] === umid[0], show(unk))
+
 // E15-D107: a held ready line.
 const asst = (at, text, usage) => JSON.stringify({ type: 'assistant', timestamp: at, uuid: `u-${at}`, message: { role: 'assistant', content: [{ type: 'text', text }], ...(usage ? { usage } : {}) } })
 const transcript = (fx, r, lines) => {
@@ -178,6 +206,8 @@ const transcript = (fx, r, lines) => {
 const held = fixture({ old: {}, young: {}, cyc: {} })
 for (const r of ['old', 'cyc']) transcript(held, r, [asst(ago(READY_LIMIT_MS + 60000), 'Handoff written.\nauto-cycle: ready')])
 transcript(held, 'young', [asst(ago(READY_LIMIT_MS / 2), 'Handoff written.\nauto-cycle: ready')])
+// Clause 3b proves the two ages as written, so a suite slowed by load never ages the young one past the limit.
+const heldWritten = Date.now()
 const wh = watcher(held)
 polls(held, wh)
 fs.appendFileSync(held.record.cyc, '- auto-cycle: cycle 1 tree abc\n')
@@ -850,10 +880,10 @@ for (;;) {
   const size = (s) => fs.statSync(path.join(waves.wt.a, `${s}.out`)).size
   const rec = fs.readFileSync(waves.record.a, 'utf8')
   const dl = [...rec.matchAll(/seat (s\d) handle \S+(?: deadline (\S+))?/g)].map((m) => [m[1], m[2] ? Date.parse(m[2]) : null])
-  clause('clause 3b — without the watcher: s1 and s2 are past their deadlines, s3 has none, s4\'s is ahead; s1\'s handle never grew while s2\'s did; the old transcript\'s ready line is past the ready limit and the young one within it',
+  clause('clause 3b — without the watcher: s1 and s2 are past their deadlines, s3 has none, s4\'s is ahead; s1\'s handle never grew while s2\'s did; the old transcript\'s ready line was past the ready limit when written and the young one within it',
     dl[0][1] < Date.now() && dl[1][1] < Date.now() && dl[2][1] === null && dl[3][1] > Date.now() && size('s1') === 1 && size('s2') === 9 &&
-    Date.now() - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'old.jsonl'), 'utf8')).timestamp) > READY_LIMIT_MS &&
-    Date.now() - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'young.jsonl'), 'utf8')).timestamp) < READY_LIMIT_MS, JSON.stringify(dl))
+    heldWritten - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'old.jsonl'), 'utf8')).timestamp) > READY_LIMIT_MS &&
+    heldWritten - Date.parse(JSON.parse(fs.readFileSync(path.join(held.dir, 'young.jsonl'), 'utf8')).timestamp) < READY_LIMIT_MS, JSON.stringify(dl))
 }
 clause('clause 3c — without the watcher: 150,000 plus the 65,000 handoff cost is 215,000, above 205,000 and below 216,000; the stale bridge file is older than the expiry and the fresh one younger; the twin\'s record warns S-w',
   150000 + 65000 === 215000 && 205000 < 215000 && 216000 > 215000 && Date.now() - fs.statSync(bridgeFile('S-x')).mtimeMs > BRIDGE_EXPIRY_MS &&

@@ -27,7 +27,8 @@
 //   deadline <role> <seat> line <n>  a seat past the deadline of its wave line, record line n, whose handle file did not
 //                                grow between two polls
 //   pause <role> line <n> <reason>  a record newly showing a standing pause, at record line n: an auto-cycle paused
-//                                line, a Blocked state, an unanswered question or an alarm with no ruling after it
+//                                line the session skip (ownPauses in dctr-lib.mjs) leaves for the role's last read session, a Blocked
+//                                state, an unanswered question or an alarm with no ruling after it
 //   ready <role> <session> <at>  a last assistant message, timestamped at, ending with the ready line for longer than
 //                                READY_LIMIT_MS, with no cycle line since the poll that first saw it
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
@@ -54,7 +55,7 @@ import { fileURLToPath } from 'node:url'
 import { herdr } from './dctr-state.mjs'
 import { restoreFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
-  laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, pausingStates, resolveTier,
+  laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier,
   lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
@@ -112,7 +113,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = i }
   }
   const exited = new Set(), pauses = new Map(), grew = new Map(), late = new Set(), readySeen = new Map(), readyRaised = new Set()
-  const past = new Map(), contextRaised = new Set(), staleRaised = new Set()
+  const past = new Map(), contextRaised = new Set(), staleRaised = new Set(), sessionOf = new Map()
+  // Holds a space, so no `[session <id>]` tag, whose id is one token, ever names it.
+  const NO_SESSION = '(no session)'
 
   function inbox() {
     let names = []
@@ -155,7 +158,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     const s = paneSession(lane.pane)
     if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) { exited.delete(role); restored.delete(`exit ${role} ${lane.pane}`) }
     const rec = recordOf(lane.worktree)
-    if (rec) { standing(role, rec.record.entries); seats(role, rec.record.entries, lane.worktree) }
+    if (typeof s === 'string') sessionOf.set(role, s)
+    // A lookup that failed or named no session keeps the role's last read session; with none, NO_SESSION matches no tag.
+    if (rec) { standing(role, rec.record.entries, sessionOf.get(role) ?? NO_SESSION); seats(role, rec.record.entries, lane.worktree) }
     if (!s || !rec) return
     const rf = (() => { try { const r = JSON.parse(fs.readFileSync(restoreFile(lane.pane), 'utf8')); return r?.session_id === s ? r : null } catch { return null } })()
     const transcript = rf?.transcript_path ? readText(rf.transcript_path) : null
@@ -163,10 +168,11 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     context(role, s, rec.record.entries, transcript)
   }
 
-  function standing(role, entries) {
+  function standing(role, entries, paneSessionId) {
     // Each pause is named by the record line that stands for it, so a new pause with the same reason is a new event.
     const now = new Set(), last = (pred) => entries.filter(pred).at(-1)?.line
-    for (const p of standingPauses(entries)) now.add(`pause ${role} line ${p.line} auto-cycle paused: ${p.reason}`)
+    // The session skip (ownPauses in dctr-lib.mjs), for the role's last read session.
+    for (const p of ownPauses(standingPauses(entries), paneSessionId)) now.add(`pause ${role} line ${p.line} auto-cycle paused: ${p.reason}`)
     const st = pausingStates(entries)
     if (st.blocked) now.add(`pause ${role} line ${last((e) => e.kind === 'state')} ${st.blocked}`)
     if (st.alarm) now.add(`pause ${role} line ${last((e) => e.kind === 'alarm' && e.which === st.alarm)} ${st.alarm} alarm with no ruling`)

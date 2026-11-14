@@ -141,7 +141,7 @@ const EXPECTED = [
   { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: 'unknown' },
   { kind: 'auto-cycle', sub: 'cycle', n: 2, hash: '9f2c1ab' },
   { kind: 'auto-cycle', sub: 'ready' },
-  { kind: 'auto-cycle', sub: 'paused', reason: 'waiting on Scott' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'waiting on Scott', session: null },
   { kind: 'state', raw: '- State: Blocked. Q1 open', value: 'Blocked. Q1 open' },
   { kind: 'state', raw: '- State: Open', value: 'Open' },
   { kind: 'round', n: 4, time: T, revision: '4b241fd', blockers: 0, alarm: 1 },
@@ -149,7 +149,7 @@ const EXPECTED = [
   { kind: 'ruling', id: 'D7', time: T, text: 'append, never edit' },
   { kind: 'question-opened', id: 'Q3', time: T, text: 'which layout' },
   { kind: 'question-answered', id: 'Q3', time: T, text: 'both' },
-  { kind: 'auto-cycle', sub: 'paused', reason: 'cap reached' },
+  { kind: 'auto-cycle', sub: 'paused', reason: 'cap reached', session: null },
   { kind: 'auto-cycle', sub: 'on', cap: 10, tier: '120000' },
   { kind: 'auto-cycle', sub: 'warned', session: '4a9392da-bd72', tier: '60%' },
   { kind: 'auto-cycle', sub: 'cycle', n: 3, hash: '0f2c1ab' },
@@ -328,6 +328,54 @@ clause('clause 1v \u2014 a relay line is one entry of kind relay with its time, 
 const relayNear = parseRecord(RELAY_NEAR.join('\n')).entries
 clause('clause 1w \u2014 a relay line missing its ref or its to, or with a time that is not a form time, is not an entry (E15-D1)',
   relayNear.length === 0, JSON.stringify(relayNear))
+
+// A hook's R7, R8 or R9 paused line ends with its writer, ` [session <id>]`: the parser returns the reason without it and
+// the id as `session`. A line with no tag has no session; a bracket that is not that tag at the end stays reason text.
+const tagged = parseRecord(['- auto-cycle paused: session idle, waiting for you [session s-1]', '- auto-cycle paused: Claude API error: overloaded [session 1e90ba4f-0082]',
+  '- auto-cycle paused: waiting on Scott', '- auto-cycle paused: question: [session x] first?', '- `auto-cycle paused: waiting for your permission approval [session s-2]`'].join('\n')).entries
+clause('clause 1t2 — a paused line\'s writer tag: the reason without it and the id as session; no tag, no session; a bracket elsewhere stays reason text',
+  tagged.length === 5 && tagged[0].reason === 'session idle, waiting for you' && tagged[0].session === 's-1' &&
+  tagged[1].reason === 'Claude API error: overloaded' && tagged[1].session === '1e90ba4f-0082' &&
+  tagged[2].reason === 'waiting on Scott' && tagged[2].session === null &&
+  tagged[3].reason === 'question: [session x] first?' && tagged[3].session === null &&
+  tagged[4].reason === 'waiting for your permission approval' && tagged[4].session === 's-2', JSON.stringify(tagged))
+
+// EP11-B1: a raw paused line holding a carriage return or a Unicode line or paragraph separator, as an old record or
+// an agent's line can, parses as it did before the tag, its reason cut at the break; a tagged line keeps its tag.
+{
+  const seps = ['\r', ' ', ' ']
+  const raw = seps.map((s) => parseRecord(`- auto-cycle paused: Claude API error: upstream unavailable${s}retry later\n`).entries.filter((e) => e.sub === 'paused'))
+  const ask = seps.map((s) => parseRecord(`- auto-cycle paused: question: Q1 which way?${s}more\n`).entries.filter((e) => e.sub === 'paused'))
+  const tag = parseRecord('- auto-cycle paused: session idle, waiting for you [session s-1]  \n').entries.filter((e) => e.sub === 'paused')
+  clause('clause 1t3 — a raw paused line holding a carriage return, U+2028 or U+2029 is still a paused entry, its reason cut at the break and untagged, and a tagged line with trailing spaces keeps its tag',
+    raw.every((p) => p.length === 1 && p[0].reason === 'Claude API error: upstream unavailable' && p[0].session === null) &&
+    ask.every((p) => p.length === 1 && p[0].reason === 'question: Q1 which way?') &&
+    tag.length === 1 && tag[0].reason === 'session idle, waiting for you' && tag[0].session === 's-1',
+    JSON.stringify({ raw, ask, tag }))
+}
+
+// EP12-B1, B2: the paused form reads every raw line as c2ab490's form did, apart from a writer tag it ends with. The
+// oracle is c2ab490's paused form, verbatim; the lines are every sequence of up to four pieces, line breaks and tag
+// fragments among them. A line c2ab490 did not read is no entry; one it read is one entry, with the same reason when
+// untagged, and when tagged a reason that is c2ab490's minus spaces or tabs and that one tag.
+{
+  const OLD = /^(?:-\s+)?auto-cycle paused:\s+(\S.*)(?:[.,;:]?(?:\s.*)?)$/i
+  const PIECES = ['a', 'b c', ' ', '\t', '.', ':', '\r', '\u2028', '\u2029', '[session s1]', ' [session s2]', '[session', 'x]', 'question: Q1 ']
+  const lines = [], all = [[]]
+  for (let n = 1; n <= 4; n++) { const next = []; for (const s of all.filter((x) => x.length === n - 1)) for (const p of PIECES) next.push(s.concat(p)); all.push(...next) }
+  for (const s of all) if (s.length) lines.push('- auto-cycle paused: ' + s.join(''))
+  const bad = []
+  for (const L of lines) {
+    const m = OLD.exec(L.trim()), o = m ? m[1].trim() : null
+    const n = parseRecord(L + '\n').entries.filter((e) => e.sub === 'paused')
+    const ok = o === null ? n.length === 0
+      : n.length === 1 && (n[0].session === null ? n[0].reason === o
+        : o.startsWith(n[0].reason) && new RegExp(`^[ \\t]+\\[session[ \\t]+${n[0].session.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]$`).test(o.slice(n[0].reason.length)))
+    if (!ok) bad.push({ L, o, n: n.map((e) => [e.reason, e.session]) })
+  }
+  clause(`clause 1t4 — over ${lines.length} raw paused lines, the form reads each as c2ab490's form did, apart from a writer tag it ends with (the oracle needs no parser)`,
+    lines.length > 10000 && bad.length === 0, JSON.stringify(bad.slice(0, 5)))
+}
 
 // ---------------------------------------------------------------- clause 2: known-good stays quiet
 

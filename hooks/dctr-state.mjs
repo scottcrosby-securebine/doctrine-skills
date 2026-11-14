@@ -11,7 +11,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import {
-  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, standingPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
+  PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, pauseCode, EVENT_PAUSES, standingPauses, ownPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
@@ -773,7 +773,8 @@ export const autoCycleDir = () => {
   return dir
 }
 /** The typer's claim, single use per record state (RB3-1): keyed by the session id and claimKey, the line number of
- *  the record's latest auto-cycle line at launch, so a pause written after a claim gives the resolved session a new
+ *  the record's latest auto-cycle line at launch after the session skip, so a pause written after a claim that the
+ *  skip keeps for this session gives the resolved session a new
  *  claim while the same record state never launches twice. */
 export const claimFile = (sessionId, key) => path.join(autoCycleDir(), `${sessionId}.${key}.claim`)
 
@@ -858,13 +859,16 @@ export function appendRecordLine(recordPath, line) {
   fs.appendFileSync(recordPath, (text === '' || text.endsWith('\n') ? '' : '\n') + line + '\n')
 }
 
-/** Append `auto-cycle paused: <reason>` to the record (E8-D16), unless a standing pause names the same pause, or,
+/** Append `auto-cycle paused: <reason>` to the record (E8-D16), an R7, R8 or R9 ending ` [session <id>]` given the
+ *  hook's session (pausedLine), unless a standing pause names the same pause, or,
  *  for the idle pause, unless any pause stands (pauseStands, E8-D18, E8-R27, E8-R28). Given the hook's session, an
- *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31); the typer passes none, so its
+ *  R7, R8 or R9 line from before that session's latest turn end does not count (E8-R29, E8-R31), and the session skip
+ *  (ownPauses in dctr-lib.mjs) applies; the typer passes none, so its
  *  pauses keep the plain rule. Never a state line: the record's last state line is left as it was. `{ written }`. */
 export function appendPaused(recordPath, reason, sessionId = null) {
-  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0)) return { written: false }
-  appendRecordLine(recordPath, pausedLine(reason))
+  if (pauseStands(parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, sessionStartLine(recordPath), reason, sessionId ? turnEndLine(sessionId, recordPath) : 0, sessionId)) return { written: false }
+  // Only a permission prompt, an idle stop or an API error is about one session alone, so only those carry it.
+  appendRecordLine(recordPath, pausedLine(reason, EVENT_PAUSES.includes(pauseCode(reason)) ? sessionId : null))
   return { written: true }
 }
 
@@ -886,17 +890,17 @@ const pauseMarker = (kind, recordPath, line) =>
 
 /**
  * Raise the toast once for each of the record's standing pauses (standingPauses in dctr-lib.mjs, B3, E8-D26),
- * whoever wrote the line, and publish the paused token naming the last of them. Each line's alerted marker is taken
+ * after the session skip (ownPauses in dctr-lib.mjs), and publish the paused token naming the last of them. Each line's alerted marker is taken
  * first, exclusively, and outlives the session, so a later session, a concurrent hook or the typer never raises
  * that line again (F2). herdr is called only given a pane: the hook passes none in a contained session, which is the
  * one guard keeping herdr out of it. True when this call raised any.
  */
-export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} }) {
+export function alertPaused({ recordPath, repo, phase, paneId, sessionId = null, log = () => {} }) {
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
-  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
+  const fresh = ownPauses(standingPauses(entries, start), sessionId).filter((p) => { try { reserveMarker(pauseMarker('alerted', recordPath, p.line)); return true } catch { return false } })
   if (!fresh.length) return false
   if (paneId) {
-    publishToken(paneId, autocycleToken(entries, start), log)
+    publishToken(paneId, autocycleToken(entries, start, sessionId), log)
     for (const p of fresh) {
       try { herdr(pauseToastArgs(repo, phase, p.reason, pauseActionAt(p, entries, start))) } // herdr-lint: display only; the paused line and the pane message stand without it
       catch (e) { log(`auto-cycle toast not raised (${e.message.split('\n')[0]})`) }
@@ -908,13 +912,13 @@ export function alertPaused({ recordPath, repo, phase, paneId, log = () => {} })
 /**
  * The pane message for each standing pause not yet shown (E8-R23), one line each: `doctrine auto-cycle paused:
  * <reason>. <what to do>`, which the Stop, Notification or StopFailure hook prints as a systemMessage, the first of
- * them to run after the line is written. Its own marker, apart from the toast's: the detached typer raises the toast
+ * them to run after the line is written in a session the session skip (ownPauses in dctr-lib.mjs) leaves it to. Its own marker, apart from the toast's: the detached typer raises the toast
  * and has no pane output of its own, so one marker for both left its pauses with no pane message (SP1). Null when
  * there is nothing to print.
  */
-export function pauseMessageOnce(recordPath) {
+export function pauseMessageOnce(recordPath, sessionId = null) {
   const entries = parseRecord(fs.readFileSync(recordPath, 'utf8')).entries, start = sessionStartLine(recordPath)
-  const fresh = standingPauses(entries, start).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
+  const fresh = ownPauses(standingPauses(entries, start), sessionId).filter((p) => { try { reserveMarker(pauseMarker('shown', recordPath, p.line)); return true } catch { return false } })
   return fresh.length ? fresh.map((p) => pauseMessage(p.reason, pauseActionAt(p, entries, start))).join('\n') : null
 }
 
