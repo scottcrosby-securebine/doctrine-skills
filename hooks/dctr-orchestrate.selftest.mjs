@@ -68,6 +68,15 @@ const fresh = bridgeTmp('tmpdir-fresh', reading(1000000))
 const stale = bridgeTmp('tmpdir-stale', reading(1000000), 2 * 300000)
 const garbled = bridgeTmp('tmpdir-garbled', '{"session_id":"orch-sess')
 const textWindow = bridgeTmp('tmpdir-text-window', reading('1000000'))
+// R1-O1: a session that ran claude-opus-5-5, its last main-thread entry naming it, followed by a seat's entry naming
+// claude-haiku-5-5 and an API error's <synthetic> one, with a fresh 1,000,000 bridge reading in the fresh TMPDIR.
+const R = 'ran-session'
+const ranOpus = transcript(`${R}.jsonl`, [user, assistant(101825, { message: { role: 'assistant', model: 'claude-opus-5-5', usage: { input_tokens: 4, cache_creation_input_tokens: 101821, cache_read_input_tokens: 0, output_tokens: 10 } } }),
+  JSON.stringify({ type: 'assistant', uuid: 'side', isSidechain: true, message: { role: 'assistant', model: 'claude-haiku-5-5', content: [] } }),
+  JSON.stringify({ type: 'assistant', uuid: 'syn', isSidechain: false, message: { role: 'assistant', model: '<synthetic>', content: [] } })])
+const ranBridge = path.join(fresh.dir, `dctr-${R}`, 'bridge.json')
+fs.mkdirSync(path.dirname(ranBridge), { recursive: true })
+fs.writeFileSync(ranBridge, JSON.stringify({ session_id: R, window: 1000000, used: 101825, pct: 10, t: new Date().toISOString() }))
 
 // Each run gets a TMPDIR of its own, so the bridge file it reads is the one its clause wrote (E15-D256).
 const runIn = (tmpdir, ...args) => {
@@ -146,6 +155,15 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
   clause('clause 2p — an unknown id still refuses with a bridge reading present', r.code === 1 && r.out === 'refuse model id "not-a-model" is unknown', show(r))
 }
 
+{
+  const same = runIn(fresh.dir, 'capacity', 'claude-opus-5-5', 'default', ranOpus)
+  const other = runIn(fresh.dir, 'capacity', 'claude-sonnet-5-5', 'default', ranOpus)
+  clause('clause 2q — a session that ran the model id asked about, with a fresh bridge reading: accept at the bridge window 1,000,000, naming the bridge (R1-O1)',
+    same.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(same.out), show(same))
+  clause('clause 2r — the same session and bridge reading asked about another model id: the window 200,000 from the model id, naming the model id and not the bridge (R1-O1)',
+    other.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(other.out) && !/bridge/.test(other.out), show(other))
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures, without the command
 
 const readings = (f) => fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => {
@@ -177,6 +195,14 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
     st?.session_id === S && st.window === 1000000 && age(stale.f) > 300000 && parse(garbled.f) === null && tw?.session_id === S && typeof tw.window === 'string',
     `${JSON.stringify(st)} ${age(stale.f)} ${JSON.stringify(tw)}`)
   clause('clause 3h — the empty TMPDIR holds no bridge file', fs.readdirSync(emptyTmp).length === 0, String(fs.readdirSync(emptyTmp)))
+  const lines = (f) => fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const models = (f) => lines(f).map((e) => [e.isSidechain === true, e.message?.model ?? null])
+  const rb = parse(ranBridge)
+  clause('clause 3i — S.jsonl names no model on any entry; ran-session.jsonl reads 101,825 first, names claude-opus-5-5 on its one main-thread entry with usage, then a seat entry naming claude-haiku-5-5 and a main-thread <synthetic> entry last; its bridge file names it with window 1,000,000 and is under the expiry old (R1-O1)',
+    models(hostStart).every(([, m]) => m === null) && String(readings(ranOpus)) === '101825' &&
+      JSON.stringify(models(ranOpus)) === JSON.stringify([[false, null], [false, 'claude-opus-5-5'], [true, 'claude-haiku-5-5'], [false, '<synthetic>']]) &&
+      path.basename(ranOpus, '.jsonl') === R && rb?.session_id === R && rb.window === 1000000 && age(ranBridge) < 300000,
+    `${JSON.stringify(models(hostStart))} ${readings(ranOpus)} ${JSON.stringify(models(ranOpus))} ${JSON.stringify(rb)}`)
 }
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)

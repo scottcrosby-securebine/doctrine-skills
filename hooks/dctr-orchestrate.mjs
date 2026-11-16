@@ -6,9 +6,11 @@
 // source where it derived one and every reason. Exit 0 accept, 1 refuse, 2 malformed arguments.
 //
 // The window comes from the statusline bridge's per-session file for the transcript's session, the session id being
-// the transcript's file name, source `bridge` (E15-D256). A file that is missing, does not parse, names another
+// the transcript's file name, source `bridge` (E15-D256), unless the transcript names the model its session ran
+// (`message.model` on its last main-thread assistant entry naming one) and that model is not the id asked about, `[1m]`
+// aside: the bridge reports the window of the model the session ran, and no other. A file that is missing, does not parse, names another
 // session, carries no numeric window or is older than the lane watcher's BRIDGE_EXPIRY_MS is no bridge reading, and
-// the window then comes from the model id: 1,000,000 for a known id ending `[1m]`, 200,000 for a known id without it,
+// the window then comes from the model id, as it does for another model's session: 1,000,000 for a known id ending `[1m]`, 200,000 for a known id without it,
 // source `model id`. Any other id refuses with no window, bridge reading or not (E15-D208). The load is the transcript's FIRST main-thread usage
 // reading, the resume load (E15-D209). The tier is read as the gauge reads it (`resolveTier`: a number, `<n>%` or
 // `default`), and any error it reports refuses, its floor raise included. The arithmetic is `capacityDecision` in
@@ -16,7 +18,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { capacityDecision, firstUsage, resolveTier, HANDOFF_COST_TOKENS } from './dctr-lib.mjs'
+import { capacityDecision, firstUsage, resolveTier, transcriptEntries, HANDOFF_COST_TOKENS } from './dctr-lib.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
 
@@ -42,12 +44,23 @@ export function bridgeWindow(sessionId) {
   return Number.isFinite(w) && w > 0 ? w : null
 }
 
+/** The model the transcript's session ran: `message.model` on its last main-thread assistant entry naming one, an
+ *  API error's `<synthetic>` aside, or null. */
+export function sessionModel(transcriptText) {
+  const read = transcriptText === null ? null : transcriptEntries(transcriptText)
+  const named = (e) => e?.type === 'assistant' && !e.isSidechain && typeof e.message?.model === 'string' && e.message.model !== '<synthetic>'
+  return read?.entries.filter(named).at(-1)?.message.model ?? null
+}
+
 /** The capacity verdict as the line it prints and whether it accepts; bridged is bridgeWindow's value. */
 export function capacity(modelId, tierText, transcriptText, bridged = null) {
   const idWindow = windowOf(modelId)
   if (idWindow === null) return { accept: false, line: `refuse model id "${modelId}" is unknown` }
-  const window = bridged ?? idWindow
-  const win = `window ${window} from ${bridged === null ? 'model id' : 'bridge'}`
+  // shortcut: a transcript's model names no `[1m]`, so a 200K session matches `<id>[1m]` and gives its bridge window; read the variant once a transcript records it.
+  const ran = sessionModel(transcriptText)
+  const fromBridge = bridged !== null && (ran === null || ran === String(modelId).replace(/\[1m\]$/, ''))
+  const window = fromBridge ? bridged : idWindow
+  const win = `window ${window} from ${fromBridge ? 'bridge' : 'model id'}`
   const reading = firstUsage(transcriptText)
   if (reading.unknown) return { accept: false, line: `refuse ${win}: the resume load is unknown (${reading.unknown})` }
   const load = reading.used
