@@ -32,7 +32,7 @@ fs.writeFileSync(path.join(bin, 'herdr'), `#!/bin/sh\ntouch ${JSON.stringify(tri
 const home = path.join(tmp, 'home')
 // An empty codex state dir: codex jobs read as (none), while live seats, outside herdr, read as unknown.
 fs.mkdirSync(path.join(home, '.claude', 'plugins', 'data', 'codex-openai-codex', 'state'), { recursive: true })
-const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', DCTR_PAGE_PASSWORD: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: '' }
+const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', DCTR_PAGE_PASSWORD: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: '' }
 delete env.HERDR_ENV
 
 // ---------------------------------------------------------------- the fixture tracking root
@@ -280,7 +280,7 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   await refusedStart('two tracking roots', [root, root, '--port', '<port>'], {}, /usage/)
   await refusedStart('no tracking root', ['--port', '<port>'], {}, /usage/)
   await refusedStart('a tracking root that is a file', [P, '--port', '<port>'], {}, /not a directory/)
-  clause('E2E start [3: the file root is a file and the free-port probe listens and closes]', fs.statSync(P).isFile(), 'fixture')
+  clause('E2E start [3: the file root is a file]', fs.statSync(P).isFile(), 'fixture')
   // Proved without the server: a plain listener on 0.0.0.0 answers on 127.0.0.1, so it is the any-address.
   const any = net.createServer().listen(0, '0.0.0.0'); await waitFor(() => any.address())
   clause('E2E start [3: 0.0.0.0 really is a wildcard: a plain listener there answers on 127.0.0.1]', await connects(any.address().port), 'no answer on loopback')

@@ -25,7 +25,7 @@ import { statusFor } from './dctr-project.mjs'
 const USAGE = 'usage: node dctr-page.mjs <tracking root> [--port N] [--host ADDR]'
 const DEFAULTS = { host: '127.0.0.1', port: '8787' }
 
-export const isLoopback = (h) => h === 'localhost' || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'))
+const isLoopback = (h) => h === 'localhost' || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'))
 const hostPort = (h, port) => `${net.isIPv6(h) ? `[${h}]` : h}:${port}`
 
 /** argv to `{ root, port, host }` as given, or null when its shape is wrong: an unknown flag, a flag with no
@@ -90,19 +90,19 @@ export const pageHtml = (lines) => doc('doctrine status', lines.map(esc).join('\
 /** The page for a statusFor that threw: its one-line message, escaped, and no status value. */
 export const errorHtml = (message) => doc('doctrine status unavailable', esc(message))
 
-function send(req, res, status, headers, body) {
+function send(res, status, headers, body) {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body), ...headers })
-  res.end(req.method === 'HEAD' ? undefined : body)
+  res.end(body)   // Node sends no body on a HEAD response
 }
 
 function serve({ root, host, port }, password) {
   const server = http.createServer((req, res) => {
     const cfg = { bind: host, port: server.address().port, password }
     const refusal = requestDecision({ method: req.method, url: req.url, host: req.headers.host, authorization: req.headers.authorization }, cfg)
-    if (refusal) return send(req, res, refusal.status, refusal.headers, `${refusal.status} ${http.STATUS_CODES[refusal.status]}\n`)
+    if (refusal) return send(res, refusal.status, refusal.headers, `${refusal.status} ${http.STATUS_CODES[refusal.status]}\n`)
     let lines
-    try { lines = statusFor(root) } catch (e) { return send(req, res, 503, {}, errorHtml(e.message)) }
-    send(req, res, 200, {}, pageHtml(lines))
+    try { lines = statusFor(root) } catch (e) { return send(res, 503, {}, errorHtml(e.message)) }
+    send(res, 200, {}, pageHtml(lines))
   })
   server.headersTimeout = 10_000
   server.requestTimeout = 30_000

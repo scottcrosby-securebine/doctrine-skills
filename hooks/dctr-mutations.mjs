@@ -5166,7 +5166,7 @@ const MUTATIONS = [
   { name: "page html: the error page does not escape its message", file: "dctr-page.mjs", clause: "S-D [1: errorHtml escapes its message and carries it whole]",
     from: "doc('doctrine status unavailable', esc(message))", to: "doc('doctrine status unavailable', message)" },
   { name: "page serve: a statusFor throw is a 500", file: "dctr-page.mjs", clause: "E2E unreadable [1: no docs/PROJECT.md is 503 carrying exactly the message status prints",
-    from: "catch (e) { return send(req, res, 503, {}, errorHtml(e.message)) }", to: "catch (e) { return send(req, res, 500, {}, errorHtml(e.message)) }" },
+    from: "catch (e) { return send(res, 503, {}, errorHtml(e.message)) }", to: "catch (e) { return send(res, 500, {}, errorHtml(e.message)) }" },
   { name: "page serve: the page may be cached", file: "dctr-page.mjs", clause: "E2E page [2: GET / is 200, text/html; charset=utf-8, Cache-Control: no-store, and no CORS header]",
     from: "'Cache-Control': 'no-store', ", to: "" },
   { name: "page serve: the status lines are kept from the first request (E5-S14)", file: "dctr-page.mjs", clause: "E2E fresh [1: after the project State changes, the next GET shows the new state",
