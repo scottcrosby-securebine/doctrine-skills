@@ -298,7 +298,7 @@ function start(run) {
   }
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
   const launchFile = path.join(run, 'launch', 'orchestrator.sh')
-  const launch = `cd ${shq(checkout)} && env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
+  const launch = `cd ${shq(checkout)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
     `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
     `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`
   fs.mkdirSync(path.dirname(launchFile), { recursive: true })

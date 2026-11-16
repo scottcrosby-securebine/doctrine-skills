@@ -322,6 +322,30 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     `over ${over.status} ${JSON.stringify(over.stderr)}; at ${at.status}`)
 }
 
+// ---------------------------------------------------------------- clause 2: a launch file rewritten while it runs (R1-N3)
+
+{
+  // A claude that appends a tail line to the file tail-target names, as a rewrite while sh still reads that file would.
+  const tbin = path.join(tmp, 'tail-bin'), target = path.join(tmp, 'tail-target'); fs.mkdirSync(tbin)
+  fs.writeFileSync(path.join(tbin, 'claude'), `#!/bin/sh\nf=$(/bin/cat ${shq(target)})\nprintf '\\n/usr/bin/touch %s\\n' "$f.tail" >> "$f"\n`)
+  fs.chmodSync(path.join(tbin, 'claude'), 0o755)
+  const runTail = (file, line) => { fs.writeFileSync(target, file); fs.rmSync(`${file}.tail`, { force: true }); const r = spawnSync('env', ['-i', 'sh', '-c', line], { encoding: 'utf8' }); return { code: r.status, tail: fs.existsSync(`${file}.tail`), grew: read(file) } }
+  const f = fixture()
+  const r = create(f, 'a', { env: { PATH: [tbin, bin, ...SYS_PATH].join(':') } })
+  const line = laneOf(read(f.laneLog), 'a')?.launch, file = path.join(f.run, 'launch/a.sh')
+  const got = r.code === 0 && line ? runTail(file, line) : null
+  clause('clause 2am3 — the launch file create writes, appended to by the claude it starts, runs nothing after claude exits (R1-N3)',
+    r.code === 0 && line === `sh ${shq(file)}` && got?.tail === false && /\/usr\/bin\/touch /.test(got.grew), `exit ${r.code} ${said(r)}; line ${JSON.stringify(line)}; ${JSON.stringify(got)}`)
+  // Without the command: the same stub under a launch file written by hand, with and without exec.
+  const dir = path.join(tmp, 'tail-proof'); fs.mkdirSync(dir)
+  const plain = path.join(dir, 'plain.sh'), execd = path.join(dir, 'exec.sh')
+  fs.writeFileSync(plain, `cd ${shq(dir)} && env PATH=${shq([tbin, ...SYS_PATH].join(':'))} claude\n`)
+  fs.writeFileSync(execd, `cd ${shq(dir)} && exec env PATH=${shq([tbin, ...SYS_PATH].join(':'))} claude\n`)
+  const p = runTail(plain, `sh ${shq(plain)}`), e = runTail(execd, `sh ${shq(execd)}`)
+  clause('clause 3am3 — without the command, sh runs the line the stub appends to a launch file whose command has no exec, and not to one whose command is exec\'d',
+    p.tail === true && e.tail === false && /\/usr\/bin\/touch /.test(e.grew), JSON.stringify([p, e]))
+}
+
 // ---------------------------------------------------------------- clause 2: RESUME_LINE waits for the session /clear started (E15-D252)
 
 {
@@ -550,7 +574,7 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   clause('clause 2v — create, reset, archive and remove for lane a with DCTR_CALLER=orchestrator append exactly four lines in that order, each a UTC time ending Z inside the clause\'s run, orchestrator, its subcommand and a; the create line\'s next fields are the pane the shim made and the worktree, and the rest is the launch line (E15-D186, E15-D126)',
     lines.length === 4 && fields.every((m, k) => m && m[1] >= t0 && m[1] <= t1 && m[2] === 'orchestrator' && m[3] === ['create', 'reset', 'archive', 'remove'][k] && m[4].split(' ')[0] === 'a') &&
     lines[0].split(' ')[4] === pane && lines[0].split(' ')[5] === f.wt('a') && launch === `sh ${shq(path.join(f.run, 'launch/a.sh'))}` &&
-    (read(path.join(f.run, 'launch/a.sh')) || '').startsWith(`cd '${f.wt('a')}' && env DCTR_ROLE='a' `) && (read(path.join(f.run, 'launch/a.sh')) || '').includes(' claude --model ') &&
+    (read(path.join(f.run, 'launch/a.sh')) || '').startsWith(`cd '${f.wt('a')}' && exec env DCTR_ROLE='a' `) && (read(path.join(f.run, 'launch/a.sh')) || '').includes(' claude --model ') &&
     lines[1].endsWith(` reset a ${f.base}`) && lines[2].endsWith(' archive a') && lines[3].endsWith(' remove a'),
     JSON.stringify({ t0, t1, lines }))
 }

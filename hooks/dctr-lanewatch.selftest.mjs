@@ -902,7 +902,30 @@ clause('clause 2bh — with a PATH over 1024 bytes start records the orchestrato
   loStarted.DCTR_ROLE === 'orchestrator' && loStarted.DCTR_CALLER === 'orchestrator' && loStarted.DCTR_RUN === lo.run && loStarted.PATH === LO_PATH,
   JSON.stringify([rLo, loOrch, loStarted.DCTR_ROLE, loStarted.PATH === LO_PATH]))
 
+// R1-N3: the same launch line with a claude that appends a tail line to the launch file it was started from, as a
+// rewrite of that file while sh still reads it would. The env-logging claude is put back after.
+const tailTarget = path.join(tmp, 'tail-target'), stubText = fs.readFileSync(path.join(claudeStub, 'claude'), 'utf8')
+const tailStub = `#!/bin/sh\nf=$(/bin/cat ${shq(tailTarget)})\nprintf '\\n/usr/bin/touch %s\\n' "$f.tail" >> "$f"\n`
+const runTail = (file, line) => {
+  fs.writeFileSync(path.join(claudeStub, 'claude'), tailStub); fs.writeFileSync(tailTarget, file); fs.rmSync(`${file}.tail`, { force: true })
+  try { const r = spawnSync('/bin/sh', ['-c', line], { env: {}, timeout: 20000 }); return { code: r.status, tail: fs.existsSync(`${file}.tail`), grew: fs.readFileSync(file, "utf8") } } finally { fs.writeFileSync(path.join(claudeStub, 'claude'), stubText) }
+}
+const loFile = path.join(lo.run, 'launch', 'orchestrator.sh'), loTail = loOrch ? runTail(loFile, loOrch.launch) : null
+clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended to by the claude it starts, runs nothing after claude exits (R1-N3)',
+  loOrch?.launch === `sh ${shq(loFile)}` && loTail?.tail === false && /\/usr\/bin\/touch /.test(loTail.grew ?? ''), JSON.stringify([loOrch, loTail]))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
+
+{
+  // 2bh2's stub, without start: sh runs what it appends to a launch file whose command has no exec, and not otherwise.
+  const dir = path.join(tmp, 'tail-proof'); fs.mkdirSync(dir)
+  const plain = path.join(dir, 'plain.sh'), execd = path.join(dir, 'exec.sh')
+  fs.writeFileSync(plain, `cd ${shq(dir)} && env PATH=${shq(LO_PATH)} claude\n`)
+  fs.writeFileSync(execd, `cd ${shq(dir)} && exec env PATH=${shq(LO_PATH)} claude\n`)
+  const p = runTail(plain, `sh ${shq(plain)}`), e = runTail(execd, `sh ${shq(execd)}`)
+  clause('clause 3g2 — without the watcher: sh runs the line 2bh2\'s claude appends to a launch file whose command has no exec, and not to one whose command is exec\'d',
+    p.tail === true && e.tail === false && /\/usr\/bin\/touch /.test(e.grew ?? ''), JSON.stringify([p, e]))
+}
 
 {
   const fx = fixture({ a: { shim: { status: 'working' } } })
