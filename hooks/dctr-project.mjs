@@ -18,7 +18,8 @@
 // where the block's label says, `none found in the searched paths`; the two are never the same line.
 //
 // Pure functions (parseDoc, modelFrom, check, formatFinding, statusLines, boardRows, boardText, memberRecords) are exported for
-// hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O.
+// hooks/dctr-project.selftest.mjs. The readers at the bottom are the only I/O. statusFor(root) is the status command's
+// wiring, exported for hooks/dctr-page.mjs.
 //
 // Rules: state, evidence, roster, coverage, item, entry, reference, impact, issues, pointer, id, members.
 //
@@ -646,6 +647,31 @@ export function readCodex(root, stateDir = codexStateDir()) {
   return out
 }
 
+// ---------------------------------------------------------------- statusFor (E5-R11)
+
+const PROJECT_UNREADABLE = 'DCTR_PROJECT_UNREADABLE'
+/** docs/PROJECT.md under `root` read and modelled, with the reader the model's files were read through. Throws
+ *  the CLI's one-line message, its `code` PROJECT_UNREADABLE, when the project file cannot be read. */
+function loadProject(root) {
+  let text
+  try { text = fs.readFileSync(path.join(root, PROJECT_PATH), 'utf8') }
+  catch (e) { throw Object.assign(new Error(`dctr-project: cannot read ${PROJECT_PATH} under ${root} (${e.code || e.message})`), { code: PROJECT_UNREADABLE }) }
+  const readRel = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8') } catch { return null } }
+  return { model: modelFrom(text, readRel), readRel }
+}
+
+/** The lines `status` prints for the tracking root `root`, an absolute path, read fresh on every call. The CLI's
+ *  `status` prints them and hooks/dctr-page.mjs renders them per request; neither keeps them. Throws as
+ *  loadProject does. */
+export function statusFor(root) {
+  const { model } = loadProject(root)
+  return statusLines(model, {
+    records: () => readRecords(root, val(model.project, 'Records'), memberRecords(model)),
+    seats: () => readSeats(trackedRoot(root, model)),
+    codex: () => readCodex(trackedRoot(root, model)),
+  })
+}
+
 // ---------------------------------------------------------------- CLI
 
 // Both through realpath: Node resolves symlinks in import.meta.filename, so a symlinked plugin dir dispatched nothing
@@ -658,11 +684,8 @@ if (isMain) {
     process.exit(2)
   }
   const root = path.resolve(rest[0] ?? '.')
-  let text
-  try { text = fs.readFileSync(path.join(root, PROJECT_PATH), 'utf8') }
-  catch (e) { console.error(`dctr-project: cannot read ${PROJECT_PATH} under ${root} (${e.code || e.message})`); process.exit(2) }
-  const readRel = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8') } catch { return null } }
-  const model = modelFrom(text, readRel)
+  let model, readRel
+  if (cmd !== 'status') try { ({ model, readRel } = loadProject(root)) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
   if (cmd === 'check') {
     const findings = check(model, (rel) => fs.existsSync(path.join(root, rel)))
     for (const f of findings) console.log(formatFinding(f))
@@ -679,10 +702,8 @@ if (isMain) {
     console.log(`wrote ${out}: ${rows.length} phase row(s)`)
     process.exit(0)
   }
-  const lines = statusLines(model, {
-    records: () => readRecords(root, val(model.project, 'Records'), memberRecords(model)),
-    seats: () => readSeats(trackedRoot(root, model)),
-    codex: () => readCodex(trackedRoot(root, model)),
-  })
+  // status ends the script without process.exit, so a piped stdout drains before the process does (P1-C1).
+  let lines
+  try { lines = statusFor(root) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
   console.log(lines.join('\n'))
 }

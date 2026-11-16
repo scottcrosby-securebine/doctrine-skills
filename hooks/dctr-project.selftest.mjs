@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { parseDoc, modelFrom, check, formatFinding, statusLines, boardRows, boardText, readCodex, readRecords, memberRecords, trackedRoot, PROJECT_PATH, RECORDS_LABEL } from './dctr-project.mjs'
+import { parseDoc, modelFrom, check, formatFinding, statusLines, statusFor, boardRows, boardText, readCodex, readRecords, memberRecords, trackedRoot, PROJECT_PATH, RECORDS_LABEL } from './dctr-project.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -891,6 +891,42 @@ clause('CLI status — HERDR_ENV unset prints live seats: unknown, and a missing
 clause('CLI status — [3: the environment really lacks both sources]',
   !fs.existsSync(path.join(home, '.claude', 'plugins', 'data', 'codex-openai-codex', 'state')) && env.HERDR_ENV !== '1', 'fixture')
 clause('CLI status — the tripwire herdr on PATH was called ZERO times with HERDR_ENV unset', !fs.existsSync(trip('herdr')), 'herdr was called')
+// ---------------------------------------------------------------- statusFor (E5-R11, seam S-A)
+// The function the page server calls per request: the CLI's status wiring, moved. Three clauses: the lines it
+// returns are what the CLI prints for the same tree in the same environment, an unreadable project throws the
+// CLI's one-line message, and the CLI exits 2 with exactly that line; each fixture proved without either.
+{
+  const asCli = (root) => { const saved = { ...process.env }; Object.assign(process.env, env); try { return statusFor(root) } finally { for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]; Object.assign(process.env, saved) } }
+  const tryFor = (root) => { try { return { lines: asCli(root) } } catch (e) { return { err: e } } }
+  for (const [name, root] of [['the good tree', good], ['the deep-member tree', deepM]]) {
+    const got = tryFor(root), printed = cli('status', root)
+    clause(`statusFor S-A [2: on ${name} it returns exactly the lines the CLI prints, joined as the CLI joins them]`,
+      Array.isArray(got.lines) && printed.status === 0 && `${got.lines.join('\n')}\n` === printed.stdout, `${got.err?.message ?? JSON.stringify(got.lines)} vs ${printed.stdout}`)
+  }
+  clause('statusFor S-A [3: the good tree prints open records, unknown and (none)-free seats, so the comparison covers more than a header]',
+    cli('status', good).stdout.includes('  docs/records/p3.md: state: Open') && cli('status', good).stdout.includes('live seats: unknown'), 'fixture')
+  for (const [name, root, code] of [['no docs/PROJECT.md', empty, 'ENOENT'], ['a docs/PROJECT.md that is a directory', unreadable, 'EISDIR']]) {
+    const want = `dctr-project: cannot read docs/PROJECT.md under ${root} (${code})`
+    const got = tryFor(root), printed = cli('status', root)
+    clause(`statusFor S-A [1: ${name} throws an Error whose message is the one line ${JSON.stringify(want)}]`,
+      got.err instanceof Error && got.err.message === want, got.err?.message ?? JSON.stringify(got.lines))
+    clause(`statusFor S-A [1: CLI status on ${name} exits 2, prints that line alone on stderr and nothing on stdout]`,
+      printed.status === 2 && printed.stderr === `${want}\n` && printed.stdout === '', `status ${printed.status}: ${JSON.stringify(printed.stderr)} ${JSON.stringify(printed.stdout)}`)
+  }
+  clause('statusFor S-A [3: one tree has no docs/PROJECT.md and the other holds a directory there]',
+    !fs.existsSync(path.join(empty, PROJECT_PATH)) && fs.statSync(path.join(unreadable, PROJECT_PATH)).isDirectory(), 'fixture')
+  clause('statusFor S-A — called in-process with HERDR_ENV unset, the tripwire herdr on PATH was called ZERO times', !fs.existsSync(trip('herdr')), 'herdr was called')
+  // P1-C1: status piped from a roster far past one pipe buffer prints every byte. An exit straight after the write
+  // cut it at 65,536 bytes; 5f9578c, which ended without one, printed all of it.
+  const big = path.join(tmp, 'big-roster'), ROWS = 30000
+  writeTree(big, { [PROJECT_PATH]: `# Project: big\nState: Ruled\nCurrent epic: E1\nCertification target: none\nRecords: none\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n${Array.from({ length: ROWS }, (_, i) => `| E${i + 1} | T | docs/epics/E${i + 1}.md |`).join('\n')}\n` })
+  const want = Buffer.byteLength(`${asCli(big).join('\n')}\n`)
+  const piped = spawnSync('node', [script, 'status', big], { env, maxBuffer: 64 * 1024 * 1024 })
+  clause('statusFor S-A — CLI status piped from a 30,000-epic roster exits 0 and prints every byte statusFor returns, newline included',
+    piped.status === 0 && piped.stdout.length === want, `status ${piped.status}: ${piped.stdout.length} bytes piped, ${want} wanted`)
+  clause('statusFor S-A [3: that roster really has 30,000 rows, and the output it should print is several pipe buffers long]',
+    (fs.readFileSync(path.join(big, PROJECT_PATH), 'utf8').match(/^\| E\d+ \| T \|/gm) ?? []).length === ROWS && want > 4 * 65536, `${want} bytes`)
+}
 const rContained = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1', DCTR_VIEW_REQUEST_DIR: tmp }, encoding: 'utf8' })
 clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints unknown and still calls herdr ZERO times',
   rContained.stdout.split('\n').includes('live seats: unknown') && !fs.existsSync(trip('herdr')), rContained.stdout)
