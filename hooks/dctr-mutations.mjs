@@ -66,7 +66,9 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
   // The sender and its suite.
   'dctr-send.mjs', 'dctr-send.selftest.mjs',
   // The lane watcher and its suite.
-  'dctr-lanewatch.mjs', 'dctr-lanewatch.selftest.mjs']
+  'dctr-lanewatch.mjs', 'dctr-lanewatch.selftest.mjs',
+  // The status page server (E5 page-server) and its suite.
+  'dctr-page.mjs', 'dctr-page.selftest.mjs']
 /** Cheapest first, and the order is the MEASURED one: `some` stops at the first suite that notices,
  *  so a mutation pays for every suite ahead of the one that catches it. Measured standalone at
  *  008014d: seat 17ms, gate 439ms, pane 8.2s, teardown 19.1s. This list previously read seat, pane,
@@ -103,8 +105,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  0.59-0.61s; it goes after history and before project.
  *  The guard suite, measured standalone on one host, three runs: guard 2.28-2.32s; it goes after seat and before gauge.
  *  The send suite goes last, unmeasured, because only the mutations that name its clauses need it.
- *  The lane watcher suite, measured standalone on one host, three runs: 3.3s each; it goes after gauge. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-lanewatch.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
+ *  The lane watcher suite, measured standalone on one host, three runs: 3.3s each; it goes after gauge.
+ *  The page suite, measured standalone on one host, three runs: 2.66-2.75s, beside gauge 2.22-2.28s on the same host;
+ *  it goes after gauge and before the lane watcher. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-page.selftest.mjs', 'dctr-lanewatch.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */
@@ -5119,6 +5123,56 @@ const MUTATIONS = [
     clause: "clause 2x20 \u2014 the lock lost on a\\'s nudge: a is report\u2026",
     from: "for (const x of pending) if (!last.has(x.role)) last.set(x.role, 'retry')",
     to: "for (const x of pending) last.set(x.role, 'retry')" },
+  // The page server (E5 page-server): at least one per seam, S-A in dctr-project.mjs and S-B to S-D in dctr-page.mjs,
+  // plus the server's own wiring, each spot-run on a copy.
+  { name: "statusFor: CLI status exits 1, not 2, on an unreadable project", file: "dctr-project.mjs", clause: "statusFor S-A [1: CLI status on no docs/PROJECT.md exits 2",
+    from: "try { lines = statusFor(root) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }", to: "try { lines = statusFor(root) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(1) }" },
+  { name: "statusFor: the unreadable-project message drops its error code", file: "dctr-project.mjs", clause: "statusFor S-A [1: no docs/PROJECT.md throws an Error whose message is the one line",
+    from: "under ${root} (${e.code || e.message})`), { code: PROJECT_UNREADABLE })", to: "under ${root}`), { code: PROJECT_UNREADABLE })" },
+  { name: "page start: a contained session is not refused", file: "dctr-page.mjs", clause: "S-B [1: a contained session is refused with one line naming why]",
+    from: "if (env.DCTR_VIEW_REQUEST_DIR) return", to: "if (false) return" },
+  { name: "page start: an empty DCTR_PAGE_PASSWORD counts as set", file: "dctr-page.mjs", clause: "S-B [1: --host 192.0.2.1 with DCTR_PAGE_PASSWORD empty is refused",
+    from: "if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return", to: "if (!isLoopback(host) && env.DCTR_PAGE_PASSWORD === undefined) return" },
+  { name: "page start: a wildcard bind counts as loopback", file: "dctr-page.mjs", clause: "S-B [1: --host 0.0.0.0 with DCTR_PAGE_PASSWORD unset is refused",
+    from: "export const isLoopback = (h) => h === 'localhost' ||", to: "export const isLoopback = (h) => isWildcard(h) || h === 'localhost' ||" },
+  { name: "page start: a port above 65535 is accepted", file: "dctr-page.mjs", clause: "S-B [1: --port \"65536\" is refused with one line naming why]",
+    from: " || Number(port) > 65535)", to: ")" },
+  { name: "page start: a tracking root that is a file is accepted", file: "dctr-page.mjs", clause: "S-B [1: a tracking root that is a file is refused with one line naming why]",
+    from: "dir = fs.statSync(path.resolve(root)).isDirectory()", to: "dir = fs.existsSync(path.resolve(root))" },
+  { name: "page start: a failed bind escapes as a stack trace", file: "dctr-page.mjs", clause: "E2E start [1: a port already in use exits non-zero with one stderr line and no URL line]",
+    from: "  server.on('error', (e) => { console.error(`dctr-page: cannot listen on ${hostPort(host, port)} (${e.code || e.message})`); process.exit(1) })\n", to: "" },
+  { name: "page request: a POST is served", file: "dctr-page.mjs", clause: "S-C [1: POST / gets 405]",
+    from: "if (method !== 'GET' && method !== 'HEAD') return", to: "if (method === 'TRACE') return" },
+  { name: "page request: any path is served", file: "dctr-page.mjs", clause: "S-C [1: GET /x gets 404]",
+    from: "String(url).split('?')[0] !== '/'", to: "!String(url).startsWith('/')" },
+  { name: "page request: the Host header is not checked", file: "dctr-page.mjs", clause: "E2E refuse [1: Host attacker.example:<port> is 421 with no status value in the body (E5-S18)]",
+    from: "if (!own.includes(String(host ?? '').toLowerCase())) return { status: 421", to: "if (false) return { status: 421" },
+  { name: "page request: localhost:<port> is the server's own on a non-loopback bind", file: "dctr-page.mjs", clause: "S-C [1: Host \"localhost:8787\" on bind 192.0.2.1 gets 421]",
+    from: "...(isLoopback(bind) ? [`localhost:${port}`] : [])", to: "`localhost:${port}`" },
+  { name: "page request: an IPv6 bind is not bracketed in Host", file: "dctr-page.mjs", clause: "S-C [2: [::1]:<port> on an ::1 bind is served (null)]",
+    from: "net.isIPv6(h) ? `[${h}]` : h", to: "h" },
+  { name: "page request: a non-loopback bind asks for no credentials", file: "dctr-page.mjs", clause: "E2E auth [1: no credentials is 401 with WWW-Authenticate: Basic realm=\"doctrine\" and no status value]",
+    from: "if (!isLoopback(bind)) {", to: "if (false) {" },
+  { name: "page request: a prefix of the password is accepted", file: "dctr-page.mjs", clause: "S-C [1: a prefix of the password on a non-loopback bind gets 401]",
+    from: "!crypto.timingSafeEqual(sha(given), sha(password))", to: "!password.startsWith(given)" },
+  { name: "page request: a 401 carries no WWW-Authenticate", file: "dctr-page.mjs", clause: "S-C [1: 405 names GET and HEAD in Allow, and 401 carries WWW-Authenticate: Basic realm=\"doctrine\"]",
+    from: "return { status: 401, headers: { 'WWW-Authenticate': 'Basic realm=\"doctrine\"' } }", to: "return { status: 401, headers: {} }" },
+  { name: "page html: only the first special character on a line is escaped", file: "dctr-page.mjs", clause: "S-D [1: every <, >, &, \" and ' in every line is escaped, the second < on a line included]",
+    from: "replace(/[&<>\"']/g,", to: "replace(/[&<>\"']/," },
+  { name: "page html: no newline after <pre>, so an empty first line is lost", file: "dctr-page.mjs", clause: "S-D [2: a first line that is empty survives the newline the HTML parser drops after <pre>]",
+    from: "<body><pre>\\n${text}", to: "<body><pre>${text}" },
+  { name: "page html: the error page does not escape its message", file: "dctr-page.mjs", clause: "S-D [1: errorHtml escapes its message and carries it whole]",
+    from: "doc('doctrine status unavailable', esc(message))", to: "doc('doctrine status unavailable', message)" },
+  { name: "page serve: a statusFor throw is a 500", file: "dctr-page.mjs", clause: "E2E unreadable [1: no docs/PROJECT.md is 503 carrying exactly the message status prints",
+    from: "catch (e) { return send(req, res, 503, {}, errorHtml(e.message)) }", to: "catch (e) { return send(req, res, 500, {}, errorHtml(e.message)) }" },
+  { name: "page serve: the page may be cached", file: "dctr-page.mjs", clause: "E2E page [2: GET / is 200, text/html; charset=utf-8, Cache-Control: no-store, and no CORS header]",
+    from: "'Cache-Control': 'no-store', ", to: "" },
+  { name: "page serve: the status lines are kept from the first request (E5-S14)", file: "dctr-page.mjs", clause: "E2E fresh [1: after the project State changes, the next GET shows the new state",
+    from: "    try { lines = statusFor(root) }", to: "    try { lines = globalThis.keptLines ??= statusFor(root) }" },
+  { name: "page serve: a wildcard bind prints a URL", file: "dctr-page.mjs", clause: "E2E auth start [2: a wildcard bind prints listening on 0.0.0.0:<port>",
+    from: "isWildcard(host) ? `listening on", to: "false ? `listening on" },
+  { name: "page serve: a non-loopback bind prints no plain-HTTP warning", file: "dctr-page.mjs", clause: "E2E auth start [2: a wildcard bind prints listening on 0.0.0.0:<port>, then one line on plain-HTTP Basic auth and TLS",
+    from: "    if (!isLoopback(host)) console.log('Basic auth", to: "    if (false) console.log('Basic auth" },
 ]
 
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
