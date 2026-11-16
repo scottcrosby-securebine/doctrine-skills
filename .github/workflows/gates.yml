@@ -112,7 +112,7 @@ jobs:
       - name: status page server tamper test
         # Three clauses over hooks/dctr-page.mjs: the start refusals, the per-request method, path, Host and
         # Basic-auth decision, and the escaped page, pure and then on a spawned server over a fixture tracking
-        # root whose page must equal what status prints. Tripwire herdr on PATH; binds loopback and 0.0.0.0.
+        # root whose page must equal what status prints. Tripwire herdr on PATH; binds loopback, and a LAN address where the host has one.
         run: node hooks/dctr-page.selftest.mjs
 
       - name: record line parser tamper test

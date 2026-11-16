@@ -66,7 +66,8 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
     ['a relative root that is a directory', { ...ok, root: path.relative(process.cwd(), root) }, {}],
   ]
   for (const [name, args, e] of goods) clause(`S-B [2: ${name} is not refused]`, startRefusal(args, e) === null, String(startRefusal(args, e)))
-  const NONLOOP = ['192.0.2.1', '10.0.0.1', '0.0.0.0', '::', '128.0.0.1', '1.127.0.0']
+  const NONLOOP = ['192.0.2.1', '10.0.0.1', '128.0.0.1', '1.127.0.0']
+  const WILDCARD = ['0.0.0.0', '::']
   const refusals = [
     ['a contained session', ok, { DCTR_VIEW_REQUEST_DIR: tmp }, /contained/],
     ['a contained session with every other argument bad too', { host: '192.0.2.1', port: 'x' }, { DCTR_VIEW_REQUEST_DIR: tmp }, /contained/],
@@ -75,6 +76,10 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
       [`--host ${h} with DCTR_PAGE_PASSWORD empty`, { ...ok, host: h }, { DCTR_PAGE_PASSWORD: '' }, /DCTR_PAGE_PASSWORD/],
     ]),
     ...['abc', '65536', '-1', '', '1.5', ' 80', '8e3'].map((p) => [`--port ${JSON.stringify(p)}`, { ...ok, port: p }, {}, /port/]),
+    ...WILDCARD.flatMap((h) => [
+      [`--host ${h}, a wildcard bind, with no password`, { ...ok, host: h }, {}, /wildcard.*specific address/],
+      [`--host ${h}, a wildcard bind, with DCTR_PAGE_PASSWORD set`, { ...ok, host: h }, { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/],
+    ]),
     ['an empty --host', { ...ok, host: '' }, {}, /host/],
     ['no tracking root', { host: ok.host, port: ok.port }, {}, /usage/],
     ['a tracking root that is a file', { ...ok, root: file }, {}, /not a directory/],
@@ -264,8 +269,11 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
     await stop(s)
   }
   await refusedStart('a contained session (E5-S19)', [root, '--port', '<port>'], { DCTR_VIEW_REQUEST_DIR: tmp }, /contained/)
-  await refusedStart('--host 0.0.0.0 with no password (E5-S16)', [root, '--host', '0.0.0.0', '--port', '<port>'], {}, /DCTR_PAGE_PASSWORD/)
-  await refusedStart('--host 0.0.0.0 with an empty password', [root, '--host', '0.0.0.0', '--port', '<port>'], { DCTR_PAGE_PASSWORD: '' }, /DCTR_PAGE_PASSWORD/)
+  await refusedStart('a non-loopback --host with no password (E5-S16)', [root, '--host', '192.0.2.1', '--port', '<port>'], {}, /DCTR_PAGE_PASSWORD/)
+  await refusedStart('a non-loopback --host with an empty password', [root, '--host', '192.0.2.1', '--port', '<port>'], { DCTR_PAGE_PASSWORD: '' }, /DCTR_PAGE_PASSWORD/)
+  // A wildcard bind answers on loopback too, so "no listener on 127.0.0.1:<port>" is what it would have broken.
+  await refusedStart('--host 0.0.0.0 with a password set (a wildcard bind)', [root, '--host', '0.0.0.0', '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/)
+  await refusedStart('--host :: with a password set (a wildcard bind)', [root, '--host', '::', '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/)
   await refusedStart('a malformed --port', [root, '--port', 'abc'], {}, /port/)
   await refusedStart('an unknown flag', [root, '--port', '<port>', '--bogus'], {}, /usage/)
   await refusedStart('a flag with no value', [root, '--port'], {}, /usage/)
@@ -273,6 +281,10 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   await refusedStart('no tracking root', ['--port', '<port>'], {}, /usage/)
   await refusedStart('a tracking root that is a file', [P, '--port', '<port>'], {}, /not a directory/)
   clause('E2E start [3: the file root is a file and the free-port probe listens and closes]', fs.statSync(P).isFile(), 'fixture')
+  // Proved without the server: a plain listener on 0.0.0.0 answers on 127.0.0.1, so it is the any-address.
+  const any = net.createServer().listen(0, '0.0.0.0'); await waitFor(() => any.address())
+  clause('E2E start [3: 0.0.0.0 really is a wildcard: a plain listener there answers on 127.0.0.1]', await connects(any.address().port), 'no answer on loopback')
+  any.close()
 
   // The bind fails: the port is held by another listener.
   const holder = net.createServer().listen(0, '127.0.0.1'); await waitFor(() => holder.address())
@@ -285,42 +297,32 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   await stop(s); holder.close()
 }
 
-// A wildcard bind with a password: the listening line, the TLS line, and Basic auth (E5-S17).
-{
-  const PW = `pw-${process.pid}-secret`
-  const s = startServer([root, '--host', '0.0.0.0', '--port', '0'], { DCTR_PAGE_PASSWORD: PW })
-  await waitFor(() => s.out.split('\n').length >= 3 || s.code !== undefined)
-  await sleep(150)
-  const lines = s.out.split('\n'), m = /^listening on 0\.0\.0\.0:(\d+)$/.exec(lines[0]), port = Number(m?.[1])
-  clause('E2E auth start [2: a wildcard bind prints listening on 0.0.0.0:<port>, then one line on plain-HTTP Basic auth and TLS, and no URL]',
-    !!m && lines.length === 3 && lines[2] === '' && /Basic auth/.test(lines[1]) && /TLS/.test(lines[1]) && !s.out.includes('http://'), JSON.stringify(s.out))
-  clause('E2E auth start [2: the password appears nowhere on stdout or stderr]', !s.out.includes(PW) && !s.err.includes(PW), 'printed')
-  if (m) {
-    const host = `0.0.0.0:${port}`, auth = (pw) => `Basic ${Buffer.from(`u:${pw}`).toString('base64')}`
-    const none = await request(port, { headers: { Host: host } })
-    const wrong = await request(port, { headers: { Host: host, Authorization: auth('nope') } })
-    const right = await request(port, { headers: { Host: host, Authorization: auth(PW) } })
-    clause('E2E auth [1: no credentials is 401 with WWW-Authenticate: Basic realm="doctrine" and no status value]',
-      none.status === 401 && none.headers['www-authenticate'] === 'Basic realm="doctrine"' && !carriesValue(none.body), JSON.stringify(none))
-    clause('E2E auth [1: a wrong password is 401 with no status value]', wrong.status === 401 && !carriesValue(wrong.body), JSON.stringify(wrong))
-    clause('E2E auth [2: the right password is 200 and the page matches status]', right.status === 200 && preText(right.body ?? '') === cliStatus().stdout.replace(/\n$/, ''), JSON.stringify(right.status))
-    const own = await request(port, { headers: { Host: `127.0.0.1:${port}`, Authorization: auth(PW) } })
-    clause('E2E auth [1: on a wildcard bind a Host naming 127.0.0.1 is 421, since only <bind>:<port> is the server\'s own]', own.status === 421, String(own.status))
-    clause('E2E auth [3: the wrong password differs from the one the server was started with]', 'nope' !== PW, 'fixture')
-  }
-  await stop(s)
-}
-
-// A non-wildcard, non-loopback bind, where the host has such an address: the URL line plus the TLS line.
+// A non-loopback bind, where the host has such an address: the URL line, the TLS line, and Basic auth (E5-S17).
 {
   const addr = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address
-  if (!addr) console.log('SKIP  E2E non-loopback start: this host has no non-internal IPv4 address')
+  if (!addr) console.log('SKIP  E2E non-loopback start and auth: this host has no non-internal IPv4 address')
   else {
-    const s = startServer([root, '--host', addr, '--port', '0'], { DCTR_PAGE_PASSWORD: 'x' })
+    const PW = `pw-${process.pid}-secret`
+    const s = startServer([root, '--host', addr, '--port', '0'], { DCTR_PAGE_PASSWORD: PW })
     await waitFor(() => s.out.split('\n').length >= 3 || s.code !== undefined)
-    const lines = s.out.split('\n')
-    clause('E2E non-loopback start [2: --host <a non-internal IPv4 address of this host> prints http://<that address>:<port>/ and then the TLS line]',
-      new RegExp(`^http://${addr.replace(/\./g, '\\.')}:\\d+/$`).test(lines[0]) && /TLS/.test(lines[1] ?? '') && lines.length === 3, JSON.stringify([s.out, s.err]))
+    await sleep(150)
+    const lines = s.out.split('\n'), m = new RegExp(`^http://${addr.replace(/\./g, '\\.')}:(\\d+)/$`).exec(lines[0]), port = Number(m?.[1])
+    clause('E2E non-loopback start [2: --host <a non-internal IPv4 address of this host> prints http://<that address>:<port>/ and then one line on plain-HTTP Basic auth and TLS]',
+      !!m && lines.length === 3 && lines[2] === '' && /Basic auth/.test(lines[1]) && /TLS/.test(lines[1]), JSON.stringify([s.out, s.err]))
+    clause('E2E non-loopback start [2: the password appears nowhere on stdout or stderr]', !s.out.includes(PW) && !s.err.includes(PW), 'printed')
+    if (m) {
+      const host = `${addr}:${port}`, auth = (pw) => `Basic ${Buffer.from(`u:${pw}`).toString('base64')}`
+      const none = await request(port, { host: addr, headers: { Host: host } })
+      const wrong = await request(port, { host: addr, headers: { Host: host, Authorization: auth('nope') } })
+      const right = await request(port, { host: addr, headers: { Host: host, Authorization: auth(PW) } })
+      clause('E2E auth [1: no credentials is 401 with WWW-Authenticate: Basic realm="doctrine" and no status value]',
+        none.status === 401 && none.headers['www-authenticate'] === 'Basic realm="doctrine"' && !carriesValue(none.body), JSON.stringify(none))
+      clause('E2E auth [1: a wrong password is 401 with no status value]', wrong.status === 401 && !carriesValue(wrong.body), JSON.stringify(wrong))
+      clause('E2E auth [2: the right password is 200 and the page matches status]', right.status === 200 && preText(right.body ?? '') === cliStatus().stdout.replace(/\n$/, ''), JSON.stringify(right.status))
+      const local = await request(port, { host: addr, headers: { Host: `localhost:${port}`, Authorization: auth(PW) } })
+      clause('E2E auth [1: on a non-loopback bind a Host naming localhost is 421, since only <bind>:<port> is the server\'s own]', local.status === 421, String(local.status))
+      clause('E2E auth [3: the wrong password differs from the one the server was started with]', 'nope' !== PW, 'fixture')
+    }
     await stop(s)
   }
 }

@@ -5,7 +5,8 @@
 // Started by hand, in the foreground, and by nothing else: no hook entry names it (E5-S20). Binds to 127.0.0.1
 // port 8787 by default; --port 0 takes a free port. A --host outside loopback (127.0.0.0/8, ::1, localhost)
 // needs DCTR_PAGE_PASSWORD, which every request must then carry as its HTTP Basic password (E5-R8). It refuses to
-// start in a contained session (DCTR_VIEW_REQUEST_DIR set), as the pane launcher does.
+// start in a contained session (DCTR_VIEW_REQUEST_DIR set), as the pane launcher does, and on a wildcard --host
+// (0.0.0.0 or ::), which must name a specific address instead.
 //
 // Every refusal before listening exits 1 with one line on stderr and opens no listener. Once listening it prints
 // its URL, and nothing per request. Each GET or HEAD of / that passes the method, path, Host and credential
@@ -25,7 +26,6 @@ const USAGE = 'usage: node dctr-page.mjs <tracking root> [--port N] [--host ADDR
 const DEFAULTS = { host: '127.0.0.1', port: '8787' }
 
 export const isLoopback = (h) => h === 'localhost' || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'))
-const isWildcard = (h) => h === '0.0.0.0' || h === '::'
 const hostPort = (h, port) => `${net.isIPv6(h) ? `[${h}]` : h}:${port}`
 
 /** argv to `{ root, port, host }` as given, or null when its shape is wrong: an unknown flag, a flag with no
@@ -44,8 +44,8 @@ function parseArgs(argv) {
 }
 
 /** Null when the server may start, or the one line it refuses with: a contained session, malformed arguments
- *  (no root, a port that is not 0 to 65535, an empty host), a tracking root that is not a directory, or a
- *  non-loopback host with DCTR_PAGE_PASSWORD unset or empty. */
+ *  (no root, a port that is not 0 to 65535, an empty host), a tracking root that is not a directory, a wildcard
+ *  host (0.0.0.0 or ::, refused by ruling), or a non-loopback host with DCTR_PAGE_PASSWORD unset or empty. */
 export function startRefusal({ host, port, root }, env) {
   if (env.DCTR_VIEW_REQUEST_DIR) return 'dctr-page: refused: a contained session (DCTR_VIEW_REQUEST_DIR set) must reach nothing on the host'
   if (root === undefined) return USAGE
@@ -54,6 +54,7 @@ export function startRefusal({ host, port, root }, env) {
   let dir = false
   try { dir = fs.statSync(path.resolve(root)).isDirectory() } catch { /* not there: refused below */ }
   if (!dir) return `dctr-page: refused: tracking root ${root} is not a directory`
+  if (host === '0.0.0.0' || host === '::') return `dctr-page: refused: --host ${host} is a wildcard bind; name a specific address`
   if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return `dctr-page: refused: --host ${host} is not loopback and DCTR_PAGE_PASSWORD is unset or empty`
   return null
 }
@@ -108,7 +109,7 @@ function serve({ root, host, port }, password) {
   server.on('error', (e) => { console.error(`dctr-page: cannot listen on ${hostPort(host, port)} (${e.code || e.message})`); process.exit(1) })
   server.listen(Number(port), host, () => {
     const real = server.address().port
-    console.log(isWildcard(host) ? `listening on ${hostPort(host, real)}` : `http://${hostPort(host, real)}/`)
+    console.log(`http://${hostPort(host, real)}/`)
     if (!isLoopback(host)) console.log('Basic auth over plain HTTP sends the password unencrypted; on an open network put a TLS reverse proxy in front of this server')
   })
 }

@@ -5133,8 +5133,10 @@ const MUTATIONS = [
     from: "if (env.DCTR_VIEW_REQUEST_DIR) return", to: "if (false) return" },
   { name: "page start: an empty DCTR_PAGE_PASSWORD counts as set", file: "dctr-page.mjs", clause: "S-B [1: --host 192.0.2.1 with DCTR_PAGE_PASSWORD empty is refused",
     from: "if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return", to: "if (!isLoopback(host) && env.DCTR_PAGE_PASSWORD === undefined) return" },
-  { name: "page start: a wildcard bind counts as loopback", file: "dctr-page.mjs", clause: "S-B [1: --host 0.0.0.0 with DCTR_PAGE_PASSWORD unset is refused",
-    from: "export const isLoopback = (h) => h === 'localhost' ||", to: "export const isLoopback = (h) => isWildcard(h) || h === 'localhost' ||" },
+  { name: "page start: a wildcard bind is not refused (Scott's ruling on G2)", file: "dctr-page.mjs", clause: "E2E start [1: --host 0.0.0.0 with a password set (a wildcard bind) left no listener on its port]",
+    from: "  if (host === '0.0.0.0' || host === '::') return", to: "  if (false) return" },
+  { name: "page start: only 0.0.0.0 is refused as a wildcard, :: is not", file: "dctr-page.mjs", clause: "S-B [1: --host ::, a wildcard bind, with DCTR_PAGE_PASSWORD set is refused with one line naming why]",
+    from: "host === '0.0.0.0' || host === '::'", to: "host === '0.0.0.0'" },
   { name: "page start: a port above 65535 is accepted", file: "dctr-page.mjs", clause: "S-B [1: --port \"65536\" is refused with one line naming why]",
     from: " || Number(port) > 65535)", to: ")" },
   { name: "page start: a tracking root that is a file is accepted", file: "dctr-page.mjs", clause: "S-B [1: a tracking root that is a file is refused with one line naming why]",
@@ -5169,9 +5171,7 @@ const MUTATIONS = [
     from: "'Cache-Control': 'no-store', ", to: "" },
   { name: "page serve: the status lines are kept from the first request (E5-S14)", file: "dctr-page.mjs", clause: "E2E fresh [1: after the project State changes, the next GET shows the new state",
     from: "    try { lines = statusFor(root) }", to: "    try { lines = globalThis.keptLines ??= statusFor(root) }" },
-  { name: "page serve: a wildcard bind prints a URL", file: "dctr-page.mjs", clause: "E2E auth start [2: a wildcard bind prints listening on 0.0.0.0:<port>",
-    from: "isWildcard(host) ? `listening on", to: "false ? `listening on" },
-  { name: "page serve: a non-loopback bind prints no plain-HTTP warning", file: "dctr-page.mjs", clause: "E2E auth start [2: a wildcard bind prints listening on 0.0.0.0:<port>, then one line on plain-HTTP Basic auth and TLS",
+  { name: "page serve: a non-loopback bind prints no plain-HTTP warning", file: "dctr-page.mjs", clause: "E2E non-loopback start [2: --host <a non-internal IPv4 address of this host> prints http://<that address>:<port>/ and then one line on plain-HTTP Basic auth and TLS]",
     from: "    if (!isLoopback(host)) console.log('Basic auth", to: "    if (false) console.log('Basic auth" },
 ]
 
