@@ -272,19 +272,17 @@ function create() {
     made.push(`the launch file ${script}`)
     const launch = `sh ${shq(script)}`
     for (const [k, line] of [launch, '/clear', RESUME_LINE].entries()) {
-      waitReady(pane, k === 0, fail)
+      waitReady(pane, k === 0, fail, k === 2)
       herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, so nothing follows it and nothing is closed
     }
     append(`${role} ${pane} ${wt} ${launch}`)
   } catch (e) { fail(why(e)) }
 }
 
-let waitsAfterLaunch = 0
 /** Polls `pane get` until the pane reads ready (L7), or fails past the wait. `fresh`: before the launch line, ready is a
- *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES, and in the second
- *  wait after it, the one before RESUME_LINE, also the pane's restore file naming the session herdr reports. */
-function waitReady(pane, fresh, fail) {
-  const resume = !fresh && ++waitsAfterLaunch === 2
+ *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES. `resume`: before
+ *  RESUME_LINE, also the pane's restore file naming the session herdr reports. */
+function waitReady(pane, fresh, fail, resume) {
   for (let waited = 0; ; waited += times.poll) {
     let p = null
     try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone`) }

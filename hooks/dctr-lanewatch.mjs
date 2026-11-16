@@ -109,8 +109,7 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   let limitsSeen = 0, notifiedAt = null
   for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
-    if (w[1] === 'held') restored.add(w.slice(1).join(' '))
-    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
+    if (['exit', 'pause', 'deadline', 'ready', 'context', 'held'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
