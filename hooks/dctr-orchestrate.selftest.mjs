@@ -223,7 +223,8 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
   const named = (f) => parsed(f).filter((e) => e.type === 'assistant' && !e.isSidechain && e.message?.model === 'claude-opus-5-5').length
   const bb = JSON.parse(fs.readFileSync(badBridge, 'utf8'))
   clause('clause 3j — unreadable-session.jsonl is unreadable to transcriptEntries and names claude-opus-5-5 on a main-thread entry, ran-session.jsonl is readable, they differ by the malformed line alone, and the bridge file names the session with window 1,000,000 under the expiry old (R2-C1)',
-    transcriptEntries(fs.readFileSync(unreadable, 'utf8')) === null && named(unreadable) === 1 && transcriptEntries(fs.readFileSync(ranOpus, 'utf8')) !== null &&
+    (() => { try { JSON.parse('{"type":"assis'); return false } catch { return true } })() &&
+      transcriptEntries(fs.readFileSync(unreadable, 'utf8')) === null && named(unreadable) === 1 && transcriptEntries(fs.readFileSync(ranOpus, 'utf8')) !== null &&
       fs.readFileSync(unreadable, 'utf8').replace('{"type":"assis\n', '') === fs.readFileSync(ranOpus, 'utf8') &&
       bb.session_id === B && bb.window === 1000000 && Date.now() - fs.statSync(badBridge).mtimeMs < 300000,
     `${JSON.stringify(transcriptEntries(fs.readFileSync(unreadable, 'utf8')))} ${named(unreadable)} ${JSON.stringify(bb)}`)

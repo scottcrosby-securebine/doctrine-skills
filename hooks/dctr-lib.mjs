@@ -791,7 +791,8 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
 
 /** The capacity check `doctrine-orchestrate` starts a role on (E15-D51, Q5): accept only when the role's resume
  *  load plus the handoff cost is strictly below its tier, and the tier is at most its window. Pure: the caller
- *  derives the window from the model id, reads the load from the transcript and refuses on any `resolveTier` error
+ *  takes the window from the statusline bridge, or from the model id where there is no bridge reading or the transcript
+ *  is unreadable or names another model, reads the load from the transcript and refuses on any `resolveTier` error
  *  first (`hooks/dctr-orchestrate.mjs`). */
 export function capacityDecision({ window, load, tier }) {
   const need = load + HANDOFF_COST_TOKENS
@@ -1002,7 +1003,7 @@ export const latestAutoCycle = (entries) => (entries || []).filter((e) => e.kind
 /**
  * THE PAUSE MODEL (E8-R25), stated once; step 3, the dedup, the sidebar token and the alerts all read it.
  *
- * A paused line P is resolved only when it is an R2, R3 or R4 pause, whoever wrote it, and a line AFTER P answers
+ * An R2, R3 or R4 paused line P, whoever wrote it, is resolved when a line AFTER P answers
  * it: a state line not reading Blocked (R2), a ruling line (R3), a `question: <id> answered` line for its id (R4).
  * It is judged against the lines after P and never the whole record, so a later alarm or Blocked of the same kind
  * never makes an old, answered pause stand again. An R8 tagged session S resolves once S has taken a turn after it
@@ -1083,7 +1084,7 @@ export const sessionWarned = (entries, sessionId) =>
   (entries || []).filter((e) => e.kind === 'auto-cycle' && e.sub === 'warned' && e.session === sessionId).at(-1) || null
 
 /** B2 step 3 (E8-R25): an unresolved paused line the session skip leaves follows this session's latest warned line,
- *  whatever anchor follows it, since only an R2, R3 or R4 pause that resolves lets the same session cycle again. False
+ *  whatever anchor follows it, since only an R2, R3, R4 or R8 pause that resolves lets the same session cycle again. False
  *  with no such line. Every pause standingPauses returns after that warned line and the skip leaves is one of these. */
 export function pausedAfterWarned(entries, sessionId) {
   const mine = sessionWarned(entries, sessionId)
