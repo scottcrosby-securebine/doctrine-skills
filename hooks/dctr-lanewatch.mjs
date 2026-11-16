@@ -109,7 +109,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   let limitsSeen = 0, notifiedAt = null
   for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
-    if (['exit', 'pause', 'deadline', 'held', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
+    if (w[1] === 'held') restored.add(w.slice(1).join(' '))
+    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
@@ -147,21 +148,23 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     }
   }
 
-  /** The pane's reading, `{ s, status }` with `s` its session id or null for no agent session; undefined when the read
-   *  failed or came back empty. */
-  function paneRead(pane) {
+  /** The status of the pane paneSession last read and got a reply for, which the held event reads. */
+  let paneStatus
+  /** The pane's session id, null for a pane with no agent session, undefined when the read failed or came back empty. */
+  function paneSession(pane) {
     let reply
     try { reply = herdr(['pane', 'get', pane]) } catch { return undefined }
     const p = reply?.result?.pane
     if (!p) return undefined
+    paneStatus = p.agent_status
     const s = p.agent_session?.value
-    return { s: typeof s === 'string' && s !== '' ? s : null, status: p.agent_status }
+    return typeof s === 'string' && s !== '' ? s : null
   }
 
   function session(role, lane) {
-    const r = paneRead(lane.pane), s = r?.s
+    const s = paneSession(lane.pane)
     const marker = readText(path.join(run, 'pending', role))?.trim()
-    if (marker && typeof s === 'string' && READY_STATUSES.includes(r.status)) {
+    if (marker && typeof s === 'string' && READY_STATUSES.includes(paneStatus)) {
       const t = `held ${role} ${marker}`
       if (!heldRaised.has(t)) { heldRaised.add(t); raise(t) }
     }
