@@ -6,7 +6,7 @@
 // source where it derived one and every reason. Exit 0 accept, 1 refuse, 2 malformed arguments.
 //
 // The window comes from the statusline bridge's per-session file for the transcript's session, the session id being
-// the transcript's file name, source `bridge` (E15-D256), unless the transcript names the model its session ran
+// the transcript's file name, source `bridge` (E15-D256), unless the transcript cannot be read or names the model its session ran
 // (`message.model` on its last main-thread assistant entry naming one) and that model is not the id asked about, `[1m]`
 // aside: the bridge reports the window of the model the session ran, and no other. A file that is missing, does not parse, names another
 // session, carries no numeric window or is older than the lane watcher's BRIDGE_EXPIRY_MS is no bridge reading, and
@@ -45,11 +45,12 @@ export function bridgeWindow(sessionId) {
 }
 
 /** The model the transcript's session ran: `message.model` on its last main-thread assistant entry naming one, an
- *  API error's `<synthetic>` aside, or null. */
+ *  API error's `<synthetic>` aside, null when it names none, or undefined when transcriptEntries cannot read it. */
 export function sessionModel(transcriptText) {
   const read = transcriptText === null ? null : transcriptEntries(transcriptText)
   const named = (e) => e?.type === 'assistant' && !e.isSidechain && typeof e.message?.model === 'string' && e.message.model !== '<synthetic>'
-  return read?.entries.filter(named).at(-1)?.message.model ?? null
+  if (!read) return undefined // unreadable is unknown, never "names no model"
+  return read.entries.filter(named).at(-1)?.message.model ?? null
 }
 
 /** The capacity verdict as the line it prints and whether it accepts; bridged is bridgeWindow's value. */

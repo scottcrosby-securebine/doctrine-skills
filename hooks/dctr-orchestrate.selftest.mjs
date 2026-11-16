@@ -77,6 +77,14 @@ const ranOpus = transcript(`${R}.jsonl`, [user, assistant(101825, { message: { r
 const ranBridge = path.join(fresh.dir, `dctr-${R}`, 'bridge.json')
 fs.mkdirSync(path.dirname(ranBridge), { recursive: true })
 fs.writeFileSync(ranBridge, JSON.stringify({ session_id: R, window: 1000000, used: 101825, pct: 10, t: new Date().toISOString() }))
+// R2-C1: ran-session's lines with a malformed complete line after the first, under a session of its own with the same
+// fresh 1,000,000 bridge reading in the fresh TMPDIR.
+const B = 'unreadable-session'
+const ranLines = fs.readFileSync(ranOpus, 'utf8').split('\n')
+const unreadable = transcript(`${B}.jsonl`, [ranLines[0], '{"type":"assis', ...ranLines.slice(1, -1)])
+const badBridge = path.join(fresh.dir, `dctr-${B}`, 'bridge.json')
+fs.mkdirSync(path.dirname(badBridge), { recursive: true })
+fs.writeFileSync(badBridge, JSON.stringify({ session_id: B, window: 1000000, used: 101825, pct: 10, t: new Date().toISOString() }))
 
 // Each run gets a TMPDIR of its own, so the bridge file it reads is the one its clause wrote (E15-D256).
 const runIn = (tmpdir, ...args) => {
@@ -162,6 +170,11 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
     same.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(same.out), show(same))
   clause('clause 2r — the same session and bridge reading asked about another model id: the window 200,000 from the model id, naming the model id and not the bridge (R1-O1)',
     other.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(other.out) && !/bridge/.test(other.out), show(other))
+  const unread = runIn(fresh.dir, 'capacity', 'claude-sonnet-5-5', 'default', unreadable)
+  clause('clause 2s — a transcript with a malformed line naming claude-opus-5-5, asked about claude-sonnet-5-5 with a fresh bridge reading: the window 200,000 from the model id, naming the model id and not the bridge (R2-C1)',
+    unread.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(unread.out) && !/bridge/.test(unread.out), show(unread))
+  clause('clause 2t — its readable twin, the same lines without the malformed one, prints the same line (R2-C1)',
+    other.out === unread.out && other.code === unread.code, `${show(other)}; ${show(unread)}`)
 }
 
 // ---------------------------------------------------------------- clause 3: the fixtures, without the command
@@ -203,6 +216,17 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
       JSON.stringify(models(ranOpus)) === JSON.stringify([[false, null], [false, 'claude-opus-5-5'], [true, 'claude-haiku-5-5'], [false, '<synthetic>']]) &&
       path.basename(ranOpus, '.jsonl') === R && rb?.session_id === R && rb.window === 1000000 && age(ranBridge) < 300000,
     `${JSON.stringify(models(hostStart))} ${readings(ranOpus)} ${JSON.stringify(models(ranOpus))} ${JSON.stringify(rb)}`)
+}
+{
+  const { transcriptEntries } = await import('./dctr-lib.mjs')
+  const parsed = (f) => fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
+  const named = (f) => parsed(f).filter((e) => e.type === 'assistant' && !e.isSidechain && e.message?.model === 'claude-opus-5-5').length
+  const bb = JSON.parse(fs.readFileSync(badBridge, 'utf8'))
+  clause('clause 3j — unreadable-session.jsonl is unreadable to transcriptEntries and names claude-opus-5-5 on a main-thread entry, ran-session.jsonl is readable, they differ by the malformed line alone, and the bridge file names the session with window 1,000,000 under the expiry old (R2-C1)',
+    transcriptEntries(fs.readFileSync(unreadable, 'utf8')) === null && named(unreadable) === 1 && transcriptEntries(fs.readFileSync(ranOpus, 'utf8')) !== null &&
+      fs.readFileSync(unreadable, 'utf8').replace('{"type":"assis\n', '') === fs.readFileSync(ranOpus, 'utf8') &&
+      bb.session_id === B && bb.window === 1000000 && Date.now() - fs.statSync(badBridge).mtimeMs < 300000,
+    `${JSON.stringify(transcriptEntries(fs.readFileSync(unreadable, 'utf8')))} ${named(unreadable)} ${JSON.stringify(bb)}`)
 }
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
