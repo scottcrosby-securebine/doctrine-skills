@@ -869,7 +869,7 @@ for (;;) {
 // E15-D254: a pending marker the sender left for a role whose pane was not ready. b has none, as a send that nudged
 // leaves it; c's read fails and n's pane has no agent session.
 const hm = fixture({ a: { shim: { status: 'working' } }, b: {}, c: { shim: { fail: true } }, n: { session: null } })
-const mark = (r, name) => write(path.join(hm.run, 'pending', r), name)
+const mark = (r, name) => write(path.join(hm.run, 'pending', r, name), '')
 for (const r of ['a', 'c', 'n']) mark(r, 'X1.md')
 const heldEvents = () => events(hm).filter((e) => e.startsWith('held '))
 const whm = watcher(hm)
@@ -911,7 +911,7 @@ clause('clause 2bh — with a PATH over 1024 bytes start records the orchestrato
   const stubLog = path.join(tmp, 'claude-env-proof.log')
   const proof = spawnSync('/bin/sh', ['-c', `${shq(path.join(claudeStub, 'claude'))}; cp ${shq(claudeEnvLog)} ${shq(stubLog)}`], { env: { PATH: LO_PATH } })
   clause('clause 3g — without the watcher: the held fixture\'s working pane reads working, its markers lie under <run>/pending/ with nothing under <run>/held/, the claude stub logs the PATH it was started with, and PATH=<that PATH> alone is over 1024 bytes',
-    JSON.parse(g.stdout).result.pane.agent_status === 'working' && fs.readFileSync(path.join(hm.run, 'pending', 'a'), 'utf8') === 'X2.md' && !fs.existsSync(path.join(hm.run, 'held')) &&
+    JSON.parse(g.stdout).result.pane.agent_status === 'working' && JSON.stringify(fs.readdirSync(path.join(hm.run, 'pending', 'a')).sort()) === '["X1.md","X2.md"]' && !fs.existsSync(path.join(hm.run, 'held')) &&
     proof.status === 0 && envOf(stubLog).PATH === LO_PATH && Buffer.byteLength(`PATH=${shq(LO_PATH)}`) > 1024, JSON.stringify([g.stdout, proof.status, envOf(stubLog).PATH === LO_PATH]))
 }
 

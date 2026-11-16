@@ -5156,8 +5156,8 @@ const MUTATIONS = [
     to: "bridgeWindow(path.basename(transcript))" },
   { name: "a send that holds without a nudge leaves no pending marker (E15-D254) (E15R-SK5a)", file: "dctr-send.mjs",
     clause: "clause 2y \u2014 a send that holds its message without a nudge\u2026",
-    from: "  fs.writeFileSync(part, name)\n  fs.renameSync(part, pend)\n",
-    to: "  void part\n" },
+    from: "  fs.writeFileSync(path.join(pendingDir(role), name), '')\n",
+    to: "" },
   { name: "a typed nudge leaves the pending marker (E15-D254) (E15R-SK5b)", file: "dctr-send.mjs",
     clause: "clause 2y \u2014 a send that holds its message without a nudge\u2026",
     from: "if (type(pane, NUDGE)) { delivered(); say(",
@@ -5182,6 +5182,14 @@ const MUTATIONS = [
     clause: "clause 2bh \u2014 with a PATH over 1024 bytes start records \u2026",
     from: "orchestrator ${pane} ${checkout} sh ${shq(launchFile)}",
     to: "orchestrator ${pane} ${checkout} ${launch}" },
+  { name: "a nudge removes every pending marker, one a later send wrote after its listing among them (E15-D254) (E15R1-C1)", file: "dctr-send.mjs",
+    clause: "clause 2y3 \u2014 a marker another send writes after this send\u2026",
+    from: "  const delivered = () => { for (const m of markers) fs.rmSync(path.join(pendingDir(role), m), { force: true }) }",
+    to: "  const delivered = () => fs.rmSync(pendingDir(role), { recursive: true, force: true })" },
+  { name: "the watcher raises a held event for the first pending marker alone (E15-D254) (E15R1-C1b)", file: "dctr-lanewatch.mjs",
+    clause: "clause 2bg \u2014 a role with a pending marker whose pane re\u2026",
+    from: "READY_STATUSES.includes(paneStatus)) for (const marker of markers) {",
+    to: "READY_STATUSES.includes(paneStatus)) for (const marker of markers.slice(0, 1)) {" },
 ]
 
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a

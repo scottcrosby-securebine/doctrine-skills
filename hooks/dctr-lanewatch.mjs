@@ -35,8 +35,8 @@
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
 //                                polls with no warned line naming the session; `unknown` once for a bridge file older
 //                                than BRIDGE_EXPIRY_MS, whose value is never read
-//   held <role> <name>           the role's pane reading ready, with an agent session, while <run>/pending/<role>, which
-//                                dctr-send.mjs leaves for a message it held without a nudge, names <name>
+//   held <role> <name>           the role's pane reading ready, with an agent session, while <run>/pending/<role>/ holds
+//                                <name>, the marker dctr-send.mjs leaves for a message it held without a nudge
 //   limit <role> <kind> <L> ...  each new limits.log line: an account line names its reset time and the wake-all
 //                                command, a model line `/model`, an other line its error
 // A pane read that fails or comes back empty is unknown: no exit event, and the watcher types nothing ever. It shows a
@@ -162,8 +162,9 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   function session(role, lane) {
     const s = paneSession(lane.pane)
-    const marker = readText(path.join(run, 'pending', role))?.trim()
-    if (marker && typeof s === 'string' && READY_STATUSES.includes(paneStatus)) {
+    let markers = []
+    try { markers = fs.readdirSync(path.join(run, 'pending', role)).sort() } catch { /* none */ }
+    if (typeof s === 'string' && READY_STATUSES.includes(paneStatus)) for (const marker of markers) {
       const t = `held ${role} ${marker}`
       if (!heldRaised.has(t)) { heldRaised.add(t); raise(t) }
     }

@@ -1,7 +1,7 @@
 // doctrine — the sender (E15 Messages): the only way a message reaches a session of a run.
 //
 //   node hooks/dctr-send.mjs send <role> <text>     hold the text under <run>/held/<role>/, then nudge the role's pane
-//                                                   (a send that types no nudge leaves <run>/pending/<role>)
+//                                                   (a send that types no nudge leaves <run>/pending/<role>/<held file>)
 //   node hooks/dctr-send.mjs report <kind> <text>   write the text to <run>/inbox/, kind report, question or request
 //   node hooks/dctr-send.mjs wake <role>            clear and resume a handed-off session, else nudge it
 //   node hooks/dctr-send.mjs wake-all <run>         wake every session an account limit stopped, after the owner's roll
@@ -23,10 +23,10 @@
 // that session; otherwise it stops typing. Each wait for a ready reading gives up WAKE_GIVE_UP_MS after it starts, the
 // first at the wake's start: its pane reads and git calls are bounded by that wait's time left, none starts past it,
 // and a wait that gives up types nothing more. A line already decided on a ready reading inside the window is typed
-// with the default bound of `herdr(`. A send writes <run>/pending/<role>, naming its held file, before it reads the
-// pane, never under held/<role>/; a typed nudge, a send's or the last line of a wake, removes it unless a later send
-// has rewritten it since this one began, so the marker stands exactly while a held message has had no nudge after it,
-// and the lane watcher raises `held <role>` once the pane reads ready. Each send or wake the orchestrator
+// with the default bound of `herdr(`. A send writes the marker <run>/pending/<role>/<its held file's name> before it
+// reads the pane, never under held/<role>/; a typed nudge, a send's or the last line of a wake, removes the markers it
+// listed before it read the pane and no other, so a marker a later send wrote meanwhile stands, a marker stands while
+// its held message may have had no nudge after it, and the lane watcher raises `held <role> <name>` once the pane reads ready. Each send or wake the orchestrator
 // makes appends one relay line to its own record. Contained (DCTR_VIEW_REQUEST_DIR set) it writes its files and
 // makes no pane call.
 //
@@ -174,10 +174,8 @@ if (sub === 'send') {
   const name = `${stamp()}.${process.pid}.md`
   writeNew(path.join(heldDir, name), text)
   say(`held ${path.join(heldDir, name)}`)
-  const pend = pendingFile(role), part = `${pend}.${process.pid}.part`
-  fs.mkdirSync(path.dirname(pend), { recursive: true })
-  fs.writeFileSync(part, name)
-  fs.renameSync(part, pend)
+  fs.mkdirSync(pendingDir(role), { recursive: true })
+  fs.writeFileSync(path.join(pendingDir(role), name), '')
   relay(role, `held/${role}/${name}`)
 } else relay(role, `held/${role}/`)
 if (process.env.DCTR_VIEW_REQUEST_DIR) { say('contained: no pane call'); process.exit() }
@@ -188,15 +186,16 @@ const claim = path.join(autoCycleDir(), `sender-${process.pid}.${paneToken(lane.
 writeMarker(claim, { pid: process.pid, pane: lane.pane })
 try { deliver(lane.pane, lane, claim, role) } finally { fs.rmSync(claim, { force: true }) }
 
-/** The marker a send leaves while its message has had no nudge: <run>/pending/<role>, outside held/<role>/. */
-function pendingFile(role) { return path.join(run, 'pending', role) }
+/** Where a send leaves one marker per held message, named as that message: <run>/pending/<role>/, outside held/<role>/. */
+function pendingDir(role) { return path.join(run, 'pending', role) }
 
 /** Everything after the claim is taken; the caller removes the claim whatever this returns. A send types the nudge;
  *  a wake, and each of wake-all's, the wake steps, recording in `typing` how many lines it decided on. */
 function deliver(pane, lane, claim, role) {
-  // A nudge clears only the marker it found: one a later send rewrote meanwhile names a message this nudge may predate.
-  const marker = readText(pendingFile(role))
-  const delivered = () => { if (marker !== null && readText(pendingFile(role)) === marker) fs.rmSync(pendingFile(role), { force: true }) }
+  // A nudge removes only the markers listed here: one a later send writes meanwhile names a message this nudge may predate.
+  let markers = []
+  try { markers = fs.readdirSync(pendingDir(role)) } catch { /* none */ }
+  const delivered = () => { for (const m of markers) fs.rmSync(path.join(pendingDir(role), m), { force: true }) }
   if (paneClaimHeld(pane, claim)) return say(`another claim on ${pane} is held: nothing typed`)
   const first = readPane(pane)
   if (!first) return

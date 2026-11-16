@@ -666,14 +666,15 @@ clause('clause 2w — the restore file, transcript, latch and record each absent
 
 // ---------------------------------------------------------------- clause 2: the pending marker (E15-D254)
 
-const pendingOf = (fx, role = 'a') => { try { return fs.readFileSync(path.join(fx.run, 'pending', role), 'utf8') } catch { return null } }
+const pendingOf = (fx, role = 'a') => { try { return fs.readdirSync(path.join(fx.run, 'pending', role)).sort() } catch { return [] } }
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const pBusy = fixture({ status: 'working' })
 const rPBusy = await sender(pBusy, ['send', 'a', 'for a busy lane'])
 const pIdle = fixture()
 const rPIdle = await sender(pIdle, ['send', 'a', 'for an idle lane'])
-clause('clause 2y — a send that holds its message without a nudge writes <run>/pending/a naming the held file, and nothing beside the message under held/a/; its twin, a send that found the pane idle and nudged, leaves no pending marker (E15-D254)',
-  rPBusy.code === 0 && typed(pBusy).length === 0 && held(pBusy).length === 1 && pendingOf(pBusy) === path.basename(held(pBusy)[0]) &&
-  rPIdle.code === 0 && JSON.stringify(typed(pIdle)) === JSON.stringify(nudged()) && pendingOf(pIdle) === null,
+clause('clause 2y — a send that holds its message without a nudge writes <run>/pending/a/<the held file\'s name>, and nothing beside the message under held/a/; its twin, a send that found the pane idle and nudged, leaves no pending marker (E15-D254)',
+  rPBusy.code === 0 && typed(pBusy).length === 0 && held(pBusy).length === 1 && same(pendingOf(pBusy), [path.basename(held(pBusy)[0])]) &&
+  rPIdle.code === 0 && JSON.stringify(typed(pIdle)) === JSON.stringify(nudged()) && same(pendingOf(pIdle), []),
   JSON.stringify([show(pBusy, rPBusy), pendingOf(pBusy), show(pIdle, rPIdle), pendingOf(pIdle)]))
 
 setShim(pBusy, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0 } } })
@@ -685,10 +686,19 @@ const rPFail = await sender(pFail, ['send', 'a', 'two'])
 const pAfterFail = pendingOf(pFail), pHeldAfterFail = held(pFail).map((f) => path.basename(f))
 setShim(pFail, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0 } } })
 const rPOk = await sender(pFail, ['send', 'a', 'three'])
-clause('clause 2y2 — the nudge of a later wake removes the pending marker; a send whose nudge fails leaves it naming the newer held file, and the next send whose nudge is typed removes it (E15-D254)',
-  rPWake.code === 0 && JSON.stringify(typed(pBusy)) === JSON.stringify(nudged()) && pendingOf(pBusy) === null &&
-  rPFail.code === 0 && pHeldAfterFail.length === 2 && pAfterFail === pHeldAfterFail[1] && rPOk.code === 0 && typed(pFail).at(-1) === nudged()[0] && pendingOf(pFail) === null,
+clause('clause 2y2 — the nudge of a later wake removes the pending marker; a send whose nudge fails leaves a marker for each held file, and the next send whose nudge is typed removes them (E15-D254)',
+  rPWake.code === 0 && JSON.stringify(typed(pBusy)) === JSON.stringify(nudged()) && same(pendingOf(pBusy), []) &&
+  rPFail.code === 0 && pHeldAfterFail.length === 2 && same(pAfterFail, pHeldAfterFail) && rPOk.code === 0 && typed(pFail).at(-1) === nudged()[0] && same(pendingOf(pFail), []),
   JSON.stringify([show(pBusy, rPWake), pendingOf(pBusy), pAfterFail, pHeldAfterFail, show(pFail, rPOk), pendingOf(pFail)]))
+
+// A second send's marker written while the first send's nudge is being typed: the shim writes it on that typing call,
+// after the first send listed its markers.
+const pRace = fixture()
+setShim(pRace, { onType: { text: NUDGE, file: path.join(pRace.run, 'pending', 'a', 'B.md'), line: '' } })
+const rPRace = await sender(pRace, ['send', 'a', 'first'])
+clause('clause 2y3 — a marker another send writes after this send listed its markers, while its nudge is typed, survives that nudge, and this send\'s own marker does not (E15-D254)',
+  rPRace.code === 0 && JSON.stringify(typed(pRace)) === JSON.stringify(nudged()) && held(pRace).length === 1 && same(pendingOf(pRace), ['B.md']),
+  JSON.stringify([show(pRace, rPRace), pendingOf(pRace)]))
 
 // ---------------------------------------------------------------- clause 2: wake-all (E15 Recovery)
 
@@ -1256,6 +1266,14 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   const sb = status(b), si = status(i), sf = status(f)
   clause('clause 3m — without the sender: the busy pending fixture\'s pane reads working, its twin\'s idle, and the failing-nudge shim reads idle and exits 1 on its typing call',
     sb === 'working' && si === 'idle' && sf === 'idle' && ft.status === 1, JSON.stringify([sb, si, sf, ft.status]))
+  // 2y3's trigger: a pane read writes no marker, and the nudge's typing call writes B.md under pending/a/ and succeeds.
+  const r = fixture(), dir = path.join(r.run, 'pending', 'a')
+  fs.mkdirSync(dir, { recursive: true })
+  setShim(r, { onType: { text: NUDGE, file: path.join(dir, 'B.md'), line: '' } })
+  const herdr = (...a) => spawnSync(path.join(r.bin, 'herdr'), a, { encoding: 'utf8' })
+  const g = herdr('pane', 'get', PANE), afterGet = fs.readdirSync(dir), t = herdr('pane', 'run', PANE, NUDGE), afterType = fs.readdirSync(dir)
+  clause('clause 3m2 — without the sender: 2y3\'s shim writes no marker on a pane read, and writes B.md under pending/a/ on the nudge\'s typing call, which succeeds',
+    g.status === 0 && afterGet.length === 0 && t.status === 0 && same(afterType, ['B.md']), JSON.stringify([g.status, afterGet, t.status, afterType]))
 }
 
 process.exit(bad ? 1 : 0)
