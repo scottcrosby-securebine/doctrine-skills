@@ -16,6 +16,7 @@ import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq } from './dctr-lib.mjs'
 import { parseDoc } from './dctr-project.mjs'
+import { restoreFile } from './dctr-state.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -25,11 +26,26 @@ const LANE = path.join(HERE, 'dctr-lane.mjs')
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-lane-')))
 const childTmp = path.join(tmp, 't'); fs.mkdirSync(childTmp)
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
+// The restore file path of each pane id the shim makes, under the children's TMPDIR, where the restore hook writes it.
+const RESTORE = (() => {
+  const prev = process.env.TMPDIR, m = {}
+  process.env.TMPDIR = childTmp
+  for (let i = 1; i <= 9; i++) m[`p${i}`] = restoreFile(`p${i}`)
+  if (prev === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prev
+  return JSON.stringify(m)
+})()
 const cbin = path.join(tmp, 'cbin'); fs.mkdirSync(cbin)
+// A PATH short enough that no launch line create could type nears herdr's 1,024-byte limit, whatever the host's PATH.
+const SYS_PATH = [path.dirname(process.execPath), '/usr/bin', '/bin']
+const SHORT_PATH = [cbin, bin, ...SYS_PATH].join(':')
 
 // The herdr shim: a fresh pane reads agent_status unknown with no agent session; after each typing call it reads
-// working for two reads and then idle with a session. HERDR_SHIM_MODE changes one answer per fixture. Every call is
-// logged with what it answered and whether lane.log and the watched files existed at that moment.
+// working for two reads and then idle with a session, s1 from the launch line on. /clear writes the pane's restore
+// file (its path from HERDR_SHIM_RESTORE) naming s2 and the pane then holds s2; in mode late-restore the pane reads
+// idle under s1 for three reads first, and in mode no-restore it never writes the file and keeps s1. A typed line over
+// 1,024 bytes is refused, as herdr refuses it. HERDR_SHIM_MODE changes one answer per fixture. Every call is logged
+// with what it answered, a typed line with the pane's session and its restore file's session when it was typed, and
+// whether lane.log and the watched files existed at that moment.
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/usr/bin/env node
 const fs = require('fs'), path = require('path')
 const dir = process.env.HERDR_SHIM_DIR, mode = process.env.HERDR_SHIM_MODE || 'normal'
@@ -37,11 +53,14 @@ const args = process.argv.slice(2)
 const stFile = path.join(dir, 'state.json')
 let st = { n: 0, panes: {} }
 try { st = JSON.parse(fs.readFileSync(stFile, 'utf8')) } catch {}
-let out = '', err = '', code = 0, read = null, session = null, made = null
+let out = '', err = '', code = 0, read = null, session = null, made = null, at = null
+const restoreOf = (id) => JSON.parse(process.env.HERDR_SHIM_RESTORE || '{}')[id]
+const restored = (id) => { try { return JSON.parse(fs.readFileSync(restoreOf(id), 'utf8')).session_id } catch { return null } }
+const clearTo = (id, p) => { const f = restoreOf(id); if (f) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ session_id: 's2', transcript_path: null })) } p.session = 's2' }
 const watch = JSON.parse(process.env.HERDR_SHIM_WATCH || '[]').map((f) => fs.existsSync(f))
 if (args[0] === 'tab' && args[1] === 'create') {
   if (mode === 'tab-fail') { code = 1; err = 'transport down' }
-  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0 }; made = { tab: 't' + st.n, pane: id }; out = JSON.stringify({ result: { tab: { tab_id: made.tab }, root_pane: { pane_id: id } } }) }
+  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0, session: null, late: 0 }; if (restoreOf(id)) fs.rmSync(restoreOf(id), { force: true }); made = { tab: 't' + st.n, pane: id }; out = JSON.stringify({ result: { tab: { tab_id: made.tab }, root_pane: { pane_id: id } } }) }
 } else if (args[0] === 'pane' && args[1] === 'get') {
   const p = st.panes[args[2]]
   if (mode === 'get-fail') { code = 1; err = 'transport down' }
@@ -50,18 +69,27 @@ if (args[0] === 'tab' && args[1] === 'create') {
   else {
     let status
     if (p.typed === 0) { status = ['agent-before', 'idle-before'].includes(mode) ? 'idle' : 'unknown'; session = ['agent-before', 'session-before'].includes(mode) ? 'old' : null }
-    else if (p.busy > 0) { p.busy--; status = 'working'; session = 's1' }
-    else { status = mode === 'stuck-after' ? 'working' : 'idle'; session = 's1' }
+    else if (p.late > 0) { if (--p.late === 0) clearTo(args[2], p); status = 'idle'; session = p.session }
+    else if (p.busy > 0) { p.busy--; status = 'working'; session = p.session }
+    else { status = mode === 'stuck-after' ? 'working' : 'idle'; session = p.session }
     read = status
     out = JSON.stringify({ result: { pane: { pane_id: args[2], agent_status: status, agent_session: session ? { value: session } : null, focused: false } } })
   }
 } else if (args[0] === 'pane' && args[1] === 'run') {
-  const p = st.panes[args[2]]
-  if (p) { p.typed++; p.busy = 2 }
-  out = JSON.stringify({ result: {} })
+  const p = st.panes[args[2]], bytes = Buffer.byteLength(args[3] || '')
+  if (bytes > 1024) { code = 1; err = 'herdr: the line is ' + bytes + ' bytes, over the 1024-byte limit' }
+  else {
+    if (p) {
+      p.typed++; p.busy = 2
+      if (p.typed === 1) p.session = 's1'
+      if (args[3] === '/clear') { if (mode === 'late-restore') { p.busy = 0; p.late = 4 } else if (mode !== 'no-restore') clearTo(args[2], p) }
+      at = { session: p.session, restore: restored(args[2]) }
+    }
+    out = JSON.stringify({ result: {} })
+  }
 } else out = JSON.stringify({ result: {} })
 fs.writeFileSync(stFile, JSON.stringify(st))
-fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
+fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, at, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
 if (err) process.stderr.write(err + '\\n')
 process.stdout.write(out)
 process.exit(code)
@@ -170,7 +198,7 @@ const lane = (f, args, { cwd = f.repo, env = {}, unset = [] } = {}) => {
   const e = {
     ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_RUN: f.run,
     HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
-    DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
+    HERDR_SHIM_RESTORE: RESTORE, DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
   const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8', maxBuffer: Infinity })
@@ -230,7 +258,7 @@ clause('clause 2g — no herdr call is made before the worktree, handoff copy, r
 const lineA = laneLines(A)[0] || ''
 clause('clause 2h — the create line is `<time> <caller> create <role> <pane> <worktree> <launch line>`, and laneOf reads the pane and worktree back (L2, L3)',
   LANE_LINE.test(lineA) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z orchestrator create a p1 /.test(lineA) &&
-  launchA?.pane === 'p1' && launchA.worktree === wtA && launchA.caller === 'orchestrator' && lineA.endsWith(` ${launchA.launch}`) && launchA.launch.startsWith('cd '),
+  launchA?.pane === 'p1' && launchA.worktree === wtA && launchA.caller === 'orchestrator' && lineA.endsWith(` ${launchA.launch}`) && launchA.launch === `sh ${shq(path.join(A.run, 'launch/a.sh'))}`,
   JSON.stringify(lineA))
 
 // The watch list for later creates: every git and file step's product, which the shim checks at its first call.
@@ -262,6 +290,68 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp, shown)
   clause('clause 2j2 — the same line, run again after the model file changes, starts claude on the model the file names when the line runs: claude-opus-5-5 first, claude-sonnet-5 second (E15-D219)',
     r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']), shown)
+}
+
+// ---------------------------------------------------------------- clause 2: a PATH past herdr's line limit (E15-D251)
+
+{
+  const sys = SYS_PATH
+  const pads = []
+  while ([cbin, bin, ...pads].join(':').length < 1300) pads.push(`/nonexistent/lane-pad-${pads.length}-abcdefghijklmnop`)
+  const shown = (r, line, e, typedLines) => `exit ${r.code} ${said(r)}; typed ${JSON.stringify(typedLines.map((t) => Buffer.byteLength(t.args[3])))} bytes; line ${JSON.stringify(line)}; claude ${JSON.stringify(e && [e.cwd, e.env.DCTR_ROLE, e.env.PATH])}`
+  for (const [n, pathVar, what] of [['2am', [cbin, bin, ...pads, ...sys].join(':'), 'a PATH of more than 1,300 bytes'], ['2am2', SHORT_PATH, 'a short PATH, the known-good twin']]) {
+    const f = fixture()
+    const r = create(f, 'a', { env: { PATH: pathVar } })
+    const typedLines = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run')
+    const line = laneOf(read(f.laneLog), 'a')?.launch
+    fs.rmSync(claudeLog, { force: true })
+    spawnSync('env', ['-i', 'sh', '-c', line || 'false'], { encoding: 'utf8' })
+    const e = (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))[0]
+    clause(`clause ${n} — create with ${what}, under a herdr refusing a typed line over 1,024 bytes, exits 0 with its create line, types three lines none over 1,024 bytes, the first being the recorded launch line, which run under env -i starts claude in the worktree as role a with the create call's PATH (E15-D251)`,
+      r.code === 0 && Boolean(line) && typedLines.length === 3 && typedLines.every((t) => Buffer.byteLength(t.args[3]) <= 1024 && t.at) && typedLines[0].args[3] === line &&
+        Boolean(e) && fs.realpathSync(e.cwd) === f.wt('a') && e.env.DCTR_ROLE === 'a' && e.env.PATH === pathVar,
+      shown(r, line, e, typedLines))
+  }
+  // Without the command: the long PATH alone is over 1,024 bytes, and the shim refuses a 1,025-byte line and types a 1,024-byte one.
+  const dir = path.join(tmp, 'shim-limit'); fs.mkdirSync(dir)
+  const sh = (...a) => spawnSync(path.join(bin, 'herdr'), a, { encoding: 'utf8', env: { ...process.env, HERDR_SHIM_DIR: dir } })
+  sh('tab', 'create')
+  const over = sh('pane', 'run', 'p1', 'x'.repeat(1025)), at = sh('pane', 'run', 'p1', 'x'.repeat(1024))
+  clause('clause 3as — without the command, the 2am PATH is over 1,024 bytes, and the herdr shim refuses a 1,025-byte typed line and types a 1,024-byte one',
+    Buffer.byteLength([cbin, bin, ...pads, ...sys].join(':')) > 1024 && over.status === 1 && /over the 1024-byte limit/.test(over.stderr) && at.status === 0,
+    `over ${over.status} ${JSON.stringify(over.stderr)}; at ${at.status}`)
+}
+
+// ---------------------------------------------------------------- clause 2: RESUME_LINE waits for the session /clear started (E15-D252)
+
+{
+  const resumeAt = (f) => shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run' && e.args[3] === RESUME_LINE)
+  const clears = (f) => shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run' && e.args[3] === '/clear')
+  for (const [n, mode, what] of [['2an', 'late-restore', 'whose pane reads idle under the launch session for three reads after /clear before it writes its restore file and holds the new session'], ['2an2', 'normal', 'whose pane writes its restore file and holds the new session at /clear, the known-good twin']]) {
+    const f = fixture()
+    const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode, PATH: SHORT_PATH } })
+    const res = resumeAt(f)
+    clause(`clause ${n} — create ${what} exits 0 with its create line, types /clear and RESUME_LINE once each, and when RESUME_LINE is typed the restore file names s2, the session herdr reports, not the launch session s1 (E15-D252)`,
+      r.code === 0 && laneLines(f).length === 1 && clears(f).length === 1 && res.length === 1 && res[0].at?.restore === 's2' && res[0].at.session === 's2',
+      `exit ${r.code} ${said(r)}; at RESUME_LINE ${JSON.stringify(res.map((e) => e.at))}`)
+  }
+  // Without the command: the late pane reads idle under s1 with no restore file three times after /clear, then s2 with
+  // its file; the no-restore pane never writes one; the normal pane writes it at /clear.
+  const drive = (mode, reads) => {
+    const dir = path.join(tmp, `shim-${mode}`); fs.mkdirSync(dir)
+    const env = { ...process.env, HERDR_SHIM_DIR: dir, HERDR_SHIM_MODE: mode, HERDR_SHIM_RESTORE: JSON.stringify({ p1: path.join(dir, 'p1.restored') }) }
+    const sh = (...a) => spawnSync(path.join(bin, 'herdr'), a, { encoding: 'utf8', env })
+    sh('tab', 'create'); sh('pane', 'run', 'p1', 'launch'); sh('pane', 'get', 'p1'); sh('pane', 'get', 'p1'); sh('pane', 'run', 'p1', '/clear')
+    const out = []
+    for (let i = 0; i < reads; i++) { const g = JSON.parse(sh('pane', 'get', 'p1').stdout).result.pane; out.push([g.agent_status, g.agent_session?.value, read(path.join(dir, 'p1.restored')) && JSON.parse(read(path.join(dir, 'p1.restored'))).session_id]) }
+    return JSON.stringify(out)
+  }
+  const late = drive('late-restore', 4), none = drive('no-restore', 6), normal = drive('normal', 3)
+  clause('clause 3at — without the command, after /clear the late-restore shim pane reads idle s1 with no restore file three times and then idle s2 with a restore file naming s2, the no-restore pane reads s1 with no restore file throughout, and the normal pane names s2 from the first read',
+    late === JSON.stringify([['idle', 's1', null], ['idle', 's1', null], ['idle', 's1', null], ['idle', 's2', 's2']]) &&
+      none === JSON.stringify(Array(6).fill(['working', 's1', null]).map((x, i) => (i < 2 ? x : ['idle', 's1', null]))) &&
+      normal === JSON.stringify([['working', 's2', 's2'], ['working', 's2', 's2'], ['idle', 's2', 's2']]),
+    `late ${late}; none ${none}; normal ${normal}`)
 }
 
 // ---------------------------------------------------------------- clause 2: the first resume (E15-D160)
@@ -459,7 +549,8 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   const launch = lines[0]?.split(' ').slice(6).join(' ')
   clause('clause 2v — create, reset, archive and remove for lane a with DCTR_CALLER=orchestrator append exactly four lines in that order, each a UTC time ending Z inside the clause\'s run, orchestrator, its subcommand and a; the create line\'s next fields are the pane the shim made and the worktree, and the rest is the launch line (E15-D186, E15-D126)',
     lines.length === 4 && fields.every((m, k) => m && m[1] >= t0 && m[1] <= t1 && m[2] === 'orchestrator' && m[3] === ['create', 'reset', 'archive', 'remove'][k] && m[4].split(' ')[0] === 'a') &&
-    lines[0].split(' ')[4] === pane && lines[0].split(' ')[5] === f.wt('a') && launch.startsWith(`cd '${f.wt('a')}' && env DCTR_ROLE='a' `) && launch.includes(' claude --model ') &&
+    lines[0].split(' ')[4] === pane && lines[0].split(' ')[5] === f.wt('a') && launch === `sh ${shq(path.join(f.run, 'launch/a.sh'))}` &&
+    (read(path.join(f.run, 'launch/a.sh')) || '').startsWith(`cd '${f.wt('a')}' && env DCTR_ROLE='a' `) && (read(path.join(f.run, 'launch/a.sh')) || '').includes(' claude --model ') &&
     lines[1].endsWith(` reset a ${f.base}`) && lines[2].endsWith(' archive a') && lines[3].endsWith(' remove a'),
     JSON.stringify({ t0, t1, lines }))
 }
@@ -523,9 +614,10 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
 for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every read'], ['1o', 'get-empty', 0, 'pane get answers nothing'],
   ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line'],
   ['1bd', 'session-before', 0, 'the new pane reads agent_status unknown and already holds an agent session'],
-  ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown']]) {
+  ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown'],
+  ['1bw', 'no-restore', 2, 'the pane never writes its restore file or holds a new session after /clear (E15-D252)']]) {
   const f = fixture()
-  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode } })
+  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode, PATH: SHORT_PATH } })
   const t = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run').length
   clause(`clause ${n} — when ${why}, create exits non-zero naming the worktree it made, leaves it, types ${typed} line${typed === 1 ? '' : 's'} and writes no lane.log line (L6, L7)`,
     r.code !== 0 && exists(f.wt('a')) && (r.out + r.err).includes(f.wt('a')) && t === typed && laneLines(f).length === 0, `exit ${r.code} ${said(r)}; typed ${t}`)

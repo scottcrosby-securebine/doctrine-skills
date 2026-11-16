@@ -5119,6 +5119,13 @@ const MUTATIONS = [
     clause: "clause 2x20 \u2014 the lock lost on a\\'s nudge: a is report\u2026",
     from: "for (const x of pending) if (!last.has(x.role)) last.set(x.role, 'retry')",
     to: "for (const x of pending) last.set(x.role, 'retry')" },
+  // e15-repair (E15-SK2, E15-SK3): create's launch file and its wait for the session /clear started.
+  { name: 'create types the launch command inline, PATH and all, not sh <run>/launch/<role>.sh (E15-D251)', file: 'dctr-lane.mjs',
+    clause: 'clause 2am — create with a PATH of more than 1,300 bytes, under a herdr refusing a typed line over 1,024 bytes, exits 0 with its create line (E15-D251)',
+    from: '    const launch = `sh ${shq(script)}`\n', to: '    const launch = command\n' },
+  { name: 'create types RESUME_LINE once the pane reads ready after /clear, whatever its restore file names (E15-D252)', file: 'dctr-lane.mjs',
+    clause: 'clause 2an — when RESUME_LINE is typed the restore file names s2, the session herdr reports, not the launch session s1 (E15-D252)',
+    from: '    if (resume && p && !restored(pane, p)) p = null', to: '    if (false) p = null' },
 ]
 
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
