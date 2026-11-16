@@ -17,8 +17,8 @@
 // `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment, so the line
 // stays short whatever the length of its PATH. A start whose tab, pane or wait fails closes the tab it made, releases
 // its lock, writes neither, and exits 1 with one line. Before each poll the watcher re-reads the lock and renews it,
-// and ends once it no longer names this watcher; herdr( calls renew it too. stop signals only a live holder whose lock was renewed within 3 * POLL_MS, waits
-// for it to release the lock, removes a lock only when its holder has exited, says which of these it did, and touches no
+// and ends once it no longer names this watcher; herdr( calls renew it too. stop signals only a live holder whose lock
+// was renewed within 3 * POLL_MS, waits for it to release the lock, removes a lock only when its holder has exited, says which of these it did, and touches no
 // other. Contained (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
 //
 // Each poll, every POLL_MS, appends one events.log line per new fact, `<ISO time> <word> ...`:
@@ -47,8 +47,8 @@
 // line, an account episode's notification and a stall's notification already there are not raised again, nor a
 // deadline for the same wave line, a held for the same marker, a ready for the same entry, a pause for the same record
 // line or a past-tier context for the same session; an exit or unknown context already there is not raised again while
-// its state holds. Once a poll reads any of these states clear, before the restart or after it, it is raised again when it returns; a read that
-// fails clears nothing.
+// its state holds. Once a poll reads any of these states clear, before the restart or after it, it is raised again
+// when it returns; a read that fails clears nothing.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
