@@ -51,6 +51,14 @@ const unescape = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&
 // The text inside the one <pre>, unescaped, less the newline after <pre> the HTML parser drops.
 const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); return m ? unescape(m[1]) : null }
 
+// ---------------------------------------------------------------- spellings of --host (P1-B1, P1-B2, N6)
+// Every --host is judged on one canonical form, so each spelling below must get the verdict its address gets.
+const WILDCARD_SPELLINGS = ['0.0.0.0', '0', '0x0', '0.0', '00.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0', '::ffff:0.0.0.0', '[::]']
+const LOOPBACK_SPELLINGS = ['127.0.0.1', '127.1', '127.9.9.9', '0177.0.0.1', '2130706433', '::1', '0:0:0:0:0:0:0:1', '[::1]', 'localhost', 'LOCALHOST', 'LocalHost']
+// ::ffff:127.0.0.1 stays non-loopback: the spec's list is 127.0.0.0/8, ::1 and localhost (G5).
+const NONLOOP_SPELLINGS = ['192.0.2.1', '10.0.0.1', '128.0.0.1', '1.127.0.0', '::ffff:127.0.0.1', 'mymac.local', 'MyMac.local', 'localhost.', '127.0.0.1.example']
+const MALFORMED_HOSTS = ['127.0.0.1:80', '127.0.0.1:8080', '[::1]:80', 'a b', 'a/b', 'u@h', 'h?x', 'h#x', '256.0.0.1']
+
 // ---------------------------------------------------------------- S-B startRefusal (pure)
 {
   const file = path.join(tmp, 'a-file'); fs.writeFileSync(file, 'x')
@@ -65,9 +73,11 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
     ['a non-loopback host with a password', { ...ok, host: '192.0.2.1' }, { DCTR_PAGE_PASSWORD: 'pw' }],
     ['a relative root that is a directory', { ...ok, root: path.relative(process.cwd(), root) }, {}],
   ]
+  for (const h of LOOPBACK_SPELLINGS) goods.push([`loopback spelling --host ${h} with no password`, { ...ok, host: h }, {}])
+  for (const h of NONLOOP_SPELLINGS) goods.push([`non-loopback spelling --host ${h} with a password`, { ...ok, host: h }, { DCTR_PAGE_PASSWORD: 'pw' }])
   for (const [name, args, e] of goods) clause(`S-B [2: ${name} is not refused]`, startRefusal(args, e) === null, String(startRefusal(args, e)))
   const NONLOOP = ['192.0.2.1', '10.0.0.1', '128.0.0.1', '1.127.0.0']
-  const WILDCARD = ['0.0.0.0', '::']
+  const WILDCARD = WILDCARD_SPELLINGS
   const refusals = [
     ['a contained session', ok, { DCTR_VIEW_REQUEST_DIR: tmp }, /contained/],
     ['a contained session with every other argument bad too', { host: '192.0.2.1', port: 'x' }, { DCTR_VIEW_REQUEST_DIR: tmp }, /contained/],
@@ -80,6 +90,8 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
       [`--host ${h}, a wildcard bind, with no password`, { ...ok, host: h }, {}, /wildcard.*specific address/],
       [`--host ${h}, a wildcard bind, with DCTR_PAGE_PASSWORD set`, { ...ok, host: h }, { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/],
     ]),
+    ...NONLOOP_SPELLINGS.map((h) => [`non-loopback spelling --host ${h} with no password`, { ...ok, host: h }, {}, /DCTR_PAGE_PASSWORD/]),
+    ...MALFORMED_HOSTS.map((h) => [`--host ${JSON.stringify(h)}, which is not one host`, { ...ok, host: h }, { DCTR_PAGE_PASSWORD: 'pw' }, /--host .* is not a host/]),
     ['an empty --host', { ...ok, host: '' }, {}, /host/],
     ['no tracking root', { host: ok.host, port: ok.port }, {}, /usage/],
     ['a tracking root that is a file', { ...ok, root: file }, {}, /not a directory/],
@@ -115,6 +127,12 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
     ['localhost:<port> on an ::1 bind', req({ host: 'localhost:8787' }), V6],
     ['the right password under any username', nreq({}), N],
     ['the right password with an empty username', nreq({ authorization: basic('', 's3cret') }), N],
+    // Mixed-case and shorthand binds (P1-B2): the bind is judged on its canonical form, the Host header case-blind.
+    ...['mymac.local:8787', 'MYMAC.LOCAL:8787', 'MyMac.local:8787'].map((h) => [`Host ${h} on bind MyMac.local`, nreq({ host: h }), { ...N, bind: 'MyMac.local' }]),
+    ...['localhost:8787', 'LocalHost:8787'].map((h) => [`Host ${h} on bind LOCALHOST`, req({ host: h }), { ...L, bind: 'LOCALHOST' }]),
+    ['Host 127.0.0.1:<port> on bind 127.1', req({ host: '127.0.0.1:8787' }), { ...L, bind: '127.1' }],
+    ['Host [::1]:<port> on bind 0:0:0:0:0:0:0:1', req({ host: '[::1]:8787' }), { ...L, bind: '0:0:0:0:0:0:0:1' }],
+    ['no credentials on bind LOCALHOST, which is loopback', req({ host: 'localhost:8787', authorization: undefined }), { ...L, bind: 'LOCALHOST' }],
   ]
   // Every case runs with the fs readers counted: a decision that reads a file is a reader call.
   const counted = ['readFileSync', 'readdirSync', 'statSync', 'existsSync', 'realpathSync']
@@ -131,9 +149,12 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
       results.push([`S-C [1: GET ${u} gets 404]`, requestDecision(req({ url: u }), L), 404])
     results.push(['S-C [1: a wrong path with a wrong Host gets 404, path checked before Host]', requestDecision(req({ url: '/x', host: 'evil:1' }), L), 404])
     const hosts = [['attacker.example:8787', L], ['127.0.0.1:9999', L], ['127.0.0.1', L], [undefined, L], ['', L], ['127.0.0.1:8787.evil', L],
-      ['localhost:8787', N], ['::1:8787', V6], ['[::1]', V6], ['127.0.0.1:8787', V6]]
+      ['localhost:8787', N], ['::1:8787', V6], ['[::1]', V6], ['127.0.0.1:8787', V6],
+      ['othermac.local:8787', { ...N, bind: 'MyMac.local' }], ['mymac.local:9999', { ...N, bind: 'MyMac.local' }], ['other:8787', { ...L, bind: 'LOCALHOST' }]]
     for (const [h, cfg] of hosts) results.push([`S-C [1: Host ${JSON.stringify(h)} on bind ${cfg.bind} gets 421]`, requestDecision((cfg === N ? nreq : req)({ host: h }), cfg), 421])
-    results.push(['S-C [1: a wrong Host with the right password gets 421, Host checked before credentials]', requestDecision(nreq({ host: 'evil:8787' }), N), 421])
+    // Missing credentials too, so an auth check moved ahead of the Host check would answer 401 here (P1-C5).
+    results.push(['S-C [1: a wrong Host with NO credentials on a non-loopback bind gets 421, not 401: Host is checked before credentials]', requestDecision(nreq({ host: 'evil:8787', authorization: undefined }), N), 421])
+    results.push(['S-C [1: a wrong Host with the right password gets 421]', requestDecision(nreq({ host: 'evil:8787' }), N), 421])
     const auths = [['no Authorization', undefined], ['a wrong password', basic('u', 'wrong')], ['the password with a character added', basic('u', 's3cret!')],
       ['a prefix of the password', basic('u', 's3cre')], ['a Bearer token carrying the password', 'Bearer s3cret'], ['Basic with no colon', `Basic ${Buffer.from('s3cret').toString('base64')}`],
       ['the password as the username', basic('s3cret', '')], ['Basic with nothing after it', 'Basic ']]
@@ -149,6 +170,9 @@ const preText = (html) => { const m = /<pre>\n?([\s\S]*?)<\/pre>/.exec(html); re
   clause('S-C [1: 405 names GET and HEAD in Allow, and 401 carries WWW-Authenticate: Basic realm="doctrine"]',
     r405?.headers?.Allow === 'GET, HEAD' && r401?.headers?.['WWW-Authenticate'] === 'Basic realm="doctrine"', JSON.stringify([r405, r401]))
   clause('S-C — requestDecision made ZERO file reads over every case above', reads === 0, `${reads} reads`)
+  clause('S-C [3: the mixed-case names differ from the bind only in case, and the refused ones differ in name or port]',
+    ['MYMAC.LOCAL', 'MyMac.local'].every((n) => n !== 'mymac.local' && n.toLowerCase() === 'mymac.local') && 'LocalHost' !== 'LOCALHOST' && 'LocalHost'.toLowerCase() === 'LOCALHOST'.toLowerCase() &&
+    'othermac.local' !== 'mymac.local' && 'other' !== 'localhost', 'fixture')
   clause('S-C [3: the attacker Host names neither the bind nor localhost, and the wrong passwords differ from s3cret]',
     !['127.0.0.1:8787', 'localhost:8787'].includes('attacker.example:8787') && ['wrong', 's3cret!', 's3cre'].every((p) => p !== N.password), 'fixture')
 }
@@ -187,6 +211,8 @@ const request = (port, { method = 'GET', path: p = '/', headers = {}, host = '12
   const r = http.request({ host, port, method, path: p, headers }, (res) => {
     let body = ''; res.setEncoding('utf8'); res.on('data', (d) => { body += d }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }))
   })
+  // A deadline, so a response that never comes fails its clause instead of hanging the suite.
+  r.setTimeout(5000, () => { r.destroy(); resolve({ error: 'TIMEOUT after 5s' }) })
   r.on('error', (e) => resolve({ error: e.code })); r.end()
 })
 const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)) }) })
@@ -274,6 +300,11 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   // A wildcard bind answers on loopback too, so "no listener on 127.0.0.1:<port>" is what it would have broken.
   await refusedStart('--host 0.0.0.0 with a password set (a wildcard bind)', [root, '--host', '0.0.0.0', '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/)
   await refusedStart('--host :: with a password set (a wildcard bind)', [root, '--host', '::', '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/)
+  for (const h of ['0', '::0', '0:0:0:0:0:0:0:0', '::ffff:0.0.0.0'])
+    await refusedStart(`--host ${h} with a password set (a wildcard spelling)`, [root, '--host', h, '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /wildcard.*specific address/)
+  await refusedStart('--host 127.0.0.1:80, which is not one host', [root, '--host', '127.0.0.1:80', '--port', '<port>'], { DCTR_PAGE_PASSWORD: 'pw' }, /is not a host/)
+  await refusedStart('--port given twice (N1)', [root, '--port', '<port>', '--port', '<port>'], {}, /usage/)
+  await refusedStart('--host given twice (N1)', [root, '--host', '127.0.0.1', '--host', '127.0.0.1', '--port', '<port>'], {}, /usage/)
   await refusedStart('a malformed --port', [root, '--port', 'abc'], {}, /port/)
   await refusedStart('an unknown flag', [root, '--port', '<port>', '--bogus'], {}, /usage/)
   await refusedStart('a flag with no value', [root, '--port'], {}, /usage/)
@@ -285,6 +316,29 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   const any = net.createServer().listen(0, '0.0.0.0'); await waitFor(() => any.address())
   clause('E2E start [3: 0.0.0.0 really is a wildcard: a plain listener there answers on 127.0.0.1]', await connects(any.address().port), 'no answer on loopback')
   any.close()
+  // The spellings proved without the server: what a plain net listener bound to each one reports and answers on.
+  const plain = async (h) => {
+    const srv = net.createServer()
+    const a = await new Promise((r) => { srv.once('error', (e) => r({ error: e.code })); srv.listen(0, h, () => r(srv.address())) })
+    const answers = a.error ? false : await connects(a.port)
+    await new Promise((r) => srv.close(() => r()))
+    return { ...a, answers }
+  }
+  for (const h of ['0', '0x0', '::0', '0:0:0:0:0:0:0:0', '::ffff:0.0.0.0']) {
+    const a = await plain(h)
+    clause(`E2E spellings [3: --host ${h} really is a wildcard: a plain listener there reports ${a.address} and answers on 127.0.0.1]`,
+      (a.address === '0.0.0.0' || a.address === '::') && a.answers, JSON.stringify(a))
+  }
+  const loop = new net.BlockList(); loop.addSubnet('127.0.0.0', 8, 'ipv4'); loop.addAddress('::1', 'ipv6')
+  for (const h of ['127.1', '2130706433', '0:0:0:0:0:0:0:1', 'LOCALHOST']) {
+    const a = await plain(h)
+    clause(`E2E spellings [3: --host ${h} really is loopback: a plain listener there reports ${a.address}]`,
+      !!a.address && loop.check(a.address, net.isIPv6(a.address) ? 'ipv6' : 'ipv4'), JSON.stringify(a))
+  }
+  // Why the server must bind the canonical form: the resolver reads 0177.0.0.1 as decimal, not as the octal the
+  // URL parser and the loopback judgement read, so binding the raw spelling would not be the address judged.
+  const oct = await plain('0177.0.0.1')
+  clause('E2E spellings [3: a plain listener on the raw spelling 0177.0.0.1 does not bind 127.0.0.1]', oct.address !== '127.0.0.1', JSON.stringify(oct))
 
   // The bind fails: the port is held by another listener.
   const holder = net.createServer().listen(0, '127.0.0.1'); await waitFor(() => holder.address())
@@ -325,6 +379,17 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
     }
     await stop(s)
   }
+}
+
+// Shorthand and mixed-case loopback binds (P1-B2): the URL line names the canonical address, and a client sending
+// back exactly that Host is served.
+for (const [h, want] of [['127.1', '127.0.0.1'], ['0177.0.0.1', '127.0.0.1'], ['LOCALHOST', 'localhost']]) {
+  const s = startServer([root, '--host', h, '--port', '0'])
+  await waitFor(() => s.out.includes('\n') || s.code !== undefined)
+  const m = new RegExp(`^http://${want.replace(/\./g, '\\.')}:(\\d+)/\n$`).exec(s.out)
+  const r = m ? await request(Number(m[1]), { host: want, headers: { Host: `${want}:${m[1]}` } }) : {}
+  clause(`E2E canonical [1: --host ${h} prints http://${want}:<port>/ and a GET with that Host is 200]`, !!m && r.status === 200, JSON.stringify([s.out, s.err, r.status]))
+  await stop(s)
 }
 
 // IPv6 loopback, where the host has it: the URL brackets the address.

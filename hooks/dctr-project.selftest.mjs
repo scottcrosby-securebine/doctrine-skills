@@ -916,6 +916,16 @@ clause('CLI status — the tripwire herdr on PATH was called ZERO times with HER
   clause('statusFor S-A [3: one tree has no docs/PROJECT.md and the other holds a directory there]',
     !fs.existsSync(path.join(empty, PROJECT_PATH)) && fs.statSync(path.join(unreadable, PROJECT_PATH)).isDirectory(), 'fixture')
   clause('statusFor S-A — called in-process with HERDR_ENV unset, the tripwire herdr on PATH was called ZERO times', !fs.existsSync(trip('herdr')), 'herdr was called')
+  // P1-C1: status piped from a roster far past one pipe buffer prints every byte. An exit straight after the write
+  // cut it at 65,536 bytes; 5f9578c, which ended without one, printed all of it.
+  const big = path.join(tmp, 'big-roster'), ROWS = 30000
+  writeTree(big, { [PROJECT_PATH]: `# Project: big\nState: Ruled\nCurrent epic: E1\nCertification target: none\nRecords: none\n\n## Epics\n| ID | Title | Record |\n|---|---|---|\n${Array.from({ length: ROWS }, (_, i) => `| E${i + 1} | T | docs/epics/E${i + 1}.md |`).join('\n')}\n` })
+  const want = Buffer.byteLength(`${asCli(big).join('\n')}\n`)
+  const piped = spawnSync('node', [script, 'status', big], { env, maxBuffer: 64 * 1024 * 1024 })
+  clause('statusFor S-A — CLI status piped from a 30,000-epic roster exits 0 and prints every byte statusFor returns, newline included',
+    piped.status === 0 && piped.stdout.length === want, `status ${piped.status}: ${piped.stdout.length} bytes piped, ${want} wanted`)
+  clause('statusFor S-A [3: that roster really has 30,000 rows, and the output it should print is several pipe buffers long]',
+    (fs.readFileSync(path.join(big, PROJECT_PATH), 'utf8').match(/^\| E\d+ \| T \|/gm) ?? []).length === ROWS && want > 4 * 65536, `${want} bytes`)
 }
 const rContained = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1', DCTR_VIEW_REQUEST_DIR: tmp }, encoding: 'utf8' })
 clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints unknown and still calls herdr ZERO times',

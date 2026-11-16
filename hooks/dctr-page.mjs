@@ -25,7 +25,22 @@ import { statusFor } from './dctr-project.mjs'
 const USAGE = 'usage: node dctr-page.mjs <tracking root> [--port N] [--host ADDR]'
 const DEFAULTS = { host: '127.0.0.1', port: '8787' }
 
-const isLoopback = (h) => h === 'localhost' || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'))
+/** A --host in its one canonical spelling, as the WHATWG URL parser writes a host: names lowercased, IPv4 shorthand
+ *  (127.1, 0, 0x0, 2130706433, octal parts) as a dotted quad, IPv6 compressed and without brackets. Null when the
+ *  text is not one host: it carries a port, a path, credentials, a query or a fragment, or does not parse. Every
+ *  judgement of the bind (wildcard, loopback, the Host allowlist) and the bind itself use this form, so no
+ *  spelling is judged one way and bound another (P1-B1, P1-B2). */
+const canonicalHost = (h) => {
+  // A colon outside an IPv6 literal is a port, and the parser drops http's default one (127.0.0.1:80 parses clean).
+  if (!net.isIPv6(h) && h.replace(/^\[[^\]]*\]$/, '').includes(':')) return null
+  let u
+  try { u = new URL(`http://${net.isIPv6(h) ? `[${h}]` : h}/`) } catch { return null }
+  if (u.host !== u.hostname || u.pathname !== '/' || u.username || u.password || u.search || u.hash) return null
+  return u.hostname.replace(/^\[(.*)\]$/, '$1')
+}
+// ::ffff:0:0 is ::ffff:0.0.0.0, which binds as :: does.
+const WILDCARDS = ['0.0.0.0', '::', '::ffff:0:0']
+const isLoopback = (h) => { const c = canonicalHost(h); return c === 'localhost' || c === '::1' || (net.isIPv4(c ?? '') && c.startsWith('127.')) }
 const hostPort = (h, port) => `${net.isIPv6(h) ? `[${h}]` : h}:${port}`
 
 /** argv to `{ root, port, host }` as given, or null when its shape is wrong: an unknown flag, a flag with no
@@ -44,8 +59,9 @@ function parseArgs(argv) {
 }
 
 /** Null when the server may start, or the one line it refuses with: a contained session, malformed arguments
- *  (no root, a port that is not 0 to 65535, an empty host), a tracking root that is not a directory, a wildcard
- *  host (0.0.0.0 or ::, refused by ruling), or a non-loopback host with DCTR_PAGE_PASSWORD unset or empty. */
+ *  (no root, a port that is not 0 to 65535, an empty host or one that is not a host), a tracking root that is not a
+ *  directory, a wildcard host in any spelling (0, 0.0.0.0, ::0, ::ffff:0.0.0.0, refused by ruling), or a
+ *  non-loopback host with DCTR_PAGE_PASSWORD unset or empty. Each host test reads canonicalHost's form. */
 export function startRefusal({ host, port, root }, env) {
   if (env.DCTR_VIEW_REQUEST_DIR) return 'dctr-page: refused: a contained session (DCTR_VIEW_REQUEST_DIR set) must reach nothing on the host'
   if (root === undefined) return USAGE
@@ -54,7 +70,9 @@ export function startRefusal({ host, port, root }, env) {
   let dir = false
   try { dir = fs.statSync(path.resolve(root)).isDirectory() } catch { /* not there: refused below */ }
   if (!dir) return `dctr-page: refused: tracking root ${root} is not a directory`
-  if (host === '0.0.0.0' || host === '::') return `dctr-page: refused: --host ${host} is a wildcard bind; name a specific address`
+  const bind = canonicalHost(host)
+  if (bind === null) return `dctr-page: refused: --host ${host} is not a host: give an address or a name, with no port`
+  if (WILDCARDS.includes(bind)) return `dctr-page: refused: --host ${host} is a wildcard bind; name a specific address`
   if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return `dctr-page: refused: --host ${host} is not loopback and DCTR_PAGE_PASSWORD is unset or empty`
   return null
 }
@@ -72,7 +90,7 @@ const basicPassword = (authorization) => {
 export function requestDecision({ method, url, host, authorization }, { bind, port, password }) {
   if (method !== 'GET' && method !== 'HEAD') return { status: 405, headers: { Allow: 'GET, HEAD' } }
   if (String(url).split('?')[0] !== '/') return { status: 404, headers: {} }
-  const own = [hostPort(bind, port), ...(isLoopback(bind) ? [`localhost:${port}`] : [])]
+  const own = [hostPort(canonicalHost(bind), port), ...(isLoopback(bind) ? [`localhost:${port}`] : [])]
   if (!own.includes(String(host ?? '').toLowerCase())) return { status: 421, headers: {} }
   if (!isLoopback(bind)) {
     const given = basicPassword(authorization)
@@ -120,5 +138,7 @@ if (isMain) {
   const args = parseArgs(process.argv.slice(2))
   const why = startRefusal(args ?? {}, process.env)
   if (why) { console.error(why); process.exit(1) }
-  serve({ ...args, root: path.resolve(args.root) }, process.env.DCTR_PAGE_PASSWORD || '')
+  // Bound and printed in the canonical form, so the URL line is a Host the allowlist passes, and the address bound
+  // is the one judged: the resolver reads 0177.0.0.1 as decimal 177.0.0.1, the URL parser as octal 127.0.0.1.
+  serve({ ...args, host: canonicalHost(args.host), root: path.resolve(args.root) }, process.env.DCTR_PAGE_PASSWORD || '')
 }

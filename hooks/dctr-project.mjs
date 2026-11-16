@@ -684,14 +684,8 @@ if (isMain) {
     process.exit(2)
   }
   const root = path.resolve(rest[0] ?? '.')
-  if (cmd === 'status') {
-    let lines
-    try { lines = statusFor(root) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
-    console.log(lines.join('\n'))
-    process.exit(0)
-  }
   let model, readRel
-  try { ({ model, readRel } = loadProject(root)) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
+  if (cmd !== 'status') try { ({ model, readRel } = loadProject(root)) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
   if (cmd === 'check') {
     const findings = check(model, (rel) => fs.existsSync(path.join(root, rel)))
     for (const f of findings) console.log(formatFinding(f))
@@ -708,4 +702,8 @@ if (isMain) {
     console.log(`wrote ${out}: ${rows.length} phase row(s)`)
     process.exit(0)
   }
+  // status ends the script without process.exit, so a piped stdout drains before the process does (P1-C1).
+  let lines
+  try { lines = statusFor(root) } catch (e) { if (e.code !== PROJECT_UNREADABLE) throw e; console.error(e.message); process.exit(2) }
+  console.log(lines.join('\n'))
 }
