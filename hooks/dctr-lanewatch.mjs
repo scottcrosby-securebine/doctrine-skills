@@ -13,9 +13,10 @@
 // takes <run>/lanewatch.lock itself as its first act (takeRunLock, its token written beside its pid), and refuses while
 // another holds it. start waits up to WAIT_MS for a live holder carrying its own token, and only then writes its TMPDIR
 // to <run>/tmpdir, which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag
-// `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and a launch line built from its own
-// environment. A start whose tab, pane or wait fails closes the tab it made, releases its lock, writes neither, and exits
-// 1 with one line. Before each poll the watcher re-reads the lock and renews it, and ends once it no longer names this
+// `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and the launch line
+// `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment, so the line
+// stays short whatever the length of its PATH. A start whose tab, pane or wait fails closes the tab it made, releases
+// its lock, writes neither, and exits 1 with one line. Before each poll the watcher re-reads the lock and renews it, and ends once it no longer names this
 // watcher; herdr( calls renew it too. stop signals only a live holder whose lock was renewed within 3 * POLL_MS, waits
 // for it to release the lock, removes a lock only when its holder has exited, says which of these it did, and touches no
 // other. Contained (DCTR_VIEW_REQUEST_DIR set) start and the watcher refuse with no pane call.
@@ -34,6 +35,8 @@
 //   context <role> <session> ... a context reading past its resolved tier (resolveTier, the floor included) on two
 //                                polls with no warned line naming the session; `unknown` once for a bridge file older
 //                                than BRIDGE_EXPIRY_MS, whose value is never read
+//   held <role> <name>           the role's pane reading ready, with an agent session, while <run>/pending/<role>, which
+//                                dctr-send.mjs leaves for a message it held without a nudge, names <name>
 //   limit <role> <kind> <L> ...  each new limits.log line: an account line names its reset time and the wake-all
 //                                command, a model line `/model`, an other line its error
 // A pane read that fails or comes back empty is unknown: no exit event, and the watcher types nothing ever. It shows a
@@ -42,8 +45,8 @@
 // inside a catch that never sends again, and writes `notified <line index> <word>` for each stall it notified, the
 // stall line's index in events.log. What it has reported survives a restart through events.log: a report, a limit
 // line, an account episode's notification and a stall's notification already there are not raised again, nor a
-// deadline for the same wave line, a ready for the same entry, a pause for the same record line or a past-tier context
-// for the same session; an exit or unknown context already there is not raised again while its state holds. Once a poll
+// deadline for the same wave line, a held for the same marker, a ready for the same entry, a pause for the same record
+// line or a past-tier context for the same session; an exit or unknown context already there is not raised again while its state holds. Once a poll
 // reads any of these states clear, before the restart or after it, it is raised again when it returns; a read that
 // fails clears nothing.
 
@@ -56,7 +59,7 @@ import { herdr } from './dctr-state.mjs'
 import { restoreFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier,
-  lastOnOffEntry, sessionWarned, endsReady, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
+  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -106,14 +109,14 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
   let limitsSeen = 0, notifiedAt = null
   for (const [i, l] of completeLines().entries()) {
     const w = l.split(' ')
-    if (['exit', 'pause', 'deadline', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
+    if (['exit', 'pause', 'deadline', 'held', 'ready', 'context'].includes(w[1])) restored.add(w.slice(1).join(' ').replace(/^(context \S+ \S+ past tier).*/, '$1'))
     if (w[1] === 'report') seenReports.add(w.slice(2).join(' '))
     if (w[1] === 'notified') notifiedStalls.add(`${w[2]} ${w[3]}`)
     if (w[1] === 'woken') notifiedAt = null
     if (w[1] === 'limit') { limitsSeen += 1; if (w[3] === 'account' && notifiedAt === null) notifiedAt = i }
   }
   const exited = new Set(), pauses = new Map(), grew = new Map(), late = new Set(), readySeen = new Map(), readyRaised = new Set()
-  const past = new Map(), contextRaised = new Set(), staleRaised = new Set(), sessionOf = new Map()
+  const past = new Map(), contextRaised = new Set(), staleRaised = new Set(), sessionOf = new Map(), heldRaised = new Set()
   // Holds a space, so no `[session <id>]` tag, whose id is one token, ever names it.
   const NO_SESSION = '(no session)'
 
@@ -144,18 +147,24 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     }
   }
 
-  /** The pane's session id, null for a pane with no agent session, undefined when the read failed or came back empty. */
-  function paneSession(pane) {
+  /** The pane's reading, `{ s, status }` with `s` its session id or null for no agent session; undefined when the read
+   *  failed or came back empty. */
+  function paneRead(pane) {
     let reply
     try { reply = herdr(['pane', 'get', pane]) } catch { return undefined }
     const p = reply?.result?.pane
     if (!p) return undefined
     const s = p.agent_session?.value
-    return typeof s === 'string' && s !== '' ? s : null
+    return { s: typeof s === 'string' && s !== '' ? s : null, status: p.agent_status }
   }
 
   function session(role, lane) {
-    const s = paneSession(lane.pane)
+    const r = paneRead(lane.pane), s = r?.s
+    const marker = readText(path.join(run, 'pending', role))?.trim()
+    if (marker && typeof s === 'string' && READY_STATUSES.includes(r.status)) {
+      const t = `held ${role} ${marker}`
+      if (!heldRaised.has(t)) { heldRaised.add(t); raise(t) }
+    }
     if (s === null) { if (!exited.has(role)) { exited.add(role); raise(`exit ${role} ${lane.pane}`) } } else if (s !== undefined) { exited.delete(role); restored.delete(`exit ${role} ${lane.pane}`) }
     const rec = recordOf(lane.worktree)
     if (typeof s === 'string') sessionOf.set(role, s)
@@ -285,10 +294,13 @@ function start(run) {
     sleepMs(100)
   }
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
+  const launchFile = path.join(run, 'launch', 'orchestrator.sh')
   const launch = `cd ${shq(checkout)} && env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
     `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
     `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`
-  fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} ${launch}\n`)
+  fs.mkdirSync(path.dirname(launchFile), { recursive: true })
+  fs.writeFileSync(launchFile, `${launch}\n`)
+  fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} sh ${shq(launchFile)}\n`)
   process.stdout.write(`dctr-lanewatch: started in ${watcher}\n`)
 }
 
