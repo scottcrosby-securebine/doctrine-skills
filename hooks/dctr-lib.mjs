@@ -1005,13 +1005,17 @@ export const latestAutoCycle = (entries) => (entries || []).filter((e) => e.kind
  * A paused line P is resolved only when it is an R2, R3 or R4 pause, whoever wrote it, and a line AFTER P answers
  * it: a state line not reading Blocked (R2), a ruling line (R3), a `question: <id> answered` line for its id (R4).
  * It is judged against the lines after P and never the whole record, so a later alarm or Blocked of the same kind
- * never makes an old, answered pause stand again. Every other paused line never resolves, the skills' `question:
- * <text>` form included, which carries no id.
+ * never makes an old, answered pause stand again. An R8 tagged session S resolves once S has taken a turn after it
+ * (E15-SK1): `entries` holds a `{ kind: 'turn-end', session: S, line }` entry, the record's line count at S's turn
+ * end, at or after P's line. No record line has that form: only a caller holding S's turn end adds one (the cycle
+ * hook's step 3). Every other paused line never resolves, the skills' `question: <text>` form included, which carries
+ * no id.
  */
 export function pauseResolved(paused, entries) {
   const after = (entries || []).filter((e) => e.line > paused.line), reason = paused?.reason || ''
   if (PAUSES.R2.match.test(reason)) return after.some((e) => e.kind === 'state' && !/^Blocked\b/i.test(e.value || ''))
   if (PAUSES.R3.match.test(reason)) return after.some((e) => e.kind === 'ruling')
+  if (pauseCode(reason) === 'R8') return Boolean(paused.session) && (entries || []).some((e) => e.kind === 'turn-end' && e.session === paused.session && e.line >= paused.line)
   const q = /^open question (\S+): /.exec(reason)
   if (q) return after.some((e) => e.kind === 'question-answered' && e.id === q[1])
   return false

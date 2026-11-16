@@ -687,6 +687,34 @@ const es21b = rec('- auto-cycle: warned s 60%', ...R2L, '- State: Open', '- Stat
 clause('clause 1p2 — a ruled R3 pause stays resolved after a second alarm of its kind, an unblocked R2 after a second Blocked, so neither stands again (RB2-1)',
   pauseResolved(es21.find((e) => e.sub === 'paused'), es21) && standingPauses(es21).length === 0 && !pauseStands(es21, 0, 'time alarm fired, ruling needed') &&
   pauseResolved(es21b.find((e) => e.sub === 'paused'), es21b) && standingPauses(es21b).length === 0, 'an old pause stood again')
+// E15-SK1: an R8 idle pause tagged S resolves once S's turn end is at or after its line, and holds step 3 until then.
+// The turn end reaches pauseResolved as a `turn-end` entry the cycle hook adds from S's turn end file.
+const SK1L = ['- auto-cycle: warned s 60%', pausedLine(pauseReason('R8'), 's')]
+const sk1 = rec(...SK1L), sk1P = sk1.find((e) => e.sub === 'paused'), turnAt = (session, line) => ({ kind: 'turn-end', session, line })
+const sk1R7 = rec('- auto-cycle: warned s 60%', pausedLine(pauseReason('R7'), 's')), sk1Un = rec('- auto-cycle: warned s 60%', pausedLine(pauseReason('R8')))
+clause('clause 1p3 — an R8 tagged S resolves on a turn end of S at or after its line, and step 3 then lets S cycle; with no turn end, an earlier one, another session\'s, an R7 or an untagged R8, it stands and step 3 holds (E15-SK1)',
+  pauseResolved(sk1P, [...sk1, turnAt('s', 2)]) && pauseResolved(sk1P, [...sk1, turnAt('s', 5)]) && !pausedAfterWarned([...sk1, turnAt('s', 2)], 's') &&
+  !pauseResolved(sk1P, sk1) && pausedAfterWarned(sk1, 's') && !pauseResolved(sk1P, [...sk1, turnAt('s', 1)]) && pausedAfterWarned([...sk1, turnAt('s', 1)], 's') &&
+  !pauseResolved(sk1P, [...sk1, turnAt('t', 9)]) && pausedAfterWarned([...sk1, turnAt('t', 9)], 's') &&
+  !pauseResolved(sk1R7.at(-1), [...sk1R7, turnAt('s', 9)]) && pausedAfterWarned([...sk1R7, turnAt('s', 9)], 's') &&
+  !pauseResolved(sk1Un.at(-1), [...sk1Un, turnAt('s', 9)]) && pausedAfterWarned([...sk1Un, turnAt('s', 9)], 's'),
+  'an R8 resolved on the wrong turn end, or another pause changed')
+clause('clause 3p3 — without pauseResolved: the SK1 fixture\'s line 1 is S\'s warned line and line 2 an R8 line tagged S; the R7 twin\'s line 2 is an R7 tagged S and the untagged twin\'s an R8 with no tag',
+  SK1L[0] === '- auto-cycle: warned s 60%' && SK1L[1] === '- auto-cycle paused: session idle, waiting for you [session s]' &&
+  pausedLine(pauseReason('R7'), 's') === '- auto-cycle paused: waiting for your permission approval [session s]' &&
+  pausedLine(pauseReason('R8')) === '- auto-cycle paused: session idle, waiting for you', JSON.stringify([SK1L, pausedLine(pauseReason('R7'), 's'), pausedLine(pauseReason('R8'))]))
+// End to end: S warned, its R8 written, then a submitted prompt and a Stop not ending ready waits (step 3 passed);
+// the twin with no prompt between is held by step 3.
+const sk1Decided = (f) => { try { return /Stop auto-cycle Stop decided (.*)$/m.exec(fs.readFileSync(path.join(stateDir(f.session), 'hook.log'), 'utf8'))?.[1] ?? null } catch { return null } }
+const sk1Turn = fixture('sk1-r8-turn', { lines: [pausedLine(pauseReason('R8'), 's-sk1-r8-turn')] }), sk1Held = fixture('sk1-r8-held', { lines: [pausedLine(pauseReason('R8'), 's-sk1-r8-held')] })
+run(sk1Turn, { hook_event_name: 'UserPromptSubmit', prompt: 'go on' }); run(sk1Turn, { last_assistant_message: 'Working on it.' }); run(sk1Held, { last_assistant_message: 'Working on it.' })
+clause('clause 2p3 — a warned session whose R8 line precedes a submitted prompt: its Stop not ending ready decides wait; with no prompt between, step 3 decides none (E15-SK1)',
+  /^wait: /.test(sk1Decided(sk1Turn) || '') && /^none: an unresolved paused line follows this session's warned line$/.test(sk1Decided(sk1Held) || ''),
+  JSON.stringify([sk1Decided(sk1Turn), sk1Decided(sk1Held)]))
+const sk1Lines = (f) => fs.readFileSync(f.record, 'utf8').split('\n')
+clause('clause 3p4 — without the hook: each SK1 hook fixture carries its session\'s warned line and, on the next line, an R8 line tagged that session',
+  [sk1Turn, sk1Held].every((f) => { const ls = sk1Lines(f), i = ls.indexOf(`- auto-cycle: warned ${f.session} 60%`); return i > 0 && ls[i + 1] === `- auto-cycle paused: session idle, waiting for you [session ${f.session}]` }),
+  JSON.stringify([sk1Lines(sk1Turn), sk1Lines(sk1Held)]))
 const RDY = '- auto-cycle: ready'
 const R10R = 'could not cycle: handoff not written', R7R = 'waiting for your permission approval'
 clause('clause 1q — standingPauses: the unresolved pauses after the latest warned or cycle line, or with neither the latest line when an unresolved pause; a ready line after a pause hides nothing; pauseStands only for the same pause as one of them (E8-R25, RB2-3, E8-R27)',
