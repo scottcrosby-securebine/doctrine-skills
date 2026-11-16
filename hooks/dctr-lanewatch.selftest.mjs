@@ -57,7 +57,7 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 process.env.PATH = `${bin}:${process.env.PATH}`
 
 const { createWatcher, POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS } = await import('./dctr-lanewatch.mjs')
-const { laneOf } = await import('./dctr-lib.mjs')
+const { laneOf, shq } = await import('./dctr-lib.mjs')
 const { restoreFile, stateDir } = await import('./dctr-state.mjs')
 const lanewatch = await import('./dctr-lanewatch.mjs')
 const { bridgeFile } = await import('./dctr-bridge.mjs')
@@ -346,7 +346,8 @@ const startPath = `${nodeShimDir}:${bin}:/usr/bin:/bin`
 const rStart = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: st.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: startPath, TMPDIR: T2, SHIM_DIR: st.dir }, st.repo)
 const orch = laneOf(fs.readFileSync(path.join(st.run, 'lane.log'), 'utf8'), 'orchestrator')
 clause('clause 2q — start appends an orchestrator create line that laneOf reads as the orchestrator\'s pane and checkout (E15-D244)',
-  rStart.code === 0 && orch?.pane === 'w0:p0' && orch?.worktree === st.repo && orch?.caller === 'orchestrator' && /DCTR_ROLE=orchestrator/.test(orch?.launch ?? ''),
+  rStart.code === 0 && orch?.pane === 'w0:p0' && orch?.worktree === st.repo && orch?.caller === 'orchestrator' &&
+    /DCTR_ROLE=orchestrator/.test((() => { try { return fs.readFileSync(path.join(st.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()),
   JSON.stringify([rStart, orch]))
 clause('clause 2r — start writes its TMPDIR to <run>/tmpdir (E15-D248)',
   fs.existsSync(path.join(st.run, 'tmpdir')) && fs.readFileSync(path.join(st.run, 'tmpdir'), 'utf8') === T2, JSON.stringify(rStart))
@@ -863,7 +864,56 @@ for (;;) {
   }
 }
 
+// ---------------------------------------------------------------- clause 2: held messages and the launch file
+
+// E15-D254: a pending marker the sender left for a role whose pane was not ready. b has none, as a send that nudged
+// leaves it; c's read fails and n's pane has no agent session.
+const hm = fixture({ a: { shim: { status: 'working' } }, b: {}, c: { shim: { fail: true } }, n: { session: null } })
+const mark = (r, name) => write(path.join(hm.run, 'pending', r), name)
+for (const r of ['a', 'c', 'n']) mark(r, 'X1.md')
+const heldEvents = () => events(hm).filter((e) => e.startsWith('held '))
+const whm = watcher(hm)
+polls(hm, whm)
+const hmBusy = heldEvents()
+setPanes(hm, { [hm.pane.a]: { status: 'idle' } }); polls(hm, whm, 2)
+const hmIdle = heldEvents()
+polls(hm, watcher(hm), 2)
+const hmRestart = heldEvents()
+mark('a', 'X2.md'); polls(hm, whm, 2)
+clause('clause 2bg — a role with a pending marker whose pane reads working raises no held event; once it reads idle, exactly one naming the role and the marker over two polls, none more after a restart, and one more for a new marker; a role with no marker, one whose read fails and one with no agent session, none (E15-D254)',
+  hmBusy.length === 0 && JSON.stringify(hmIdle) === '["held a X1.md"]' && JSON.stringify(hmRestart) === JSON.stringify(hmIdle) &&
+  JSON.stringify(heldEvents()) === '["held a X1.md","held a X2.md"]', show(hm))
+
+// E15-D251: the orchestrator's launch line with a PATH over 1024 bytes.
+const lo = fixture({})
+const claudeStub = path.join(tmp, 'claude-stub'), claudeEnvLog = path.join(tmp, 'claude-env.log')
+write(path.join(claudeStub, 'claude'), `#!/bin/sh\nenv > ${claudeEnvLog}\n`); fs.chmodSync(path.join(claudeStub, 'claude'), 0o755)
+const LO_PATH = `${claudeStub}:${LONG}`
+write(path.join(lo.run, 'model', 'orchestrator'), 'claude-opus-5-5\n')
+const loEnv = { DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: lo.run, HERDR_PANE_ID: 'w0:p0', HERDR_WORKSPACE_ID: 'w0', PATH: LO_PATH, TMPDIR: T, SHIM_DIR: lo.dir }
+const rLo = await proc(['start'], loEnv, lo.repo)
+await proc(['stop'], loEnv)
+const loOrch = laneOf(fs.readFileSync(path.join(lo.run, 'lane.log'), 'utf8'), 'orchestrator')
+if (loOrch) spawnSync('/bin/sh', ['-c', loOrch.launch], { env: {}, timeout: 20000 })
+const envOf = (f) => (fs.existsSync(f) ? Object.fromEntries(fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])) : {})
+const loStarted = envOf(claudeEnvLog)
+clause('clause 2bh — with a PATH over 1024 bytes start records the orchestrator\'s launch line as sh <run>/launch/orchestrator.sh, at most 1024 bytes, and that line run by sh -c in an empty environment starts claude with role, caller and run orchestrator\'s and the start call\'s PATH (E15-D251)',
+  rLo.code === 0 && loOrch?.launch === `sh ${shq(path.join(lo.run, 'launch', 'orchestrator.sh'))}` && Buffer.byteLength(loOrch.launch) <= 1024 &&
+  loStarted.DCTR_ROLE === 'orchestrator' && loStarted.DCTR_CALLER === 'orchestrator' && loStarted.DCTR_RUN === lo.run && loStarted.PATH === LO_PATH,
+  JSON.stringify([rLo, loOrch, loStarted.DCTR_ROLE, loStarted.PATH === LO_PATH]))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
+
+{
+  const fx = fixture({ a: { shim: { status: 'working' } } })
+  process.env.SHIM_DIR = fx.dir
+  const g = spawnSync(path.join(bin, 'herdr'), ['pane', 'get', fx.pane.a], { encoding: 'utf8', env: { ...process.env } })
+  const stubLog = path.join(tmp, 'claude-env-proof.log')
+  const proof = spawnSync('/bin/sh', ['-c', `${shq(path.join(claudeStub, 'claude'))}; cp ${shq(claudeEnvLog)} ${shq(stubLog)}`], { env: { PATH: LO_PATH } })
+  clause('clause 3g — without the watcher: the held fixture\'s working pane reads working, its markers lie under <run>/pending/ with nothing under <run>/held/, the claude stub logs the PATH it was started with, and PATH=<that PATH> alone is over 1024 bytes',
+    JSON.parse(g.stdout).result.pane.agent_status === 'working' && fs.readFileSync(path.join(hm.run, 'pending', 'a'), 'utf8') === 'X2.md' && !fs.existsSync(path.join(hm.run, 'held')) &&
+    proof.status === 0 && envOf(stubLog).PATH === LO_PATH && Buffer.byteLength(`PATH=${shq(LO_PATH)}`) > 1024, JSON.stringify([g.stdout, proof.status, envOf(stubLog).PATH === LO_PATH]))
+}
 
 {
   const fx = fixture({ dead: { session: null }, gone: { shim: { fail: true } }, blank: { shim: { empty: true } }, up: {} })
