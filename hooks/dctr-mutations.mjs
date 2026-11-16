@@ -5119,6 +5119,14 @@ const MUTATIONS = [
     clause: "clause 2x20 \u2014 the lock lost on a\\'s nudge: a is report\u2026",
     from: "for (const x of pending) if (!last.has(x.role)) last.set(x.role, 'retry')",
     to: "for (const x of pending) last.set(x.role, 'retry')" },
+  { name: "an R8 pause never resolves on its session's later turn (E15-SK1)", file: "dctr-lib.mjs",
+    clause: "clause 1p3 \u2014 an R8 tagged S resolves on a turn end of S\u2026",
+    from: "  if (pauseCode(reason) === 'R8') return Boolean(paused.session) && (entries || []).some((e) => e.kind === 'turn-end' && e.session === paused.session && e.line >= paused.line)\n",
+    to: "" },
+  { name: "step 3 reads the record alone, never the session's turn end (E15-SK1)", file: "dctr-cycle.mjs",
+    clause: "clause 2p3 \u2014 a warned session whose R8 line precedes a\u2026",
+    from: "pausedAfterWarned([...record.entries, { kind: 'turn-end', session: sessionId, line: priorTurnEnd }], sessionId)",
+    to: "pausedAfterWarned(record.entries, sessionId)" },
 ]
 
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
