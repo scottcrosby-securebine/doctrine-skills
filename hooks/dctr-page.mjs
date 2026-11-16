@@ -139,6 +139,7 @@ if (isMain) {
   const why = startRefusal(args ?? {}, process.env)
   if (why) { console.error(why); process.exit(1) }
   // Bound and printed in the canonical form, so the URL line is a Host the allowlist passes, and the address bound
-  // is the one judged: the resolver reads 0177.0.0.1 as decimal 177.0.0.1, the URL parser as octal 127.0.0.1.
+  // is the one judged: the URL parser reads 0177.0.0.1 as octal 127.0.0.1, while what the raw spelling binds
+  // depends on the platform's resolver (macOS's reads it as decimal 177.0.0.1, glibc's as octal).
   serve({ ...args, host: canonicalHost(args.host), root: path.resolve(args.root) }, process.env.DCTR_PAGE_PASSWORD || '')
 }

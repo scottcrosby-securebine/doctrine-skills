@@ -5145,7 +5145,7 @@ const MUTATIONS = [
     from: "const c = canonicalHost(h); return", to: "const c = h; return" },
   { name: "page request: the Host allowlist names the raw bind, so a mixed-case bind answers 421 (P1-B2)", file: "dctr-page.mjs", clause: "S-C [2: Host mymac.local:8787 on bind MyMac.local is served (null)]",
     from: "hostPort(canonicalHost(bind), port)", to: "hostPort(bind, port)" },
-  { name: "page serve: the raw --host is bound and printed, not its canonical form", file: "dctr-page.mjs", clause: "E2E canonical [1: --host 0177.0.0.1 prints http://127.0.0.1:<port>/ and a GET with that Host is 200]",
+  { name: "page serve: the raw --host is bound and printed, not its canonical form", file: "dctr-page.mjs", clause: "E2E canonical [1: --host 127.1 prints http://127.0.0.1:<port>/ and a GET with that Host is 200]",
     from: "serve({ ...args, host: canonicalHost(args.host), root:", to: "serve({ ...args, root:" },
   { name: "page start: a --host carrying http's default port is taken as a host", file: "dctr-page.mjs", clause: "S-B [1: --host \"127.0.0.1:80\", which is not one host is refused with one line naming why]",
     from: "if (!net.isIPv6(h) && h.replace(/^\\[[^\\]]*\\]$/, '').includes(':')) return null", to: "if (false) return null" },
