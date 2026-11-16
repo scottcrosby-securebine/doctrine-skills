@@ -5,8 +5,8 @@
 // Started by hand, in the foreground, and by nothing else: no hook entry names it (E5-S20). Binds to 127.0.0.1
 // port 8787 by default; --port 0 takes a free port. A --host outside loopback (127.0.0.0/8, ::1, localhost)
 // needs DCTR_PAGE_PASSWORD, which every request must then carry as its HTTP Basic password (E5-R8). It refuses to
-// start in a contained session (DCTR_VIEW_REQUEST_DIR set), as the pane launcher does, and on a wildcard --host
-// (0.0.0.0 or ::), which must name a specific address instead.
+// start in a contained session (DCTR_VIEW_REQUEST_DIR set), as the pane launcher does, and on a wildcard --host in
+// any spelling (0, 0.0.0.0, ::0, ::ffff:0.0.0.0 and the rest), which must name a specific address instead.
 //
 // Every refusal before listening exits 1 with one line on stderr and opens no listener. Once listening it prints
 // its URL, and nothing per request. Each GET or HEAD of / that passes the method, path, Host and credential
@@ -31,6 +31,9 @@ const DEFAULTS = { host: '127.0.0.1', port: '8787' }
  *  judgement of the bind (wildcard, loopback, the Host allowlist) and the bind itself use this form, so no
  *  spelling is judged one way and bound another (P1-B1, P1-B2). */
 const canonicalHost = (h) => {
+  // Judged on the raw text first: the parser resolves 127.0.0.1/.., drops @ and // and strips tabs and newlines,
+  // so after it these all read as a clean 127.0.0.1 (P2-C1).
+  if (/[/\\@?#\s\u0000-\u001f\u007f]/.test(h)) return null
   // A colon outside an IPv6 literal is a port, and the parser drops http's default one (127.0.0.1:80 parses clean).
   if (!net.isIPv6(h) && h.replace(/^\[[^\]]*\]$/, '').includes(':')) return null
   let u
@@ -69,11 +72,11 @@ export function startRefusal({ host, port, root }, env) {
   if (!host) return 'dctr-page: refused: --host is empty'
   let dir = false
   try { dir = fs.statSync(path.resolve(root)).isDirectory() } catch { /* not there: refused below */ }
-  if (!dir) return `dctr-page: refused: tracking root ${root} is not a directory`
+  if (!dir) return `dctr-page: refused: tracking root ${JSON.stringify(root)} is not a directory`
   const bind = canonicalHost(host)
-  if (bind === null) return `dctr-page: refused: --host ${host} is not a host: give an address or a name, with no port`
-  if (WILDCARDS.includes(bind)) return `dctr-page: refused: --host ${host} is a wildcard bind; name a specific address`
-  if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return `dctr-page: refused: --host ${host} is not loopback and DCTR_PAGE_PASSWORD is unset or empty`
+  if (bind === null) return `dctr-page: refused: --host ${JSON.stringify(host)} is not a host: give an address or a name, with no port`
+  if (WILDCARDS.includes(bind)) return `dctr-page: refused: --host ${JSON.stringify(host)} is a wildcard bind; name a specific address`
+  if (!isLoopback(host) && !env.DCTR_PAGE_PASSWORD) return `dctr-page: refused: --host ${JSON.stringify(host)} is not loopback and DCTR_PAGE_PASSWORD is unset or empty`
   return null
 }
 

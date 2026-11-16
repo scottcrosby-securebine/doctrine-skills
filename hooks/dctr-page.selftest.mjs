@@ -57,7 +57,12 @@ const WILDCARD_SPELLINGS = ['0.0.0.0', '0', '0x0', '0.0', '00.0.0.0', '::', '::0
 const LOOPBACK_SPELLINGS = ['127.0.0.1', '127.1', '127.9.9.9', '0177.0.0.1', '2130706433', '::1', '0:0:0:0:0:0:0:1', '[::1]', 'localhost', 'LOCALHOST', 'LocalHost']
 // ::ffff:127.0.0.1 stays non-loopback: the spec's list is 127.0.0.0/8, ::1 and localhost (G5).
 const NONLOOP_SPELLINGS = ['192.0.2.1', '10.0.0.1', '128.0.0.1', '1.127.0.0', '::ffff:127.0.0.1', 'mymac.local', 'MyMac.local', 'localhost.', '127.0.0.1.example']
-const MALFORMED_HOSTS = ['127.0.0.1:80', '127.0.0.1:8080', '[::1]:80', 'a b', 'a/b', 'u@h', 'h?x', 'h#x', '256.0.0.1']
+const MALFORMED_HOSTS = ['127.0.0.1:80', '127.0.0.1:8080', '[::1]:80', 'a b', 'a/b', 'u@h', 'h?x', 'h#x', '256.0.0.1',
+  // Each of these the URL parser normalises to a clean 127.0.0.1, so only the raw text shows it is not one host (P2-C1).
+  '127.0.0.1/a/..', '127.0.0.1/..', '@127.0.0.1', '//127.0.0.1', '\\127.0.0.1', '127.0.0.1\t', '127.0.0.1\n', '\n127.0.0.1', '127.0.0.1\u0000']
+// A non-internal IPv4 address of this host, where it has one: what a wildcard answers on and a loopback bind does not.
+const LAN = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address
+const UNSPECIFIED = ['0.0.0.0', '::', '::ffff:0.0.0.0']
 
 // ---------------------------------------------------------------- S-B startRefusal (pure)
 {
@@ -96,6 +101,7 @@ const MALFORMED_HOSTS = ['127.0.0.1:80', '127.0.0.1:8080', '[::1]:80', 'a b', 'a
     ['no tracking root', { host: ok.host, port: ok.port }, {}, /usage/],
     ['a tracking root that is a file', { ...ok, root: file }, {}, /not a directory/],
     ['a tracking root that does not exist', { ...ok, root: missing }, {}, /not a directory/],
+    ['a tracking root whose name holds a newline', { ...ok, root: `${missing}\nsecond line` }, {}, /not a directory/],
   ]
   for (const [name, args, e, re] of refusals) {
     const r = startRefusal(args, e)
@@ -105,6 +111,9 @@ const MALFORMED_HOSTS = ['127.0.0.1:80', '127.0.0.1:8080', '[::1]:80', 'a b', 'a
   const loop = new net.BlockList(); loop.addSubnet('127.0.0.0', 8, 'ipv4'); loop.addAddress('::1', 'ipv6')
   clause('S-B [3: every non-loopback host above is outside 127.0.0.0/8 and ::1, and not localhost, by net.BlockList]',
     NONLOOP.every((h) => !loop.check(h, net.isIPv6(h) ? 'ipv6' : 'ipv4')) && ['127.9.9.9', '::1'].every((h) => loop.check(h, net.isIPv6(h) ? 'ipv6' : 'ipv4')), 'fixture')
+  // The first eight P2-C1 spellings; the NUL one the parser rejects by itself.
+  clause('S-B [3: eight P2-C1 spellings each carry a /, \\, @, whitespace or control character, yet the URL parser alone reads each as 127.0.0.1]',
+    MALFORMED_HOSTS.slice(9, 17).length === 8 && MALFORMED_HOSTS.slice(9, 17).every((h) => /[/\\@\s\u0000-\u001f]/.test(h) && new URL(`http://${h}/`).hostname === '127.0.0.1'), 'fixture')
   clause('S-B [3: the file root is a regular file, the missing root does not exist, and the good root is a directory]',
     fs.statSync(file).isFile() && !fs.existsSync(missing) && fs.statSync(root).isDirectory(), 'fixture')
 }
@@ -311,21 +320,33 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   await refusedStart('two tracking roots', [root, root, '--port', '<port>'], {}, /usage/)
   await refusedStart('no tracking root', ['--port', '<port>'], {}, /usage/)
   await refusedStart('a tracking root that is a file', [P, '--port', '<port>'], {}, /not a directory/)
+  // A value holding a newline is printed escaped, so the refusal stays one stderr line (P2-C2).
+  await refusedStart('a --host holding a newline', [root, '--host', '127.0.0.1\nsecond line', '--port', '<port>'], {}, /is not a host/)
+  await refusedStart('a tracking root holding a newline', [`${root}\nsecond line`, '--port', '<port>'], {}, /not a directory/)
+  clause('E2E start [3: both values really hold a newline, and the root with it does not exist]', '127.0.0.1\nsecond line'.includes('\n') && !fs.existsSync(`${root}\nsecond line`), 'fixture')
   clause('E2E start [3: the file root is a file]', fs.statSync(P).isFile(), 'fixture')
-  // Proved without the server: a plain listener on 0.0.0.0 answers on 127.0.0.1, so it is the any-address.
-  const any = net.createServer().listen(0, '0.0.0.0'); await waitFor(() => any.address())
-  clause('E2E start [3: 0.0.0.0 really is a wildcard: a plain listener there answers on 127.0.0.1]', await connects(any.address().port), 'no answer on loopback')
-  any.close()
   // The spellings proved without the server: what a plain net listener bound to each one reports and answers on.
   const plain = async (h) => {
     const srv = net.createServer()
     const a = await new Promise((r) => { srv.once('error', (e) => r({ error: e.code })); srv.listen(0, h, () => r(srv.address())) })
     const answers = a.error ? false : await connects(a.port)
+    const answersLan = a.error || !LAN ? false : await connects(a.port, LAN)
     await new Promise((r) => srv.close(() => r()))
-    return { ...a, answers }
+    return { ...a, answers, answersLan }
   }
-  // Only what holds on Linux and macOS alike. A wildcard is proved by answering on 127.0.0.1, never by the address
-  // the listener reports: Linux reports ::ffff:0.0.0.0 as given, macOS reports ::. A loopback spelling is proved by
+  // A wildcard is proved by what only a wildcard has (P2-C3): it reports an unspecified address, in whichever of the
+  // three forms the platform uses (Linux keeps ::ffff:0.0.0.0, macOS reports ::), and where this host has a LAN
+  // address it answers there too. Answering on 127.0.0.1 alone proves nothing, since a loopback listener does that.
+  const isWildcardBind = (a) => UNSPECIFIED.includes(a.address) && (!LAN || a.answersLan)
+  if (!LAN) console.log('SKIP  E2E spellings [3: the LAN half of the wildcard proof]: this host has no non-internal IPv4 address')
+  const any = await plain('0.0.0.0')
+  clause('E2E start [3: 0.0.0.0 really is a wildcard: a plain listener there reports an unspecified address and, where this host has a LAN address, answers on it]',
+    isWildcardBind(any), JSON.stringify(any))
+  // The twin that shows the proof discriminates: a loopback listener answers on 127.0.0.1 and still fails it.
+  const lo = await plain('127.0.0.1')
+  clause('E2E start [3: the proof discriminates: a plain listener on 127.0.0.1 answers on 127.0.0.1 yet reports no unspecified address and answers on no LAN address]',
+    lo.answers && !isWildcardBind(lo) && !lo.answersLan, JSON.stringify(lo))
+  // Only what holds on Linux and macOS alike. A loopback spelling is proved by
   // its reported address falling in 127.0.0.0/8 or ::1, never by which one: LOCALHOST binds ::1 on macOS and
   // 127.0.0.1 under a usual Linux /etc/hosts. The IPv6 spellings need IPv6, so where ::1 cannot be bound they skip
   // loudly; the verdict each one gets is still pinned by the pure S-B tables, which need no socket.
@@ -334,7 +355,8 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
   for (const h of ['0', '0x0', '::0', '0:0:0:0:0:0:0:0', '::ffff:0.0.0.0']) {
     if (noV6 && h.includes(':')) { console.log(`SKIP  E2E spellings [3: --host ${h}]: this host cannot bind IPv6 (${v6.error})`); continue }
     const a = await plain(h)
-    clause(`E2E spellings [3: --host ${h} really is a wildcard: a plain listener there answers on 127.0.0.1]`, a.answers, JSON.stringify(a))
+    clause(`E2E spellings [3: --host ${h} really is a wildcard: a plain listener there reports an unspecified address and, where this host has a LAN address, answers on it]`,
+      isWildcardBind(a), JSON.stringify(a))
   }
   const loop = new net.BlockList(); loop.addSubnet('127.0.0.0', 8, 'ipv4'); loop.addAddress('::1', 'ipv6')
   for (const h of ['127.1', '2130706433', '0:0:0:0:0:0:0:1', 'LOCALHOST']) {
@@ -357,7 +379,7 @@ const connects = (port, host = '127.0.0.1') => new Promise((resolve) => { const 
 
 // A non-loopback bind, where the host has such an address: the URL line, the TLS line, and Basic auth (E5-S17).
 {
-  const addr = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address
+  const addr = LAN
   if (!addr) console.log('SKIP  E2E non-loopback start and auth: this host has no non-internal IPv4 address')
   else {
     const PW = `pw-${process.pid}-secret`
