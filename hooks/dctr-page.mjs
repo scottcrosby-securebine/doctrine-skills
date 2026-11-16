@@ -27,7 +27,8 @@ const DEFAULTS = { host: '127.0.0.1', port: '8787' }
 
 /** A --host in its one canonical spelling, as the WHATWG URL parser writes a host: names lowercased, IPv4 shorthand
  *  (127.1, 0, 0x0, 2130706433, octal parts) as a dotted quad, IPv6 compressed and without brackets. Null when the
- *  text is not one host: it carries a port, a path, credentials, a query or a fragment, or does not parse. Every
+ *  text is not one host, among other things when it carries a port, a path, credentials, a query, a fragment, a
+ *  backslash, whitespace or a control character, or does not parse. Every
  *  judgement of the bind (wildcard, loopback, the Host allowlist) and the bind itself use this form, so no
  *  spelling is judged one way and bound another (P1-B1, P1-B2). */
 const canonicalHost = (h) => {
@@ -37,8 +38,10 @@ const canonicalHost = (h) => {
   // A colon outside an IPv6 literal is a port, and the parser drops http's default one (127.0.0.1:80 parses clean).
   if (!net.isIPv6(h) && h.replace(/^\[[^\]]*\]$/, '').includes(':')) return null
   let u
+  // Past the two checks above the parser cannot see a port, path, userinfo, query or fragment: each needs one of
+  // : / \ @ ? #, refused above, and their percent-encoded and full-width forms decode to code points a host rejects,
+  // so the parser throws.
   try { u = new URL(`http://${net.isIPv6(h) ? `[${h}]` : h}/`) } catch { return null }
-  if (u.host !== u.hostname || u.pathname !== '/' || u.username || u.password || u.search || u.hash) return null
   return u.hostname.replace(/^\[(.*)\]$/, '$1')
 }
 // ::ffff:0:0 is ::ffff:0.0.0.0, which binds as :: does.

@@ -418,6 +418,55 @@ for (const [h, want] of [['127.1', '127.0.0.1'], ['0177.0.0.1', '127.0.0.1'], ['
   await stop(s)
 }
 
+// The handler's own reader calls (P3-C2). Run inside herdr (HERDR_ENV=1) with a logging herdr shim first on PATH:
+// each statusFor makes one `herdr api snapshot` through readSeats, so the log counts reader calls. A refused request
+// (405, 404, 421, 401) must add none, and an accepted one exactly one.
+{
+  const shimBin = path.join(tmp, 'shim-bin'), log = path.join(tmp, 'herdr-shim.log')
+  fs.mkdirSync(shimBin)
+  fs.writeFileSync(path.join(shimBin, 'herdr'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(log)}\necho '{"result":{"snapshot":{"panes":[]}}}'\n`)
+  fs.chmodSync(path.join(shimBin, 'herdr'), 0o755)
+  const inHerdr = { HERDR_ENV: '1', PATH: `${shimBin}:${env.PATH}` }
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0)
+  // Clause 3, without the server: the shim logs one line per call and answers in the shape readSeats reads.
+  const probe = spawnSync('herdr', ['api', 'snapshot'], { env: { ...env, ...inHerdr }, encoding: 'utf8' })
+  let panes; try { panes = JSON.parse(probe.stdout).result.snapshot.panes } catch { panes = null }
+  clause('E2E readers [3: the herdr shim, run alone, logs one line per call and answers result.snapshot.panes as an empty list]',
+    calls() === 1 && fs.readFileSync(log, 'utf8') === 'api snapshot\n' && Array.isArray(panes) && panes.length === 0, JSON.stringify([calls(), probe.stdout]))
+  fs.rmSync(log)
+  const counted = async (s, port, name, reqOpts, wantStatus, wantCalls) => {
+    const before = calls(), r = await request(port, reqOpts)
+    clause(`E2E readers [${wantCalls ? 2 : 1}: ${name} is ${wantStatus} and makes ${wantCalls} reader call${wantCalls === 1 ? '' : 's'}]`,
+      r.status === wantStatus && calls() - before === wantCalls, JSON.stringify([r.status, calls() - before]))
+    return r
+  }
+  const s = startServer([root, '--port', '0'], inHerdr)
+  await waitFor(() => s.out.includes('\n') || s.code !== undefined)
+  const port = Number(/:(\d+)\/\n$/.exec(s.out)?.[1]), host = `127.0.0.1:${port}`
+  if (!port) clause('E2E readers — the loopback server started inside herdr', false, JSON.stringify([s.out, s.err]))
+  else {
+    await counted(s, port, 'POST /', { method: 'POST', headers: { Host: host } }, 405, 0)
+    await counted(s, port, 'GET /x', { path: '/x', headers: { Host: host } }, 404, 0)
+    await counted(s, port, 'GET / with Host attacker.example', { headers: { Host: `attacker.example:${port}` } }, 421, 0)
+    const ok = await counted(s, port, 'an accepted GET /', { headers: { Host: host } }, 200, 1)
+    clause('E2E readers [2: the accepted page read the shim\'s empty pane list: live seats prints (none), not unknown]', /^live seats:\n {2}\(none\)$/m.test(preText(ok.body ?? '') ?? ''), ok.body)
+  }
+  await stop(s)
+  if (!LAN) console.log('SKIP  E2E readers [1: a 401 makes no reader call]: this host has no non-internal IPv4 address')
+  else {
+    const PW = 'pw-readers'
+    const n = startServer([root, '--host', LAN, '--port', '0'], { ...inHerdr, DCTR_PAGE_PASSWORD: PW })
+    await waitFor(() => n.out.split('\n').length >= 3 || n.code !== undefined)
+    const np = Number(new RegExp(`^http://${LAN.replace(/\./g, '\\.')}:(\\d+)/$`, 'm').exec(n.out)?.[1])
+    if (!np) clause('E2E readers — the non-loopback server started inside herdr', false, JSON.stringify([n.out, n.err]))
+    else {
+      await counted(n, np, 'GET / with no credentials on a non-loopback bind', { host: LAN, headers: { Host: `${LAN}:${np}` } }, 401, 0)
+      await counted(n, np, 'GET / with the right password on a non-loopback bind', { host: LAN, headers: { Host: `${LAN}:${np}`, Authorization: `Basic ${Buffer.from(`u:${PW}`).toString('base64')}` } }, 200, 1)
+    }
+    await stop(n)
+  }
+}
+
 // IPv6 loopback, where the host has it: the URL brackets the address.
 {
   const s = startServer([root, '--host', '::1', '--port', '0'])
