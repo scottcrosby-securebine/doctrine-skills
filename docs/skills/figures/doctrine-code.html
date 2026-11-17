@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- doctrine-code's figure, started from specimen.html. Render from the repo root:
+     node docs/skills/figures/render.mjs docs/skills/figures/doctrine-code.html docs/skills/doctrine-code.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-code/SKILL.md@40dba8c4906130600a9d4ead38e3d9a454fe0308">
+<title>Figure: doctrine-code</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 02/15</span><span>doctrine-code</span></header>
+
+<section class="title">
+  <h1>Agree the seams, then build apart</h1>
+  <p>General coding under the doctrine, backend to UI. Every pass of the gate simplifies before it checks.</p>
+</section>
+
+<section class="row">
+  <div class="label">Before<br>wave 1</div>
+  <div class="flow">
+    <div class="box"><b>Ask</b><span>what the spec leaves open, or a brainstorm; the test seams agreed</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Write it down</b><span>the spec, or a requirements file under docs/, specs/ or .scratch/</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Pin the fixed point</b><span>git rev-parse HEAD, the SHA the phase starts from</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">The build</div>
+  <div class="fan">
+    <div class="col" style="width:250px"><div class="box" id="plan"><b>Phases and waves</b><span>each agent handed the seams it owns</span></div></div>
+    <svg class="wires" data-from="#plan" data-to=".agent"></svg>
+    <div class="col" style="width:400px">
+      <div class="box agent"><b>Wave agent</b><span>own worktree, output dir and port; test-first</span></div>
+      <div class="box agent"><b>Wave agent</b><span>a module it does not own: a stub, or a later wave</span></div>
+    </div>
+    <svg class="wires" data-from=".agent" data-to="#merge"></svg>
+    <div class="col" style="flex:1"><div class="box" id="merge"><b>Integrate and commit</b><span>the orchestrator commits; wave agents never commit on the ship branch</span></div></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">The gate,<br>each pass</div>
+  <div class="flow">
+    <div class="box"><b>Simplify</b><span>/ponytail-review, committed first</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Native checks</b><span>the project's gates; one real run</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>matts-code-review</b><span>fixed point, spec, standards</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Red team</b><span>other model family, five axes</span></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>Loop until one pass is clean; a rename declined with a reason never blocks.</p>
+  <p>UI: reuse the house components, return the grep, check the running app.</p>
+  <p>The red team hunts what the diff cannot show: duplicates already in the tree.</p>
+  <p>Deliver: commit; push or open a PR only where the repo or you say.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-code/SKILL.md at blob 40dba8c</footer>
+<script src="figure.js"></script>
+</body>
+</html>
