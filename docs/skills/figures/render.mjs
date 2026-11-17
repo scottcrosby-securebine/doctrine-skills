@@ -13,12 +13,12 @@
 //   npm i -D playwright-core && node node_modules/playwright-core/cli.js install chromium
 // The stylesheet loads its fonts from Google Fonts, so a render needs the network.
 //
-// Exit 0: the PNG is written and its header reads 2400x1350. Exit 1: the render failed, with the reason: a font
-// that did not load, content past the canvas edge, a page error or a failed request. Exit 2: bad arguments or no
-// playwright-core.
+// Exit 0: the PNG is written. Exit 1: nothing is written, and the reason is printed: a font that did not load,
+// content past the canvas's right or bottom edge, a page error or a failed request. Exit 2: bad arguments or no
+// playwright-core. render.selftest.mjs beside this file is its tamper test.
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 
@@ -57,13 +57,11 @@ try {
   }, FONTS)
   if (state.missing.length) problems.push(`font not loaded: ${state.missing.join(', ')}`)
   if (state.w > W || state.h > H) problems.push(`content is ${state.w}x${state.h}, past the ${W}x${H} canvas`)
+  const png = await page.screenshot({ clip: { x: 0, y: 0, width: W, height: H } })
+  // Checked after the capture, so an error raised during it still refuses.
   if (problems.length) fail(1, problems.join('\n'))
-  await page.screenshot({ path: out, clip: { x: 0, y: 0, width: W, height: H } })
+  writeFileSync(out, png)
 } finally {
   await browser.close()
 }
-
-const b = readFileSync(out)
-const ok = b.toString('hex', 0, 8) === '89504e470d0a1a0a' && b.readUInt32BE(16) === W * SCALE && b.readUInt32BE(20) === H * SCALE
-if (!ok) fail(1, `${out} is not a ${W * SCALE}x${H * SCALE} PNG`)
 console.log(`${out}: ${W * SCALE}x${H * SCALE}`)

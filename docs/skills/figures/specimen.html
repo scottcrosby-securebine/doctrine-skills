@@ -5,6 +5,8 @@
        2. FIG nn/15: nn is the skill's row in README.md's skill table, two digits. Keep "FIG" and the slash.
        3. The skill's name in the header, the title, the subtitle, the rows, the notes, and the footer's blob.
      Render: node docs/skills/figures/render.mjs docs/skills/figures/<skill>.html docs/skills/<skill>.png
+     Then git add both files, and show the PNG on docs/skills/<skill>.md with alt text that says what it draws:
+       ![<what the figure shows>](<skill>.png)
      Parts, all in figure.css: .head, .title, .row with a .label, .flow of .box and .arrow, .fan of .col and
      svg.wires (figure.js draws it from data-from to data-to), .notes of <p>, .foot. -->
 <html lang="en">
