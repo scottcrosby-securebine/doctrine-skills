@@ -1,0 +1,62 @@
+<!doctype html>
+<!-- SPECIMEN: the template every figure source starts from. It redraws the doctrine-write figure.
+     To start a figure: copy this file to docs/skills/figures/<skill>.html, then
+       1. drawn-from: skills/<skill>/SKILL.md@<blob>, the blob printed by `git hash-object skills/<skill>/SKILL.md`.
+       2. FIG nn/15: nn is the skill's row in README.md's skill table, two digits. Keep "FIG" and the slash.
+       3. The skill's name in the header, the title, the subtitle, the rows, the notes, and the footer's blob.
+     Render: node docs/skills/figures/render.mjs docs/skills/figures/<skill>.html docs/skills/<skill>.png
+     Parts, all in figure.css: .head, .title, .row with a .label, .flow of .box and .arrow, .fan of .col and
+     svg.wires (figure.js draws it from data-from to data-to), .notes of <p>, .foot. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-write/SKILL.md@1c3987507e8eb1e02914e86867f074fa32d22657">
+<title>Figure specimen: doctrine-write</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 06/15</span><span>doctrine-write</span></header>
+
+<section class="title">
+  <h1>One voice drafts, four lenses review, and the ledger decides what may be asserted</h1>
+  <p>Prose as the deliverable: proposals, briefs, reports, documentation pages.</p>
+</section>
+
+<section class="row">
+  <div class="label">Before the<br>draft</div>
+  <div class="flow">
+    <div class="box"><b>Ask</b><span>audience and what the reader does after: the anchor</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Ground</b><span>a claim ledger, each fact with its source line</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Draft</b><span>one voice, never sections in parallel</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">The gate</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box" id="draft"><b>The draft</b><span>plus the ledger, pasted</span></div></div>
+    <svg class="wires" data-from="#draft" data-to=".lens"></svg>
+    <div class="col" style="width:412px">
+      <div class="box lens"><b>Clarity</b><span>Strunk, by absolute path</span></div>
+      <div class="box lens"><b>Accuracy</b><span>every claim against the ledger</span></div>
+      <div class="box lens"><b>Audience fit</b><span>each section against the anchor</span></div>
+      <div class="box lens"><b>Structure</b><span>BLUF, one idea per paragraph, the bound</span></div>
+    </div>
+    <svg class="wires" data-from=".lens" data-to="#red"></svg>
+    <div class="col" style="flex:1"><div class="box" id="red"><b>Red team</b><span>the hostile reader; then the prose-deliverable exit</span></div></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>Blocking: a false or unsourced claim, a section off the anchor, a structural defect, drift in a rewrite, a failed check.</p>
+  <p>Simplify once, before the certifying pass, never after.</p>
+  <p>A fact absent from the ledger is not the doc’s to assert; a gap is an explicit unknown.</p>
+  <p>Deliver: write it where agreed, commit by the repo’s norm.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-write/SKILL.md at blob 1c39875</footer>
+<script src="figure.js"></script>
+</body>
+</html>
