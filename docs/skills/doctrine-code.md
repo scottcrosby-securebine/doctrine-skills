@@ -1,138 +1,132 @@
 # doctrine-code
 
-The coding wrapper: it takes a feature, a spec or a set of tickets and runs the build through the doctrine's phases, waves and gate, with a code review and an adversary that did not write the code standing between the work and delivery.
+Use it for general coding work done with the doctrine: building a feature, wiring modules, or implementing a spec or tickets, on the backend, the frontend or the UI. Parallel agents build the work, and a code review and a red team from another model family stand between it and delivery.
+
+![The doctrine-code shape: questions settle a requirements file and the test seams, the fixed point is pinned, wave agents build test-first in their own worktrees, and the phase gate runs simplification first, then native checks, matts-code-review and a red team, looping until one pass is clean.](doctrine-code.png)
+
+The figure shows the order this page walks through. Simplification runs first in every pass, before the checks that certify it, never after them.
 
 ## When to use it, and when not
 
-Use it when you want general coding work done with the doctrine: backend, frontend or UI, building features, wiring modules, implementing a spec or tickets, with parallel agents, red-teaming and looping. The README's table puts it as "Features, specs and tickets."
-
-The boundary against the other wrappers is the shape of the request, not the language or the layer:
+Use it when the request is to build something. The boundary against the other wrappers is the shape of the request, not the language or the layer:
 
 - Something is broken, throwing, failing or slow and you want it diagnosed: [doctrine-debug](doctrine-debug.md).
 - You want defects found rather than a feature built: [doctrine-audit](doctrine-audit.md).
-- The deliverable is a rendered page judged by how it looks: [doctrine-gauntlet](doctrine-gauntlet.md). doctrine-code does cover UI work, but it judges it by a visual check against the running app, not by a builder-and-critic loop against a reference.
+- The deliverable is web design judged on the rendered page: [doctrine-gauntlet](doctrine-gauntlet.md). doctrine-code does UI work too, but it judges it with a visual check against the running app, not a builder-and-critic loop against a reference.
 - A documentation sweep: [doctrine-docs](doctrine-docs.md). A proposal, brief, PRD or report: [doctrine-write](doctrine-write.md).
 
-If the work is a one-off question or a one-off edit to a single file nothing else reads, the hub says not to use the doctrine at all.
+The doctrine is not for a one-off question or a one-off edit to a single file nothing else reads.
+
+doctrine-code is a wrapper. The [`doctrine`](doctrine.md) hub supplies the posture: phases and waves, the native checks, the red team, the loop and its alarms, simplification, delivery, and a fallback for every missing skill. This page covers what the wrapper adds: the build discipline, the designated review and its inputs, the red team's axes, and where the record lives.
 
 ## What it asks you first
 
-Doctrine step 1 runs before any work is aimed, and this wrapper shapes it in one of two ways.
+The questions step is the hub's step 1, in one of two forms.
 
-With a spec or tickets, the agent asks only the questions the spec leaves open. It does not re-ask what the spec already settles.
+- **You have a spec or tickets.** The agent asks only what the spec leaves open.
+- **You have no spec.** It runs `superpowers:brainstorming`, and that interview is the questions step, so you are not asked twice. Without superpowers, the agent interviews you itself.
 
-With no spec, it runs `superpowers:brainstorming`, and that interview is the questions step. You are not interviewed twice. Without superpowers installed, the agent interviews you itself.
+Either way, expect to be asked where the test seams go, unless your spec settles it. The seams are the points where tests are written first, and they are also the module contract: the exports that two agents in separate worktrees must agree on are fixed here, before any agent starts, because isolated agents cannot agree on a name while they run.
 
-Either way, when Matt Pocock's `implement` skill is not installed, which the wrapper calls the default rather than an edge case, the build runs `tdd` at test seams you name and agree before wave 1. The wrapper adds those seams to the questions of step 1 because nothing else in the flow produces them, so unless your spec already settles them, expect to be asked where the tests go.
+Your answers go into a requirements file before wave 1: the spec's own path, or a new file under `docs/`, `specs/` or `.scratch/`. Those three directories are where `matts-code-review` looks for a spec. With none there, its Spec reviewer skips and reports "no spec available", and the gate reviews the code against nothing you asked for. Reviews get the file as it stood at wave 1. A later ruling goes in the run record, never into this file.
 
-The settled answers are written to a file before wave 1: the spec's own path, or a new file under your project's `docs/`, `specs/` or `.scratch/`. Those three directories are where `matts-code-review` looks for a spec. A brainstorm whose requirements stay in the conversation leaves the review's Spec axis with nothing to check the code against, and it reports "no spec available" while the gate reads clean on one axis of two. The sources list the categories of question, not the questions themselves; what you are asked depends on what your spec leaves open.
+The run record is a separate file. Where a `docs/PROJECT.md` tracks the phase, [doctrine-project](doctrine-project.md) says where the record goes. Otherwise it goes under `.doctrine/records/` in the repo root, and the agent adds the line `/.doctrine/records/` to the file that `git rev-parse --path-format=absolute --git-path info/exclude` prints, so no tracked file changes. It never goes under the three spec directories, where the review would read run state as the spec. The record opens with your request in your own words, verbatim, as the anchor every reviewer grades against.
 
 ## How the work runs
 
-The wrapper maps its flow onto the hub's steps like this.
+**Build.** The agent works per Matt Pocock's `implement` skill where it is installed, read from your host's skill directory. Where it is not installed, which the wrapper treats as the normal case, the build runs `tdd` at the agreed seams: typecheck regularly, single test files regularly, the full suite once at the end.
 
-**Requirements** (doctrine step 1): the questions above, the answers written to disk, and the anchor, your own words for what the work is for, recorded verbatim for every reviewer.
+**Waves.** The plan is split into phases, and independent slices run as parallel waves. Each wave agent's prompt carries the seams it owns, test-first. Disjoint files are not enough isolation: two agents on separate component files that share one `.next` directory and one dev port both keep answering 200 while the second build overwrites the first. So each agent that writes code gets its own worktree, output directory and port, with dependencies hardlinked rather than symlinked. Where a seam imports a module another agent is writing, the agent gets that module's agreed exports as a stub, or its work waits for a later wave.
 
-**Build discipline**: the agent executes per Matt Pocock's `implement` skill where it is installed, and otherwise per the inline fallback: `tdd` at the agreed seams, then typecheck regularly, single test files regularly, the full suite once at the end, review at the end. The seams go into each wave agent's prompt, since the wave agent is the one writing the tests. `implement` ends with review and commit, and those two lines belong to the orchestrator, not the wave agent: a wave agent never commits on the branch the run ships from. In a shared tree it returns its diff uncommitted; in its own worktree it commits on that worktree's branch and hands it over.
+**Commits.** `implement` ends with review and then commit, and both belong to the orchestrator, not the wave agent. A wave agent never commits on the branch the run ships from. In a shared tree it returns its diff uncommitted. In its own worktree it commits on that worktree's branch and hands the branch over. Everything a gate pass reads is committed before the pass opens: the integrated wave output, then every repair and simplification diff. `matts-code-review` reads `git diff <fixed-point>...HEAD`, so an uncommitted repair is invisible to it, and an empty diff fails it. The agent reads your repo's delivery norm before wave 1, since it decides which branch carries those commits.
 
-**Phases and waves** (doctrine step 2): the plan is split into phases, and independent slices run as parallel waves under the hub's isolation rule. Disjoint files are the floor, not the bar. Two agents on separate component files sharing one `.next` directory and one dev port both keep answering 200 while the second build overwrites the first, so each mutating seat gets its own worktree, output directory and port, with dependencies hardlinked rather than symlinked.
+## The phase gate
 
-**Phase exit** (doctrine steps 3 to 6): the simplification review, finished and committed before the pass's native checks start, then native checks, then `matts-code-review`, then the red team, then the loop to the hub's exit condition, with each repair simplified before the pass that re-checks it. The agent proposes a gate to you rather than taking one, whatever its reach search found; where you choose the hub's smaller gate it is native checks and the red team with any blocking finding repaired and re-reviewed, with the record naming the gate, the reach evidence, the revision that evidence was bound to, and your choice. The next section says what fills each of those slots.
+Each pass runs in this order:
 
-**Delivery** (doctrine step 7): commit, then push and open a PR only where your repo's norm says to or you have said to. Where nothing documents a norm, the agent commits locally and asks. The agent reads that norm before wave 1, not after the commits exist, because what a gate pass reads must already be committed on the branch it reviews.
+1. **Simplification**: `/ponytail-review` where installed, otherwise `/simplify` or a manual YAGNI pass, finished and committed before the checks start, so its diff is inside what the pass certifies. A repair is simplified before the pass that re-checks it.
+2. **Native checks**: every check your project documents as a gate, in its CLAUDE.md, AGENTS.md, README, review checklist or task runner, as they read at the fixed point. Before any pass is clean, one complete path has also run end to end in the real environment, or the nearest one that runs the real code.
+3. **`matts-code-review`**, the designated review, along two axes: Standards and Spec.
+4. **The red team**, from the other model family.
 
-For UI work the same flow runs, plus a block that goes into every wave agent's prompt: reuse the project's existing color patterns, component library and layout conventions; grep for a sibling component before styling anything new and return the grep; verify visually against the running app before claiming done, since tests alone do not prove UI. The visual check names the `run` skill, and a skill name resolves to nothing inside a seat, so the orchestrator puts the project's actual launch command into the prompt. Where the project cannot run authenticated UI locally, the visual check is deferred to integration and run once, by the orchestrator, against the documented post-deploy path. The red team on UI work is also handed the reuse rule, every wave agent's returned grep, and the renders or visual check output the producing side verified, since handed the diff alone it would judge the code and not the result the builder claimed. The sources do not say where the `run` skill comes from.
+The loop repeats until one pass comes clean.
 
-## What the gate is for this shape
+### What the review needs
 
-The hub leaves four slots to the wrapper, and this is what doctrine-code puts in them.
+`matts-code-review` needs four things from the agent that nothing else in the flow supplies:
 
-**Core discipline.** Matt Pocock's `implement`, read from `~/.claude/skills/implement/SKILL.md` when present. Without it, the inline fallback above.
+- **A pinned fixed point**: the SHA the phase started from, taken with `git rev-parse HEAD` before wave 1. Dispatched with none, the review stops and asks you, twice a phase. Pointed at `main` or the merge-base, it re-reviews phases already closed and files their findings again, which the hub counts as outstanding, so no pass can come clean.
+- **A spec source**: the requirements file, by path. A spec that refers to issues by number also needs Matt's `docs/agents/issue-tracker.md`. Where that file is missing, the agent hands a path instead of a `#N`.
+- **The standards as they read at the fixed point.** The review would otherwise read your standards files in the changed tree, so a diff that loosens a standard would be judged against the loosened one. The agent hands it each file as `git show <fixed point>:<path>` prints it, pasted or as a copy beside the record and outside the diff.
+- **The hub's finding split.** The Standards axis returns judgement calls, such as a rename or a "possible Feature Envy", beside breaches of a documented standard. A suggestion declined with a stated reason is non-blocking. A naming or wording note that changes neither what the code does nor what it is for is not a finding at all. Treat every note as blocking and the phase grinds into the round alarm.
 
-**Designated review.** `matts-code-review`, inside the phase gate, with four inputs the wrapper is responsible for because nothing else supplies them:
+### What the red team attacks
 
-1. A fixed point: the SHA the phase started from, taken with `git rev-parse HEAD` before wave 1. Dispatched bare, the review stops and asks you for one, twice a phase, every phase. Pointed at `main` or the merge-base, it re-reviews every phase already closed and re-files their findings, which the hub counts as outstanding, so no pass can come clean.
-2. A spec source: the requirements file from step 1, by path. Specs that reference issues by number need Matt's `docs/agents/issue-tracker.md`; where that is missing the agent hands a path rather than a `#N`.
-3. The standards as they read at the fixed point. The review finds the repo's standards sources and hands its Standards sub-agent their paths, which that seat reads in the changed tree, so a diff that loosens a standard would be judged against the loosened one. The agent hands the review those files' contents as `git show <fixed point>:<path>` prints them, pasted or as a snapshot written beside the record and outside the diff, and tells it to give its Standards sub-agent those in place of the paths.
-4. The hub's finding split. The review's Standards axis returns labelled judgement calls, a rename suggestion or a "possible Feature Envy", on top of documented-standard breaches. Each is graded by the hub's test: a suggestion declined with a stated reason is non-blocking, and a naming or wording note that changes neither what the code does nor what it is for is not a finding at all. Treating them all as blocking grinds the phase into the round alarm.
+On Claude Code the red team is Codex, run through the codex plugin's `codex:codex-rescue` subagent. On Codex CLI it is Claude, run through the Claude Code CLI. It must answer on five axes:
 
-The review reads `git diff <fixed-point>...HEAD`. An empty diff fails it, and an uncommitted repair is invisible to it, which is why every repair and simplification diff is committed before a pass opens.
+- a break in a contract or seam agreed before wave 1;
+- an agreed seam with no test;
+- behaviour that differs from the requirements file as it stood at wave 1;
+- anything that duplicates a module or component already in the tree, which the review cannot see because it reads only the diff;
+- a breach of your project's documented law.
 
-**Red team.** The hub's: `codex:codex-rescue` through the Agent tool, handed what the hub gives every reviewer seat (the diff, the anchor, the blocking definition, the closed questions, the project's own law as it read at the fixed point, and word that it loads no doctrine skill) and required to separate blocking from non-blocking and list what it attacked and could not break. The wrapper names five axes it must answer on: contract or seam breaks at the seams agreed before wave 1, an agreed seam with no test, behaviour that differs from the spec file as it stood at wave 1, anything duplicating a module or component already in the tree (which the designated review cannot see, because it reads the diff), and breaches of the project's documented law. Beside them it is handed the step 1 requirements file as it stood at wave 1, the same fixed-point standards the designated review gets, the path of the installed `matts-code-review` SKILL.md for its smell baseline (a smell is non-blocking unless the hub's blocking test holds on its own), and the test-first standard the wave agents worked to, as data it grades against and never runs. On UI work it also gets what the UI paragraph above adds. Every finding is verified from source before it is acted on.
+It also gets the requirements file as it stood at wave 1, the same fixed-point standards the review gets, the path of the installed `matts-code-review` SKILL.md for its list of code smells, and the test-first standard the wave agents worked to, which it grades against and never runs. A smell blocks only where the hub's blocking test holds on its own. The agent verifies every finding from source before acting on it.
 
-**Simplification.** `/ponytail-review` where installed, otherwise `/simplify` or a YAGNI pass, run before the pass expected to certify the shipping revision so its diff is inside what that pass certifies.
+## UI work
 
-**The record.** The wrapper is silent on where it lives, so the hub's default applies: beside the work in the target repo, excluded from version control and from every reviewer's diff and search, its path named in the report. The requirements file is handed to reviewers by path, so run state goes in a separate file.
+UI work runs the same flow, plus a block that goes into every wave agent's prompt, because the agent that styles the component is the one who must follow it:
 
-**Exit.** The hub's, unchanged: one clean pass of the full gate on one identified revision (or of the smaller gate, where you chose it), no blocking finding open from any earlier pass, and the real-environment run on record. The round alarm fires at every multiple of 4 rounds that found a blocker, and the time alarm at two hours without a round closing, unless your anchor sets other figures. A phase ends in one of five states, and only Exited is clean.
+- Reuse the project's existing color patterns, component library and layout conventions.
+- Grep for a sibling component before styling anything new, and return the grep with the work.
+- Verify visually against the running app before claiming done. Tests alone do not prove UI.
 
-Where a dependency is missing, the slot is filled from the hub's Fallbacks table, the substitution is recorded, and the exit statement names it. The Requirements section below lists each one.
+The visual check names the `run` skill, and a skill name means nothing inside a wave agent's prompt. The agent puts your project's actual launch command there instead. Where your project cannot run authenticated UI locally, the visual check is deferred to integration and run once, by the orchestrator, against your documented post-deploy check, since several agents checking one deployed site is the shared-environment failure the hub forbids.
 
-## A worked example
+On UI work the red team also gets the reuse rule, every wave agent's grep, and the renders or visual-check output.
 
-This example is illustrative: it shows the shape of a run, not a recorded one. The feature, the SHAs and the counts are invented.
+## How it ends
 
-You have a spec for a CSV export: a new endpoint that writes the current filtered list, and a button that calls it. You type `use doctrine-code on docs/specs/csv-export.md`.
+The exit is the hub's: one clean pass of the full gate on one identified revision, with nothing blocking left open from an earlier pass and the real-environment run on record. Two alarms stop the loop and put a diagnosis to you: the round alarm, at every fourth round that found a blocking finding, and the time alarm, at two hours without a round closing. Your request can set other figures for both. Only a ruling you give after an alarm fires restarts the loop.
 
-The agent reads the spec and asks two things it leaves open: whether the export should honour the list's active filter, and where the test seams are. You say yes to the filter and agree two seams, the serializer and the HTTP handler. It writes both answers to `.scratch/csv-export-requirements.md`, opens the record beside it, records your request verbatim as the anchor, and reads your CLAUDE.md, which says work lands as a PR. It pins the fixed point: `git rev-parse HEAD` returns `7c1d2e9`.
+The hub's reduced gate is open to this wrapper. The agent searches what the change reaches and proposes a gate, and only your choice puts a phase on the reduced one: native checks and one red-team review, a blocking finding repaired and the review re-run on the repair, with no loop, no designated review and no alarms. The real-environment run is never dropped.
 
-Wave 1 is two seats, one for the endpoint and one for the button, each in its own worktree on its own port, each prompt carrying its seam and the UI reuse block with your dev server command in place of the `run` skill. Each returns a diff and its test output, and the button seat returns the grep it ran for a sibling export button. The agent applies both diffs to the phase branch and commits. `/ponytail-review` runs on the integrated diff and finds nothing to delete. The agent then re-runs the checks itself.
+A phase ends in one of five states: Exited, the only clean one; Stopped, when you end the loop; Shipped at an escalation, when you choose to deliver from an alarm; Blocked, on an unanswered question; and Unable, when the run cannot resume by itself.
 
-Round 1 opens on that revision. Native checks: the lint, typecheck and test commands your CLAUDE.md names, all green. The real-environment run: the dev server up, the endpoint hit over the wire, the file opened and read. `matts-code-review`, fixed point `7c1d2e9`, spec path passed, returns two things: a rename suggestion on the serializer, declined with a reason and graded non-blocking, and a Spec finding that the export ignores the active filter, blocking. The red team, `codex:codex-rescue`, returns one blocking finding of its own, that the handler returns 200 with an empty body when the list is empty, verified from source, and lists three attacks that did not land. Round 1 closes with 2 blockers.
-
-The class question on the filter finding turns up one other handler that reads the same list without the filter. It is inside the scope you allowed, so the fix goes into the shared query both call. The repairs are committed. `/ponytail-review` runs and deletes a speculative delimiter option nobody asked for, and that diff is committed too. The revision is now `3f8a1c2`.
-
-Round 2 runs the full gate on `3f8a1c2`, the repair diff handed to each seat beside the full one. Native checks green, the real run on record, the review clean with the rename still declined, the red team with no blocking finding and its attack list attached. The pass is clean and the phase is Exited.
-
-The report opens with the gate line:
-
-```text
-Gate: clean pass on 3f8a1c2, real run on record. No blockers open.
-```
-
-Under it: what filled each slot (native checks, the three commands; designated review, `matts-code-review`; red team, `codex:codex-rescue`; simplification, `/ponytail-review`), no substitutions, the deferred list with the one rename, the record's path, and the original request walked item by item: endpoint landed, filter landed, button landed. Then delivery per your norm: commit, push, PR opened.
-
-Had round 4 closed with a blocker still open, the round alarm would have stopped the loop and put a diagnosis to you instead, and had you chosen to ship from there, the line would take the README's other form:
-
-```text
-Gate: shipped at an escalation, round 4, zero clean passes. Open: 1 blocking finding.
-```
+Delivery follows your repo's norm: commit, then push and open a PR only where that norm or you say to. Where no norm is documented, the agent commits locally and asks. The report opens with one line: whether the shipping revision is certified, which blocking findings are open, and any punch list.
 
 ## How to invoke it
 
-The trigger is the description's: general coding work (backend, frontend, or UI) done with the doctrine. Naming the skill is the surest way to fire it.
-
-A sample prompt:
+Name the skill:
 
 ```text
 use doctrine-code to implement docs/specs/csv-export.md; the work lands as a PR
 ```
 
-Naming the spec path gives step 1 its source and the review its Spec axis. Naming the delivery norm saves a question where your repo documents none.
+Naming the spec path gives the questions step its source and the review its Spec axis. Naming the delivery norm saves a question where your repo documents none.
 
 ## Requirements
 
-Nothing here needs to be installed for the wrapper to run. Each external skill it names has a fallback, and the run records which one it used. [docs/requirements.md](../requirements.md) has the install commands.
+Nothing here must be installed for the wrapper to run. Each external skill has a fallback, and the record names any substitution. [requirements.md](../requirements.md) has the install commands.
 
-- **Matt Pocock's `implement`**: read from `~/.claude/skills/implement/SKILL.md` if present. Without it, the inline fallback: `tdd` at agreed seams, typecheck and single test files regularly, full suite once at the end.
-- **Matt's `tdd`**: without it, inline red-green-refactor.
-- **`matts-code-review`**: your own renamed copy of Matt's `code-review`, which the plugin does not bundle. Without it, `/code-review`, or two parallel subagents, Standards and Spec, handed the fixed point, the spec, the diff command and the repo's standards sources.
-- **superpowers**: for brainstorming, parallel dispatch and worktrees. Without it, the agent interviews you itself, dispatches parallel Agent tool calls, and uses `git worktree add`.
-- **codex plugin**: the different-model red team. Without it, a fresh-context subagent prompted to refute the work, and the report names it as same-model.
+- **Matt Pocock's `implement`**: without it, `tdd` at the agreed seams, as above.
+- **Matt's `tdd`**: without it, an inline red-green-refactor.
+- **`matts-code-review`**: a renamed copy of Matt's `code-review`, which the plugin does not bundle. Without it, `/code-review`, or two parallel subagents, Standards and Spec, handed the fixed point, the spec, the diff command and the standards sources.
+- **superpowers**: brainstorming, parallel dispatch and worktrees. Without it, the agent interviews you itself, dispatches parallel agents directly, and uses `git worktree add`.
+- **The codex plugin**: the red team from the other model family. Without it, a fresh-context subagent prompted to refute the work, which the report names as same-model.
 - **ponytail**: without it, `/simplify` or a manual YAGNI pass.
-- **herdr**: optional, for watching the seats in panes. See [watching a run](../watching-a-run.md).
+- **herdr**: optional, for watching each agent in its own pane. See [watching a run](../watching-a-run.md).
 
 ## Red flags
 
-These are the wrapper's own, in reader terms. If you see one in a run, the run has drifted from the flow.
+If you see one of these in a run, it has drifted from the flow:
 
 - Two wave agents on disjoint files but one `.next` and one port, and a screenshot offered as proof that shows the other agent's build.
-- A component styled from scratch because the reuse rule stayed in the skill file and never entered the wave agent's prompt.
-- `matts-code-review` dispatched with no fixed point: it stops mid-phase to ask you, or it takes `main` and re-files findings from phases that closed last week.
-- Requirements from a brainstorm that live only in the conversation, with the Spec axis reporting "no spec available" while the gate reads clean.
-- A naming suggestion treated as blocking, so no pass comes clean and the phase grinds to the round alarm.
-- `tdd` started at seams nobody agreed, each agent's guess different.
-- UI declared done on green tests with nothing rendered.
+- A component styled from scratch because the reuse rule never reached the wave agent's prompt.
+- `matts-code-review` dispatched with no fixed point: it stops to ask you, or takes `main` and re-files findings from closed phases.
+- Requirements from a brainstorm that live only in the conversation, and a Spec axis reporting "no spec available" while the gate reads clean.
+- A naming suggestion treated as blocking, so no pass comes clean.
+- `tdd` started at seams nobody agreed, each agent guessing differently.
+- UI declared done on green tests, with nothing rendered.
 - A push, or a PR opened, with no repo norm and no instruction from you saying to.
 
-The specification is [`skills/doctrine-code/SKILL.md`](../../skills/doctrine-code/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine-code/SKILL.md`](../../skills/doctrine-code/SKILL.md). Trust it over this page wherever the two disagree.
