@@ -67,9 +67,9 @@ Larger architectural refactors found along the way are not rewritten mid-audit. 
 
 ## The gates
 
-**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. Before a phase, the hub has the agent search what the change reaches and propose a gate. Only you can put a phase on the hub's reduced gate, which drops the loop, the designated review and the alarms, and with no answer the phase runs the full gate. The hub's two alarms bound every phase: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
+**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate, which keeps your checks and one adversarial review but drops the loop, the designated review and the alarms. If you do not answer, the phase runs the full gate. The hub's two alarms bound every phase on the full gate: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
 
-The designated review for fix phases is `matts-code-review`. The audit points it with three things, each of which prevents a failure:
+The designated review for fix phases is `matts-code-review`. The audit points it with three things, each preventing a failure:
 
 - **A fixed point**: the SHA the fix phase started from, taken with `git rev-parse HEAD` before the phase's first edit. Never `main` and never the merge-base. With no fixed point the review stops and asks you, twice a phase, every phase. With a branch ref it re-reviews fix phases that already closed and re-files their findings, which the gate counts as outstanding, so no pass can come clean.
 - **A spec source**: the confirmed-list entries this phase fixes, or the tracker issues filed for them. Without one, the review's Spec half skips and it reviews on one axis of two. Issue references resolve only where Matt's `docs/agents/issue-tracker.md` exists. Otherwise it passes the file path.
@@ -84,11 +84,11 @@ The designated review for fix phases is `matts-code-review`. The audit points it
 - **The designated review**: a fresh-context review of the finished report against your words and the confirmed list. `matts-code-review` reviews code against standards and a spec, not a prose report.
 - **The red team**: handed the finished report as well as the confirmed list.
 
-The red team in every gate is the `codex:codex-rescue` seat, a model from a different family. Where the codex plugin is absent, a fresh-context subagent told to refute stands in, and the run names it as a same-model substitute. Its return must separate blocking from non-blocking findings and list what it attacked and could not break. "No findings" with no such list counts as a failed seat.
+The red team in every gate is a seat from the other model family: the `codex:codex-rescue` seat on Claude Code, and Claude through the Claude Code CLI on Codex. Where that seat is absent, a fresh-context subagent told to refute stands in, and the run names it as a same-model substitute. Its return must separate blocking from non-blocking findings and list what it attacked and could not break. "No findings" with no such list counts as a failed seat.
 
 ## How it ends
 
-The run ends with your repo's delivery norm, a commit or a pull request, never with "the loop is clean". Under read-only it ends instead with the report handed to you, uncommitted. In report-first mode the report goes where your project keeps reports, and if there is no such place it asks you. The report, the confirmed list and anything filed are delivered together, and the report names what was left unfiled.
+The run ends with your repo's delivery norm, a commit or a pull request, never with "the loop is clean". Under read-only it ends instead with everything handed to you uncommitted: the report, and in fix-as-we-go mode the diff. In report-first mode the report goes where your project keeps reports, and if there is no such place it asks you. The report, the confirmed list and anything filed are delivered together, and the report names what was left unfiled.
 
 The report opens with one line saying whether the shipping revision is certified and which blocking findings are still open. The README shows two of its forms:
 
@@ -99,13 +99,13 @@ Gate: shipped at an escalation, round 6, zero clean passes. Open: 2 blocking fin
 
 Then it walks your request item by item, saying where each landed or why it was deferred, and lists the non-blocking improvements it found and deferred.
 
-Each phase ends in one of the hub's five states, and only Exited is clean. Exited means a pass came clean. Stopped means you ended the loop. Shipped at an escalation means delivery after an alarm, or after the report's closing round, with a punch list. Blocked means a question put to you is still unanswered. Unable means the run cannot resume by itself, for example because write access went away.
+Each phase ends in one of the hub's five states, and only Exited is clean. Exited means a pass came clean. Stopped means you ended the loop. Shipped at an escalation means you chose to deliver after an alarm, or the report's closing round delivered, with a punch list. Blocked means a direction question put to you is still unanswered. Unable means the run cannot resume by itself, for example because write access went away.
 
 ## A worked example
 
 This example is illustrative. It shows the shape of a run, not a recorded one.
 
-You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The target is settled, so it asks the rest: fix as you go or report first, read-only or not, and the filing line. You answer fix as you go, writes allowed, and file anything that needs a schema change. It writes your answers to disk and dispatches five finders, each prompt carrying the scope ruling.
+You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The target is settled, so it asks the rest: fix as you go or report first, read-only or not, and the filing line. You answer fix as you go, writes allowed, and file anything that needs a schema change. It writes your answers to disk and dispatches five finders, each prompt carrying your rulings.
 
 The finders return findings with `file:line` evidence. Two are confirmed and one stays plausible:
 
@@ -114,7 +114,7 @@ A1  src/importer.ts:88   high  duplicate header silently overwrites a field  con
 A2  src/importer.ts:140  low   dead branch, needs a schema change to remove   confirmed
 ```
 
-The plausible item goes to the appendix. The red team refutes nothing and adds A3, a null path at line 61, which is traced and confirmed. A2 needs a schema change, which you ruled is filed, so it goes to your tracker. A fix phase opens on A1 and A3, its review pinned to the SHA it started from, and loops through the gate until a pass comes clean. Rounds 2 and 3 use fresh lenses and confirm nothing new, so the hunt is dry. The report then passes its own gate and ships with the commit.
+The plausible item goes to the appendix. The red team refutes nothing and adds A3, a null path at line 61, which is traced and confirmed. A2 needs a schema change, and you ruled that such issues are filed, so it goes to your tracker. A fix phase opens on A1 and A3, its review pinned to the SHA it started from, and loops through the gate until a pass comes clean. Rounds 2 and 3 use fresh lenses and confirm nothing new, so the hunt is dry. The report then passes its own gate and ships with the commit.
 
 ## How to invoke it
 
@@ -134,8 +134,8 @@ Nothing has to be installed. Each external skill has a fallback, in the hub's fa
 - Matt Pocock's `diagnosing-bugs`. Without it: reproduce first, and write the regression test before the fix.
 - Matt Pocock's `improve-codebase-architecture`. Without it: architectural refactors are filed as issues.
 - ponytail, for the simplicity lens and the simplification review. Without it: a read that reports and changes nothing for the lens, and `/simplify` or a manual pass for the review.
-- OpenAI's codex plugin, for the red team from a different model family. Without it: a fresh-context subagent told to refute.
-- superpowers, for parallel dispatch and worktrees. Without it: parallel seat dispatches, each with its own assembled prompt.
+- OpenAI's codex plugin on Claude Code, or the Claude Code CLI on Codex, for the red team from the other model family. Without it: a fresh-context subagent told to refute.
+- superpowers, for parallel dispatch and worktrees. Without it: parallel seat dispatches, each with its own assembled prompt, and `git worktree add`.
 
 Install commands and the full list are in [`docs/requirements.md`](../requirements.md). To watch the seats while they run, see [watching a run](../watching-a-run.md).
 
@@ -146,7 +146,7 @@ Signs a run has gone wrong:
 - You said report-first, and the repo has changes beyond the report and what was filed.
 - A report file was committed into a repo you said not to touch.
 - The confirmed list never reached disk, so round 3 re-filed what round 1 fixed and every round looked productive.
-- A compaction reset the dry-round count, so "two dry rounds" was one.
+- Clearing the agent's memory reset the dry-round count, so "two dry rounds" was one.
 - The report cites an issue number that was never filed.
 - A finding vanished because your project named no tracker.
 - A plausible item was fixed as though it were confirmed.
