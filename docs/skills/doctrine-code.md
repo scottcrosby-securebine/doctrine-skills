@@ -26,7 +26,7 @@ The questions step is the hub's step 1, in one of two forms.
 - **You have a spec or tickets.** The agent asks only what the spec leaves open.
 - **You have no spec.** It runs `superpowers:brainstorming`, and that interview is the questions step, so you are not asked twice. Without superpowers, the agent interviews you itself.
 
-Where Matt Pocock's `implement` skill is not installed, which the wrapper treats as the normal case, expect to be asked where the test seams go, unless your spec settles it. The seams are the points where tests are written first, and they are also the module contract: the exports that two agents in separate worktrees must agree on are fixed here, before any agent starts, because isolated agents cannot agree on a name while they run.
+Where Matt Pocock's `implement` skill is not installed, expect to be asked where the test seams go, unless your spec settles it. The seams are the points where tests are written first, and they are also the module contract: the exports that two agents in separate worktrees must agree on are fixed here, before any agent starts, because isolated agents cannot agree on a name while they run.
 
 Your answers go into a requirements file before wave 1: the spec's own path, or a new file under `docs/`, `specs/` or `.scratch/`. Those three directories are where `matts-code-review` looks for a spec. With none there, its Spec reviewer skips and reports "no spec available", and the gate reviews the code against nothing you asked for. Reviews get the file as it stood at wave 1. A later ruling goes in the run record, never into this file.
 
@@ -45,7 +45,7 @@ The run record is a separate file. Where a `docs/PROJECT.md` tracks the phase, [
 Each pass runs in this order:
 
 1. **Simplification**: `/ponytail-review` where installed, otherwise `/simplify` or a manual YAGNI pass, finished and committed before the checks start, so its diff is inside what the pass certifies. A repair is simplified before the pass that re-checks it.
-2. **Native checks**: every check your project documents as a gate, in its CLAUDE.md, AGENTS.md, README, review checklist or task runner, as they read at the fixed point. Before any pass is clean, one complete path has also run end to end in the real environment, or the nearest one that runs the real code.
+2. **Native checks**: every check your project documents as a gate, in its CLAUDE.md, AGENTS.md, README, review checklist or task runner, as they read at the fixed point. A check the change adds or tightens also runs and counts. Before any pass is clean, one complete path has also run end to end in the real environment, or the nearest one that runs the real code.
 3. **`matts-code-review`**, the designated review, along two axes: Standards and Spec.
 4. **The red team**, from the other model family.
 
@@ -70,7 +70,7 @@ On Claude Code the red team is Codex, run through the codex plugin's `codex:code
 - anything that duplicates a module or component already in the tree, which the review cannot see because it reads only the diff;
 - a breach of your project's documented law.
 
-It also gets the requirements file as it stood at wave 1, the same fixed-point standards the review gets, the path of the installed `matts-code-review` SKILL.md for its list of code smells, and the test-first standard the wave agents worked to, which it grades against and never runs. A smell blocks only where the hub's blocking test holds on its own. Its return separates blocking from non-blocking findings and lists what it attacked and could not break. The agent verifies every finding from source before acting on it.
+It also gets the requirements file as it stood at wave 1, the same fixed-point standards the review gets, the path of the installed `matts-code-review` SKILL.md for its list of code smells, and the test-first standard the wave agents worked to, which it grades against and never runs. A smell blocks only where the hub's blocking test holds on its own. Where that SKILL.md is not installed, the red team works from your documented standards alone, and the report says so. The agent requires its return to separate blocking from non-blocking findings and to list what it attacked and could not break, and a return without that list counts as a failed review. The agent verifies every finding from source before acting on it.
 
 ## UI work
 
@@ -80,7 +80,7 @@ UI work runs the same flow, plus a block that goes into every wave agent's promp
 - Grep for a sibling component before styling anything new, and return the grep with the work.
 - Verify visually against the running app, with the `run` skill or browser tools, before claiming done. Tests alone do not prove UI.
 
-A wave agent cannot call the `run` skill by name, so the orchestrator writes your project's actual launch command into the prompt instead. Where your project cannot run authenticated UI locally, the visual check is deferred to integration and run once, by the orchestrator, against your documented post-deploy check, since several agents checking one deployed site is the shared-environment failure the hub forbids.
+A wave agent cannot call the `run` skill by name, so the agent running the phase writes your project's actual launch command into the prompt instead. Where your project cannot run authenticated UI locally, the visual check is deferred to integration, each wave agent's prompt says so, and it runs once, by the agent running the phase, against your documented post-deploy check, since several agents checking one deployed site is the shared-environment failure the hub forbids.
 
 On UI work the red team also gets the reuse rule, every wave agent's grep, and the renders or visual-check output.
 
@@ -88,9 +88,9 @@ On UI work the red team also gets the reuse rule, every wave agent's grep, and t
 
 The exit is the hub's: one clean pass of the full gate on one identified revision, with nothing blocking left open from an earlier pass and the real-environment run on record. Two alarms stop the loop and put a diagnosis to you: the round alarm, at every fourth round that found a blocking finding, and the time alarm, at two hours without a round closing. Your request can set other figures for both. Only a ruling you give after an alarm fires restarts the loop.
 
-The hub's reduced gate is open to this wrapper. The agent checks how far the change reaches and proposes a gate. Only your choice puts a phase on the reduced one. That gate runs the native checks, the real-environment run and one red-team review. A blocking finding from the review is repaired and the review re-run on the repair, and a second blocking finding moves the phase to the full gate. It has no loop, no designated review and no alarms.
+The hub's reduced gate is open to this wrapper. The agent checks how far the change reaches and proposes a gate. Only your choice puts a phase on the reduced one. That gate runs the native checks, the real-environment run and one red-team review. A blocking finding from the review is repaired and the review re-run on the repair, and a blocking finding from that re-run moves the phase to the full gate. It has no loop, no designated review and no alarms.
 
-A phase ends in one of five states: Exited, the only clean one; Stopped, when you end the loop; Shipped at an escalation, when you choose to deliver from an alarm; Blocked, on an unanswered question; and Unable, when the run cannot resume by itself.
+A phase ends in one of five states: Exited, the only clean one; Stopped, when you end the loop; Shipped at an escalation, when you choose to deliver from an alarm; Blocked, when the session ends with a question about direction, one only you can answer, still open; and Unable, when the run cannot resume by itself.
 
 Delivery follows your repo's norm: commit, then push and open a PR only where that norm or you say to. Where no norm is documented, the agent commits locally and asks. The report opens with one line: whether the shipping revision is certified, which blocking findings are open, the difference between the certified and shipping revisions where they differ, and any punch list.
 
@@ -110,7 +110,7 @@ The wrapper runs with none of these installed. Each external skill has a fallbac
 
 - **Matt Pocock's `implement`**: without it, `tdd` at the agreed seams, as above.
 - **Matt's `tdd`**: without it, an inline red-green-refactor.
-- **`matts-code-review`**: Matt's `code-review`, copied under that name by you, since the plugin does not bundle it. Without it, `/code-review`, or two parallel subagents, Standards and Spec, handed the fixed point, the spec, the diff command and the standards sources.
+- **`matts-code-review`**: Matt's `code-review`, which you copy in under that name yourself, since the plugin does not bundle it. Without it, `/code-review`, or two parallel subagents, Standards and Spec, handed the fixed point, the spec, the diff command and the standards sources.
 - **superpowers**: brainstorming, parallel dispatch and worktrees. Without it, the agent interviews you itself, dispatches parallel agents directly, and uses `git worktree add`.
 - **The codex plugin**: the red team from the other model family. Without it, a fresh-context subagent prompted to refute the work, which the report names as same-model.
 - **The Claude Code CLI**, on a Codex CLI host: the red team from the other model family there. Without it, the same-model substitute.
