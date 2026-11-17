@@ -19,9 +19,13 @@
 // branch `<base>` itself, refused while any worktree of the repo holds it), copies the first handoff into its
 // docs/handoffs/, writes the record the handoff's `record:` line names (relative, inside the worktree) with the phase
 // name and one `State: Open` line, points the memory file kickoff at the copy, sets skip-worktree on a tracked memory
-// file, makes the role's own herdr tab, types the launch line, `/clear` and RESUME_LINE each once the pane reads
-// ready, and only then appends `create <role> <pane> <worktree> <launch line>`. Before the launch line, ready is a
-// `pane get` that answered with a pane holding no agent session and agent_status unknown; after it, READY_STATUSES. A
+// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh`, types the launch line
+// `sh <run>/launch/<role>.sh`, `/clear` and RESUME_LINE each once the pane reads ready, and only then appends
+// `create <role> <pane> <worktree> <launch line>`. The launch line carries no PATH value, so it stays within herdr's
+// 1,024-byte limit on a typed line whatever the PATH. Before the launch line, ready is a `pane get` that answered with
+// a pane holding no agent session and agent_status unknown; after it, READY_STATUSES; and before RESUME_LINE, also the
+// pane's restore file naming the session herdr reports in the pane, which the restore hook writes only for the session
+// a /clear started, so the resume line never reaches the launch session, whose prompt gate would block it. A
 // reply that fails or carries no pane is not ready. A handoff copy, record or memory file whose real path leaves the
 // worktree through a link fails the create before any of the three is written.
 //
@@ -70,7 +74,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import {
   runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
 } from './dctr-lib.mjs'
-import { herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
+import { herdr, isPaneNotFound, sleepMs, restoreFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 const MEMORY = 'SESSION_MEMORY.md'
@@ -259,11 +263,16 @@ function create() {
     pane = tab?.result?.root_pane?.pane_id ?? null
     if (!pane) fail('herdr made no pane')
     made.push(`the herdr pane ${pane}`)
-    const launch = `cd ${shq(wt)} && env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
+    const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
       `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"`
+    const script = path.join(run, 'launch', `${role}.sh`)
+    fs.mkdirSync(path.dirname(script), { recursive: true })
+    fs.writeFileSync(script, `${command}\n`)
+    made.push(`the launch file ${script}`)
+    const launch = `sh ${shq(script)}`
     for (const [k, line] of [launch, '/clear', RESUME_LINE].entries()) {
-      waitReady(pane, k === 0, fail)
+      waitReady(pane, k === 0, fail, k === 2)
       herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, so nothing follows it and nothing is closed
     }
     append(`${role} ${pane} ${wt} ${launch}`)
@@ -271,15 +280,22 @@ function create() {
 }
 
 /** Polls `pane get` until the pane reads ready (L7), or fails past the wait. `fresh`: before the launch line, ready is a
- *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES. */
-function waitReady(pane, fresh, fail) {
+ *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES. `resume`: before
+ *  RESUME_LINE, also the pane's restore file naming the session herdr reports. */
+function waitReady(pane, fresh, fail, resume) {
   for (let waited = 0; ; waited += times.poll) {
     let p = null
     try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone`) }
+    if (resume && p && !restored(pane, p)) p = null // not ready for RESUME_LINE until the restore file names its session
     if (p && (fresh ? !p.agent_session?.value && p.agent_status === 'unknown' : READY_STATUSES.includes(p.agent_status))) return
-    if (waited >= times.ready) fail(`the pane ${pane} did not read ready ${fresh ? 'for the launch line' : 'after the launch line'} within ${times.ready}ms`)
+    if (waited >= times.ready) fail(`the pane ${pane} did not read ready ${fresh ? 'for the launch line' : resume ? 'after /clear, its restore file naming the session herdr reports there,' : 'after the launch line'} within ${times.ready}ms`)
     sleepMs(times.poll)
   }
+}
+
+/** Whether the pane's restore file names the session herdr reports in `p`; a file that cannot be read or parsed does not. */
+function restored(pane, p) {
+  try { return Boolean(p.agent_session?.value) && JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === p.agent_session.value } catch { return false }
 }
 
 // ---------------------------------------------------------------- reset

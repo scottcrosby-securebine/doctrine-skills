@@ -32,7 +32,7 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, stopHeldFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, publishToken, liveWork, treeHash, handoffLanded, processListing,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, turnEndLine, publishToken, liveWork, treeHash, handoffLanded, processListing,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
@@ -114,6 +114,8 @@ try {
   // E8-R31: a Stop, a StopFailure and a submitted prompt each end a turn; record where, before this event writes any
   // line, so an R7, R8 or R9 the ended turn answered no longer holds back the dedup. A submitted prompt does nothing
   // else: it writes no paused line, raises no alert and prints nothing, since its output would reach the model.
+  // E15-SK1: the turn end before this event's own, so step 3 sees whether a turn ended after an R8 line.
+  const priorTurnEnd = turnEndLine(sessionId, recordPath)
   if (event !== 'Notification') writeTurnEnd(sessionId, recordPath)
   // Codex: the watcher follows this turn for the events Codex never fires (an API error, idle, a background terminal's
   // exit). Spawned detached; it reads herdr only when a pane may be reached.
@@ -148,7 +150,7 @@ try {
       stopRepo,
       ...pausingStates(record.entries),
       warned,
-      pausedAfterWarned: pausedAfterWarned(record.entries, sessionId),
+      pausedAfterWarned: pausedAfterWarned([...record.entries, { kind: 'turn-end', session: sessionId, line: priorTurnEnd }], sessionId),
       backgroundTasks: backgroundLive(payload.background_tasks),
       liveWork: live,
       sessionCrons: nonEmpty(payload.session_crons),

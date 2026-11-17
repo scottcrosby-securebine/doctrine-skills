@@ -664,6 +664,42 @@ const classBad = classRuns.filter(([label, fx, r]) => r.code !== 0 || typed(fx).
 clause('clause 2w — the restore file, transcript, latch and record each absent, empty or unreadable, git absent, each git call handoffLanded makes (rev-parse, check-ignore, ls-files --error-unmatch, log, ls-files -v and status) failing or timed out, rev-parse and log printing nothing, a committed handoff or the memory file modified under a core.fsmonitor hook that reports nothing changed, a committed handoff rewritten at the same size and mtime under the repository\'s own core.checkStat=minimal or core.trustctime=false, an inherited GIT_DIR naming nothing or another repository or GIT_CEILING_DIRECTORIES at the repository root, a gitfile naming a removed gitdir, and a .git directory missing HEAD, alone or inside a repository holding the handoff clean, a handoff reached through a symlinked docs directory or lane path into a repository where it is uncommitted, an inherited GIT_CONFIG_* excludes file, a ~/.gitconfig one under a session GIT_CONFIG_GLOBAL=/dev/null, or the user\'s default git/ignore ignoring the untracked handoff, a handoff file that is a link into a repository where it is uncommitted, a memory file that is a link to a file modified in the handoff\'s repository or in a second repository, and a handoff committed in the lane as a link to a file outside every repository with the lane\'s memory file modified or the link retargeted, uncommitted, or a docs directory committed in the lane as a link to a second repository and retargeted, uncommitted, a handoff or memory file reached through a chain of committed links whose middle link is retargeted and uncommitted, an untracked, non-ignored handoff link hidden by the repository\'s own status.showUntrackedFiles=no, and a memory file committed as a link to a file outside every repository and retargeted, uncommitted: no /clear typed, and handoffLanded false on an existing memory link whose real path cannot be read, its directory closed or its target missing; the healthy control, under a ceiling at its root behind a git that stops at one, behind a git that stops at a filesystem boundary unless told to cross one, reached through a symlinked lane path, with its handoff file a link to a committed file in the same repository, with its handoff or its memory file a committed link to a file outside every repository, or with its docs directory a committed link to a second repository, or with its handoff and memory file each reached through a chain of committed links, the repository\'s own .gitignore ignoring docs/handoffs/ with the handoff untracked, under a core.fsmonitor hook that reports nothing changed, under the repository\'s own core.checkStat=minimal and core.trustctime=false, and a lane with no .git above it, clear (SR1, SR3, SR4, SR5, SR6, SR7, SR8, SR9, SR10, SR11, SR12, SR13, B1)',
   classBad.length === 0 && memAccClean === true && memAccDenied === false && memGone === false, `${classBad.join(' || ')} | memory link clean ${memAccClean}, its directory closed ${memAccDenied}, its target missing ${memGone}`)
 
+// ---------------------------------------------------------------- clause 2: the pending marker (E15-D254)
+
+const pendingOf = (fx, role = 'a') => { try { return fs.readdirSync(path.join(fx.run, 'pending', role)).sort() } catch { return [] } }
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const pBusy = fixture({ status: 'working' })
+const rPBusy = await sender(pBusy, ['send', 'a', 'for a busy lane'])
+const pIdle = fixture()
+const rPIdle = await sender(pIdle, ['send', 'a', 'for an idle lane'])
+clause('clause 2y — a send that holds its message without a nudge writes <run>/pending/a/<the held file\'s name>, and nothing beside the message under held/a/; its twin, a send that found the pane idle and nudged, leaves no pending marker (E15-D254)',
+  rPBusy.code === 0 && typed(pBusy).length === 0 && held(pBusy).length === 1 && same(pendingOf(pBusy), [path.basename(held(pBusy)[0])]) &&
+  rPIdle.code === 0 && JSON.stringify(typed(pIdle)) === JSON.stringify(nudged()) && same(pendingOf(pIdle), []),
+  JSON.stringify([show(pBusy, rPBusy), pendingOf(pBusy), show(pIdle, rPIdle), pendingOf(pIdle)]))
+
+setShim(pBusy, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0 } } })
+const rPWake = await sender(pBusy, ['wake', 'a'])
+const pFail = fixture({ status: 'working' })
+await sender(pFail, ['send', 'a', 'one'])
+setShim(pFail, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0, typeFail: true } } })
+const rPFail = await sender(pFail, ['send', 'a', 'two'])
+const pAfterFail = pendingOf(pFail), pHeldAfterFail = held(pFail).map((f) => path.basename(f))
+setShim(pFail, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0 } } })
+const rPOk = await sender(pFail, ['send', 'a', 'three'])
+clause('clause 2y2 — the nudge of a later wake removes the pending marker; a send whose nudge fails leaves a marker for each held file, and the next send whose nudge is typed removes them (E15-D254)',
+  rPWake.code === 0 && JSON.stringify(typed(pBusy)) === JSON.stringify(nudged()) && same(pendingOf(pBusy), []) &&
+  rPFail.code === 0 && pHeldAfterFail.length === 2 && same(pAfterFail, pHeldAfterFail) && rPOk.code === 0 && typed(pFail).at(-1) === nudged()[0] && same(pendingOf(pFail), []),
+  JSON.stringify([show(pBusy, rPWake), pendingOf(pBusy), pAfterFail, pHeldAfterFail, show(pFail, rPOk), pendingOf(pFail)]))
+
+// A second send's marker written while the first send's nudge is being typed: the shim writes it on that typing call,
+// after the first send listed its markers.
+const pRace = fixture()
+setShim(pRace, { onType: { text: NUDGE, file: path.join(pRace.run, 'pending', 'a', 'B.md'), line: '' } })
+const rPRace = await sender(pRace, ['send', 'a', 'first'])
+clause('clause 2y3 — a marker another send writes after this send listed its markers, while its nudge is typed, survives that nudge, and this send\'s own marker does not (E15-D254)',
+  rPRace.code === 0 && JSON.stringify(typed(pRace)) === JSON.stringify(nudged()) && held(pRace).length === 1 && same(pendingOf(pRace), ['B.md']),
+  JSON.stringify([show(pRace, rPRace), pendingOf(pRace)]))
+
 // ---------------------------------------------------------------- clause 2: wake-all (E15 Recovery)
 
 const L = (i) => `2026-11-09T04:00:0${i}.000Z`
@@ -1219,6 +1255,25 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   clause('clause 3y — without the sender: the shim answers a /clear with success and only then writes its line onto the lock; another line leaves the lock alone',
     other.status === 0 && before === 'pid 1\nns -\ntoken \n' && cleared.status === 0 && JSON.parse(cleared.stdout).result !== undefined && after === `${before}taken\n`,
     JSON.stringify([other.status, before, cleared.status, cleared.stdout, after]))
+}
+
+// E15-D254, without the sender: the pending fixtures' panes read as the clauses need them.
+{
+  const b = fixture({ status: 'working' }), i = fixture(), f = fixture()
+  setShim(f, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 0, typeFail: true } } })
+  const status = (fx) => JSON.parse(spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'get', PANE], { encoding: 'utf8' }).stdout).result.pane.agent_status
+  const ft = spawnSync(path.join(f.bin, 'herdr'), ['pane', 'run', PANE, NUDGE], { encoding: 'utf8' })
+  const sb = status(b), si = status(i), sf = status(f)
+  clause('clause 3m — without the sender: the busy pending fixture\'s pane reads working, its twin\'s idle, and the failing-nudge shim reads idle and exits 1 on its typing call',
+    sb === 'working' && si === 'idle' && sf === 'idle' && ft.status === 1, JSON.stringify([sb, si, sf, ft.status]))
+  // 2y3's trigger: a pane read writes no marker, and the nudge's typing call writes B.md under pending/a/ and succeeds.
+  const r = fixture(), dir = path.join(r.run, 'pending', 'a')
+  fs.mkdirSync(dir, { recursive: true })
+  setShim(r, { onType: { text: NUDGE, file: path.join(dir, 'B.md'), line: '' } })
+  const herdr = (...a) => spawnSync(path.join(r.bin, 'herdr'), a, { encoding: 'utf8' })
+  const g = herdr('pane', 'get', PANE), afterGet = fs.readdirSync(dir), t = herdr('pane', 'run', PANE, NUDGE), afterType = fs.readdirSync(dir)
+  clause('clause 3m2 — without the sender: 2y3\'s shim writes no marker on a pane read, and writes B.md under pending/a/ on the nudge\'s typing call, which succeeds',
+    g.status === 0 && afterGet.length === 0 && t.status === 0 && same(afterType, ['B.md']), JSON.stringify([g.status, afterGet, t.status, afterType]))
 }
 
 process.exit(bad ? 1 : 0)
