@@ -21,7 +21,7 @@
   <div class="flow">
     <div class="box"><b>Ask</b><span>what the spec leaves open, or a brainstorm; the test seams agreed</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>Write it down</b><span>a requirements file under docs/, specs/ or .scratch/</span></div>
+    <div class="box"><b>Write it down</b><span>the spec, or a requirements file under docs/, specs/ or .scratch/</span></div>
     <div class="arrow">→</div>
     <div class="box"><b>Pin the fixed point</b><span>git rev-parse HEAD, the SHA the phase starts from</span></div>
   </div>
@@ -37,7 +37,7 @@
       <div class="box agent"><b>Wave agent</b><span>a module it does not own: a stub, or a later wave</span></div>
     </div>
     <svg class="wires" data-from=".agent" data-to="#merge"></svg>
-    <div class="col" style="flex:1"><div class="box" id="merge"><b>Integrate and commit</b><span>the orchestrator commits; agents never do on the ship branch</span></div></div>
+    <div class="col" style="flex:1"><div class="box" id="merge"><b>Integrate and commit</b><span>the orchestrator commits; wave agents never commit on the ship branch</span></div></div>
   </div>
 </section>
 
