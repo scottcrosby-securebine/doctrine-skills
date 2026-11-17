@@ -13,17 +13,17 @@
 
 <section class="title">
   <h1>Two axes read each doc area in parallel, and the code decides the fact</h1>
-  <p>A documentation sweep under the doctrine. Docs only: a code bug is filed and annotated, never fixed.</p>
+  <p>A documentation sweep under the doctrine. Docs only: a code bug is annotated in the doc, never fixed.</p>
 </section>
 
 <section class="row">
-  <div class="label">Per area</div>
+  <div class="label">Once, then<br>per area</div>
   <div class="fan">
-    <div class="col" style="width:250px"><div class="box" id="scope"><b>Scope and inventory</b><span>doc trees, a concrete horizon ref, PR shape; areas</span></div></div>
+    <div class="col" style="width:250px"><div class="box" id="scope"><b>Scope and inventory</b><span>doc trees, a concrete horizon ref, PR shape, gate; split into areas</span></div></div>
     <svg class="wires" data-from="#scope" data-to=".axis"></svg>
     <div class="col" style="width:380px">
       <div class="box axis"><b>Accuracy</b><span>every claim against source, as doc-file:line</span></div>
-      <div class="box axis"><b>Coverage</b><span>merges since the horizon no doc mentions</span></div>
+      <div class="box axis"><b>Coverage</b><span>changes since the horizon that no doc mentions</span></div>
     </div>
     <svg class="wires" data-from=".axis" data-to="#merge"></svg>
     <div class="col" style="flex:1"><div class="box" id="merge"><b>Merge</b><span>dedupe; the code decides the fact, not the direction</span></div></div>
@@ -47,9 +47,9 @@
 
 <section class="notes">
   <p>A command check means the command still resolves. It is never run for its effects.</p>
-  <p>A code bug is filed, and the doc annotated with what the code does today. No invented issue numbers.</p>
+  <p>A code bug is filed where it can be, and the doc annotated with what the code does today. No invented issue numbers.</p>
   <p>CLAUDE.md and AGENTS.md edits are flagged separately in the PR.</p>
-  <p>Exit: one clean pass, or the prose-deliverable exit’s closing round.</p>
+  <p>Exit: one clean pass, or a closing round and delivery at an escalation, not certified.</p>
 </section>
 
 <footer class="foot">Drawn from skills/doctrine-docs/SKILL.md at blob 6a5cf61</footer>
