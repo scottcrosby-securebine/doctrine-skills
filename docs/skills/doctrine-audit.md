@@ -2,7 +2,7 @@
 
 A bug hunt or deep code audit under the doctrine. Parallel finders sweep an area of your codebase, every finding is confirmed against source before it counts, a red team attacks the confirmed list, and the run either fixes what it confirmed or hands you a report, whichever you chose. The hunt stops after two rounds in a row find nothing new.
 
-![Scope questions feed five parallel finder lenses into one confirmed list on disk; from that list a red team refutes and extends, fix phases run highest severity first under the hub's gate, the rest is filed, and fresh rounds loop back until two come back dry, then the report goes through its own gate. The Dry? box sends the run back to fresh lenses until two rounds confirm nothing new.](doctrine-audit.png)
+![Scope questions feed five parallel finder lenses into one confirmed list on disk; from that list a red team refutes and extends, fix phases run highest severity first under the hub's gate, the rest is filed, and a Dry? box sends the run back to fresh lenses until two rounds confirm nothing new; then the report goes through its own gate.](doctrine-audit.png)
 
 The figure reads top to bottom. The top row finds and verifies: your scope answers go to five finder lenses, and their findings, once confirmed, land in one list. The bottom row reads that list: the red team, the fix phases, the filing, and the dry-round test. The report closes the run and passes a gate of its own.
 
