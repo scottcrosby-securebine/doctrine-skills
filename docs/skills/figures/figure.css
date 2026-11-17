@@ -1,0 +1,71 @@
+/* The figure set's one stylesheet. A figure is a 1200x675 canvas that render.mjs shoots at scale 2.
+   Rebuilt from the seven figures drawn at plugin 2.2.7, whose sources did not survive: same palette, type and
+   parts. specimen.html shows every part in use. */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400&display=block');
+
+:root {
+  --bg: #070c11;
+  --panel: #0f1922;
+  --line: #23343f;
+  --text: #e6edf2;
+  --muted: #8fa3b0;
+  --accent: #f5a701;
+  --pad: 32px;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --display: 'Archivo', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; }
+body {
+  width: 1200px; height: 675px; background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column; font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Spaced uppercase mono: the header, row labels and the footer. */
+.head, .label, .foot { font: 400 11px/17px var(--mono); letter-spacing: .17em; text-transform: uppercase; color: var(--muted); }
+
+.head { flex: none; height: 35px; padding: 9px var(--pad) 0; border-bottom: 1px solid var(--line); display: flex; gap: 25px; }
+.head .no { color: var(--accent); font-weight: 500; margin-left: -10px; }
+
+.title { flex: none; padding: 16px var(--pad) 14px; border-bottom: 1px solid var(--line); }
+.title::before { content: ''; display: block; width: 26px; height: 2px; background: var(--accent); margin-bottom: 11px; }
+.title h1 { font: 800 35px/35px var(--display); max-width: 720px; }
+.title p { font-size: 13.5px; line-height: 18px; margin-top: 8px; }
+
+/* A band of the figure: a label on the left, the drawing on the right. */
+.row { flex: none; display: grid; grid-template-columns: 160px 1fr; padding: 11px var(--pad); border-bottom: 1px solid var(--line); }
+.label { padding-top: 9px; }
+
+/* A run of boxes joined by arrows. */
+.flow { display: flex; align-items: stretch; }
+.flow > .box { flex: 1; }
+.arrow { flex: none; width: 27px; display: grid; place-items: center; color: var(--muted); font: 400 19px var(--sans); }
+
+/* A panel with its top-right and bottom-left corners cut; the outer layer is the border. */
+.box {
+  --cut: 11px;
+  position: relative; background: var(--line); padding: 8px 11px 7px;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.box::before {
+  content: ''; position: absolute; inset: 1px; background: var(--panel); z-index: 0;
+  clip-path: polygon(0 0, calc(100% - var(--cut) + .4px) 0, 100% calc(var(--cut) - .4px), 100% 100%, calc(var(--cut) - .4px) 100%, 0 calc(100% - var(--cut) + .4px));
+}
+.box > * { position: relative; }
+.box b { display: block; font: 600 14.5px/16px var(--display); }
+.box span { display: block; margin-top: 4px; font: 400 11px/15px var(--mono); letter-spacing: .053em; color: var(--muted); }
+
+/* A fan: the source column, the connector svg (figure.js draws it), the targets column, and so on. */
+.fan { display: flex; align-items: center; height: 100%; }
+.fan .col { display: flex; flex-direction: column; gap: 4px; }
+.fan svg.wires { flex: none; width: 45px; align-self: stretch; overflow: visible; }
+.fan svg.wires path { fill: none; stroke: var(--muted); stroke-width: 1px; }
+
+/* Rules of the skill, in two columns of mono text. */
+.notes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; padding: 9px var(--pad) 0; align-content: start; }
+.notes p { font: 400 13px/19px var(--mono); letter-spacing: .033em; padding: 4px 0 7px; }
+.notes p:nth-child(n+3) { border-top: 1px solid var(--line); padding-top: 5px; }
+
+.foot { flex: none; border-top: 1px solid var(--line); padding: 9px var(--pad) 0; height: 35px; }
