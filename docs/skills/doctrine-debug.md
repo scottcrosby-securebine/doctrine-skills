@@ -2,7 +2,7 @@
 
 Diagnose and fix one reported defect under the doctrine. The run builds a command that fails on the bug, tests hypotheses in parallel against it, red-teams the diagnosis before any fix is written, and then gates the fix.
 
-![doctrine-debug in two phases. Diagnosis: ask, build the feedback loop, a wave of read-only probes with one hypothesis each, then a red team on the root-cause claim. Fix: regression test first, minimal fix, simplification, then the gate of loop, native checks, matts-code-review and red team, then delivery.](doctrine-debug.png)
+![doctrine-debug in two phases. Diagnosis: ask, build the feedback loop, a wave of isolated probes with one hypothesis each, a new list when all die, then a red team on the root-cause claim. Fix: regression test first, minimal fix, simplification, then the gate of loop, native checks, matts-code-review and red team, repeated until one pass comes clean, then delivery.](doctrine-debug.png)
 
 ## When it fires
 
@@ -14,7 +14,7 @@ Pick another skill when the work is not one known defect. A hunt for bugs you ha
 
 It starts with the open questions about the bug: how to reproduce it, when it last worked, and the environment it fails in. Your answers go into the run's record verbatim as the anchor, and every reviewer gets them, so the fix is judged against what you said was wrong.
 
-Two other things are yours to set. If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more. You can also set the alarm figures: the round count and the time budget. Without them the hub's defaults apply, 4 and two hours.
+Two other things are yours to set. If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more. You can also set the alarm figures: how many rounds that find a blocking problem the run may take before it stops and asks you, and the time budget. Without them the hub's defaults apply, 4 rounds and two hours.
 
 ## How a run goes
 
@@ -22,15 +22,15 @@ The core discipline is Matt Pocock's `diagnosing-bugs` skill, followed phase by 
 
 ### Phase one: the diagnosis
 
-**Build the feedback loop.** The skill tells the agent to spend disproportionate effort here. The loop is done only when the agent can name one command, already run, that goes red on this bug. Without a local way to reproduce it (no local database, a UI behind a login), the agent uses your project's documented CI or production-probe paths, or stops and asks you. It does not guess at causes without a loop.
+**Build the feedback loop.** The wrapper tells the agent to spend disproportionate effort here. The loop is done only when the agent can name one command, already run, that goes red on this bug. Without a local way to reproduce it (no local database, a UI behind a login), the agent uses your project's documented CI or production-probe paths, or stops and asks you. It does not guess at causes without a loop.
 
 **Test hypotheses as a wave.** When more than one cause is live, the agent sends one probe per hypothesis, in parallel. Each probe's prompt carries the loop command, the output already in hand, the symptom, the one hypothesis it owns, and its isolation, with read-only stated in the prompt itself. A probe handed only "test hypothesis 3" reads code and calls that evidence, which is why the command goes in every prompt. Hypotheses die on evidence from the loop. If all of them die, the agent builds a new list from what it learned rather than reusing the old one.
 
-**Count the waves that fail.** This phase runs no review gate, so the hub's round alarm would never fire here. The wrapper counts instead: one for every wave that ends without a confirmed root cause, whether every hypothesis died, a survivor could not be proved, or the evidence was inconclusive. The count is kept on disk. When it reaches a multiple of the round-alarm figure, the run stops and puts the hub's diagnosis to you, with this count where the round count would be. The hub's time alarm applies as written.
+**Count the waves that fail.** This phase runs no review gate, so the hub's round alarm would never fire here. The wrapper counts instead: one for every wave that ends without a confirmed root cause, whether every hypothesis died, a survivor could not be proved, or the evidence was inconclusive. The count is kept on disk. When it reaches a multiple of the rounds figure, 4 unless you set another, the run stops and puts the hub's diagnosis to you, with this count where the round count would be. The hub's time alarm applies as written.
 
 **Red-team the diagnosis before any fix.** The red team gets the symptom, the loop, the root-cause claim, the surviving probe's return, each killed hypothesis with its evidence, and Phase 1 of `diagnosing-bugs` as the standard for the loop. It is asked to refute the claim on two points: does the loop reproduce the symptom you reported, not a neighbouring one, and did every rival hypothesis die on evidence from the loop rather than on code-reading. The agent checks each counter-claim against source.
 
-The diagnosis phase ends when the claim survives that red team and the agent's own trace through the source. The agent then writes the claim down where the fix will land, in one paragraph: the symptom, the loop command, the root cause and the source evidence. That paragraph is the phase's deliverable, where a later session resumes from, and the spec the fix's review reads.
+The diagnosis phase ends when the claim survives that red team and the agent's own trace through the source. The agent then writes the claim down where the fix will land, in one paragraph: the symptom, the loop command, the root cause and the source evidence. That paragraph is the phase's deliverable, the point a later session resumes from, and the spec the fix's review reads.
 
 ### Phase two: the fix
 
@@ -38,17 +38,17 @@ The diagnosis phase ends when the claim survives that red team and the agent's o
 
 **Simplify before the gate.** A simplification review of the fix runs and is committed before the gate's checks start, and again on each repair before the pass that re-checks it. The wrapper's rule of thumb: a bug fix that adds a new abstraction is usually the wrong fix.
 
-**Gate the fix.** Each pass runs the loop, which must be green, the project's own documented checks, `matts-code-review` on the fix diff, and a red team on the diff. The phase exits on one clean pass, as the hub defines it. For an intermittent bug, green means the full stress run clean, sized against the reproduction rate Phase 1 measured, never one lucky run.
+**Gate the fix.** Each pass runs four checks: the loop, which must be green, the project's own documented checks, `matts-code-review` on the fix diff, and a red team on the diff. A pass that finds a blocking problem leads to a repair and another pass. The phase exits on one clean pass, as the hub defines it. For an intermittent bug, green means the full stress run clean, sized against the reproduction rate Phase 1 measured, never one lucky run.
 
 The fix's red team also gets the written root-cause claim, that reproduction rate (or word that the loop is deterministic), and your project's standards as they read before the fix. It answers three questions: does the regression test fail without the fix, is the fix minimal, and do other callers carry the same fault.
 
-## How the review is pointed
+### How the review is pointed
 
 The agent gives `matts-code-review` three things so it reviews the fix and nothing else:
 
-- **The fixed point.** The agent reads `git rev-parse HEAD` before writing the regression test and passes that commit. Without one, the review stops and asks you, twice a phase. Given `main` or the merge-base, it re-reviews work already merged.
+- **The fixed point.** The agent reads `git rev-parse HEAD` before writing the regression test and passes that commit. Sent without one, the review stops to ask you for it, twice a phase. Given `main` or the merge-base, it re-files findings from work already merged, and the gate counts them against the current pass.
 - **A spec.** The bug's tracker issue, or the root-cause paragraph. Without one, its Spec reviewer skips with "no spec available" and the review covers one axis of two. An issue reference resolves only where `docs/agents/issue-tracker.md` exists, so otherwise the agent passes a file path.
-- **The standards as they were.** Each standards file as it read at the fixed point, from `git show <sha>:<path>` or a worktree kept at that commit until the review returns. Read from the changed tree, a fix that loosened a standard would be judged by the loosened version.
+- **The standards as they were.** Each standards file as it read at the fixed point, from `git show <sha>:<path>` or a worktree kept at that commit until the review returns. If the review read the standards from the changed tree, a fix that loosened a standard would be judged by the loosened version.
 
 ## How it ends
 
@@ -58,6 +58,8 @@ Delivery follows your repository's norm, a commit or a pull request. The report 
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
+Below that line the report gives the path of the run's record, which sits beside the work and outside version control, names what filled each slot of the gate, lists the improvements it deferred, and walks your original request item by item, saying where each landed or why it was deferred.
+
 Each phase ends in one of the hub's five states: Exited (the only clean one), Stopped, Shipped at an escalation, Blocked, or Unable. A run that stops on an alarm asks you whether to continue or ship, with a diagnosis of what shipping now would mean.
 
 ## How to invoke it
@@ -65,7 +67,7 @@ Each phase ends in one of the hub's five states: Exited (the only clean one), St
 Say what fails and what you know about when it broke. Those are the first questions it would ask.
 
 ```text
-use doctrine-debug: `npm run export -- --since=2026-09-01` throws a KeyError since last week, passed on the 3rd, same trace in CI. Diagnose and fix it.
+use doctrine-debug: `npm run export -- --since=2026-09-01` throws `TypeError: Cannot read properties of undefined` since last week, passed on the 3rd, same trace in CI. Diagnose and fix it.
 ```
 
 ## Requirements
@@ -77,7 +79,7 @@ Nothing must be installed. Each dependency has a fallback:
 - A red team from the other model family: on Claude Code, OpenAI's codex plugin. Without it, a fresh-context subagent of the same model, and the report says so.
 - superpowers, for the parallel probe wave. Without it, parallel subagents, each with its prompt written out in full.
 - ponytail, for the simplification review. Without it, `/simplify` or a manual pass that deletes what nobody asked for.
-- `doctrine-pane` and [herdr](https://herdr.dev) 0.8.2 or later, only for a pane you asked for. Without them the step runs non-interactively and is recorded as not run.
+- `doctrine-pane` and [herdr](https://herdr.dev) 0.8.2 or later, only for a pane you asked for. Without them the agent runs the commands non-interactively and records the interactive step as not run.
 
 Every substitution is written in the record and named in the exit statement. Install commands are in [requirements](../requirements.md).
 

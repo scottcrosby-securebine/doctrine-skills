@@ -19,12 +19,12 @@
 <section class="row">
   <div class="label">Phase one:<br>diagnosis</div>
   <div class="fan">
-    <div class="col" style="width:226px"><div class="box" id="loop"><b>Build the loop</b><span>one already-run command that goes red on this bug</span></div></div>
+    <div class="col" style="width:226px"><div class="box"><b>Ask</b><span>how to reproduce it, when it last worked, where</span></div><div class="box" id="loop"><b>Build the loop</b><span>one already-run command that goes red on this bug</span></div></div>
     <svg class="wires" data-from="#loop" data-to=".probe"></svg>
     <div class="col" style="width:330px">
-      <div class="box probe"><b>Probe: hypothesis A</b><span>the loop command, read-only</span></div>
+      <div class="box probe"><b>Probe: hypothesis A</b><span>the loop command, isolated</span></div>
       <div class="box probe"><b>Probe: hypothesis B</b><span>killed on loop evidence</span></div>
-      <div class="box probe"><b>Probe: hypothesis C</b><span>one hypothesis per probe</span></div>
+      <div class="box probe"><b>Probe: hypothesis C</b><span>all die: a new list from new evidence</span></div>
     </div>
     <svg class="wires" data-from=".probe" data-to="#red"></svg>
     <div class="col" style="flex:1"><div class="box" id="red"><b>Red team the claim</b><span>right symptom? rivals died on the loop? then a source trace and one written paragraph</span></div></div>
@@ -40,16 +40,16 @@
     <div class="arrow">→</div>
     <div class="box"><b>Simplify</b><span>committed before the gate</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>Gate</b><span>loop green, native checks, matts-code-review, red team</span></div>
+    <div class="box"><b>Gate</b><span>loop, native checks, matts-code-review, red team; repeat until one pass is clean</span></div>
     <div class="arrow">→</div>
     <div class="box"><b>Deliver</b><span>by the repo’s norm</span></div>
   </div>
 </section>
 
 <section class="notes">
-  <p>Ask first: how to reproduce it, when it last worked, where it fails.</p>
+  <p>One probe per hypothesis, each carrying the loop command.</p>
   <p>Every wave without a confirmed cause counts toward the alarm.</p>
-  <p>The review gets a pinned SHA, the root-cause paragraph as spec, standards as they were.</p>
+  <p>The review gets a pinned SHA, the issue or root-cause paragraph as spec, standards as they were.</p>
   <p>An intermittent bug is green only on a full stress run.</p>
 </section>
 
