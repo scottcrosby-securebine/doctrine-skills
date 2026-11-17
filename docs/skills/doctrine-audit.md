@@ -67,7 +67,13 @@ Larger architectural refactors found along the way are not rewritten mid-audit. 
 
 ## The gates
 
-**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate, which keeps your checks and one adversarial review but drops the loop, the designated review and the alarms. If you do not answer, the phase runs the full gate. The hub's two alarms bound every phase on the full gate: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
+**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. A pass counts as clean only once one complete path has also run end to end in the environment the work ships to, or the nearest one that runs the real code, with the change's effect observed. Where no such environment is reachable, the run says the check is unrun and never calls the pass clean.
+
+Every blocking finding gets the hub's class question: where else would the same defect have left the same mark? The agent looks at every such site, fixes the ones inside your scope, and lists those outside it in the report, or asks you where it cannot tell. A fix to one call site therefore often lands in the shared code they all use.
+
+Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate. It keeps your checks, the end-to-end run and an adversarial review, re-run on each repair, but drops the loop, the designated review and the alarms, and a second blocking finding moves the phase to the full gate. If you do not answer, the phase runs the full gate.
+
+The hub's two alarms bound every phase on the full gate: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours without a round closing unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
 
 The designated review for fix phases is `matts-code-review`. The audit points it with three things, each preventing a failure:
 
@@ -105,7 +111,7 @@ Each phase ends in one of the hub's five states, and only Exited is clean. Exite
 
 This example is illustrative. It shows the shape of a run, not a recorded one.
 
-You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The target is settled, so it asks the rest: fix as you go or report first, read-only or not, and the filing line. You answer fix as you go, writes allowed, and file anything that needs a schema change. It writes your answers to disk and dispatches five finders, each prompt carrying your rulings.
+You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The target is settled, so it asks the rest: fix as you go or report first, read-only or not, and the filing line. You answer fix as you go, writes allowed, and file anything that needs a schema change. It writes your answers to disk and dispatches five finders, each prompt carrying your scope and write rulings.
 
 The finders return findings with `file:line` evidence. Two are confirmed and one stays plausible:
 
@@ -114,7 +120,7 @@ A1  src/importer.ts:88   high  duplicate header silently overwrites a field  con
 A2  src/importer.ts:140  low   dead branch, needs a schema change to remove   confirmed
 ```
 
-The plausible item goes to the appendix. The red team refutes nothing and adds A3, a null path at line 61, which is traced and confirmed. A2 needs a schema change, and you ruled that such issues are filed, so it goes to your tracker. A fix phase opens on A1 and A3, its review pinned to the SHA it started from, and loops through the gate until a pass comes clean. Rounds 2 and 3 use fresh lenses and confirm nothing new, so the hunt is dry. The report then passes its own gate and ships with the commit.
+The plausible item goes to the appendix. The red team refutes nothing and adds A3, a null path at line 61, which is traced and confirmed. A2 needs a schema change, and you ruled that such issues are filed, so it goes to your tracker. A fix phase opens on A1 and A3, its review pinned to the SHA it started from. The red team finds a defect in the A1 repair, and the class question turns up a second call site with the same header handling, so the fix moves into the shared function. The next pass comes clean, with an end-to-end import run on record. Rounds 2 and 3 use fresh lenses and confirm nothing new, so the hunt is dry. The report then passes its own gate and ships with the commit.
 
 ## How to invoke it
 
@@ -146,7 +152,7 @@ Signs a run has gone wrong:
 - You said report-first, and the repo has changes beyond the report and what was filed.
 - A report file was committed into a repo you said not to touch.
 - The confirmed list never reached disk, so round 3 re-filed what round 1 fixed and every round looked productive.
-- Clearing the agent's memory reset the dry-round count, so "two dry rounds" was one.
+- Summarising the agent's memory between rounds reset the dry-round count, so "two dry rounds" was one.
 - The report cites an issue number that was never filed.
 - A finding vanished because your project named no tracker.
 - A plausible item was fixed as though it were confirmed.
