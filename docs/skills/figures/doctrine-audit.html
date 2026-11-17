@@ -17,7 +17,7 @@
 </section>
 
 <section class="row">
-  <div class="label">Every step<br>reads one list</div>
+  <div class="label">Find and<br>verify</div>
   <div class="fan">
     <div class="col" style="width:226px"><div class="box" id="ask"><b>Ask scope</b><span>area, fix-as-we-go or report-first, read-only, filing line</span></div></div>
     <svg class="wires" data-from="#ask" data-to=".lens"></svg>
@@ -29,18 +29,18 @@
       <div class="box lens"><b>Security paths</b></div>
     </div>
     <svg class="wires" data-from=".lens" data-to="#list"></svg>
-    <div class="col" style="flex:1"><div class="box" id="list"><b>Confirmed list</b><span>verified from source, file:line, on disk; PLAUSIBLE goes to the appendix</span></div></div>
+    <div class="col" style="flex:1"><div class="box" id="list"><b>Confirmed list</b><span>verified from source, file:line, on disk; unconfirmed items go to the appendix</span></div></div>
   </div>
 </section>
 
 <section class="row">
-  <div class="label">From the list</div>
+  <div class="label">Every later step<br>reads the list</div>
   <div class="flow">
     <div class="box"><b>Red team</b><span>refute and extend</span></div>
     <div class="arrow">→</div>
     <div class="box"><b>Fix phases</b><span>highest severity first, the hub’s gate each</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>File the rest</b><span>never an invented number</span></div>
+    <div class="box"><b>File the rest</b><span>never an invented issue number</span></div>
     <div class="arrow">→</div>
     <div class="box"><b>Dry?</b><span>two rounds with nothing new; else fresh lenses</span></div>
     <div class="arrow">→</div>
@@ -52,7 +52,7 @@
   <p>Report-first and read-only are two questions; ask both.</p>
   <p>Report-first: no fix phase opens, but filing still runs.</p>
   <p>Fix phases: matts-code-review pinned to the phase’s starting SHA, never main.</p>
-  <p>Nothing filed is said plainly; no lens invented to reach the count.</p>
+  <p>If nothing was filed, the report says so. No lens is invented to reach the count.</p>
 </section>
 
 <footer class="foot">Drawn from skills/doctrine-audit/SKILL.md at blob b3e7e8d</footer>
