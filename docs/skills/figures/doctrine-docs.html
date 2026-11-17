@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- Figure source for doctrine-docs, started from specimen.html. Render from the repo root:
+     node docs/skills/figures/render.mjs docs/skills/figures/doctrine-docs.html docs/skills/doctrine-docs.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-docs/SKILL.md@6a5cf61236582bc5b8161908954b56cd605bfdad">
+<title>Figure: doctrine-docs</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 05/15</span><span>doctrine-docs</span></header>
+
+<section class="title">
+  <h1>Two axes read each doc area in parallel, and the code decides the fact</h1>
+  <p>A documentation sweep under the doctrine. Docs only: a code bug is filed and annotated, never fixed.</p>
+</section>
+
+<section class="row">
+  <div class="label">Per area</div>
+  <div class="fan">
+    <div class="col" style="width:250px"><div class="box" id="scope"><b>Scope and inventory</b><span>doc trees, a concrete horizon ref, PR shape; areas</span></div></div>
+    <svg class="wires" data-from="#scope" data-to=".axis"></svg>
+    <div class="col" style="width:380px">
+      <div class="box axis"><b>Accuracy</b><span>every claim against source, as doc-file:line</span></div>
+      <div class="box axis"><b>Coverage</b><span>merges since the horizon no doc mentions</span></div>
+    </div>
+    <svg class="wires" data-from=".axis" data-to="#merge"></svg>
+    <div class="col" style="flex:1"><div class="box" id="merge"><b>Merge</b><span>dedupe; the code decides the fact, not the direction</span></div></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">Then</div>
+  <div class="flow">
+    <div class="box"><b>Verify</b><span>every finding, before any edit</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Edit</b><span>in each doc’s own voice</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Native checks</b><span>your gates, then claims, links, commands</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Red team</b><span>the one adversary, also the review</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Deliver</b><span>by the repo’s norm, with a sweep summary</span></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>A command check means the command still resolves. It is never run for its effects.</p>
+  <p>A code bug is filed, and the doc annotated with what the code does today. No invented issue numbers.</p>
+  <p>CLAUDE.md and AGENTS.md edits are flagged separately in the PR.</p>
+  <p>Exit: one clean pass, or the prose-deliverable exit’s closing round.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-docs/SKILL.md at blob 6a5cf61</footer>
+<script src="figure.js"></script>
+</body>
+</html>

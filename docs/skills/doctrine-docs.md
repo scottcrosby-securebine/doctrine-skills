@@ -1,136 +1,102 @@
 # doctrine-docs
 
-A documentation sweep: the agent reads the codebase, finds every doc claim that no longer matches the code and every shipped behaviour no doc mentions, fixes the docs, and lands the result the way your repo normally ships work.
+A documentation sweep. The agent checks your docs against the code, fixes every claim the code no longer bears out, writes up shipped behaviour no doc mentions, and lands the result the way your repo ships work. It changes docs only.
 
-![The doctrine-docs wrapper as a pipeline: scope questions, then parallel Accuracy and Coverage waves per doc area, then verify, edit, a single red-team pass that is also the review, and delivery by the repo's norm.](doctrine-docs.png)
+![The doctrine-docs flow. Scope questions and an inventory of doc areas fan out to parallel Accuracy and Coverage seats per area, which merge, with the code deciding facts. Then verify, edit, native checks, one red team that is also the review, and delivery by the repo's norm.](doctrine-docs.png)
 
-The figure shows the wrapper's phases, seats and gate.
+## When to use it
 
-## When to use it, and when not
+Use it when the docs should match the implementation and the implementation should stay as it is. It fires on a request for a documentation sweep: review the codebase so the docs reflect the current implementation, update stale docs, cover undocumented features, and land the sweep by the repo's delivery norm, a PR where that is the norm.
 
-Use it when you want the docs to match the implementation and you are not asking for the implementation to change. The trigger is a documentation sweep: reviewing the codebase so all docs reflect the current implementation, updating stale docs, covering undocumented features, then landing the sweep by the repo's delivery norm.
+It does not fix code. When a doc and the code disagree because the code is wrong, the run files the bug on the project's tracker and rewrites the doc to say what the code does today, with an annotation: "currently does Y, see issue #N; intended X". Where it cannot file the issue, because your CLAUDE.md names no tracker, `gh` is not authenticated, or you have not said where issues go, the annotation goes in without a number ("currently does Y; intended X — unfiled, listed in the sweep summary") and the bug is listed in the summary instead. It never invents an issue number, never drops the annotation, and never stalls on a tracker.
 
-It is docs-only. No code changes and no bug fixing. When a doc-versus-code mismatch turns out to be a bug in the code, the run does not fix the code. It files the bug on the project's tracker and rewrites the doc to describe what the code does today, with an annotation of the form "currently does Y, see issue #N; intended X". Where no issue can be filed, because the project's CLAUDE.md names no tracker, `gh` is not authenticated, or you have not said where issues go, the annotation goes in without a number and the bug is listed in the sweep summary instead. The run never invents an issue number, never drops the annotation, and never stalls waiting for a tracker.
+Use another skill for these:
 
-Two neighbours look similar and are not:
+- Bug hunts: `doctrine-audit`. Code changes: `doctrine-code`.
+- A document that is itself the deliverable, such as a proposal, brief or report: `doctrine-write`. Its boundary line gives codebase-doc sweeps to this skill.
+- A one-off edit to one file nothing else reads needs no wrapper.
 
-- `doctrine-write` is for when the writing itself is the deliverable: a proposal, a brief, a PRD, a report. Its own spec draws the line: doctrine-docs owns codebase-doc sweeps, doctrine-research owns producing researched content, and doctrine-write is chained after either when the prose is the product.
-- `doctrine-research` is for a multi-source question that needs a fact-checked recommendation. Its spec sends codebase questions to `doctrine-audit` and names no boundary against this skill; the line above comes from doctrine-write.
-
-For bug hunts, use `doctrine-audit`. For a one-off edit to a single file nothing else reads, or a one-off question, no wrapper applies.
+`doctrine-docs` is a wrapper. It loads the [`doctrine`](doctrine.md) skill first, which supplies the gate, the anchor, the record, the two alarms and the end states, and it adds the task shape described here.
 
 ## What it asks you first
 
-The run asks only the scope questions your request did not answer and the repository cannot. There are three:
+It asks only what your request left open and the repository cannot answer:
 
-1. Which doc trees count: README, `docs/`, CLAUDE.md, playbooks, or some subset.
-2. The Coverage horizon, where history does not settle it. This is the point in history after which the run walks merges looking for undocumented behaviour. Where the repository gives a defensible ref (a tag, a release SHA) the run takes it without asking, and where it gives several it takes the widest, not the nearest. Where the candidates do not order (two branches neither of which contains the other) there is no widest, and the run gives each its own range. It becomes a question for you only where even the widest range would still be a guess about what you want covered.
-3. How the sweep lands: whether you want a PR at all, and if so one PR or one per area for a big sweep. The default is one PR where the repo's norm is PRs.
+1. **Which doc trees count**: README, `docs/`, CLAUDE.md, playbooks, or a subset.
+2. **The Coverage horizon**: the point in history after which the run looks for undocumented changes. It asks only where history does not settle this. Where the repository offers more than one defensible horizon, the run takes the widest, never the nearest: the last commit to touch the docs says when somebody last wrote, not when the code last changed. Where the candidates do not order, as with two branches neither of which contains the other, it gives each its own range. It becomes a question for you only where even that coverage would still be a guess about what you want covered. No Coverage seat goes out until the horizon is a concrete ref: a SHA, a tag or a date.
+3. **How the sweep lands**: whether you want a PR at all, and if so one PR or one per area. The default is one PR where your repo's norm is PRs.
 
-Your answers, in your own words, become the anchor (doctrine step 1): written to disk verbatim and handed to every agent that later judges the work. The anchor also records the two figures the loop's alarms fire on, a round count and a time budget, at the hub's defaults of 4 rounds and two hours unless you state others.
+Your words become the anchor, which the doctrine writes to disk verbatim and hands to every agent that judges the work. It also records the two alarm bounds: a round count, 4 by default, and a time budget, two hours by default.
 
-One more thing can come back to you mid-run. When the two axes agree on what the code does and disagree on what the doc should say about it, and only you can settle which way the doc is aimed, that is a direction question and it blocks until you answer.
+Two things can come back to you later. When the two axes agree on what the code does and disagree on what the doc should say about it, the run puts that through the doctrine's direction test: if only you can answer it and the doc reads differently either way, it waits for you; otherwise it decides and writes the ruling and its reason into the record. And before the loop it proposes which gate the sweep earns (below).
 
-## How the work runs
+## How a sweep runs
 
-The wrapper maps a sweep onto the hub's posture like this.
+1. **Scope.** The questions above, with the horizon settled as a concrete ref before anything is dispatched.
+2. **Inventory and waves.** The run splits the doc surface into areas and, for each area, dispatches two seats in parallel so neither pollutes the other's context:
+   - **Accuracy** checks every checkable claim in each doc (paths, commands, environment variables, endpoints, flags, behaviour) against the current source, and reports each stale one as `doc-file:line` with the evidence in code.
+   - **Coverage** walks the merges since the horizon and the module list, and reports each shipped feature or behaviour change that no doc mentions, with the code evidence a writer needs.
 
-**Scope (doctrine step 1).** The three questions above, and the horizon settled as a concrete ref, or one per unordered candidate, before any Coverage agent is dispatched.
+   The two lists are merged and deduplicated per area before any edit. Where they disagree on a fact, the code decides. Where they agree on the fact and disagree on what to do, the code decides nothing, and the direction test above applies.
+3. **Verify.** Every finding is checked against source before an edit. The false positive this skill fears most is a "stale" claim that was right, rewritten so the code loses an argument nobody checked.
+4. **Edit.** Accuracy findings are fixed and Coverage gaps written, each in the voice and structure of the doc it lands in, using `writing-clearly-and-concisely` if you have it and Strunk's core rules otherwise (omit needless words, active voice, definite concrete language). Redundant docs are deleted rather than kept in step. An edit to CLAUDE.md or AGENTS.md changes how agents behave, so it is flagged separately in the PR.
+5. **Native checks, red team, loop.** Described in the next section.
+6. **Simplify.** The doctrine's simplification review runs before the pass expected to certify the result, so its changes are inside what that pass certifies.
+7. **Deliver.** By the repository's norm, with a sweep summary: docs touched, stale claims fixed, gaps filled, bugs filed, and bugs not filed. Where the norm is a PR, it opens one and flags agent-instruction files separately. Where the norm is a patch, it hands over the diff and says so. Where there is no remote, no `gh`, or you said local-only, it commits locally and asks before pushing.
 
-**Inventory and waves (doctrine step 2).** The run inventories the doc surface, splits it into areas, and for each area dispatches two axes as parallel sub-agents so neither pollutes the other's context. The Accuracy seat verifies every checkable claim in each doc (paths, commands, env vars, endpoints, flags, behaviour) against the current source and reports stale ones as `doc-file:line` with the evidence in code. The Coverage seat walks merges since the horizon and the module list, finds shipped features and behaviour changes no doc mentions, and reports each gap with the code evidence a writer needs. The two lists are merged and deduplicated per area before anything is edited. Where they disagree on a fact, the code decides. Where they disagree on what to do about a fact, the code decides nothing: it goes to the direction test, or the run rules it and writes the ruling and its reason into the record.
+## The gate
 
-**Verify (wrapper step 3).** Every finding is checked against source before an edit. The false positive this shape fears most is a "stale" doc that was right, rewritten so the code becomes the loser of an argument nobody checked.
+**Native checks.** Every check your project documents as a gate, in its CLAUDE.md, README, review doc or task runner, runs first: `vale`, `markdownlint`, `mkdocs build --strict`, a link checker, whatever is there. A project with no build step still has gates, so the run reads `package.json` scripts or their equivalent itself. Three checks are added to yours, never substituted for them: every edited claim re-verified against source, a link and path check, and a command check.
 
-**Edit (wrapper step 4).** Accuracy findings are fixed and Coverage gaps written, each in the existing voice and structure of the doc it lands in. The editing pass uses `writing-clearly-and-concisely` if you have it installed, and otherwise Strunk's core rules stated inline: omit needless words, active voice, definite concrete language. Redundant docs are deleted rather than kept in step with each other. Edits to CLAUDE.md or AGENTS.md change agent behaviour, so they are flagged separately in the PR.
+**The command check never runs the command.** It confirms that the command still resolves: the binary exists, the script name is in the task runner, the flags match `--help`. The run never executes a documented command for its effects, such as `npm run migrate` or `terraform apply`. Where only running a command could verify a claim, the claim is marked unverified and the summary says so. This boundary is written into every Accuracy prompt and every red-team brief, because the seat told to verify a command is the one that would otherwise run it. For a deliverable that does not execute, the doctrine counts these checks as the run in the real environment its gate requires.
 
-**Native checks (doctrine step 3).** Every check your project documents as a gate runs first, then this wrapper's three additions. See the next section.
+**The red team is also the review.** This skill names no separate review. One adversarial pass per round fills both slots, so its brief is the whole review. It gets the doc diff with each edited doc whole beside it; what the sweep was meant to do; the Accuracy and Coverage findings already cleared; the evidence those seats worked from (the `--help` output and other command evidence, and the merge and module history over the horizon); the annotation rule and the rule that a CLAUDE.md or AGENTS.md edit is flagged; the clarity method, with word that a doc's own voice and structure win over it; the command boundary; and the scope you settled. It answers on four axes: claims still wrong, errors the edit introduced, coverage the sweep missed, and each doc's voice and structure. Its return comes back sorted into blocking, non-blocking, and what it attacked and could not break. Every finding is verified against source before anything changes.
 
-**Red team and loop (doctrine steps 4 and 5).** One adversarial pass per round over the diff, briefed in full, then repair and loop until a pass comes back clean. The next section says what fills the slots.
+The red team comes from the other model family where it can: the codex plugin's `codex:codex-rescue` seat on Claude Code, and the Claude Code CLI on Codex CLI. Without it, a fresh-context subagent of the same model takes the seat, and the report names the substitution.
 
-**Simplify (doctrine step 6).** A simplification review runs before the pass expected to certify the shipping revision, so its diff is inside what that pass certifies.
+**Which gate.** Before the loop, the run searches who reads the docs in scope and proposes a gate to you: the full gate, or the doctrine's reduced gate, which is your project's checks plus one adversarial review re-run on any repair, with no loop and no alarms; a second blocking finding moves it to the full gate. Only your choice puts the sweep on the reduced gate, and with no answer it runs the full one.
 
-**Deliver (doctrine step 7).** By the repository's norm, with the sweep summary. The report opens with the gate line.
+**Exit.** On the full gate, the sweep exits on one clean pass: no blocking finding, none left open from an earlier pass, and the checks above on record for that revision. A finding blocks when someone acting on the docs as they stand would do the wrong thing; a false claim about what the product does is the standing case. The skill adopts the doctrine's prose-deliverable exit: where no pass has come clean by the round alarm's first firing, one closing round reviews only what changed since the last fully reviewed revision, or the whole sweep where none was, and the sweep then ships at an escalation with a punch list of what it did not fix. The doctrine's rule that documentation waits until a phase exits does not apply, because the docs are the deliverable.
 
-## What the gate is for this shape
+The report opens with a gate line in the form the README shows, for example `Gate: clean pass on b71c2e0, real run on record. No blockers open.`
 
-The hub says a wrapper supplies four things: the core discipline, the designated review, the red team's axes, and where the record lives.
+**The record** lives where the doctrine puts it by default: beside the work in your repo, excluded from version control and from every reviewer's diff, with its path named in the report.
 
-**Core discipline: native checks for a docs diff.** Every check the project documents as a gate, wherever it documents one (CLAUDE.md, README, a review doc, the task runner), plus three additions: re-verifying every edited claim against source, a link and path check, and a command check. The project's gates come first and the three are added to them, never substituted for them. A repo carrying `vale`, `markdownlint`, `mkdocs build --strict` or a link-checker in its task runner runs all of them, and a project with no build step still has gates, so the run reads `package.json` scripts or their equivalent itself. "Command check" means each documented command still resolves: the binary exists, the script name is in the task runner, the flags match `--help`. It does not mean the command was executed. The run never runs a documented command for its effects (`npm run migrate`, `terraform apply`), because that would break the docs-only boundary. Where only running a command could verify a claim, the claim is marked unverified and the summary says so. That boundary is written into every Accuracy prompt and every red-team brief, because the seat told to verify commands is the one that would otherwise run them.
+## An example
 
-For a deliverable that does not execute, the hub treats this docs-only check as the real-environment run its gate requires. That is why a docs sweep can carry "real run on record" in its gate line.
+This is illustrative, not a recorded run.
 
-**Designated review: the red team itself.** This wrapper names no separate review skill. The red-team pass is both review and red team, and it runs once per pass, not twice. That makes its brief the whole of the review, so the brief is specified in detail: the diff itself pasted in (never a filename) with each edited doc whole beside it, since voice and structure are judged from the whole doc; what the sweep was supposed to do; the Accuracy and Coverage findings already cleared so the seat attacks what was passed rather than restating what was caught; the evidence those axes worked from (the `--help` output and other command evidence, and the merge and module history over the horizon), so it can re-check a flag without running anything and find a change the Coverage agents missed; the rules the edit was bound by (the annotation rule, and the rule that a CLAUDE.md or AGENTS.md edit is flagged separately); the clarity method the edit ran (the path to the installed writing-clearly-and-concisely skill's `elements-of-style.md`, or Strunk's core rules inline), with word that the method never overrides a doc's own voice and structure; the command boundary; and the scope decisions from step 1 (which trees, which horizon, which PR shape), which a fresh context would otherwise reopen with full confidence. The hub adds the project's own law as it read at the fixed point and word that the seat loads no doctrine skill.
-
-**Red team axes.** Four, and the seat's coverage is exactly these: claims still wrong, errors the edit newly introduced, coverage the sweep missed, and each doc's own voice and structure. The return comes back sorted: blocking, then non-blocking, then what it attacked and could not break. A return with no attack list has reported nothing and no pass counts clean on it. Every finding is verified from source before anything is changed, since adversaries invent things too.
-
-**The seat that fills the red-team slot.** By default the `codex:codex-rescue` subagent, a different model. Without the codex plugin, a fresh-context subagent prompted to refute the diff, with the verify-from-source rule in its brief; the report names the substitution, because a same-model adversary shares your blind spots.
-
-**Exit.** This wrapper adopts the hub's prose-deliverable exit by name. A phase exits on one clean pass: no blocking finding, none outstanding from an earlier pass, and the docs-only check on record for the revision. A finding blocks when someone acting on the docs as they stand would do the wrong thing, and a false claim about what the product does, in a doc that ships, is the standing instance. Where no pass has come clean by the round alarm's first firing, the exit is one closing round scoped to the diff since the last fully reviewed revision, or to the whole deliverable where no revision was fully reviewed, then Shipped at an escalation, with a punch list of what it did not fix. The hub's rule that documentation waits until after exit does not apply here, since the docs are the deliverable.
-
-**Where the record lives.** The wrapper is silent, so the hub's default applies: beside the work in the target repo, excluded from version control and from every reviewer's diff and search, with its path named in the report.
-
-## A worked example
-
-This example is illustrative: it shows the shape of a run, not a recorded one.
-
-You are in a Node project with a README, a `docs/` tree, and a CLAUDE.md. `package.json` has a `lint:docs` script that runs `markdownlint`. You type: `use doctrine-docs on this repo; the API docs are behind the code`.
-
-The run asks the two scope questions the repository cannot answer. You answer: README and `docs/` count, CLAUDE.md does not; land it as one PR. It does not ask about the horizon, because the repo has release tags, and it takes the widest defensible one, `v2.3.0`, rather than the last commit that touched `docs/`. Your two answers and the request go into the record verbatim as the anchor, with the alarms at 4 rounds and two hours.
-
-It inventories the doc surface into two areas, README and `docs/`, and dispatches an Accuracy seat and a Coverage seat for each, four seats in one wave. Each Accuracy prompt carries the command boundary. Each Coverage prompt carries `v2.3.0` as its concrete ref. The seats return: five Accuracy findings as `doc-file:line` with code evidence, two Coverage gaps with the commits that shipped them.
-
-The run verifies all seven against source. One Accuracy finding is a false positive: the doc said a flag defaults to off, the seat read a test fixture that sets it on, and the source agrees with the doc. That one is dropped, and the drop is recorded. One of the remaining four is not a doc defect at all: the endpoint documented as returning a list returns an object, and the code comment says it should return a list. That is a code bug. The run files it, and rewrites the doc as "currently returns an object, see issue #212; intended a list".
-
-It edits: three claims corrected, one annotated, two gaps written in the voice of the docs they join. It runs the gates: `npm run lint:docs` exits 0; every edited claim is re-read against source; every link and path in the diff resolves; every command in the diff resolves against `package.json` and `--help`, none executed.
-
-Round 1. The red team is briefed with the diff pasted in and each edited doc whole, the anchor, the six cleared findings, the `--help` output and merge history the axes worked from, the four axes, the annotation and CLAUDE.md-flag rules, the clarity method, the command boundary and the three scope decisions. It returns one blocking finding on the newly-introduced-errors axis: a gap the sweep wrote names an environment variable the code reads under a different name. It also returns two non-blocking suggestions and an attack list of what it tried on the other three axes. The run verifies the blocking finding from source, repairs it, asks where else the same mark would be (nowhere: the variable appears once in the diff), and reruns the gates on the repaired revision.
-
-Round 2. The red team is briefed again, on the repaired revision, with the repair's own diff beside the full one, and returns nothing blocking with a full attack list. The docs-only check is on record for that revision. The pass is clean.
-
-The simplification review runs before that certifying pass, and lands nothing. The run opens one PR against the repo's norm. The report's first line is the gate line, in the form the README shows:
-
-```text
-Gate: clean pass on b71c2e0, real run on record. No blockers open.
-```
-
-Under it comes the sweep summary: docs touched (README, two files under `docs/`), stale claims fixed (three), gaps filled (two), bugs filed (one, #212), bugs not filed (none). Then the request walked item by item: "the API docs are behind the code" and where each piece of that landed. Then the deferred list, carrying the two non-blocking suggestions, and the record's path.
-
-Had round 4 arrived without a clean pass, the round alarm would have stopped the loop with a diagnosis for you, and the exit would have been the closing round the prose-deliverable exit defines, with the gate line naming the punch list instead of a clean pass.
+In a Node project whose `package.json` has a `lint:docs` script, you type `use doctrine-docs on this repo; the API docs are behind the code`. The run asks which trees count and how to land; you answer README and `docs/`, one PR. It does not ask the horizon, because the repo has release tags and it takes the widest defensible one. Four seats go out, Accuracy and Coverage for each of two areas. Of seven findings, verification drops one as a false positive and turns one into a filed bug with an annotated doc. After the edits, `npm run lint:docs` passes and every edited claim, link and command is checked, none executed. The first red-team pass finds the new text names an environment variable the code reads under another name; the fix is verified and the second pass comes back clean. One PR opens, with the gate line first and the sweep summary under it.
 
 ## How to invoke it
 
-The description's trigger phrase is a documentation sweep: ask for the docs reviewed against the current implementation, stale ones updated, undocumented features covered, and the result landed.
-
-A sample prompt:
+Ask for a documentation sweep, or run `/doctrine:doctrine-docs`. Naming the trees, the horizon and the landing up front answers every scope question, so the run asks nothing before it starts:
 
 ```text
 use doctrine-docs: sweep README and docs/ against the code since v2.3.0, one PR
 ```
 
-Giving the trees, the horizon and the landing in the prompt answers all three scope questions up front, so the run asks nothing before it starts.
-
 ## Requirements
 
-Nothing has to be installed. The wrapper names these external skills, each with a fallback:
+Nothing beyond the plugin has to be installed. Each of these has a fallback:
 
-- `writing-clearly-and-concisely`, for the editing pass. Without it, Strunk's core rules are applied inline: omit needless words, active voice, definite concrete language.
-- The OpenAI codex plugin, for the red team. Without it, a fresh-context subagent prompted to refute, and the report says a same-model adversary filled the slot.
-- superpowers, for parallel dispatch. Without it, parallel Agent tool calls, each prompt assembled in full, with check output pasted before any wave is called done.
-- ponytail, for the simplification review. Without it, `/simplify` or a manual YAGNI pass.
+- `writing-clearly-and-concisely`, which this skill names for the editing pass and the red team's clarity method. Without it, Strunk's core rules inline.
+- The codex plugin on Claude Code, or the Claude Code CLI on Codex CLI, for the red team from the other model family. Without it, a same-model subagent, named as such.
+- superpowers and ponytail, which the doctrine uses for parallel dispatch and the simplification review. Without them, plain parallel seats and `/simplify` or a manual pass.
 
-The full install list with what each is for is in [`docs/requirements.md`](../requirements.md). Watching the seats work as they run needs herdr and is described in [watching-a-run](../watching-a-run.md).
+The full list is in [`docs/requirements.md`](../requirements.md). Watching seats run in panes needs herdr: see [Watching a run](../watching-a-run.md).
 
 ## Red flags
 
-Signs a run is not the one this page describes, in your terms:
+Signs a run went wrong:
 
-- The report says the claims were re-verified but your repo's own `vale`, `markdownlint` or docs build never ran. Expect a clean pass followed by red CI.
-- A documented command was executed to check it, and state a docs-only sweep promised not to touch has changed.
-- An annotation carries an issue number nobody filed, or the annotation is gone because no number existed.
-- Coverage seats went out before the horizon was a concrete ref. Three seats walked three histories and merged one list that looks complete.
-- The red team got the diff and nothing else, returned taste, reopened scope you settled at step 1, and was still counted as the review.
+- The report says claims were re-verified, but your repo's `vale`, `markdownlint` or docs build never ran.
+- A documented command was executed to check it, and changed state.
+- An annotation carries an issue number nobody filed, or was dropped because no number existed.
+- Coverage seats went out before the horizon was a concrete ref.
+- The red team got the diff alone, returned taste, reopened scope you settled, and still counted as the review.
 - A PR was opened in a repo whose norm is a local commit or a patch.
-- A "stale" claim was rewritten that was correct, and the code is now the loser of an argument nobody checked.
-- CLAUDE.md or AGENTS.md changed inside the sweep with nothing flagging that agent behaviour changed.
+- A correct "stale" claim was rewritten.
+- CLAUDE.md or AGENTS.md changed with nothing flagging it.
 
-The specification is [`skills/doctrine-docs/SKILL.md`](../../skills/doctrine-docs/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine-docs/SKILL.md`](../../skills/doctrine-docs/SKILL.md). Where this page and it disagree, trust the specification.
