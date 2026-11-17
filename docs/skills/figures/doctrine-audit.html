@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- The doctrine-audit figure, started from specimen.html; its comment says where each value goes.
+     Render: node docs/skills/figures/render.mjs docs/skills/figures/doctrine-audit.html docs/skills/doctrine-audit.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-audit/SKILL.md@b3e7e8db220deafd13b3498cf176f76fa8f98adc">
+<title>Figure: doctrine-audit</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 04/15</span><span>doctrine-audit</span></header>
+
+<section class="title">
+  <h1>A finding counts once source confirms it, and the hunt stops after two dry rounds</h1>
+  <p>Codebase audit under the doctrine: find, verify, then fix the confirmed issues or report them.</p>
+</section>
+
+<section class="row">
+  <div class="label">Every step<br>reads one list</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box" id="ask"><b>Ask scope</b><span>area, fix-as-we-go or report-first, read-only, filing line</span></div></div>
+    <svg class="wires" data-from="#ask" data-to=".lens"></svg>
+    <div class="col" style="width:412px">
+      <div class="box lens"><b>Simplicity</b><span>over-engineering, dead code</span></div>
+      <div class="box lens"><b>Logic</b><span>correctness</span></div>
+      <div class="box lens"><b>Drift</b><span>docs and config vs code</span></div>
+      <div class="box lens"><b>Feature gaps</b></div>
+      <div class="box lens"><b>Security paths</b></div>
+    </div>
+    <svg class="wires" data-from=".lens" data-to="#list"></svg>
+    <div class="col" style="flex:1"><div class="box" id="list"><b>Confirmed list</b><span>verified from source, file:line, on disk; PLAUSIBLE goes to the appendix</span></div></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">From the list</div>
+  <div class="flow">
+    <div class="box"><b>Red team</b><span>refute and extend</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Fix phases</b><span>highest severity first, the hub’s gate each</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>File the rest</b><span>never an invented number</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Dry?</b><span>two rounds with nothing new; else fresh lenses</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Report</b><span>its own gate, in both modes</span></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>Report-first and read-only are two questions; ask both.</p>
+  <p>Report-first: no fix phase opens, but filing still runs.</p>
+  <p>Fix phases: matts-code-review pinned to the phase’s starting SHA, never main.</p>
+  <p>Nothing filed is said plainly; no lens invented to reach the count.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-audit/SKILL.md at blob b3e7e8d</footer>
+<script src="figure.js"></script>
+</body>
+</html>

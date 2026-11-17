@@ -1,121 +1,148 @@
 # doctrine-audit
 
-A codebase audit under the doctrine: it finds real issues, verifies each one against source, and fixes the confirmed ones or hands you a report, whichever you asked for.
+A bug hunt or deep code audit under the doctrine. Parallel finders sweep an area of your codebase, every finding is confirmed against source before it counts, a red team attacks the confirmed list, and the run either fixes what it confirmed or hands you a report, whichever you chose. The hunt stops after two rounds in a row find nothing new.
 
-![Finder waves feed a verified list that a red team attacks, fix phases each pass the hub's gate, and the loop stops after two dry rounds.](doctrine-audit.png)
+![Scope questions feed five parallel finder lenses into one confirmed list on disk; from that list a red team refutes and extends, fix phases run highest severity first under the hub's gate, the rest is filed, and fresh rounds loop back until two come back dry, then the report goes through its own gate.](doctrine-audit.png)
 
-The figure shows the shape: parallel finders on the left, one confirmed list in the middle that every later step reads, and a fix phase per batch of issues, each with its own gate.
+The figure reads top to bottom. The answers to the scope questions go to five finder lenses, and their findings, once verified, land in one confirmed list. Every later step reads that list: the red team, the fix phases, the filing, and the dry-round test that ends the hunt. The report closes the run and passes a gate of its own.
 
-## When to use it, and when not
+## When to use it
 
-The trigger is a bug hunt or a deep code audit: you want drift, feature gaps, logic issues, over-engineering and bugs found across an area of the codebase, with parallel finder waves, red-teaming, and looping until dry. You do not have one failure in hand. You suspect a region and want it swept.
+Use it when you suspect a region of the codebase and want it swept for drift, feature gaps, logic issues, over-engineering and bugs. You start from a scope, not a symptom.
 
-The other wrappers cover the neighbouring cases. If something is already broken, throwing, failing or slow, that is `doctrine-debug`: it starts from a symptom, where this skill starts from a scope. If you want a feature built or a spec implemented, that is `doctrine-code`. If the problem is documentation that has fallen behind the code, that is `doctrine-docs`. This skill has a drift lens that reports where docs and config disagree with code, but a documentation sweep is a different job with a different gate.
+Use a neighbouring skill when the job is different:
 
-The hub is not for one-off questions or a one-off edit to a single file nothing else reads, and the same holds here. A one-file scope is fine as a first run, and the README shows one. A question you could answer by reading the file yourself is not a job for it.
+- Something is already broken, throwing, failing or slow: `doctrine-debug`, which starts from the symptom.
+- A feature or a spec to build: `doctrine-code`.
+- Documentation that has fallen behind the code: `doctrine-docs`. The audit has a drift lens that reports where docs or config disagree with code, but it does not rewrite your docs.
+
+It is a wrapper. It loads the hub, [`doctrine`](doctrine.md), and adds only the shape of an audit. The hub supplies the posture: the anchor, the gate every phase passes, the red team's rules, the alarms and the delivery line. This page says what the audit adds.
 
 ## What it asks you first
 
-Before any finder is dispatched, the agent asks whatever your request left open, on three topics: the target area, whether to fix as it goes or report first, and the severity or effort line above which an issue is filed on your tracker rather than fixed. The exact wording is not scripted by the specification, only the topics.
+Before any finder goes out, it asks whatever your request left open about:
 
-Report-first and read-only are two separate questions, and it asks both. Report-first means do not fix. Read-only means do not write anything to the repo, the working tree included. A user who says "report only, don't touch the repo" is answering both, and the run must not commit a report file into the repo it was told not to touch. Where you say read-only, or the agent has no write authority, the report is built in the scratchpad and handed over.
+- **Target area**: what it sweeps.
+- **Fix-as-we-go or report-first**: whether it fixes confirmed issues or only reports them.
+- **Read-only or not**: whether it may write anything to the repo, the working tree included.
+- **The filing line**: the severity or effort above which an issue is filed on your tracker instead of fixed.
 
-Your answers are written to disk, in the same file the confirmed list will go in, before the first wave. The doctrine calls the verbatim version of your words the anchor, and it goes to every seat that judges work against intent. This wrapper goes one step further: the rulings that bind a seat's conduct, report-first, read-only, and scope, go into every finder, fixer and reviewer prompt, because a finder is not a judging seat and would otherwise never be told the tree is read-only.
+Report-first and read-only are separate questions, and it asks both. Report-first means do not fix. Read-only means do not write. If you say "report only, don't touch the repo", you have answered both, and it must not commit a report file into that repo. Under read-only, or where it has no write authority, it builds the report in its scratch space and hands it to you.
 
-If your request leaves a direction question open, one where the work would be aimed differently depending on the answer, the run blocks on it rather than picking a default.
+These are direction questions under the hub's rule. An open one blocks the run until you answer, even where every answer would satisfy your request, because your answers decide what the audit changes and what it delivers. It never runs on the narrower reading instead.
 
-## How the work runs
+Your answers are written to disk before the first wave, in the same file as the confirmed list. The rulings that bind a seat's conduct (scope, report-first, read-only) go into every finder, fixer and reviewer prompt. The hub hands your words only to seats that judge work, and a finder does not judge, so without this it would never learn the tree is read-only.
 
-The wrapper maps its seven-step flow onto the hub's posture. Doctrine step 1 is the questions above, and the record they open. Doctrine step 2 is how the finders are dispatched: parallel seats, each with an assembled prompt rather than a summary of the task.
+## How the run goes
 
-Find. Finder waves go out in parallel, each seat holding one lens: simplicity (over-engineering and dead code), logic and correctness, drift between docs or config and code, feature gaps, and security-sensitive paths. The simplicity lens applies ponytail's audit posture if that plugin is installed, scoped to your target area rather than the whole repo, and the orchestrator resolves that posture into the lens prompt itself, since a dispatched seat cannot load a skill by name. Every finding needs file and line evidence. Findings are deduplicated across waves.
+**Find.** Finder waves go out in parallel, one lens per seat:
 
-Verify. Nothing counts until it is confirmed from source. Hunt-style findings have a high false-positive rate, and a finding nobody traced to a line is noise. Items that stay only plausible are not fixed; they go to the report's appendix, or to a tracker issue marked unverified. As each finding is confirmed it is appended to the confirmed list on disk, one line per issue: an id, `file:line`, severity, the evidence that confirmed it, and its state (confirmed, red-teamed, fixed, filed, or declined). Steps 4, 5 and 6 read this list and nothing else produces it. A second, orchestrator-only file beside it carries the counters, including the dry-round count. Both exist because a long audit compacts between rounds, and a list that lived only in context comes back empty: round 3's finders re-file what round 1 fixed, and the dry count restarts at zero.
+- simplicity: over-engineering and dead code
+- logic and correctness
+- drift: docs and config against code
+- feature gaps
+- security-sensitive paths
 
-Red team. The confirmed list goes to the red team under doctrine step 4, to refute what is on it and to extend it, together with every finder's raw output, plausible and rejected items included, each with the reason verify set it aside, since a real defect dismissed at verify is visible nowhere else. It gets findings and evidence only, never the counters file. Its extend half covers the five find lenses by name, and for the simplicity lens it is handed what that finder held: ponytail's audit skill by path, read as data and report-only, or the hub's report-only substitute where ponytail is absent. Anything the red team adds is verified the same way.
+The simplicity lens applies ponytail's audit posture, scoped to your target area and not the whole repo. A dispatched seat cannot load a skill by name, so the orchestrating agent puts that posture's content into the lens prompt. Without ponytail, the lens gets the hub's substitute, a read that reports and changes nothing. Every finding needs `file:line` evidence, and duplicates across waves are merged.
 
-Fix. In fix-as-we-go mode, confirmed issues are grouped into phases, highest severity first, and each phase runs under the hub's gate from doctrine step 5. Anything with a non-obvious root cause goes through Matt Pocock's `diagnosing-bugs`. Everything above your severity or effort line is filed on the project's tracker, whatever its CLAUDE.md names. In report-first mode this step edits nothing and opens no fix phase, but filing still happens, because filing is a tracker write and not a fix, and in report-first mode every confirmed issue is filed, not only those above your line. If the tracker lives inside the repo and you ruled read-only, those items are listed in the report as unfiled and the report says so. Where there is no tracker at all, the agent checks the project's conventions, asks you if there are none, and otherwise carries the full list in the report and states plainly that nothing was filed. It never invents an issue number and never drops a finding for having nowhere to go.
+**Verify.** A finding counts only once it is confirmed from source. Hunt-style findings have a high false-positive rate, and a finding nobody traced to a line is noise. Items that stay only plausible are never fixed. They go to the report's appendix, or to a tracker issue marked unverified.
 
-Loop until dry. The find and verify steps repeat with fresh lenses until two consecutive rounds surface no new confirmed issue. That test, "nothing new", is the right one for this outer loop and only here. Inside each fix phase the hub's gate applies as written, where a pass is clean only when nothing is outstanding. A later round's findings open new fix phases or new report entries; they do not reopen closed ones. If the agent runs out of meaningful lenses before two dry rounds, it says so and stops rather than inventing lenses to satisfy the counter.
+Confirmed findings are written to a file as they are verified: the report's own path if you settled one, otherwise a run-state file beside the work or in scratch space, named in the report. Each line holds an id, `file:line`, severity, the evidence that confirmed it, and a state: confirmed, red-teamed, fixed, filed or declined. A second file beside it, read only by the orchestrating agent, holds the counters, including the dry-round count. Both live on disk because a long audit gets compacted between rounds. A list kept only in context comes back empty: round 3 re-files what round 1 fixed, and the dry count silently restarts at zero.
 
-Deliver. Doctrine step 6, the simplification pass, runs inside each fix phase before its certifying pass. Doctrine step 7 lands the work by your repo's norm. Larger architectural refactors that surface along the way are not done mid-audit: they go through Matt Pocock's `improve-codebase-architecture` where it is installed, or are filed as issues.
+**Red team.** The confirmed list goes to the red team to refute and to extend. It also gets every finder's raw output, plausible and rejected items included, each with the reason verify set it aside, since a real defect dismissed at verify shows up nowhere else. It gets the findings and evidence only, never the counters. Its extend half covers the five lenses by name, and for simplicity it holds what that finder held. Anything it adds is verified the same way before it counts.
 
-## What the gate is for this shape
+**Fix or file.** In fix-as-we-go mode, confirmed issues are fixed in phases, highest severity first, each phase under the hub's gate. Anything with a non-obvious root cause goes through Matt Pocock's `diagnosing-bugs`. Everything above your filing line is filed on the tracker your project's AGENTS.md or CLAUDE.md names.
 
-The hub says a wrapper supplies four things: the core discipline, the designated review, the red team's axes, and where the record lives.
+In report-first mode nothing edits the repo and no fix phase opens, but filing still runs, because filing writes to a tracker and fixes nothing. Every confirmed issue is filed. If the tracker lives inside the repo and you ruled read-only, filing there is a repo write, so those items go in the report as unfiled, said plainly.
 
-The core discipline is the find, verify, fix cycle above, with `diagnosing-bugs` on any fix whose root cause is not obvious. Without that skill, the hub's fallback is inline: reproduce first, write the regression test before the fix.
+If there is no tracker to file on (none named, the CLI not signed in, or you never said where issues go), it checks your project's conventions and asks you. Failing that, it carries the full list in the report and states that nothing was filed. It never invents an issue number and never drops a finding for having nowhere to go.
 
-The designated review for fix phases is `matts-code-review`. Three things about pointing it fall to the agent, and the run is wrong if any is skipped. It pins the fixed point to the SHA the fix phase started from, captured with `git rev-parse HEAD` before the phase's first edit, never `main` and never the merge-base: with no fixed point the review stops and asks you, twice a phase, and with a branch ref it re-reviews every fix phase already closed and re-files their findings, which the gate then counts as outstanding, so no pass can come clean. It also needs a spec source, the confirmed-list entries this phase is fixing or the tracker issues filed for them; without one its Spec sub-agent skips and the review runs one axis of two. Issue references resolve only where Matt's `docs/agents/issue-tracker.md` exists; otherwise pass the path. And it hands the review, and each fix phase's red team alike, the standards sources' contents as they read at the fixed point (with the review told to give its Standards sub-agent those in place of the paths, since it otherwise reads them from the changed tree), the `diagnosing-bugs` evidence behind each non-obvious root cause the phase fixes, and, where the phase fixes a refactor run through `improve-codebase-architecture`, that skill's SKILL.md by path, read as data, or word that its fallback was taken and the refactor filed instead. Without `matts-code-review` installed, the hub substitutes `/code-review`, or two parallel subagents (Standards and Spec) handed the same inputs.
+Larger architectural refactors found along the way are not rewritten mid-audit. They go through Matt Pocock's `improve-codebase-architecture` where it is installed, or are filed as issues.
 
-In report-first mode the report is the deliverable, and it carries the hub's gate in one phase under the prose-deliverable exit: one clean pass by default, and if none has come by the round alarm's first firing, one closing round scoped to the diff since the last fully reviewed revision, or to the whole report where no revision was fully reviewed, then Shipped at an escalation with a punch list. The designated-review slot there is a fresh-context review of the finished report against the anchor and the confirmed list, because `matts-code-review` reads a diff and report-first produces none. The native checks take the docs-only form: every claim in the report re-verified against source, plus a path check.
+**Loop until dry.** Find and verify repeat with fresh lenses until two rounds in a row confirm no new issue. Findings from a later round open new fix phases, or new report entries in report-first mode. They never reopen closed phases. If it runs out of meaningful lenses before two dry rounds, it says so and stops rather than inventing lenses to reach the count.
 
-The red team is the `codex:codex-rescue` seat, a different model, or a fresh-context subagent prompted to refute where the codex plugin is absent. Its axes here are the two the wrapper names: refute the confirmed list, and extend it across the five lenses. It is handed what the red team paragraph above lists, and in report-first the finished report as well. Its return has to separate blocking from non-blocking and list what it attacked and could not break; a "no findings" with no attack list is a failed seat.
+"Nothing new" is the test for this outer loop only. Inside each fix phase the hub's gate applies as written, and a pass is clean only when nothing is outstanding, old or new.
 
-The record lives in two files. The first holds your answers and the confirmed list, at the report's own path where step 1 settled one, else a run-state file beside the work or in the scratchpad, named in the report. The second is orchestrator-only and holds the counters. The hub's two alarms bound every fix phase: the round alarm at every Nth round that found a blocker, N your figure or 4, and the time alarm at your budget or two hours, and either stops the loop with a diagnosis for you to rule on.
+## The gates
 
-## A worked example
+**Each fix phase** passes the hub's full gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. The hub's two alarms bound every phase: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
 
-This example is illustrative: it shows the shape of a run, not a recorded one.
+The designated review for fix phases is `matts-code-review`. The audit points it with three things:
 
-You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The agent has the target, so it asks the three questions the request left open: fix as you go or report first, read-only or not, and the line above which issues are filed. You answer fix-as-we-go, writes allowed, and file anything that needs a schema change. It writes those answers and your request into the record, records the alarm defaults, and dispatches wave 1: five finders, one lens each, every prompt carrying the scope ruling.
+- **A fixed point**: the SHA the fix phase started from, taken with `git rev-parse HEAD` before the phase's first edit. Never `main` and never the merge-base. With no fixed point the review stops and asks you, twice a phase, every phase. With a branch ref it re-reviews fix phases that already closed and re-files their findings, which the gate counts as outstanding, so no pass can come clean.
+- **A spec source**: the confirmed-list entries this phase fixes, or the tracker issues filed for them. Without one, the review's Spec half skips and it reviews on one axis of two. Issue references resolve only where Matt's `docs/agents/issue-tracker.md` exists. Otherwise it passes the file path.
+- **What the work rests on**, handed to the review and to each fix phase's red team alike: your standards sources as they read at the fixed point, so a diff that loosens a standard is not judged against its own loosening; the `diagnosing-bugs` evidence behind each non-obvious root cause the phase fixes, so the fix is not judged against the symptom; and, for a refactor run through `improve-codebase-architecture`, that skill's SKILL.md by path, or word that its fallback was taken and the refactor filed instead.
 
-The finders return findings with `file:line` evidence. The agent verifies each against source. Two confirm and one stays plausible, so the confirmed list reads:
+**The report** is a deliverable in both modes, so it gets a phase of its own, after the last fix phase in fix-as-we-go mode. That phase runs under the hub's prose-deliverable exit: one clean pass by default. If no pass has come clean when the round alarm first fires, one closing round runs, scoped to what changed since the last fully reviewed revision (or to the whole report if no revision was), and the report ships with a punch list of what was not fixed. Its gate has three parts:
 
-```text
-A1  src/importer.ts:88   high  duplicate header silently overwrites a field  confirmed
-A2  src/importer.ts:140  low   dead branch, unreachable after the 2.x parser  confirmed
-```
+- **Native checks**: every claim in the report re-verified against source, plus a path check.
+- **The designated review**: a fresh-context review of the finished report against your words and the confirmed list. `matts-code-review` reviews code against standards and a spec, not a prose report.
+- **The red team**: handed the finished report as well as the confirmed list.
 
-The plausible item goes to the appendix. The list goes to the red team, which refutes nothing and adds A3, a null path at line 61; the agent traces it and confirms it.
+The red team in every gate is the `codex:codex-rescue` seat, a model from a different family, or a fresh-context subagent told to refute where the codex plugin is absent, named in the report as a same-model substitute. Its return must separate blocking from non-blocking findings and list what it attacked and could not break. "No findings" with no such list counts as a failed seat.
 
-Fix phase 1 opens on A1 and A3. The agent records `git rev-parse HEAD` as the fixed point, fixes both, runs every check your repo documents, runs `matts-code-review` pinned to that SHA with the two list entries as its spec, and sends the diff to the red team. A blocking finding comes back on the A1 repair; the class question asks where else the same header handling appears, and the answer is one more call site, so the fix moves to the shared function. The next pass comes clean with one end-to-end run on record, and the phase's gate line reads:
+## How it ends
+
+The run ends with your repo's delivery norm, a commit or a pull request, never with "the loop is clean". In report-first mode the report goes where your project keeps reports. If there is no such place it asks you, and under read-only it hands the report over without committing it. The report, the confirmed list and anything filed are delivered together, and the report names what was left unfiled.
+
+The report opens with one line saying whether the shipping revision is certified and which blocking findings are still open, as in the README's example:
 
 ```text
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
-A2 needs a schema change, so it is filed as #212 rather than fixed. Round 2 goes out with fresh lenses and confirms nothing new. Round 3 confirms nothing new. Two dry rounds, so the loop is dry.
+Then it walks your request item by item, saying where each landed or why it was deferred. Each phase ends in one of the hub's five states, and only Exited is clean. Stopped means you ended the loop. Shipped at an escalation means delivery after an alarm, or after the report's closing round, with a punch list. Blocked means a question of yours is still unanswered. Unable means the run cannot resume by itself, for example because write access went away.
 
-The report puts the gate line first, then walks your request item by item: the file audited, A1 and A3 fixed and certified, A2 filed as #212, the appendix of plausible items, the deferred list of non-blocking improvements, the record's path and its final state, and the commit or PR by your repo's norm. Had you answered report-first instead, no fix phase would open, the report would go where your project keeps reports, A1 through A3 would all be filed, and the gate line would describe the report's own single phase.
+## A worked example
+
+This example is illustrative. It shows the shape of a run, not a recorded one.
+
+You type `use doctrine-audit on src/importer.ts (scope is that file only)`. The target is settled, so it asks the rest: fix as you go or report first, read-only or not, and the filing line. You answer fix as you go, writes allowed, and file anything that needs a schema change. It writes your answers to disk and dispatches five finders, each prompt carrying the scope ruling.
+
+The finders return findings with `file:line` evidence. Two are confirmed and one stays plausible:
+
+```text
+A1  src/importer.ts:88   high  duplicate header silently overwrites a field  confirmed
+A2  src/importer.ts:140  low   dead branch, needs a schema change to remove   confirmed
+```
+
+The plausible item goes to the appendix. The red team refutes nothing and adds A3, a null path at line 61, which is traced and confirmed. A2 is above your filing line, so it is filed on your tracker. A fix phase opens on A1 and A3, pinned to the SHA it started from, and runs the full gate until a pass comes clean. Rounds 2 and 3 use fresh lenses and confirm nothing new, so the hunt is dry. The report then passes its own gate and ships with the commit.
 
 ## How to invoke it
 
-Ask for a bug hunt or a deep code audit done with the doctrine, and name the area. The README's own line is the smallest useful start:
+Ask for a bug hunt or a deep code audit done with the doctrine, and name the area. The README suggests starting small:
 
 ```text
 use doctrine-audit on src/whatever.ts (scope is that file only)
 ```
 
-A fuller prompt: `Run doctrine-audit on packages/billing, report-first, read-only. I want drift between the docs and the code, and anything that writes a price.`
+A fuller request answers the scope questions up front: `Run doctrine-audit on packages/billing, report-first, read-only. I want drift between the docs and the code, and anything that writes a price.`
 
 ## Requirements
 
-Nothing has to be installed. Each external skill this wrapper names has a fallback, in the hub's table or inline in the wrapper.
+Nothing has to be installed. Each external skill has a fallback, in the hub's fallback table or in this skill's own text:
 
-- Matt Pocock's `code-review`, installed by you as a renamed `matts-code-review` copy because the original name collides with Claude Code's `/code-review`. Without it: `/code-review`, or two parallel review subagents.
-- Matt Pocock's `diagnosing-bugs`. Without it: inline, reproduce first and regression test before the fix.
-- Matt Pocock's `improve-codebase-architecture`. Without it: architectural refactors are filed as tracker issues.
-- ponytail, for the simplicity lens and the step 6 review. Without it: a manual YAGNI and dead-code read that reports and changes nothing for the lens, and `/simplify` or a manual pass for step 6.
-- The OpenAI codex plugin, for the different-model red team. Without it: a fresh-context subagent prompted to refute, and the report names it as a same-model substitute.
-- superpowers, for parallel dispatch and worktrees. Without it: parallel Agent tool calls.
+- `matts-code-review`, your renamed copy of Matt Pocock's `code-review`. Without it: `/code-review`, or two parallel review subagents (Standards and Spec) given the same inputs.
+- Matt Pocock's `diagnosing-bugs`. Without it: reproduce first, and write the regression test before the fix.
+- Matt Pocock's `improve-codebase-architecture`. Without it: architectural refactors are filed as issues.
+- ponytail, for the simplicity lens and the simplification review. Without it: a read that reports and changes nothing for the lens, and `/simplify` or a manual pass for the review.
+- OpenAI's codex plugin, for the red team from a different model family. Without it: a fresh-context subagent told to refute.
+- superpowers, for parallel dispatch. Without it: parallel seat dispatches, each with its own assembled prompt.
 
-Install commands and the full list are in [`docs/requirements.md`](../requirements.md). To watch the finders and reviewers while they run, see [watching a run](../watching-a-run.md).
+Install commands and the full list are in [`docs/requirements.md`](../requirements.md). To watch the seats while they run, see [watching a run](../watching-a-run.md).
 
 ## Red flags
 
-Signs a run has gone wrong, in your terms:
+Signs a run has gone wrong:
 
-- You said report-first and the agent fixed findings instead of reporting and filing them.
+- You said report-first, and the repo has changes beyond the report and what was filed.
 - A report file was committed into a repo you said not to touch.
 - The confirmed list never reached disk, so round 3 re-filed what round 1 fixed and every round looked productive.
 - A compaction reset the dry-round count, so "two dry rounds" was one.
-- The report cites an issue number that was never filed anywhere.
+- The report cites an issue number that was never filed.
 - A finding vanished because your project named no tracker.
-- A plausible item was fixed as though it were confirmed. A fix is a change to working code.
+- A plausible item was fixed as though it were confirmed.
 - Lenses were invented to reach two dry rounds.
-- `matts-code-review` was pointed at `main`, re-filing findings from fix phases that already closed.
+- `matts-code-review` was pointed at `main` and re-filed findings from fix phases that already closed.
 
-The hub's page is [doctrine.md](doctrine.md), and the README's summary of the whole plugin is [`README.md`](../../README.md).
-
-The specification is [`skills/doctrine-audit/SKILL.md`](../../skills/doctrine-audit/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine-audit/SKILL.md`](../../skills/doctrine-audit/SKILL.md). Where this page and the specification disagree, trust the specification.
