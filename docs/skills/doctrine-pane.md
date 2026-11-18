@@ -118,7 +118,7 @@ $ pane enter /tmp/edge.log
 --- enter sent. Output may still be arriving; `read` again until you judge it finished.
 ```
 
-If you then type a command yourself, the agent's next `type` is refused with `` dctr-pane: 96 bytes of unread output; run `read` and judge it before typing ``. It reads, tells you what it saw, and says so if you pressed a key that left no echo. When you are done, you close the pane, and the agent tells you where the transcript is.
+If you then type a command yourself, the agent's next `type` is refused with `` dctr-pane: 96 bytes of unread output; run `read` and judge it before typing ``. It reads, tells you what it saw, and says so if you pressed a key that left no echo. When you are done, you close the pane.
 
 ## Requirements
 
@@ -131,7 +131,7 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## How it is checked
 
-The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push: every refusal trips, the refusals that come before the launcher looks up the pane are shown to call herdr zero times, output arriving during that lookup stops the send, a valid session is not refused, the broken fixtures are shown to be broken without the launcher, and both the macOS and Linux forms of `script(1)` are asserted. A doctrine phase that uses a pane still runs its own gate.
+The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push. It trips the refusals for a missing profile, a bad read position, unread output, a control character, a pane that is yours, a contained session and a missing session id, and shows that each of them calls herdr zero times. It also shows that output arriving during the recorder lookup stops the send, that a valid session is not refused, that the broken fixtures are broken without the launcher, and that both the macOS and Linux forms of the `script(1)` command line are asserted. It does not trip every refusal: its stand-in herdr always reports a live recorder and every run sets herdr's environment, so the dead-recorder, outside-herdr and missing-pane refusals are not exercised. A doctrine phase that uses a pane still runs its own gate.
 
 ## Signs it is being misused
 
