@@ -8,7 +8,7 @@ Claude Code runs these on its own once the plugin is installed. [`hooks/hooks.js
 
 | Script | Runs on | What it does |
 |---|---|---|
-| `dctr-seat.mjs` | SubagentStart, SubagentStop, SessionEnd | Gives each dispatched subagent a live herdr pane, closes the pane when the subagent stops, and sweeps any pane left over at the end of the session ([watching a run](watching-a-run.md)). Outside herdr it stands down. In a container it calls no herdr and writes a view-request file instead. |
+| `dctr-seat.mjs` | SubagentStart, SubagentStop, SessionEnd | Gives each dispatched subagent a live herdr pane, closes the pane when the subagent stops unless you are reading it, and sweeps any pane left over at the end of the session ([watching a run](watching-a-run.md)). Outside herdr it stands down. In a container it calls no herdr and writes a view-request file instead. |
 | `dctr-restore.mjs` | SessionStart, after `/clear` | When the record of an open doctrine phase is reachable from `SESSION_MEMORY.md`, it hands the new session the phase name, the record's path and last state line, the wrapper and the current handoff. In every other case it prints nothing. It writes a small start file in the temp folder, and when the session is in a herdr pane it also writes the restore file the auto-cycle typer waits for. It calls no herdr. |
 | `dctr-gauge.mjs` | every tool batch | Only while auto-cycle is on: it reads how much of the context window the session has used. The first time that reaches the tier, it warns the session and appends `auto-cycle: warned` to the phase record. A subagent's batch stands down before anything is read. It calls no herdr. |
 | `dctr-cycle.mjs` | Stop, Notification (permission or idle prompt), StopFailure, UserPromptSubmit | The auto-cycle hook. Only while auto-cycle is on: at a Stop it either pauses with a line in the record, waits, or starts the typer (below). A permission prompt, idle stop or API error appends a paused line. A StopFailure in an orchestrated run also appends to the run's `limits.log`. Each pause is shown once, as a herdr notification and the `$autocycle` sidebar token. It uses git to hash the working tree. In a container it calls no herdr. |
@@ -24,7 +24,7 @@ The hook set also loads one hooks module, `hooks/band/register.tsx`, the **doctr
 |---|---|---|
 | `dctr-typer.mjs` | `dctr-cycle.mjs`, detached | Waits until your focus has moved off the session's herdr pane, then types `/clear` and the resume command into it and appends the cycle line to the record. In a container it exits before any herdr call. |
 | `dctr-render.mjs` | `dctr-seat.mjs`, in a seat's pane | Renders the subagent's transcript in its pane as it grows. It writes nothing and calls no herdr. |
-| `dctr-watch.mjs` | `dctr-cycle.mjs`, on Codex only | Codex fires no hook for an API error, an idle session or a background command's exit. This watches the session's rollout for them and hands the cycle hook the event Claude Code would have fired. It writes nothing itself. |
+| `dctr-watch.mjs` | `dctr-cycle.mjs`, on Codex only | Codex fires no hook for an API error, an idle session or a background command's exit. This watches for them in the session's rollout, the process tree under the Codex process and, in a herdr pane, herdr's reading of that pane, and hands the cycle hook the event Claude Code would have fired. It writes only its own lines to `hook.log`. |
 
 Three modules are only imported by the others: `dctr-lib.mjs` (the decisions), `dctr-state.mjs` (the files, locks and herdr calls) and `dctr-record.mjs` (the record line parser).
 
@@ -34,7 +34,7 @@ The agent runs these as commands when a skill tells it to. The skill named besid
 
 | Script | Named by | What it does |
 |---|---|---|
-| `dctr-gate.mjs` | `doctrine`, step 3 | Runs every gate check. Inside herdr the check runs in a pane you can watch. Outside herdr, or in a container, it runs detached. Either way it writes the check's output to a transcript file and, once the check ends, `<transcript>.result` with `exit=N` on its first line. It needs bash. |
+| `dctr-gate.mjs` | `doctrine`, step 3 | Runs every gate check. Inside herdr the check runs in a pane you can watch. Outside herdr, or in a container, it runs detached, except inside Codex's sandbox, where a detached process dies with its command, so it runs the check to completion first. Either way it writes the check's output to a transcript file and, once the check ends, `<transcript>.result` with `exit=N` on its first line. It needs bash. |
 | `dctr-token.mjs` | `doctrine`, step 5; `doctrine-project` | Publishes the run's round and gate counters, and the epic and phase, as herdr sidebar tokens ([watching a run](watching-a-run.md)). Outside herdr it does nothing. It writes no file. |
 | `dctr-pane.mjs` | `doctrine-pane` | Opens an interactive login (ssh, a console, a log tail) under `script(1)` in a pane you can watch and take over, and lets the agent read it and type into it. It refuses outside herdr and in a container. |
 | `dctr-project.mjs` | `doctrine-project`, `doctrine-orchestrate` | `check` validates `docs/PROJECT.md` and the epic records offline. `status` prints what they show. `board` overwrites the records folder's `board.md`. Only `status` calls herdr, and only inside herdr. |
