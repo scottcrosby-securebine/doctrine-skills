@@ -1,6 +1,6 @@
 # doctrine-write
 
-Use `doctrine-write` when the document itself is the deliverable: a proposal, a brief, a PRD, a handoff, a report, or any prose that must be clear, accurate and airtight. One author drafts from a ledger of sourced claims, four review lenses read the draft in parallel, a red team reads it whole, and the run loops until one pass of the gate comes back clean or, if the round alarm fires first, one closing round ends it.
+Use `doctrine-write` when the document itself is the deliverable: a proposal, a brief, a PRD, a handoff, a report, or any prose that must be clear, accurate and airtight. One author drafts from a ledger of sourced claims, the project's native checks and four review lenses check the draft, a red team reads it whole, and the run loops until one pass of the gate comes back clean or, if the round alarm fires first, one closing round ends it.
 
 ![The doctrine-write figure. Top row, before the draft: Ask records the audience and what the reader does afterward as the anchor, Ground builds a claim ledger with a source line per fact, and Draft is written in one voice. Bottom row, the gate: native checks run on the draft, and the draft and its pasted ledger fan out to four lenses (clarity, accuracy, audience fit, structure), which feed one red team, followed by the prose-deliverable exit. Notes list what blocks, that simplification runs once before the certifying pass, that a fact missing from the ledger is not asserted, and that delivery commits by the repository's norm.](doctrine-write.png)
 
@@ -96,14 +96,14 @@ Below that come the document's one-line thrust, anything that needs your judgmen
 use doctrine-write to rewrite docs/proposal.md for the finance committee; keep my meaning, sources are in docs/proposal-sources/
 ```
 
-If you name the reader and the sources in the prompt, the questions step is shorter. State a round count or a time budget too if you want other than 4 rounds and two hours.
+If you name the reader and the sources in the prompt, the questions step is shorter. State a round-alarm figure or a time budget too if you want other than the defaults: the alarm at every fourth round that found a blocking finding, and two hours.
 
 ## Requirements
 
 The plugin needs nothing else installed. Optional pieces change what fills a seat:
 
 - [`writing-clearly-and-concisely`](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) supplies the clarity method. Without it, the inline Strunk rules above apply.
-- The red team from the other model family needs one piece per host. On Claude Code it is [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), with the Codex CLI logged in. On Codex it is the Claude Code CLI (`claude`), installed and signed in. Without the one your host needs, a fresh-context subagent prompted to refute the document takes the seat. That substitute is the same model, so its blind spots overlap with the author's, and the exit statement names the substitution.
+- The red team from the other model family needs one piece per host. On Claude Code it is [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), with the Codex CLI logged in. On Codex it is the Claude Code CLI (`claude`), installed and signed in, and run from a Codex session outside Codex's per-call sandbox. [requirements.md](../requirements.md) has the detail. Where that piece is missing, or its seat still fails after the retries the hub allows, a fresh-context subagent prompted to refute the document takes the seat. That substitute is the same model, so its blind spots overlap with the author's, and the exit statement names the substitution.
 
 Install commands are in [requirements.md](../requirements.md). To watch the lenses and the red team as they run, see [watching a run](../watching-a-run.md).
 
