@@ -19,7 +19,7 @@
 <section class="row">
   <div class="label">Start or<br>adopt</div>
   <div class="flow">
-    <div class="box"><b>Interview</b><span>the agent proposes, the owner rules</span></div>
+    <div class="box"><b>Interview</b><span>the agent asks, then drafts items</span></div>
     <div class="arrow">→</div>
     <div class="box"><b>Admission test</b><span>can it be objectively measured? if not, owner judgement</span></div>
     <div class="arrow">→</div>
@@ -40,13 +40,13 @@
     <div class="arrow">→</div>
     <div class="box"><b>Exit pass</b><span>a seat blind to past returns</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>Done</b><span>the accounting check counts the return</span></div>
+    <div class="box"><b>Done</b><span>the latest counting return: all PASS</span></div>
   </div>
 </section>
 
 <section class="notes">
   <p>Adopt is forward-only: history becomes one linked index, every open item gets a ruled destination, and each cutover edit is ruled on its own.</p>
-  <p>check runs after every tracked write: exit 0 clean, 1 findings, 2 no readable project file or bad arguments.</p>
+  <p>check runs after every write to a state, ruling, return, roster, membership or the pointer: exit 0 clean, 1 findings, 2 no readable project file or bad arguments.</p>
   <p>An item binds nothing until the owner rules it.</p>
   <p>A regression reopens the epic; the current-epic pointer stays where it is.</p>
 </section>
