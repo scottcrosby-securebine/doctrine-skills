@@ -10,7 +10,7 @@ The skill fires when you ask for web design or front-end visual work done with t
 
 It does not cover the logic behind the page. Application code and data wiring belong to [`doctrine-code`](doctrine-code.md). It does not suit a one-off CSS tweak either: the run asks questions before it starts, dispatches a pair per section, and runs a gate every round, and none of that scales down.
 
-It needs something that can render the page. If nothing can, the run stops and tells you rather than reviewing source. A critic that cannot look is the failure this skill exists to prevent.
+It needs something that can render the page. If nothing can, the run stops and tells you rather than reviewing source. It may fall back to your project's documented preview or post-deploy check, the latter only with your explicit go-ahead. A critic that cannot look is the failure this skill exists to prevent.
 
 ## What it asks you first
 
@@ -18,7 +18,7 @@ The run first reads your repo without asking anything. It looks for a design sys
 
 Then it asks, one topic at a time:
 
-- **Which mode.** It asks every run and never assumes. The two modes differ in how they end. See [The two modes](#the-two-modes).
+- **Which mode.** It asks every run and never assumes. The two modes differ in how they end. See [What the gate is for this shape](#what-the-gate-is-for-this-shape).
 - **Whether it read the repo right.** It confirms what discovery inferred, including any design-system binding it inferred, and names the candidates it rejected and why.
 - **The page's one job and its audience.** The named reader goes into every critic's prompt, because a critic first asks whether the page serves that reader.
 - **The comparison target, and whether to exceed or match it.** "Make it look like that brand" often means matching that quality, not beating that site. Under *match*, the critic's bar becomes fidelity, and a faithful match is a pass rather than timid work.
@@ -39,7 +39,7 @@ Discovery first sweeps the repo and its neighbours for a design system, then wal
 4. An existing Claude Design project. It is a rendering, never a binding, so the run resolves it back to the repo it renders.
 5. Nothing that holds. This is the ordinary case: most work has no house system, and the skill's own brief is enough on its own.
 
-A rung holds only on a readable law, meaning rules somebody decided. A token file alone is a vocabulary, not a law. Before binding, the run probes whether a candidate is a dated snapshot or has been superseded. Once a system is bound, its design law outranks the skill. Its exit condition and its loop do not: those come from this skill's mode table. A value the house never decided, such as an unreplaced scaffold default, is not law. The run tests each value for provenance against the generator that produced it, and the ledger records which values were ruled and which are defaults. At binding the run also records what the system publishes, such as law documents, mandatory gate commands, its own harness, a package or a polish docket. Each one present changes how the run works. Each one absent has a fallback.
+A rung holds only on a readable law, meaning rules somebody decided. A token file alone is a vocabulary, not a law. Before binding, the run probes whether a candidate is a dated snapshot or has been superseded. Once a system is bound, its design law outranks the skill. Its exit condition and its loop do not: those come from this skill's mode table. A value the house never decided, such as an unreplaced scaffold default, is not law. The run tests each value for provenance against the generator that produced it, and the ledger records which values were ruled and which are defaults. At binding the run also records what the system publishes, such as law documents, mandatory gate commands, its own harness, a package or a polish docket. Each one present changes how the run works. Each one absent has a fallback. Where the run found a binding and your `CLAUDE.md` is absent or silent about it, the run writes the `Design system:` line there as one of its steps. Without write authority, the line goes in the diff it hands you instead.
 
 ### The reference
 
@@ -56,7 +56,7 @@ A restyle normally has two candidates: the page that exists, which is the floor 
 
 The run follows the hub's posture (see [doctrine](doctrine.md)). A phase is a page, or one design-system card. A wave is the builder and critic pairs inside it, one pair per section, such as hero, nav, feature blocks, pricing and footer.
 
-**The ledger.** It holds every fact the page may assert, each with its source. The facts come from your prompt, the repo and, in a restyle, the predecessor page itself. Every builder, concept-comp agent, critic and adversary is handed it. A builder asserts nothing outside it. A missing value becomes a visibly labelled placeholder, never a plausible guess. Content the predecessor carried is escalated to you, never deleted. The ledger lives at `docs/design-ledger.md` in the deliverable repo, in the bound system's docs location, or in a scratch directory where neither is writable. It also carries the questions you have already ruled on, so a fresh critic does not reopen them, and a run-state block of counters that no reviewer is handed.
+**The ledger.** It holds every fact the page may assert, each with its source. The facts come from your prompt, the repo and, in a restyle, the predecessor page itself. Every builder, concept-comp agent, critic and adversary is handed it, except its run-state block. A builder asserts nothing outside it. A missing value becomes a visibly labelled placeholder, never a plausible guess. Content the predecessor carried is escalated to you, never deleted. The ledger lives at `docs/design-ledger.md` in the deliverable repo, in the bound system's docs location, or in a scratch directory where neither is writable. It also carries the questions you have already ruled on, so a fresh critic does not reopen them, and the run's counters, which no reviewer sees.
 
 **The direction.** With no reference, the run fans out three concept comps. Each is a rendered candidate, built in its own worktree or one at a time and handed the ledger. You pick one, reject all three or ask for a blend. A full rejection gets one re-fan. A second rejection is settled in conversation, not with more comps. The chosen direction is written to `docs/design-dna.md`, the bound system's location, or the scratch directory. A direction derived from a reference is written down the same way.
 
@@ -71,7 +71,7 @@ Builders never share a file. Sections in one file are built one at a time, or th
 **The integrated gate.** When every section has passed, the run assembles the page and runs one round of the gate, in this order:
 
 1. **Native checks:** the technical floor, plus every gate your project documents, whether or not the project compiles. A project with no build step still has gates. A declared script that never exits, such as `vitest` in watch mode, is run in its non-interactive form. A gate whose dependency is missing is recorded as unrun, not failed.
-2. **The blind comparison**, wherever the run has a reference. Candidate and reference are shown as matched pairs, at the same width and theme, under neutral filenames A and B in random order. A single-use critic names a winner and says why before being told which is which. It judges execution only (type, color, space, hierarchy, motion), not the content a restyle is forbidden to change. The orchestrator scores a tie: a loss when the run aims to exceed, a pass under fidelity. A run with no reference skips this step and says so, and its gate is weaker.
+2. **The blind comparison**, wherever the run has a reference. Candidate and reference are shown as matched pairs, at the same width and theme, under neutral filenames A and B in random order. A single-use critic names a winner and says why before being told which is which. It judges execution only (type, color, space, hierarchy), not the content a restyle is forbidden to change, and it names motion unjudged, since a still shows none. The orchestrator scores a tie: a loss when the run aims to exceed, a pass under fidelity. A run with no reference skips this step and says so, and its gate is weaker.
 3. **A fresh critic on the integrated page.** It answers the reader test first, and that answer can block: would a human want to look at this, and does it serve its reader? A page that passes every check and bores its reader has failed. It re-checks sections that already passed, because a shared stylesheet edit reopens them. It returns a roll call with one line per axis: `CLEAR`, `BLOCKING` or `CANNOT JUDGE`.
 4. **The red team**, from the other model family where available. It attacks what the round passed and judges the sections as a set: two heroes competing, or one bold moment spent three times. It checks print, which nothing else in the run checks, and checks what the page asserts against the ledger, pixels included. Its roll call marks each of its four attacks `BROKE`, `HELD` or `NOT RUN`.
 
@@ -81,13 +81,13 @@ Every round's report gives the round number, what got bolder, what critics still
 
 **Simplify.** At the first round that finds nothing blocking, the run deletes decoration that survived the rounds, collapses one-off styles into tokens and drops dead variants. That diff resets the counters, so the passes that close the phase certify what remains.
 
-**The docket and your attention.** Polish does not force another round, because taking a polish fix restarts the clean-pass count. Polish goes to the project's existing backlog in the deliverable or system repo, or `docs/design-docket.md`, or the scratch directory. Docket items are marked PROPOSED or RULED, and a builder may not treat a PROPOSED item as a constraint. A RULED veto applies to the whole pattern, not only the instance you named. Docket numbers never move once assigned. Bold but arguable taste calls go to you as the arbiter, at most three escalations per phase, batched into one sitting. A docket item open for two phases is ruled or takes a stated default, and only polish or presentation may take a default. Questions that block the phase whichever way they are answered go up at once and do not count against the three: a direction killed twice, a deadlocked section, a fact the page needs that the ledger cannot source, or a house rule that can only be met by failing the floor. The run may overrule a critic, but it records the dissent and shows it to you.
+**The docket and your attention.** Polish does not force another round, because taking a polish fix restarts the clean-pass count. Polish goes to the project's existing backlog in the deliverable or system repo, or `docs/design-docket.md`, or the scratch directory. Docket items are marked PROPOSED or RULED, and a builder may not treat a PROPOSED item as a constraint. A RULED veto applies to the whole pattern, not only the instance you named. Docket numbers never move once assigned. Bold but arguable taste calls go to you as the arbiter, at most three escalations per phase, batched into one sitting. A docket item open for two phases is ruled or takes a stated default, and only polish or presentation may take a default. Questions that block the phase whichever way they are answered go up at once and do not count against the three. Examples are a direction killed twice, a deadlocked section, content the predecessor carried that the ledger cannot source, a clause of the house law ruled stale, and a house rule that can only be met by failing the floor. The run may overrule a critic, but it records the dissent and shows it to you.
 
 **Deliver.** The run commits to the deliverable repo by that repo's norms and lands the docket. After the gate line, it walks your brief item by item, naming the diff that carried each one or its explicit deferral, checked against the page itself. If it cannot write where the work must land, it builds in a scratch directory and hands you the diff, the renders and the docket together.
 
-## The two modes
+## What the gate is for this shape
 
-Both modes run the same gate. They differ in what ends the loop.
+The hub exits a phase on one clean pass. This skill replaces that exit with two modes of its own, and the hub names the fused-gate exit as a replacement that stands. Both modes run the same gate. They differ in what ends the loop. Choose fused gate for a bounded deliverable. Choose pure gauntlet when the critics should keep pushing and you accept hours of run time.
 
 **Fused gate** is bounded. The phase exits on two consecutive clean passes of the integrated gate. A round blocks on any of:
 
@@ -102,11 +102,11 @@ Both modes run the same gate. They differ in what ends the loop.
 - a red team item marked `NOT RUN`
 - the critic's verdict that the work is timid, off-grammar or generic
 
-That last item is the point of the skill. Without it, "this is mediocre" is filed as polish and a page nobody rates exits clean. A roll call with a missing line, or one that contradicts the findings under it, also blocks, and no ruling can waive it. The round alarm stops the loop after every N unresolved rounds and puts a diagnosis to you. N is your figure, 4 by default. If you say continue, it fires again at 8, then 12.
+That last item is the point of the skill. Without it, "this is mediocre" is filed as polish and a page nobody rates exits clean. A roll call with a missing line, or one that contradicts the findings under it, also blocks, and no ruling can waive it. The round alarm counts unresolved rounds, the rounds that found something blocking. At every multiple of N it stops the loop and puts a diagnosis to you. N is your figure, 4 by default. If you say continue, it fires again at the next multiple: with the default, 8, then 12.
 
-**Pure gauntlet** is long-running, and the run warns that it can take hours and burn heavy tokens. The critics decide when the work is done. The phase exits after three consecutive rounds in which a fresh critic picks the candidate over the reference with nothing blocking, or after two consecutive rounds that accept no change and leave nothing blocking. With no reference, or with fidelity as the whole run's bar, no critic can pick the candidate *over* the reference, so only the second exit can fire. The run says so when you choose this mode. This mode overrides the round alarm on purpose. Instead it reports every round, and every sixth round it stops, summarizes what is still being rejected and asks whether to continue.
+**Pure gauntlet** is long-running, and the run warns that it can take hours and burn heavy tokens. The critics decide when the work is done. The phase exits after three consecutive rounds in which a fresh critic picks the candidate over the reference with nothing blocking, or after two consecutive rounds that change nothing and leave nothing blocking. With no reference, or with fidelity as the whole run's bar, no critic can pick the candidate *over* the reference, so only the second exit can fire. The run says so when you choose this mode. This mode overrides the round alarm on purpose. Instead it reports every round, and every sixth round it stops, summarizes what is still being rejected and asks whether to continue.
 
-The hub's time alarm is not among what pure gauntlet overrides. The phase stops with the same diagnosis when your time budget, two hours by default, passes without a round closing.
+Both modes keep the hub's time alarm: the phase stops with the same diagnosis when your time budget, two hours by default, passes without a round closing.
 
 | Counter | Mode | Fires at |
 |---|---|---|
@@ -116,8 +116,6 @@ The hub's time alarm is not among what pure gauntlet overrides. The phase stops 
 | unchanged rounds | pure | 2: the phase exits |
 | section rejections | both | 3: put to you; a second deadlock goes back to direction |
 | rounds since check-in | pure | 6: stop, summarize, ask |
-
-The hub exits a phase on one clean pass. This skill replaces that exit with the counters above, and the hub names the replacement as sanctioned.
 
 ## The technical floor
 
@@ -135,9 +133,7 @@ The floor runs on the integrated page every round, in both modes:
 
 Print is a floor surface too, and the red team is the one that checks it. Performance is measured only where the project has the tooling. Otherwise it is reported as unmeasured, never as a pass. A bound system's minimum that is stricter than the floor binds ahead of it. One that is looser loses to the floor and is escalated to you, never built.
 
-Some of the floor's rules come from defects that shipped. A width of 2560 is rendered because type set at fixed pixel sizes stays frozen while the layout keeps growing. Seven rounds at narrower widths once passed a page whose nav links were 13px at every resolution. The floor compares 1440 with 2560. If the widest block of running text widens more than 5% while the median body, link and control type does not grow at all, it asks the critic about frozen type. If that block spans 95% or more of the 2560 viewport, it reports a missing max-width on the text column instead.
-
-Target size is measured on the region that takes a pointer, not the painted box. A control whose box already clears 24x24 passes without probing, and a link inline in a sentence is exempt. An undersized control fails when crowded. An isolated one, or one the probe cannot reach, goes to the critic rather than passing. A component clipping its own content inside a scroll container counts as a defect at 1440 or wider. Clipping only below 1440 is how a deliberate responsive scroller looks, and the run confirms it is one.
+A width of 2560 is rendered because type set at fixed pixel sizes stays frozen while the layout keeps growing. Seven rounds at narrower widths once passed a page whose nav links were 13px at every resolution. Target size is measured on the region that takes a pointer, not the painted box. A link inline in a sentence is exempt. An undersized control fails when crowded, and an isolated one goes to the critic. A component that clips its own content inside a scroll container is a defect at 1440 or wider, unless it is a carousel by design. The exact thresholds are in [`floor.md`](../../skills/doctrine-gauntlet/floor.md).
 
 ### Running the harness
 
@@ -152,7 +148,7 @@ It renders each width in each theme asked for. The 360 render runs as a phone, s
 
 The flags, and what each decides:
 
-- `--single-theme`, with the one theme named: the project ships one theme. Without it, the missing theme is an `[UNMEASURED]` line that never clears, and the gate can never close.
+- `--single-theme`, with `dark` or `light` as the theme argument: the project ships one theme. Without it, the missing theme is an `[UNMEASURED]` line that never clears, and the gate can never close.
 - `--fragment`: a host page owns theme switching and the type scale, as for a design-system card. A missing `h1` is not a defect, and the theme-reachability and frozen-type questions are suppressed. It suppresses no `[UNMEASURED]` line, so a single-theme fragment needs both flags.
 - `--theme-class=NAME`: toggles a class on both `<html>` and `<body>`, for projects that theme that way, such as Tailwind's `dark`. Without it those projects report a false "theme switch had no effect".
 - `--crop=SELECTOR`: also shoots that element at 1:1 for each width and theme. A full-page shot is viewed scaled down, so this is the only way to see a figure at its shipped size.
@@ -162,14 +158,15 @@ An unknown flag, or a fourth positional argument, is refused with exit 2.
 
 Output files: `<outPrefix>-<theme>-<width>.png` per configuration, `<outPrefix>-reducedmotion-<theme>.png` per theme, `<outPrefix>-<theme>-<width>-crop.png` where `--crop` matched, and `<outPrefix>-focus-<theme>-NN.png` per focus stop. Critics grade these files.
 
-The verdict line has three forms, and none can be misread as a pass:
+The verdict line on stdout has three forms, and none can be misread as a pass:
 
 | Verdict | Exit |
 |---|---|
 | `=== TECHNICAL FLOOR: PASS ===` | 0 |
 | `=== TECHNICAL FLOOR: N failing configuration(s) ===` | 1 |
-| `FLOOR: CANNOT RUN`, on stderr: nothing was measured | 2 |
 | `=== TECHNICAL FLOOR: NOT CLEAN — nothing failed, but N item(s) went unmeasured ===` | 3 |
+
+When nothing could be measured, it prints `FLOOR: CANNOT RUN` on stderr instead and exits 2.
 
 Two markers in the report carry gate law. `[UNMEASURED]` is a gap in this run, and it blocks until you waive it. Examples are axe missing or timing out, a theme switch with no effect, a navigation answering HTTP 400 or worse, a stylesheet, font or image that never arrived, a page still changing after it was measured, text painted into a canvas, and content inside a frame. `[JUDGE]` is a question the harness hands to the critic. Three print on every run: non-text contrast, visible focus, and canvas-driven motion under reduced motion. The others print under their own conditions, such as theme reachability, content clipped in a scroll container, a spec-exempt target, or frozen type. A `[JUDGE]` line never gates by itself, but the critic's answer does: a critic who finds the second theme unreachable has found a floor failure.
 
@@ -191,6 +188,20 @@ Two runners exist. The deciding factor is the round's red team, the one call tha
 - **Claude Code's Workflow tool** runs the script itself, so it cannot route the red team to another model family. Use it only where that seat is absent. Its red team is then recorded as a same-model substitute. A round's run id is kept in the ledger and passed back as `resumeFromRunId` to resume.
 
 With neither runner, the prose flow is the round, unchanged. The script differs from the prose in one place: each section-critic retry is a fresh agent handed every earlier rejection, not one critic kept alive.
+
+## A worked example
+
+This example is illustrative. It shows the shape of a run, not a recorded one.
+
+You ask: "restyle the marketing landing page with the gauntlet; the old page is the reference, and the new one should beat it." Discovery finds no design system, so nothing is bound and the skill's own brief is the law. The README documents `build`, `lint` and `test` as gates. `test` is `vitest` in watch mode, so the run uses `vitest run` and records the substitution. The ledger takes the company name, four plan tiers and prices, two certifications and a support address from your prompt and the existing page.
+
+It asks. You pick fused gate. The one job is turning a visiting engineer into a trial sign-up. The comparison target is the existing page, to be exceeded. The work lands in this repo by pull request. The site has two themes with a toggle, is a whole page, and is never printed. The run floors the existing page and records that its footer links fail contrast, so no critic will demand parity on them. It puts four sections to you and you approve them. The direction adversary returns seven CLEAR and one WEAKEN, on a wall of copy under the hero at 360, and the direction is amended in place.
+
+Four pairs go out, each in its own worktree. The pricing critic rejects once, because the tier cards clip their last row at 1440, and passes the rebuild.
+
+Round 1. The floor exits 3: nothing failed, but the display font never arrived, so the report carries an `[UNMEASURED]` line. The blind comparison picks the candidate. The critic marks the wall `BLOCKING`: at 360 the first image sits below six paragraphs. The red team marks item 4 `BROKE`, because the page says "trusted by 400 teams" and the ledger has no such figure. Repairs serve the font from the project, move the image up, and replace the invented figure with the real one you supply.
+
+Round 2 is clean, so the simplification pass runs. It removes a decorative gradient and folds two one-off spacing values into tokens. That diff resets the clean-pass count to 0. Rounds 3 and 4 are clean on the simplified page, and the phase exits on two consecutive clean passes. The report opens with the gate line, then walks your request item by item, then lists the docket's polish items and the pull request.
 
 ## How to invoke it
 
