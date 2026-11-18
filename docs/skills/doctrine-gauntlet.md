@@ -46,7 +46,7 @@ A rung holds only on a readable law, meaning rules somebody decided. A token fil
 Every comparison inherits the reference, so the run checks it first:
 
 - **A page it can load:** rendered and put through the floor. A reference that fails the floor is still valid visual direction. Its failures are recorded and handed to the critic and red team, so neither demands parity on a defect the floor forbids the build to copy.
-- **A static image:** looked at and confirmed. Pinned reference renders are used as they are.
+- **A static image:** looked at and confirmed. Pinned reference renders are used as they are, unless the house declares a different artifact canonical, which then wins.
 - **A source file that must be built:** built first, because shot raw it renders plausible garbage.
 - **A brand name with no artifact:** there is no reference, and the run creates the design direction instead.
 
@@ -66,7 +66,7 @@ A missing direction blocks the phase. A missing value inside a settled direction
 
 **The pairs.** Before the first builder, the run runs every documented gate on the untouched revision. Failures outside what you asked to change are recorded as inherited, so nobody is told to fix them or blamed for them. Then one builder per section, each paired with a fresh-context critic. A critic renders its section at 360, 768, 1440 and 2560 pixels wide, in every theme the run claims. Where a section has no route of its own, the critic renders the whole page and crops. A critic rejects with specific art-direction notes, and a section passes when its critic accepts with nothing blocking. The critic stays with its section across retries. If it rejects the same section three times, the run puts the disagreement to you. Your ruling for the builder passes the section. A ruling for the critic resumes the pair once. A second deadlock sends the section back to direction, because the object is wrong rather than its execution.
 
-Builders never share a file. Sections in one file are built one at a time, or the file is split with your approval. Builders that share a build directory or dev server each get their own worktree, with dependencies hardlinked (`cp -al`) rather than symlinked. Otherwise every URL keeps answering while serving another builder's page.
+Builders never share a file. Sections in one file are built one at a time, or the file is split with your approval. Builders that share a build directory or dev server each get their own worktree, with dependencies hardlinked (`cp -al`) rather than symlinked, and the copied tool caches (`node_modules/.vite`, `node_modules/.cache`) deleted, since a hardlinked cache file is still shared. Otherwise every URL keeps answering while serving another builder's page.
 
 **The integrated gate.** When every section has passed, the run assembles the page and runs one round of the gate, in this order:
 
@@ -144,7 +144,7 @@ node <skill-dir>/harness/floor.mjs <url-or-file> <outPrefix> [dark|light|both]
     [--fragment] [--single-theme] [--theme-class=NAME] [--crop=SELECTOR] [--expect=TEXT]
 ```
 
-It renders each width in each theme asked for. The 360 render runs as a phone, so a page with no working viewport tag fails as `NO MOBILE VIEWPORT`. A fragment is the exception, rendered in a plain 360px window, because its host page owns the viewport tag. It scrolls first so lazy images load and hides dev-server overlays. It checks heading structure, layout, target size and type scale across widths, and runs axe where it can find it. Uncaught page errors fail a configuration. A reduced-motion pass, at 1440 only, fails on text that reduced motion hides and on any CSS or Web Animations animation still running. Motion driven by script or canvas goes to the critic. A focus pass, once per theme at 1440, presses Tab from the top up to 40 times and shoots each focused element at 1:1, so a critic has a focused state to look at. The focus pass never gates.
+It renders each width in each theme asked for. The 360 render runs as a phone, so a page with no working viewport tag fails as `NO MOBILE VIEWPORT`. A fragment is the exception, rendered in a plain 360px window, because its host page owns the viewport tag. It scrolls first so lazy images load and hides dev-server overlays. It checks heading structure, layout, target size and type scale across widths, and runs axe where it can find it. Uncaught page errors fail a configuration. A reduced-motion pass, at 1440 only, fails on text that reduced motion hides and on any CSS or Web Animations animation still running in the document. It does not look inside shadow roots, and motion driven by script or canvas goes to the critic. A focus pass, once per theme at 1440, presses Tab from the top up to 40 times and shoots each focused element at 1:1, so a critic has a focused state to look at. The focus pass never gates.
 
 The flags, and what each decides:
 
