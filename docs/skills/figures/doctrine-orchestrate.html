@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Figure source for docs/skills/doctrine-orchestrate.png, started from specimen.html.
+     Render: node docs/skills/figures/render.mjs docs/skills/figures/doctrine-orchestrate.html docs/skills/doctrine-orchestrate.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-orchestrate/SKILL.md@d1e2b0903d31385b2e1a6183cced7bd6f019e12c">
+<title>Figure: doctrine-orchestrate</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 10/15</span><span>doctrine-orchestrate</span></header>
+
+<section class="title">
+  <h1>One orchestrator relays, each lane runs its own phase, and a merge session lands them one at a time</h1>
+  <p>Several doctrine phases of one epic at once, on Claude Code, each session in its own herdr pane.</p>
+</section>
+
+<section class="row">
+  <div class="label">Before the<br>run</div>
+  <div class="flow">
+    <div class="box"><b>Refuse</b><span>Codex, no herdr, no docs/PROJECT.md, not the orchestrator role</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Ask once</b><span>model id, tier and cycle cap per role; the time budget</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Capacity</b><span>dctr-orchestrate.mjs capacity: accept, or the role does not start</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Start</b><span>watcher, merge session, guard probe, then each lane</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">The run</div>
+  <div class="fan">
+    <div class="col" style="width:200px"><div class="box" id="orch"><b>Orchestrator</b><span>writes no code; relays; puts every question to you</span></div></div>
+    <svg class="wires" data-from="#orch" data-to="#send"></svg>
+    <div class="col" style="width:190px"><div class="box" id="send"><b>Sender</b><span>held folders; types only four fixed lines</span></div></div>
+    <svg class="wires" data-from="#send" data-to=".lane"></svg>
+    <div class="col" style="width:240px">
+      <div class="box lane"><b>Lane</b><span>own phase, worktree, wrapper, gate</span></div>
+      <div class="box lane"><b>Lane</b><span>own phase, worktree, wrapper, gate</span></div>
+      <div class="box lane"><b>Lane after a lane</b><span>starts from the landed revision</span></div>
+    </div>
+    <svg class="wires" data-from=".lane" data-to="#merge"></svg>
+    <div class="col" style="flex:1"><div class="box" id="merge"><b>Merge session</b><span>git merge --no-ff, one lane at a time; gate on the merged revision</span></div></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>A merge stays only on exit=0 with no capture=incomplete; otherwise the integration branch is reset.</p>
+  <p>The lane watcher logs each event; the orchestrator wakes on events.log.</p>
+  <p>Account-wide usage limit: you roll, then run wake-all once.</p>
+  <p>Ends: each session told the run ended, then the watcher stops.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-orchestrate/SKILL.md at blob d1e2b09</footer>
+<script src="figure.js"></script>
+</body>
+</html>
