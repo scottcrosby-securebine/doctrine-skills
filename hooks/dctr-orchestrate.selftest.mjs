@@ -3,16 +3,17 @@
 //   node hooks/dctr-orchestrate.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
 // Clause 1 pins `capacityDecision` in dctr-lib.mjs on the seven cases E15-D51 names, the margin read from
-// HANDOFF_COST_TOKENS. Clause 2 runs the command on fixture transcripts: the window from the model id (E15-D208) or,
-// where a usable one exists, the transcript session's bridge file (E15-D256), the load from the first usage reading
-// (E15-D209), and the refusals that are not arithmetic. Clause 3 proves the
-// fixture transcripts and bridge files carry the readings the clauses rest on, by parsing them without the command or
-// the library.
+// HANDOFF_COST_TOKENS. Clause 2 runs the command on fixture transcripts: the window from the host's own reading, a
+// Claude Code session's bridge file or a Codex rollout's model_context_window, refused as unknown where there is none,
+// the load from the first usage reading (E15-D209), and the refusals that are not arithmetic. Clause 3 proves the
+// fixture transcripts, rollouts and bridge files carry the readings the clauses rest on, by parsing them without the
+// command or the library.
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import * as F from './dctr-codex.fixtures.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -68,23 +69,26 @@ const fresh = bridgeTmp('tmpdir-fresh', reading(1000000))
 const stale = bridgeTmp('tmpdir-stale', reading(1000000), 2 * 300000)
 const garbled = bridgeTmp('tmpdir-garbled', '{"session_id":"orch-sess')
 const textWindow = bridgeTmp('tmpdir-text-window', reading('1000000'))
-// R1-O1: a session that ran claude-opus-5-5, its last main-thread entry naming it, followed by a seat's entry naming
-// claude-haiku-5-5 and an API error's <synthetic> one, with a fresh 1,000,000 bridge reading in the fresh TMPDIR.
+// A session that ran a model no list could name, its last main-thread entry naming it, with a fresh 1,000,000 bridge
+// reading in the fresh TMPDIR.
 const R = 'ran-session'
-const ranOpus = transcript(`${R}.jsonl`, [user, assistant(101825, { message: { role: 'assistant', model: 'claude-opus-5-5', usage: { input_tokens: 4, cache_creation_input_tokens: 101821, cache_read_input_tokens: 0, output_tokens: 10 } } }),
-  JSON.stringify({ type: 'assistant', uuid: 'side', isSidechain: true, message: { role: 'assistant', model: 'claude-haiku-5-5', content: [] } }),
-  JSON.stringify({ type: 'assistant', uuid: 'syn', isSidechain: false, message: { role: 'assistant', model: '<synthetic>', content: [] } })])
+const ranAny = transcript(`${R}.jsonl`, [user, assistant(101825, { message: { role: 'assistant', model: 'some-future-model-9', usage: { input_tokens: 4, cache_creation_input_tokens: 101821, cache_read_input_tokens: 0, output_tokens: 10 } } })])
 const ranBridge = path.join(fresh.dir, `dctr-${R}`, 'bridge.json')
 fs.mkdirSync(path.dirname(ranBridge), { recursive: true })
 fs.writeFileSync(ranBridge, JSON.stringify({ session_id: R, window: 1000000, used: 101825, pct: 10, t: new Date().toISOString() }))
-// R2-C1: ran-session's lines with a malformed complete line after the first, under a session of its own with the same
-// fresh 1,000,000 bridge reading in the fresh TMPDIR.
-const B = 'unreadable-session'
-const ranLines = fs.readFileSync(ranOpus, 'utf8').split('\n')
-const unreadable = transcript(`${B}.jsonl`, [ranLines[0], '{"type":"assis', ...ranLines.slice(1, -1)])
-const badBridge = path.join(fresh.dir, `dctr-${B}`, 'bridge.json')
-fs.mkdirSync(path.dirname(badBridge), { recursive: true })
-fs.writeFileSync(badBridge, JSON.stringify({ session_id: B, window: 1000000, used: 101825, pct: 10, t: new Date().toISOString() }))
+// The arithmetic fixtures' bridge readings, one TMPDIR holding a fresh file per session: 1,000,000 for orch, 200,000
+// for the others, and one for a transcript that does not exist.
+const arith = path.join(tmp, 'tmpdir-arith')
+const arithBridge = (s, window) => { const f = path.join(arith, `dctr-${s}`, 'bridge.json'); fs.mkdirSync(path.dirname(f), { recursive: true })
+  fs.writeFileSync(f, JSON.stringify({ session_id: s, window, used: 1, pct: 0, t: new Date().toISOString() })); return f }
+const arithFiles = { orch: arithBridge('orch', 1000000), 'low-first': arithBridge('low-first', 200000), 'high-first': arithBridge('high-first', 200000),
+  'no-usage': arithBridge('no-usage', 200000), absent: arithBridge('absent', 200000) }
+// Derived from TUI_TURN, a real Codex rollout: its model_context_window 258,400 made 1,000,000; the same with the
+// window removed; and RUN3 up to its first PostToolUse marker, a rollout before any token_count.
+const rollout = (id, lines) => transcript(`rollout-2026-09-28T18-52-46-${id}.jsonl`, lines)
+const codexMillion = rollout('million', F.TUI_TURN.map((l) => l.replaceAll('"model_context_window":258400', '"model_context_window":1000000')))
+const codexNoWindow = rollout('nowindow', F.TUI_TURN.map((l) => l.replaceAll(/,"model_context_window":258400/g, '')))
+const codexNoCount = rollout('nocount', F.RUN3.slice(0, F.RUN3.findIndex((l) => l.includes('POST-MARKER'))))
 
 // Each run gets a TMPDIR of its own, so the bridge file it reads is the one its clause wrote (E15-D256).
 const runIn = (tmpdir, ...args) => {
@@ -92,89 +96,100 @@ const runIn = (tmpdir, ...args) => {
   return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() }
 }
 const emptyTmp = path.join(tmp, 'tmpdir-none'); fs.mkdirSync(emptyTmp)
-const run = (...args) => runIn(emptyTmp, ...args)
+const run = (...args) => runIn(arith, ...args)
 const show = (r) => `exit ${r.code}, stdout "${r.out}"${r.err ? `, stderr "${r.err}"` : ''}`
+const unknownWindow = (r) => r.code === 1 && /^refuse window unknown: /.test(r.out) && !/window \d|\d{4}/.test(r.out)
 
 // ---------------------------------------------------------------- clause 2: the command
 
 {
-  const r = run('capacity', 'claude-opus-5-5[1m]', '220000', orch)
-  clause('clause 2a — a [1m] id: accept at the window 1,000,000', r.code === 0 && /^accept window 1000000 from model id load 47600 tier 220000\b/.test(r.out), show(r))
+  const r = run('capacity', '220000', orch)
+  clause('clause 2a — a Claude Code transcript reading 47,600 first, its bridge file reporting 1,000,000: accept at that window, naming the bridge', r.code === 0 && /^accept window 1000000 from bridge load 47600 tier 220000\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', '220000', orch)
-  clause('clause 2b — a known id without [1m]: refuse at the window 200,000', r.code === 1 && /^refuse window 200000 from model id\b/.test(r.out), show(r))
+  const r = runIn(emptyTmp, 'capacity', '220000', orch)
+  clause('clause 2b — the same transcript with no bridge file: refuse, the window unknown, naming no window', unknownWindow(r), show(r))
 }
 {
-  const r = run('capacity', 'not-a-model', '220000', orch)
-  clause('clause 2c — an unknown id: refuse, naming it unknown, with no window', r.code === 1 && /^refuse\b/.test(r.out) && r.out.includes('"not-a-model" is unknown') && !/window/.test(r.out), show(r))
+  const r = runIn(emptyTmp, 'capacity', '220000', codexMillion)
+  clause('clause 2c — a Codex rollout reporting model_context_window 1,000,000: accept at that window, naming the rollout, the load its first token_count 17,401', r.code === 0 && /^accept window 1000000 from rollout load 17401 tier 220000\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', '160000', lowFirst)
-  clause('clause 2d — first reading 94,999, later 100,000: accept on the first', r.code === 0 && /^accept window 200000 from model id load 94999 tier 160000\b/.test(r.out), show(r))
+  const r = run('capacity', '160000', lowFirst)
+  clause('clause 2d — first reading 94,999, later 100,000: accept on the first', r.code === 0 && /^accept window 200000 from bridge load 94999 tier 160000\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', '160000', highFirst)
-  clause('clause 2e — first reading 100,000, later 94,999: refuse on the first', r.code === 1 && /^refuse window 200000 from model id load 100000\b/.test(r.out), show(r))
+  const r = run('capacity', '160000', highFirst)
+  clause('clause 2e — first reading 100,000, later 94,999: refuse on the first', r.code === 1 && /^refuse window 200000 from bridge load 100000\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', '160000', noUsage)
-  const m = run('capacity', 'claude-opus-5-5', '160000', path.join(tmp, 'absent.jsonl'))
-  clause('clause 2f — a transcript with no usage, or none at all: refuse, the load unknown', r.code === 1 && /load is unknown/.test(r.out) && m.code === 1 && /load is unknown/.test(m.out), `${show(r)}; ${show(m)}`)
+  const r = run('capacity', '160000', noUsage)
+  const m = run('capacity', '160000', path.join(tmp, 'absent.jsonl'))
+  clause('clause 2f — a transcript with no usage, or none at all, each with a bridge reading: refuse, the load unknown', r.code === 1 && /load is unknown/.test(r.out) && m.code === 1 && /load is unknown/.test(m.out), `${show(r)}; ${show(m)}`)
 }
 {
-  const r = run('capacity', 'claude-opus-5-5[1m]', 'lots', orch)
+  const r = run('capacity', 'lots', orch)
   clause('clause 2g — a tier resolveTier cannot read: refuse with its error', r.code === 1 && /malformed tier/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5[1m]', '60%', orch)
-  clause('clause 2h — a percent tier resolves against the derived window: 60% of 1,000,000', r.code === 0 && /tier 600000\b/.test(r.out), show(r))
+  const r = run('capacity', '60%', orch)
+  clause('clause 2h — a percent tier resolves against the host\'s window: 60% of 1,000,000', r.code === 0 && /tier 600000\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', orch)
-  clause('clause 2i — a missing argument: exit 2 and no verdict', r.code === 2 && r.out === '', show(r))
+  const r = run('capacity', orch)
+  const old = run('capacity', 'some-model', '220000', orch)
+  clause('clause 2i — a missing argument, or the old form with a model id: exit 2 and no verdict', r.code === 2 && r.out === '' && old.code === 2 && old.out === '', `${show(r)}; ${show(old)}`)
 }
 
 {
   // 190,000 in 200,000: within the window and above the load plus margin, so only resolveTier's 90% rule refuses it.
-  const r = run('capacity', 'claude-opus-5-5', '190000', lowFirst)
-  const ok = run('capacity', 'claude-opus-5-5', '180000', lowFirst)
+  const r = run('capacity', '190000', lowFirst)
+  const ok = run('capacity', '180000', lowFirst)
   clause('clause 2j — a tier above 90% of the window but within it: refuse with the configuration error, and 90% itself accepts',
-    r.code === 1 && /^refuse\b/.test(r.out) && /configuration error/.test(r.out) && ok.code === 0 && /^accept window 200000 from model id load 94999 tier 180000\b/.test(ok.out), `${show(r)}; ${show(ok)}`)
+    r.code === 1 && /^refuse\b/.test(r.out) && /configuration error/.test(r.out) && ok.code === 0 && /^accept window 200000 from bridge load 94999 tier 180000\b/.test(ok.out), `${show(r)}; ${show(ok)}`)
 }
 
 {
-  const r = runIn(fresh.dir, 'capacity', 'claude-opus-5-5', 'default', hostStart)
+  const r = runIn(fresh.dir, 'capacity', 'default', hostStart)
   clause('clause 2k — a fresh bridge reading of 1,000,000 for the transcript\'s session: accept at that window, naming the bridge (E15-D256)',
     r.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(r.out), show(r))
 }
 {
-  const r = run('capacity', 'claude-opus-5-5', 'default', hostStart)
-  clause('clause 2l — no bridge file: the window 200,000 from the model id, naming the model id and not the bridge (E15-D256)',
-    r.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(r.out) && !/bridge/.test(r.out), show(r))
+  const r = runIn(emptyTmp, 'capacity', 'default', hostStart)
+  clause('clause 2l — no bridge file: refuse, the window unknown, naming no window', unknownWindow(r), show(r))
 }
 for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbled, 'that does not parse'], ['2o', textWindow, 'whose window is not a number']]) {
-  const r = runIn(b.dir, 'capacity', 'claude-opus-5-5', 'default', hostStart)
-  clause(`clause ${n} — a bridge file ${what} is no bridge reading: the window 200,000 from the model id (E15-D256)`,
-    r.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(r.out) && !/bridge/.test(r.out), show(r))
+  const r = runIn(b.dir, 'capacity', 'default', hostStart)
+  clause(`clause ${n} — a bridge file ${what} is no bridge reading: refuse, the window unknown, naming no window (E15-D256)`, unknownWindow(r), show(r))
 }
 {
-  const r = runIn(fresh.dir, 'capacity', 'not-a-model', 'default', hostStart)
-  clause('clause 2p — an unknown id still refuses with a bridge reading present', r.code === 1 && r.out === 'refuse model id "not-a-model" is unknown', show(r))
+  const r = runIn(fresh.dir, 'capacity', 'default', ranAny)
+  clause('clause 2q — a session that ran a model no list names, with a fresh bridge reading: accept at the bridge window 1,000,000',
+    r.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(r.out), show(r))
 }
-
 {
-  const same = runIn(fresh.dir, 'capacity', 'claude-opus-5-5', 'default', ranOpus)
-  const other = runIn(fresh.dir, 'capacity', 'claude-sonnet-5-5', 'default', ranOpus)
-  clause('clause 2q — a session that ran the model id asked about, with a fresh bridge reading: accept at the bridge window 1,000,000, naming the bridge (R1-O1)',
-    same.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(same.out), show(same))
-  clause('clause 2r — the same session and bridge reading asked about another model id: the window 200,000 from the model id, naming the model id and not the bridge (R1-O1)',
-    other.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(other.out) && !/bridge/.test(other.out), show(other))
-  const unread = runIn(fresh.dir, 'capacity', 'claude-sonnet-5-5', 'default', unreadable)
-  clause('clause 2s — a transcript with a malformed line naming claude-opus-5-5, asked about claude-sonnet-5-5 with a fresh bridge reading: the window 200,000 from the model id, naming the model id and not the bridge (R2-C1)',
-    unread.code === 1 && /^refuse window 200000 from model id load 101825\b/.test(unread.out) && !/bridge/.test(unread.out), show(unread))
-  clause('clause 2t — its readable twin, the same lines without the malformed one, prints the same line (R2-C1)',
-    other.out === unread.out && other.code === unread.code, `${show(other)}; ${show(unread)}`)
+  const w = runIn(emptyTmp, 'capacity', '220000', codexNoWindow)
+  const c = runIn(emptyTmp, 'capacity', '220000', codexNoCount)
+  const b = runIn(fresh.dir, 'capacity', '220000', codexNoWindow)
+  clause('clause 2r — a Codex rollout whose token_counts carry no model_context_window, or with no token_count yet: refuse, the window unknown, and a bridge file does not stand in for the rollout',
+    unknownWindow(w) && unknownWindow(c) && unknownWindow(b), `${show(w)}; ${show(c)}; ${show(b)}`)
+}
+{
+  const { capacity, hostWindow } = await import('./dctr-orchestrate.mjs')
+  const text = (f) => fs.readFileSync(f, 'utf8')
+  const none = capacity('220000', text(orch), null), br = capacity('220000', text(orch), { window: 1000000, source: 'bridge' })
+  const ro = capacity('220000', text(codexMillion), { window: 1000000, source: 'rollout' })
+  clause('clause 2s — capacity, pure: no reading refuses with the window unknown; a bridge reading and a rollout reading each accept, naming their source',
+    none.accept === false && /^refuse window unknown: /.test(none.line) && br.accept === true && br.line.startsWith('accept window 1000000 from bridge load 47600 tier 220000') &&
+      ro.accept === true && ro.line.startsWith('accept window 1000000 from rollout load 17401 tier 220000'), JSON.stringify([none, br, ro]))
+  const was = process.env.TMPDIR
+  process.env.TMPDIR = arith
+  const got = [hostWindow(orch), hostWindow(codexMillion), hostWindow(codexNoWindow), hostWindow(path.join(tmp, 'rollout-2026-09-28T18-52-46-gone.jsonl'))]
+  process.env.TMPDIR = emptyTmp
+  got.push(hostWindow(orch))
+  process.env.TMPDIR = was
+  clause('clause 2t — hostWindow: a Claude Code transcript with a bridge reading gives it from bridge, a rollout carrying model_context_window from rollout, and a rollout without one, a missing rollout and a transcript with no bridge reading give null',
+    JSON.stringify(got) === JSON.stringify([{ window: 1000000, source: 'bridge' }, { window: 1000000, source: 'rollout' }, null, null, null]), JSON.stringify(got))
 }
 
 // ---------------------------------------------------------------- clause 3: the fixtures, without the command
@@ -208,26 +223,25 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
     st?.session_id === S && st.window === 1000000 && age(stale.f) > 300000 && parse(garbled.f) === null && tw?.session_id === S && typeof tw.window === 'string',
     `${JSON.stringify(st)} ${age(stale.f)} ${JSON.stringify(tw)}`)
   clause('clause 3h — the empty TMPDIR holds no bridge file', fs.readdirSync(emptyTmp).length === 0, String(fs.readdirSync(emptyTmp)))
-  const lines = (f) => fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
-  const models = (f) => lines(f).map((e) => [e.isSidechain === true, e.message?.model ?? null])
   const rb = parse(ranBridge)
-  clause('clause 3i — S.jsonl names no model on any entry; ran-session.jsonl reads 101,825 first, names claude-opus-5-5 on its one main-thread entry with usage, then a seat entry naming claude-haiku-5-5 and a main-thread <synthetic> entry last; its bridge file names it with window 1,000,000 and is under the expiry old (R1-O1)',
-    models(hostStart).every(([, m]) => m === null) && String(readings(ranOpus)) === '101825' &&
-      JSON.stringify(models(ranOpus)) === JSON.stringify([[false, null], [false, 'claude-opus-5-5'], [true, 'claude-haiku-5-5'], [false, '<synthetic>']]) &&
-      path.basename(ranOpus, '.jsonl') === R && rb?.session_id === R && rb.window === 1000000 && age(ranBridge) < 300000,
-    `${JSON.stringify(models(hostStart))} ${readings(ranOpus)} ${JSON.stringify(models(ranOpus))} ${JSON.stringify(rb)}`)
+  const model = (f) => fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((e) => e.message?.model ?? null)
+  clause('clause 3i — ran-session.jsonl reads 101,825 first and names some-future-model-9; its bridge file names it with window 1,000,000 and is under the expiry old',
+    String(readings(ranAny)) === '101825' && String(model(ranAny)) === ',some-future-model-9' && path.basename(ranAny, '.jsonl') === R && rb?.session_id === R && rb.window === 1000000 && age(ranBridge) < 300000,
+    `${readings(ranAny)} ${model(ranAny)} ${JSON.stringify(rb)}`)
+  const ab = Object.entries(arithFiles).map(([s, f]) => [s, parse(f)?.session_id, parse(f)?.window, age(f) < 300000])
+  clause('clause 3j — the arithmetic TMPDIR holds a fresh bridge file per session: orch at 1,000,000, the others at 200,000; absent.jsonl does not exist',
+    JSON.stringify(ab) === JSON.stringify([['orch', 'orch', 1000000, true], ['low-first', 'low-first', 200000, true], ['high-first', 'high-first', 200000, true], ['no-usage', 'no-usage', 200000, true], ['absent', 'absent', 200000, true]]) && !fs.existsSync(path.join(tmp, 'absent.jsonl')),
+    JSON.stringify(ab))
 }
 {
-  const { transcriptEntries } = await import('./dctr-lib.mjs')
-  const parsed = (f) => fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
-  const named = (f) => parsed(f).filter((e) => e.type === 'assistant' && !e.isSidechain && e.message?.model === 'claude-opus-5-5').length
-  const bb = JSON.parse(fs.readFileSync(badBridge, 'utf8'))
-  clause('clause 3j — unreadable-session.jsonl is unreadable to transcriptEntries and names claude-opus-5-5 on a main-thread entry, ran-session.jsonl is readable, they differ by the malformed line alone, and the bridge file names the session with window 1,000,000 under the expiry old (R2-C1)',
-    (() => { try { JSON.parse('{"type":"assis'); return false } catch { return true } })() &&
-      transcriptEntries(fs.readFileSync(unreadable, 'utf8')) === null && named(unreadable) === 1 && transcriptEntries(fs.readFileSync(ranOpus, 'utf8')) !== null &&
-      fs.readFileSync(unreadable, 'utf8').replace('{"type":"assis\n', '') === fs.readFileSync(ranOpus, 'utf8') &&
-      bb.session_id === B && bb.window === 1000000 && Date.now() - fs.statSync(badBridge).mtimeMs < 300000,
-    `${JSON.stringify(transcriptEntries(fs.readFileSync(unreadable, 'utf8')))} ${named(unreadable)} ${JSON.stringify(bb)}`)
+  // The rollouts parsed by hand: each token_count's last_token_usage.input_tokens and model_context_window.
+  const counts = (f) => fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    .filter((e) => e.type === 'event_msg' && e.payload?.type === 'token_count').map((e) => [e.payload.info.last_token_usage.input_tokens, e.payload.info.model_context_window ?? null])
+  clause('clause 3k — the Codex rollouts: the million one reads 17,401 then 17,503 at window 1,000,000, the no-window one carries no model_context_window at all, the no-count one has no token_count; every one is named rollout-',
+    JSON.stringify(counts(codexMillion)) === '[[17401,1000000],[17503,1000000]]' && JSON.stringify(counts(codexNoWindow)) === '[[17401,null],[17503,null]]' &&
+      !fs.readFileSync(codexNoWindow, 'utf8').includes('model_context_window') && counts(codexNoCount).length === 0 &&
+      [codexMillion, codexNoWindow, codexNoCount].every((f) => path.basename(f).startsWith('rollout-')),
+    `${JSON.stringify(counts(codexMillion))} ${JSON.stringify(counts(codexNoWindow))} ${counts(codexNoCount).length}`)
 }
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
