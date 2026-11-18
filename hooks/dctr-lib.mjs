@@ -1218,6 +1218,11 @@ export function treeExcludes(recordPath, repo) {
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
+/** The permission flag a launch command carries, from `<run>/permission-mode`'s text (null for no file): the bypass
+ *  flag for bypassPermissions alone, else none. The flag is this fixed string, so no text read from the file reaches the
+ *  shell. */
+export const launchFlags = (text) => (String(text ?? '').trim() === 'bypassPermissions' ? ' --permission-mode bypassPermissions' : '')
+
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
  * under the directory holding `.git` at or above `cwd` (repoOf; a worktree's `.git` file counts), Records being that

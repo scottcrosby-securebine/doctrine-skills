@@ -914,6 +914,24 @@ const loFile = path.join(lo.run, 'launch', 'orchestrator.sh'), loTail = loOrch ?
 clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended to by the claude it starts, runs nothing after claude exits (R1-N3)',
   loOrch?.launch === `sh ${shq(loFile)}` && loTail?.tail === false && /\/usr\/bin\/touch /.test(loTail.grew ?? ''), JSON.stringify([loOrch, loTail]))
 
+// R4: the orchestrator's launch file carries the permission flag only when <run>/permission-mode says bypassPermissions.
+const pmStarts = []
+for (const [n, text] of [['2bi', 'bypassPermissions\n'], ['2bi2', 'default\n'], ['2bi3', null]]) {
+  const f = fixture({})
+  if (text !== null) write(path.join(f.run, 'permission-mode'), text)
+  const env = { ...loEnv, DCTR_RUN: f.run, SHIM_DIR: f.dir }
+  const r = await proc(['start'], env, f.repo)
+  await proc(['stop'], env)
+  const file = (() => { try { return fs.readFileSync(path.join(f.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()
+  pmStarts.push({ f, text })
+  const flagged = file.includes(' --permission-mode bypassPermissions')
+  clause(`clause ${n} — with <run>/permission-mode ${text === null ? 'absent' : JSON.stringify(text)}, start writes an orchestrator launch file ${text === 'bypassPermissions\n' ? 'whose claude command carries --permission-mode bypassPermissions' : 'with no permission flag'} (R4, S4)`,
+    r.code === 0 && / claude --model /.test(file) && (text === 'bypassPermissions\n' ? flagged && file.trimEnd().endsWith(' --permission-mode bypassPermissions') : !file.includes('--permission-mode')),
+    JSON.stringify([r, file]))
+}
+clause('clause 3bi — without the watcher: the three fixtures\' runs hold permission-mode bypassPermissions, default and no file',
+  JSON.stringify(pmStarts.map(({ f }) => { try { return fs.readFileSync(path.join(f.run, 'permission-mode'), 'utf8') } catch { return null } })) === JSON.stringify(['bypassPermissions\n', 'default\n', null]), '')
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 {

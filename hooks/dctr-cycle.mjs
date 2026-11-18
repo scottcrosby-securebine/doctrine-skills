@@ -9,7 +9,9 @@
 // one paused line, writes nothing, or launches dctr-typer.mjs detached with the facts it needs (pausing instead when
 // the transcript it would hand the typer cannot be read). On Notification and StopFailure it appends the paused line
 // notifyDecision returns, if any; a StopFailure in a session of the run first appends its limits.log line (limitLine:
-// the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time). Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
+// the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time). In a
+// session whose role is `orchestrator`, every one of the four events that is not a subagent's and carries
+// permission_mode first writes that mode as the one line of <run>/permission-mode, before any other stand-down. Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
 // StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
 // UserPromptSubmit does nothing else.
 //
@@ -65,6 +67,17 @@ try {
   }
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
+  // The orchestrator's latest permission mode, which the launch files it writes read (launchFlags), so a session it
+  // launches runs in its mode; whatever auto-cycle or the record says. A failed write is logged and changes nothing else.
+  if (runRole() === 'orchestrator' && typeof payload.permission_mode === 'string') {
+    const run = runRoot(process.env, payload.cwd || process.cwd())
+    if (run) {
+      try {
+        fs.mkdirSync(run, { recursive: true })
+        fs.writeFileSync(path.join(run, 'permission-mode'), `${payload.permission_mode}\n`)
+      } catch (e) { hookLog(payload.session_id || 'none', `permission-mode not written (${String(e.message).split('\n')[0]})`) }
+    }
+  }
   // E15 Recovery: a StopFailure in a session of the run appends its limits.log line first, before any paused line and
   // whatever auto-cycle says; outside a run nothing (E15-D114, D115). A failed append never stops the R9 below it.
   if (event === 'StopFailure') {

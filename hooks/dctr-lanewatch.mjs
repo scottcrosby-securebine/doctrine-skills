@@ -14,7 +14,8 @@
 // another holds it. start waits up to WAIT_MS for a live holder carrying its own token, and only then writes its TMPDIR
 // to <run>/tmpdir, which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag
 // `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and the launch line
-// `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment, so the line
+// `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment (with
+// `--permission-mode bypassPermissions` when <run>/permission-mode says the orchestrator runs in it), so the line
 // stays short whatever the length of its PATH. A start whose tab, pane or wait fails closes the tab it made, releases
 // its lock, writes neither, and exits 1 with one line. Before each poll the watcher re-reads the lock and renews it,
 // and ends once it no longer names this watcher; herdr( calls renew it too. stop signals only a live holder whose lock
@@ -59,7 +60,7 @@ import { herdr } from './dctr-state.mjs'
 import { restoreFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier,
-  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal,
+  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -300,7 +301,7 @@ function start(run) {
   const launchFile = path.join(run, 'launch', 'orchestrator.sh')
   const launch = `cd ${shq(checkout)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
     `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
-    `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`
+    `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"${launchFlags(readText(path.join(run, 'permission-mode')))}`
   fs.mkdirSync(path.dirname(launchFile), { recursive: true })
   fs.writeFileSync(launchFile, `${launch}\n`)
   fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} sh ${shq(launchFile)}\n`)

@@ -19,7 +19,8 @@
 // branch `<base>` itself, refused while any worktree of the repo holds it), copies the first handoff into its
 // docs/handoffs/, writes the record the handoff's `record:` line names (relative, inside the worktree) with the phase
 // name and one `State: Open` line, points the memory file kickoff at the copy, sets skip-worktree on a tracked memory
-// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh`, types the launch line
+// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh` (carrying
+// `--permission-mode bypassPermissions` when `<run>/permission-mode` says the orchestrator runs in it), types the launch line
 // `sh <run>/launch/<role>.sh`, `/clear` and RESUME_LINE each once the pane reads ready, and only then appends
 // `create <role> <pane> <worktree> <launch line>`. The launch line carries no PATH value, so it stays within herdr's
 // 1,024-byte limit on a typed line whatever the PATH. Before the launch line, ready is a `pane get` that answered with
@@ -72,7 +73,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags,
 } from './dctr-lib.mjs'
 import { herdr, isPaneNotFound, sleepMs, restoreFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -91,6 +92,8 @@ const gitZ = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], LISTING
 // A git or fs error's first line, for a refusal.
 const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
 const gitOk = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { stdio: 'ignore' }).status === 0
+/** <run>/permission-mode's text for launchFlags, null when it cannot be read. */
+const readMode = (run) => { try { return fs.readFileSync(path.join(run, 'permission-mode'), 'utf8') } catch { return null } }
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 /** Whether `a` and `b` are both links with one target, or both files with one sha256; any failed read is not. */
 const same = (a, b) => {
@@ -265,7 +268,7 @@ function create() {
     made.push(`the herdr pane ${pane}`)
     const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
-      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"`
+      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(readMode(run))}`
     const script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)
