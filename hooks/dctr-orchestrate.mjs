@@ -18,7 +18,7 @@
 // session, carries no numeric window or is older than the lane watcher's BRIDGE_EXPIRY_MS is no bridge reading. With
 // no reading it refuses with the window unknown and the fix: the bridge install command on Claude Code, and on Codex
 // that the rollout has no window yet. The load is the transcript's FIRST main-thread usage reading, the resume load,
-// a rollout's first token_count with input on Codex, taken from the same read of the rollout as its window. The tier
+// a rollout's first token_count with input on Codex. The tier
 // is read as the gauge reads it (`resolveTier`: a number, `<n>%` or `default`), and any error it reports refuses, its
 // floor raise included. The arithmetic is `capacityDecision` in dctr-lib.mjs. It reads the transcript once and the
 // bridge file, and calls nothing else.
