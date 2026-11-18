@@ -1,19 +1,19 @@
 # doctrine-pane
 
-The agent runs an interactive terminal session in a herdr pane beside your session, so you see what it sees and can take the keyboard at any moment. It is not a wrapper. It does not load the doctrine posture, because it is usually called in the middle of other work to run a few commands, and a doctrine run can call it too: `doctrine-debug` names it for a bug that lives on a device you log into.
+The agent runs an interactive terminal session in a herdr pane beside your session, so you see what it sees and can take the keyboard at any moment. Unlike the wrapper skills, it does not load the doctrine posture, because it is usually called in the middle of other work to run a few commands. A doctrine run can call it too: `doctrine-debug` names it for a bug that lives on a device you log into.
 
-![The doctrine-pane loop: you open the pane and answer the login, the agent reads and profiles the platform, you hand the pane over, and the agent types, judges the echo, then presses Enter in a separate call. Every send is checked, and is refused on unread output, a missing profile, a pane that is yours, a control character, a dead recorder or a check it could not make. A refusal is quoted to you verbatim](doctrine-pane.png)
+![The doctrine-pane loop: the agent opens the pane and you answer the login, the agent reads and profiles the platform, you hand the pane over, and the agent types, judges the echo, then presses Enter in a separate call. Every send is checked, and is refused on unread output, a missing profile, a pane that is yours, a control character, a dead recorder or a check it could not make. A refusal is quoted to you verbatim](doctrine-pane.png)
 
 ## When it fires
 
-Ask for it in its own terms: pop a pane, ssh into a box, log into a router or switch, get onto a console, or tail or monitor a log while the agent works. Those requests open a pane. Nothing else does: the skill has no heuristic for "this looks interactive", and it never opens a pane you did not ask for.
+Ask for it in its own terms: pop a pane, ssh into a box, log into a router or switch, get onto a console, or tail or monitor a log while the agent works. Those requests open a pane. Nothing else does: the skill has no heuristic for "this looks interactive".
 
-The test is your request, never the shape of the work. Ten devices you asked to watch get ten sessions. One device you did not ask to watch gets a script. Work nobody asked to watch stays where the project already runs it, on an MCP server or a plain command, because parsed output is what makes many results comparable.
+Ten devices you asked to watch get ten sessions. One device you did not ask to watch gets a script. Work nobody asked to watch stays where the project already runs it, on an MCP server or a plain command, because parsed output is what makes many results comparable.
 
 There are two kinds of pane:
 
 - A **Session** is a login the agent may drive and you may take over.
-- A **Monitor** is a stream beside the work, such as `docker logs -f` or a firewall tail. The agent never writes to it. You interrupt it the way you interrupt any terminal, by typing in it.
+- A **Monitor** is a stream beside the work, such as `docker logs -f` or a firewall tail, opened with the same `open` when you ask to tail or monitor something. The agent never writes to it. You interrupt it the way you interrupt any terminal, by typing in it.
 
 ## What it asks you
 
@@ -23,7 +23,7 @@ It asks no questions up front. It needs three things from you during the session
 - **The handover.** The agent types only after you say, in words, that the pane is its turn. You take it back the same way.
 - **A key, when it is stuck.** The agent cannot send control keys. At a half-typed line, a pager it must not dismiss, or a confirmation it must not answer, it tells you which key to press. A configuration block that must arrive as one paste is the same case: the agent shows you the exact text and you paste it.
 
-The connect command is not the agent's to invent. The plugin carries no knowledge of any device vendor, so the agent takes the command from your project's docs, tooling or inventory, and the command reads its own credentials from its own paths. The agent handles a path, never a secret. If your project has no written way to reach the device, give the command in your prompt.
+The connect command is not the agent's to invent. The plugin carries no knowledge of any device vendor, so the agent takes the command from your project's docs, tooling or inventory, and the command reads its own credentials from its own paths. The agent handles a path, never a secret.
 
 ## How a session runs
 
@@ -38,18 +38,18 @@ enter   <tee-file>
 own     <tee-file> agent|user
 ```
 
-The tee file is the transcript. `open` splits a pane, runs the connect command in it under `script(1)`, which records everything that crosses the terminal into that file, and prints the pane id. Keystroke logging is never switched on, so what you type at a password prompt does not reach the transcript. The transcript and its session record, `<tee-file>.state.json`, which holds the owner, the read position and the profile, are readable only by you.
+The tee file is the transcript. `open` splits a pane, runs the connect command in it under `script(1)`, which records everything that crosses the terminal into that file, and prints the pane id. Keystroke logging is never switched on, so what you type at a password prompt does not reach the transcript. The transcript and its session record, `<tee-file>.state.json`, which holds the owner, the read position and the profile, are readable only by your user account.
 
 The agent then works through one loop:
 
-1. **`open`.** The pane belongs to you.
+1. **`open`**, and you answer the login.
 2. **`read`** the banner, which is how the agent learns what it is on.
-3. **Profile the platform** before typing anything: what it is, how it pages, how to cancel on it, and what is destructive on it. The agent researches this and records it with `profile`. `type` and `enter` refuse until a profile exists. `profile` refuses any text under 80 characters. It cannot judge whether the research was good, but it prints the profile where you can see it.
+3. **Profile the platform** before typing anything: what it is, how it pages, how to cancel on it, and what is destructive on it. The agent researches this and records it with `profile`. `type` and `enter` refuse until a profile exists. `profile` refuses any text under 80 characters. The launcher cannot judge the research, so it prints the profile where you can see it.
 4. **You hand the pane over**, and the agent runs `own <tee-file> agent`.
 5. **`type`, then `enter`, as two separate calls.** The agent reads the echo of what it typed before it presses Enter.
 6. **`read` until the agent judges the command finished.**
 
-The launcher enforces rules, and the agent interprets the screen. No code parses the terminal. An earlier version decided in code what a prompt was and when a command had finished, and it was wrong on real hardware within two commands: a shell prompt is an arbitrary string, a pager prompt looks like a device prompt, and output going quiet does not mean a command ended.
+The launcher only refuses. Reading the screen is the agent's job, and no code parses the terminal, because a shell prompt is an arbitrary string, a pager prompt looks like a device prompt, and output going quiet does not mean a command ended.
 
 The launcher refuses to send when:
 
@@ -62,31 +62,31 @@ The launcher refuses to send when:
 
 The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction.
 
-A refusal prints `dctr-pane: <reason>` and exits 1. The agent quotes every refusal to you exactly as printed and never works around it. When `read` refuses, it does not read the transcript file directly, and when `open` refuses, it does not start the session another way.
+A refusal prints `dctr-pane: <reason>` and exits 1. The agent quotes every refusal to you exactly as printed and never works around it. When `read` refuses, the agent does not open the transcript file itself. When `open` refuses, it does not start the session another way.
 
 `own agent` does not mark your output as read, so after a handover the agent's first step is to read what you did. That transcript is its only view of your work, and it shows only what the terminal echoed. Keys that echo nothing, such as a space at a pager, Ctrl-C, an arrow or Tab, leave no trace. When the agent cannot tell what you pressed, it says so instead of guessing a sequence from the effects. When you take the pane back, the agent drops the rest of its plan, because you may have changed the device under it.
 
 ## Panes, tabs and transcripts
 
-Six panes fit beside your session. The cap counts the run's dispatched seats and gate panes as well as interactive panes, and every placement takes the same lock. Past six, a session opens as a tab listed in herdr's sidebar, which you watch and take over the same way. The launcher prints `overflow=tab` when that happens. It never closes a pane to make room.
+Six panes fit beside your session. The cap counts this session's dispatched seats and gate panes as well as interactive panes, and every placement takes the same lock. Past six, the new pane opens as a tab listed in herdr's sidebar, which you watch and take over the same way. The launcher prints `overflow=tab` when that happens. It never closes a pane to make room.
 
 If you omit the tee file, the launcher picks one named for the label under `dctr-pane-logs` in your temporary directory and prints it as `tee=<path>`. Labels are reduced to letters, digits, dash and underscore, so two labels can share a file, and a repeated label reuses an earlier session's file. Give an explicit path whenever the transcript matters.
 
 ## One device, one connection
 
-While a Session pane is open on a device, the agent makes no automated calls to that device, so two writers never interleave in one transcript. That does not free the device. A cached connection or an operation already in flight can still hold it, and the connect then fails in the pane, where you can see it.
+While a Session pane is open on a device, the agent makes no automated calls to that device, so two writers never interleave in one transcript. Pausing automated calls does not free the device. A cached connection or an operation already in flight can still hold it, and the connect then fails in the pane, where you can see it.
 
 A Monitor stops nothing. Its main use is watching a deploy while the agent runs it, and a rule that paused the deploy until the monitor closed would defeat the point.
 
-Inside a doctrine run, only the orchestrator opens panes, never a dispatched seat, and never while a wave that touches that device is still out.
+Inside a doctrine run, only the orchestrating session opens panes, never an agent it sent out, and never while agents it sent out are still working on that device.
 
 ## How it ends
 
 You close the pane. The agent never does, and closing the pane kills the session inside it. The pane outlives the agent's session, so a log you are watching keeps running after the agent stops.
 
-The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path truncates it, once the launcher has confirmed no live pane is using it.
+The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, or when the file holds a transcript and nothing records which pane wrote it.
 
-When the skill cannot open a pane, there is no weaker fallback. The agent says so and runs any command it needs non-interactively. In a doctrine run, the interactive step is recorded as not run, never as passed.
+When `open` refuses, there is no weaker version of the skill: the agent quotes the refusal and does not start the session another way. In a doctrine run, the run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
 
 ## An example
 
@@ -122,9 +122,9 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## Requirements
 
-- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. The launcher refuses unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`.
-- A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one it refuses.
-- Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set it refuses, because a pane is a process on the host.
+- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`.
+- A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one `open` refuses.
+- Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set, `open`, `type` and `enter` refuse, because a pane is a process on the host.
 - On Codex, the doctrine hooks, which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
 
 [docs/requirements.md](../requirements.md) and [docs/watching-a-run.md](../watching-a-run.md) cover the herdr setup.
