@@ -14,7 +14,11 @@ Pick another skill when the work is not one known defect. A hunt for bugs you ha
 
 It starts with the open questions about the bug: how to reproduce it, when it last worked, and the environment it fails in. Your answers go into the run's record verbatim as the anchor, and every reviewer gets them, so the fix is judged against what you said was wrong.
 
-Two other things are yours to set. If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more. You can also set the two alarm figures. One is how many review rounds may find a blocking problem before the run stops and asks you, which it does again at each multiple of that figure. The other is a time budget, counted from when the last round closed, or from the start of the phase before any has. Without them the hub's defaults apply, 4 rounds and two hours. Only a ruling you give after an alarm fires restarts the run.
+Two other things are yours to set. If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more.
+
+You can also set the two alarm figures. One is how many review rounds may find a blocking problem before the run stops and asks you. It stops again at each multiple of that figure. The other is a time budget, counted from when the last round closed, or from the start of the phase before any has. Without them the hub's defaults apply, 4 rounds and two hours. Only a ruling you give after an alarm fires restarts the run.
+
+Before the fix is gated, the agent may also ask you to choose between the full gate and a reduced one, as Phase two describes.
 
 ## How a run goes
 
@@ -38,13 +42,13 @@ The diagnosis phase ends when the claim survives that red team and the agent's o
 
 **Simplify before the gate.** A simplification review of the fix runs and is committed before the gate's checks start, and again on each repair before the pass that re-checks it. The wrapper's rule of thumb: a bug fix that adds a new abstraction is usually the wrong fix.
 
-**Gate the fix.** By default each pass runs four checks: the loop (which must be green), the project's own documented checks, `matts-code-review` on the fix diff, and a red team on the diff. A pass is clean when it finds no blocking problem, none stands open from an earlier pass, and one complete path has run end to end on the real code for that revision, where the work ships or the nearest place that runs the real code. A unit-test fake does not count, and where no such place is reachable the run is recorded as not run and the pass is not called clean. The phase exits on one clean pass.
+**Gate the fix.** By default each pass runs four checks: the loop (which must be green), the project's own documented checks, `matts-code-review` on the fix diff, and a red team on the diff. A pass is clean when it finds no blocking problem, none stands open from an earlier pass, and one complete path has run end to end on the real code for that revision, with the fix's effect observed, where the work ships or the nearest place that runs the real code. A unit-test fake does not count, and where no such place is reachable the run is recorded as not run and the pass is not called clean. The phase exits on one clean pass.
 
 A pass that finds a blocking problem leads to a repair and another pass, aimed at the repair first. For each blocking problem the agent also asks where else the same fault would show, repairs every such site it may touch, and reports the sites outside its scope rather than fixing or dropping them silently. For an intermittent bug, green means the full stress run clean, sized against the reproduction rate Phase 1 measured, never one lucky run.
 
 The fix's red team also gets the written root-cause claim, that reproduction rate (or word that the loop is deterministic), and your project's standards as they read before the fix. It answers three questions: does the regression test fail without the fix, is the fix minimal, and do other callers carry the same fault.
 
-You can choose a lighter gate for the fix. The agent searches for what reads or calls the code the fix changes, proposes a gate with that evidence, and you choose: the full gate above, or a reduced one of the project's checks and one adversarial review by a context that did not write the fix, repeated on any repair. No answer means the full gate, and if a re-run of that review finds another blocking problem, the phase moves to the full gate. The end-to-end run is required either way.
+You can choose a lighter gate for the fix. The agent searches for what reads or calls the code the fix changes, proposes a gate with that evidence, and you choose: the full gate above, or a reduced gate: the project's own checks plus one adversarial review by a context that did not write the fix, repeated on any repair. The reduced gate drops the full gate's review loop and both alarms for the fix phase. No answer means the full gate, and if a re-run of that review finds another blocking problem, the phase moves to the full gate. The end-to-end run is required either way.
 
 Every reviewer works under the same limits. It changes nothing it reviews, and a reviewer that did would void the pass. It gets the questions you have closed and the claims already refuted, so it does not reopen them, and it never sees the run's counters. It loads no doctrine skill. A reviewer that reports "no findings" without listing what it attacked has failed, and no pass counts clean on it.
 
@@ -66,7 +70,7 @@ Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 
 Below that line the report names what filled each slot of the gate, lists the improvements it deferred, gives the path of the run's record (kept beside the work, outside version control), and walks your original request item by item, saying where each landed or why it was deferred.
 
-Each phase ends in one of the hub's five states: Exited (certified, the only clean ending), Stopped (you ended it), Shipped at an escalation (you chose to deliver when an alarm stopped it), Blocked (a question to you is unanswered), or Unable (it cannot resume by itself, for example because credentials are gone).
+Each phase ends in one of the hub's five states: Exited (certified, the only clean ending), Stopped (you ended it), Shipped at an escalation (you chose to deliver when an alarm stopped it), Blocked (the session ended waiting on your answer to a question that decides the work's direction), or Unable (it cannot resume by itself, for example because credentials are gone).
 
 A run that an alarm stops asks you whether to continue or ship, with a diagnosis in three parts: what shipping now would mean and what continuing would cost, why the loop has not closed, and whether its exit can be reached at all. Where the gate has stopped telling good work from bad, the diagnosis proposes a narrower definition of a blocking problem for you to rule on.
 
@@ -91,7 +95,7 @@ Nothing must be installed. Each dependency has a fallback:
 
 Every substitution is written in the record and named in the exit statement. Install commands are in [requirements](../requirements.md).
 
-Optionally, run it inside herdr and every probe and reviewer gets a live pane you can read while it works: [watching a run](../watching-a-run.md).
+Optionally, on Claude Code, run it inside herdr and every probe and reviewer gets a live pane you can read while it works: [watching a run](../watching-a-run.md). On Codex the panes also need the plugin's hooks installed, as the [README](../../README.md#install) shows.
 
 ## Red flags
 
