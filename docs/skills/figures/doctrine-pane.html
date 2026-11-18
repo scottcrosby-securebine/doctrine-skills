@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- The doctrine-pane figure, started from specimen.html. Render:
+     node docs/skills/figures/render.mjs docs/skills/figures/doctrine-pane.html docs/skills/doctrine-pane.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-pane/SKILL.md@e92ef0aae52e2759daf14c6be0830cc5bcad5f0c">
+<title>Figure: doctrine-pane</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 11/15</span><span>doctrine-pane</span></header>
+
+<section class="title">
+  <h1>The agent types only into a pane you handed it, after reading the screen</h1>
+  <p>An interactive terminal session in a herdr pane, recorded to a transcript you and the agent both read.</p>
+</section>
+
+<section class="row">
+  <div class="label">The loop</div>
+  <div class="flow">
+    <div class="box"><b>Open</b><span>yours: banner, host key, password</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Read, profile</b><span>paging, cancel, what is destructive</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Handover</b><span>in your words: own agent</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Type</b><span>then judge the echo</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Enter</b><span>a separate call; read until done</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">Every send<br>is checked</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box" id="send"><b>type or enter</b><span>the agent asks to write</span></div></div>
+    <svg class="wires" data-from="#send" data-to=".ref"></svg>
+    <div class="col" style="width:412px">
+      <div class="box ref"><b>Unread output</b><span>read it and judge it first</span></div>
+      <div class="box ref"><b>No profile</b><span>research the platform first</span></div>
+      <div class="box ref"><b>Your pane</b><span>wait to be handed it</span></div>
+      <div class="box ref"><b>Control character, dead recorder</b><span>or a failed check, which is never read as safe</span></div>
+    </div>
+    <svg class="wires" data-from=".ref" data-to="#out"></svg>
+    <div class="col" style="flex:1"><div class="box" id="out"><b>Refused</b><span>quoted to you verbatim, never worked around; stuck, it names the key you press</span></div></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>A pane only when you ask; automated work stays on its MCP server or script.</p>
+  <p>Session: the agent may drive it. Monitor: it never writes to it.</p>
+  <p>Past six panes beside the session, it opens a tab.</p>
+  <p>You close the pane. The transcript stays, but opening its path again empties it.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-pane/SKILL.md at blob e92ef0a</footer>
+<script src="figure.js"></script>
+</body>
+</html>
