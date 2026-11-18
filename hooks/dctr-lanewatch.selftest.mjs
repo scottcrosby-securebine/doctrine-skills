@@ -57,8 +57,8 @@ fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 process.env.PATH = `${bin}:${process.env.PATH}`
 
 const { createWatcher, POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS } = await import('./dctr-lanewatch.mjs')
-const { laneOf, shq } = await import('./dctr-lib.mjs')
-const { restoreFile, stateDir } = await import('./dctr-state.mjs')
+const { laneOf, shq, launchFlags } = await import('./dctr-lib.mjs')
+const { restoreFile, stateDir, modeFile } = await import('./dctr-state.mjs')
 const lanewatch = await import('./dctr-lanewatch.mjs')
 const { bridgeFile } = await import('./dctr-bridge.mjs')
 const WATCH = path.join(import.meta.dirname, 'dctr-lanewatch.mjs')
@@ -914,23 +914,35 @@ const loFile = path.join(lo.run, 'launch', 'orchestrator.sh'), loTail = loOrch ?
 clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended to by the claude it starts, runs nothing after claude exits (R1-N3)',
   loOrch?.launch === `sh ${shq(loFile)}` && loTail?.tail === false && /\/usr\/bin\/touch /.test(loTail.grew ?? ''), JSON.stringify([loOrch, loTail]))
 
-// R4: the orchestrator's launch file carries the permission flag only when <run>/permission-mode says bypassPermissions.
-const pmStarts = []
-for (const [n, text] of [['2bi', 'bypassPermissions\n'], ['2bi2', 'default\n'], ['2bi3', null]]) {
-  const f = fixture({})
-  if (text !== null) write(path.join(f.run, 'permission-mode'), text)
-  const env = { ...loEnv, DCTR_RUN: f.run, SHIM_DIR: f.dir }
-  const r = await proc(['start'], env, f.repo)
+// The orchestrator's launch file reads the mode file of the pane start runs in when it runs, never when it is written.
+{
+  const pm = fixture({}), pmPane = 'w0:pm'
+  write(path.join(pm.run, 'model', 'orchestrator'), 'claude-opus-5-5\n')
+  const env = { ...loEnv, DCTR_RUN: pm.run, SHIM_DIR: pm.dir, HERDR_PANE_ID: pmPane }
+  write(modeFile(pmPane), 'bypassPermissions\n')
+  const r = await proc(['start'], env, pm.repo)
   await proc(['stop'], env)
-  const file = (() => { try { return fs.readFileSync(path.join(f.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()
-  pmStarts.push(f)
-  const flagged = file.includes(' --permission-mode bypassPermissions')
-  clause(`clause ${n} — with <run>/permission-mode ${text === null ? 'absent' : JSON.stringify(text)}, start writes an orchestrator launch file ${text === 'bypassPermissions\n' ? 'whose claude command carries --permission-mode bypassPermissions' : 'with no permission flag'} (R4, S4)`,
-    r.code === 0 && / claude --model /.test(file) && (text === 'bypassPermissions\n' ? flagged && file.trimEnd().endsWith(' --permission-mode bypassPermissions') : !file.includes('--permission-mode')),
-    JSON.stringify([r, file]))
+  const file = (() => { try { return fs.readFileSync(path.join(pm.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()
+  clause('clause 2bi — start writes an orchestrator launch file whose claude command ends with launchFlags of its own pane\'s mode file',
+    r.code === 0 && / claude --model /.test(file) && file.trimEnd().endsWith(launchFlags(modeFile(pmPane))), JSON.stringify([r, file]))
+  const argvLog = path.join(tmp, 'pm-argv.log')
+  const argvRun = (line) => {
+    fs.writeFileSync(path.join(claudeStub, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$@" > ${shq(argvLog)}\n`); fs.rmSync(argvLog, { force: true })
+    try { spawnSync('/bin/sh', ['-c', line], { env: {}, timeout: 20000 }); return fs.existsSync(argvLog) ? fs.readFileSync(argvLog, 'utf8').split('\n').filter(Boolean) : null } finally { fs.writeFileSync(path.join(claudeStub, 'claude'), stubText) }
+  }
+  const line = laneOf(fs.readFileSync(path.join(pm.run, 'lane.log'), 'utf8'), 'orchestrator')?.launch ?? 'false'
+  const on = argvRun(line)
+  write(modeFile(pmPane), 'default\n')
+  const off = argvRun(line)
+  fs.rmSync(modeFile(pmPane))
+  const gone = argvRun(line)
+  clause('clause 2bi2 — that launch line starts claude with --permission-mode bypassPermissions while the mode file reads bypassPermissions, and, run again unchanged, with no permission flag once it reads default or is gone',
+    JSON.stringify(on) === JSON.stringify(['--model', 'claude-opus-5-5', '--permission-mode', 'bypassPermissions']) &&
+      JSON.stringify(off) === JSON.stringify(['--model', 'claude-opus-5-5']) && JSON.stringify(gone) === JSON.stringify(['--model', 'claude-opus-5-5']),
+    JSON.stringify([line, on, off, gone]))
+  clause('clause 3bi — without the watcher: the 2bi pane\'s mode file is gone after the clauses, and the argv stub logs the argv it is handed',
+    !fs.existsSync(modeFile(pmPane)) && JSON.stringify(argvRun(`${shq(path.join(claudeStub, 'claude'))} a "b c"`)) === JSON.stringify(['a', 'b c']), '')
 }
-clause('clause 3bi — without the watcher: the three fixtures\' runs hold permission-mode bypassPermissions, default and no file',
-  JSON.stringify(pmStarts.map((f) => { try { return fs.readFileSync(path.join(f.run, 'permission-mode'), 'utf8') } catch { return null } })) === JSON.stringify(['bypassPermissions\n', 'default\n', null]), '')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 

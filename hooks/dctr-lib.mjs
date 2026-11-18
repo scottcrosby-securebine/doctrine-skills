@@ -1217,10 +1217,12 @@ export function treeExcludes(recordPath, repo) {
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
-/** The permission flag a launch command carries, from `<run>/permission-mode`'s text (null for no file): the bypass
- *  flag for bypassPermissions alone, else none. The flag is this fixed string, so no text read from the file reaches the
- *  shell. */
-export const launchFlags = (text) => (String(text ?? '').trim() === 'bypassPermissions' ? ' --permission-mode bypassPermissions' : '')
+/** The shell fragment a launch command ends with, for the mode file at `file` (modeFile), or '' for null: evaluated
+ *  when the command runs, so a launch file written once follows the session's latest mode. It adds the two words
+ *  `--permission-mode bypassPermissions` while the file reads bypassPermissions and nothing otherwise, a missing file
+ *  included; the file's text is only compared, so none of it reaches the command line. */
+export const launchFlags = (file) => (file === null ? ''
+  : ` $([ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
 
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
