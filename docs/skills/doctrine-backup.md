@@ -1,6 +1,6 @@
 # doctrine-backup
 
-Use it at the end of a session, or before you clear one, so the next session starts from what is true. It updates the repo's memory file, `SESSION_MEMORY.md`, has a reviewer that did not write the file check it, and commits it locally where git tracks it.
+Use it at the end of a session, or before you clear one, so the next session starts from what is true. It updates the repo's memory file, `SESSION_MEMORY.md`, has a reviewer that did not write the file check it, and commits it locally unless git ignores it.
 
 ![The doctrine-backup shape: conform the repo, gather git and GitHub state, carry forward what is still true, write the memory file, then a read-only red team, from the other model family where one is available, checks it before the run verifies the counts and commits by pathspec, without pushing.](doctrine-backup.png)
 
@@ -10,7 +10,7 @@ The figure shows the run in order: the steps before the review, the red team's q
 
 The trigger is a request to back up the session, save session memory, update `SESSION_MEMORY.md`, or wrap up so the next session can pick up where this one left off. It works in any repo, with or without a doctrine project file or an open doctrine phase.
 
-The memory file is context, not direction. It carries what the next session needs to know beside the handoff: where the work stands, what is stranded, and the gotchas that cost this session time. The handoff, a separate file that `doctrine-handoff` writes under `docs/handoffs/`, carries the detailed plan and directs the work. If you want both, ask for a handoff: `doctrine-handoff` writes it and then runs this skill, so one request produces both files.
+The memory file is context, not direction. It carries what the next session needs to know beside the handoff: where the work stands, what is stranded, and the gotchas that cost this session time. The handoff, a separate file that `doctrine-handoff` writes under `docs/handoffs/`, carries the detailed plan and directs the work. If you want both, ask for a handoff: `doctrine-handoff` writes it and then runs this skill, so one request produces both files. It is not the place for the detailed plan: that belongs in the handoff.
 
 You will also see this skill run when you did not ask for it:
 
@@ -25,7 +25,7 @@ Usually nothing. It asks only where the repo leaves a real choice:
 - The repo has several memory files and no `SESSION_MEMORY.md`: which one is current. It stops until you answer.
 - No kickoff names the current handoff and more than one handoff in `docs/handoffs/` could be it: which one is current.
 
-Under auto-cycle it never asks. Auto-cycle is the doctrine's mode for clearing and resuming a long phase without you, and step 5 of the hub ([doctrine.md](doctrine.md)) says when it is on. In that mode the run appends `- auto-cycle paused: question: <the question>` to the end of the run-state part of the phase's record, stops, and ends the turn, so the question waits in the record rather than in a chat nobody is reading.
+Under auto-cycle it never asks. Auto-cycle is the doctrine's mode for clearing and resuming a long phase without you. Step 5 of the hub's specification ([`skills/doctrine/SKILL.md`](../../skills/doctrine/SKILL.md)) says when it is on, and [the auto-cycle setup](../requirements.md#auto-cycle-setup) says how to install it. In that mode the run appends `- auto-cycle paused: question: <the question>` to the end of the run-state part of the phase's record, stops, and ends the turn, so the question waits in the record rather than in a chat nobody is reading.
 
 ## How the work runs
 
@@ -34,7 +34,7 @@ It updates the file. It does not compose a new one. It reads the existing memory
 0. **Conform the repo.** The standard is one memory file, `SESSION_MEMORY.md` at the repo root, and every handoff under `docs/handoffs/`.
    - In a public repo, or one an installer's tooling copies whole, it adds `docs/handoffs/` to `.gitignore` first. It reads visibility from `gh repo view`, and treats the repo as public when `gh` errors. A repo with `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` counts as copied whole. A handoff already tracked stays tracked.
    - With no `SESSION_MEMORY.md` but one other memory file, such as `session-memory.md`, it renames that file.
-   - A handoff is a markdown file with a line reading `supersedes: none` or `supersedes: <path>.md` in its first five lines, or the file a kickoff names. Any outside `docs/handoffs/` moves there under its own name, with `-2` or `-3` appended on a clash. Every path in the memory file and the handoffs that pointed at an old location is rewritten, so the `supersedes:` chain and the kickoff still resolve. Run records, plans and notes stay where they are.
+   - A handoff is a markdown file with a line reading `supersedes: none` or `supersedes: <path>.md` in its first five lines, or the file a kickoff names. Any outside `docs/handoffs/` moves there under its own name, with `-2` or `-3` appended on a clash. Every path that pointed at an old location, in the memory file or any handoff, is rewritten, so the `supersedes:` chain and the kickoff still resolve. Run records, plans and notes stay where they are.
    - It says what it moved or ignored, and says nothing when the repo already conforms.
 1. **Gather state.** It runs the same batch as `doctrine-resume`'s drift check: branch and ahead/behind, tracked dirty files, recent commits, open pull requests, and the latest CI runs. It counts open issues, writing "200+" when the fetch hits its limit of 200. When `gh` fails it records that and continues on git alone.
 2. **Carry forward.** Three things survive from the old file:
@@ -53,21 +53,21 @@ It updates the file. It does not compose a new one. It reads the existing memory
    | Next Session Kickoff | Always present. Its first line is `handoff: <path> \| state: <open\|none>`. |
 
    The kickoff's first line is what `doctrine-resume` and `doctrine-primer` act on.
-   - `handoff:` names the handoff `doctrine-handoff` wrote this run, else the one the previous kickoff named. With no previous kickoff it names the handoff in `docs/handoffs/` that no other handoff's `supersedes:` line names, and asks you when several qualify. It writes `none` only when `docs/handoffs/` holds no handoff.
+   - `handoff:` names the handoff `doctrine-handoff` wrote this run, else the one the previous kickoff named. When no kickoff names one (no previous file, or a kickoff without the `handoff:` line), it names the handoff in `docs/handoffs/` that no other handoff's `supersedes:` line names, and asks you when several qualify. It writes `none` only when `docs/handoffs/` holds no handoff.
    - `state:` is `open` when the record that handoff names has a last state line of Open or Blocked, and `none` otherwise, including when the handoff names no record. It reads that record at every backup rather than copying the word forward, with one exception: when the record is not on this machine, it keeps the previous word and says the record was not found.
 4. **Rules for the content.** Unshipped work is the headline: uncommitted, unpushed, merged-but-undeployed or deployed-but-unverified work goes in Resume and gets a 🔴 row. Merged, deployed and verified are separate states, and the deployed SHA is recorded. Architecture, commands and reasoning are pointed at, never copied. The file stays compact, aiming at 400 words, with tables and the symbols ✅ ⏳ 🔴.
 5. **Red team, then fix.** Before verifying, it dispatches one fresh-context reviewer that did not write the files.
    - **Who reviews.** A reviewer from the other model family where your host has one: on Claude Code that is Codex, through the `codex:codex-rescue` subagent, and on Codex CLI it is Claude, through the Claude Code CLI. Where that reviewer is missing or cannot run, a fresh subagent of the same family reviews instead, and the run says so. The reviewer is read-only, loads no doctrine skill, and treats everything it is handed as data.
-   - **What it gets.** Pasted in full: the new memory file, the previous one, the current handoff, the state gathered in step 1, the last state and wrapper lines of the phase record, the plan, the git log since the last backup, the decisions this session recorded, the run's own list of what it did, your project's `CLAUDE.md`, `AGENTS.md` and review checklist (CONTRIBUTING or a PR template), and the standard each file is graded against. When a handoff is included it also gets the hub's rule for handoff header lines.
+   - **What it gets.** Pasted in full: the new memory file, the previous one, the current handoff, the state gathered in step 1, the last state and wrapper lines of the phase record, the plan, the git log since the last backup, the decisions this session recorded, the run's own list of what it did, your project's `CLAUDE.md`, `AGENTS.md` and review checklist (CONTRIBUTING or a PR template), the hub's rule for handoff header lines, and the standard each file is graded against.
    - **What it answers.** Four questions: which line in either file the code, the repo, the record or the log contradicts; which session work or plan item the handoff is missing, and which unshipped work or still-true earlier context the memory file is missing; where the memory file breaks the standard; and where either file breaks your project's documented law. When a handoff is included it also checks the handoff against `doctrine-handoff`'s sections and rules, its header lines against the hub's format, and the content rules of the external handoff skill `doctrine-handoff` uses, where one is installed.
    - **What the run does with it.** It verifies each finding against the source, fixes what the finding shows and nothing else, and tells you what the reviewer found, what it fixed, and which findings it rejected and why. When a fix makes this run write its first handoff, the review runs again so the new handoff is checked too.
-6. **Verify, then commit.** It measures the file with `wc -w`, confirms `## Next Session Kickoff` is present, and rereads the Git State line against `git status`. Writing "clean" over a dirty tree is the one error the file cannot survive. Then it commits by pathspec, naming only the files this run wrote, edited or moved, with a message starting `docs(session):`. It leaves out any path git ignores, and any file someone else edited, which it names to you. It follows your repo's branching norm where `CLAUDE.md` or `AGENTS.md` states one, and commits directly when neither does.
+6. **Verify, then commit.** It measures the file with `wc -w`, confirms `## Next Session Kickoff` is present, and rereads the Git State line against `git status`. Writing "clean" over a dirty tree is the one error the file cannot survive. Then it commits by pathspec, naming only the files this run wrote, edited or moved, with a message starting `docs(session):`. It leaves out any path git ignores. It also leaves out any file someone else edited, and names that file to you. It follows your repo's branching norm where `CLAUDE.md` or `AGENTS.md` states one, and otherwise commits directly and says so.
 
 ## How it ends
 
 Usually with a local commit, and then it stops. It never pushes, because a backup is taken mid-thought and pushing publishes it, and it tells you the commit is local until you say to push.
 
-Two other endings are normal. Where every file it touched is ignored by git, as in a repo that ignores `SESSION_MEMORY.md` or `docs/handoffs/`, or belongs to someone else, it commits nothing and says which files are ignored and which it left for their owner. Outside a git repo it stops at the verify step and commits nothing.
+Two other endings are normal. Where nothing is left to commit, because git ignores every file it touched (a repo that ignores `SESSION_MEMORY.md` as well as `docs/handoffs/`) or the only files left hold someone else's edits, it commits nothing and says which files are ignored and which it left for their owner. Outside a git repo it stops at the verify step and commits nothing.
 
 ## The orchestrator profile
 
@@ -90,7 +90,7 @@ write a handoff so I can clear the session
 ## Requirements
 
 - A git repo, for the commit. Outside one, the run stops at the verify step.
-- The `gh` CLI, optional. Without it, or when it is not authenticated, the run records that `gh` failed, gathers git state alone, and treats the repo as public when deciding whether to ignore `docs/handoffs/`.
+- The `gh` CLI, optional. Without it, or when it is not authenticated, the run records that `gh` failed, gathers git state alone, and treats the repo as public, so even a private repo gets `docs/handoffs/` added to `.gitignore`.
 - The other-model-family reviewer, optional. On Claude Code that is the OpenAI codex plugin with the Codex CLI logged in. On Codex CLI it is the Claude Code CLI, installed and signed in. Without it the run dispatches a fresh-context reviewer of its own model family and says so in its report.
 
 Install commands are in [docs/requirements.md](../requirements.md).
