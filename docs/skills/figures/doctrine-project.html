@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- Figure source for doctrine-project, started from specimen.html.
+     Render: node docs/skills/figures/render.mjs docs/skills/figures/doctrine-project.html docs/skills/doctrine-project.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-project/SKILL.md@77266141436c2371a5f1138648bc7df2eb90e2df">
+<title>Figure: doctrine-project</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 09/15</span><span>doctrine-project</span></header>
+
+<section class="title">
+  <h1>The owner rules what done means, and only a context that did not build the work says it is done</h1>
+  <p>Project and epic tracking kept in the repo: docs/PROJECT.md and one docs/epics/&lt;ID&gt;.md per epic.</p>
+</section>
+
+<section class="row">
+  <div class="label">Start or<br>adopt</div>
+  <div class="flow">
+    <div class="box"><b>Interview</b><span>the agent proposes, the owner rules</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Admission test</b><span>can it be objectively measured? if not, owner judgement</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Ruled</b><span>end state, epic Done means, coverage map, combined check</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>check exits 0</b><span>dctr-project.mjs, offline</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">An epic</div>
+  <div class="flow">
+    <div class="box"><b>Proposed</b><span>the agent drafts</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Not started</b><span>the owner rules its Done means</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Open</b><span>its first member phase opens</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Exit pass</b><span>a seat blind to past returns</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Done</b><span>the accounting check counts the return</span></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>Adopt is forward-only: history becomes one linked index, every open item gets a ruled destination, and each cutover edit is ruled on its own.</p>
+  <p>check runs after every write that moves a state: exit 0 clean, 1 findings, 2 no readable project file.</p>
+  <p>An item binds nothing until the owner rules it.</p>
+  <p>A regression reopens the epic; the current-epic pointer stays where it is.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-project/SKILL.md at blob 7726614</footer>
+<script src="figure.js"></script>
+</body>
+</html>
