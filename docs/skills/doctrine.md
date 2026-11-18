@@ -2,7 +2,7 @@
 
 The hub every doctrine wrapper loads. It sets what the work is judged by, the checks that prove it, and a loop that will not call a result clean until a reviewer that did not write it has passed it.
 
-![The doctrine's seven posture steps in a row, the fifth a Loop that repeats steps 3 and 4 until one clean pass; below them one round of the gate, where one frozen revision fans out to native checks, the designated review and a red team and joins at a clean pass; then the five end states a phase can reach, and notes on the alarm defaults, the blocking test, the class question and the record.](doctrine.png)
+![The doctrine's seven posture steps in a row, with step 6, Simplify, drawn before step 5's clean pass, the pass the loop of steps 3 and 4 runs until one is clean; below them one round of the gate, where one frozen revision fans out to native checks, the designated review and a red team and joins at a clean pass; then the five end states a phase can reach, and notes on the alarm defaults, the blocking test, the class question and the record.](doctrine.png)
 
 ## When it fires
 
