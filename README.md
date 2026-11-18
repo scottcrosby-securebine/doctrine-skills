@@ -30,7 +30,8 @@ point of rule 6.
    installed. Its findings are verified against source first, because adversaries invent things too.
    Without a second model the run says so, rather than reporting a stronger gate than it ran.
 5. **Ask where else.** Every blocking finding that survives verification gets one question: what else
-   the same mistake would have touched. The fix goes to the cause, not just the place it showed up.
+   the same mistake would have touched. The fix clears every place that question turns up, not just
+   the one that was reported.
 6. **Loop** until one full pass comes back clean with no blocking finding left over from an
    earlier pass. Two alarms stop the loop
    and put the decision to you rather than spending your budget without telling you.
@@ -43,6 +44,19 @@ your repo does, and where your repo documents no norm the coding workflow commit
 pushes or opens a PR only if that is your documented norm or you asked for one. Where it cannot write, it hands you the diff instead. A phase writes its state
 to a file as it goes, so a run that is interrupted or compacted resumes from disk rather than from
 whatever the conversation still remembers.
+
+**Hooks.** On Claude Code the plugin also adds hooks to every session, listed in `hooks/hooks.json`:
+the seat panes (`dctr-seat.mjs`), the restore after `/clear` (`dctr-restore.mjs`), the context gauge
+(`dctr-gauge.mjs`), auto-cycle (`dctr-cycle.mjs`, which starts `dctr-typer.mjs`), the prompt gate
+(`dctr-promptgate.mjs`), the round guard (`dctr-roundguard.mjs`) and the orchestrator's write guard
+(`dctr-guard.mjs`), plus the band (`band/register.tsx`), a module that reads every five seconds
+unless you turn it off. Three of them can refuse something. When the main session, inside herdr,
+writes a new doctrine round line, the round guard refuses that call once per round if it does not
+also publish the round's counters, or if it or the record names a gate transcript under the temp
+directory. In an orchestrator session and its subagents, the write guard refuses a `Write`, `Edit`,
+`MultiEdit` or `NotebookEdit` call outside the paths that session may write. It does not inspect Bash
+or MCP writes. The prompt gate blocks auto-cycle's typed resume line in any session but the one it was typed
+for. [docs/what-runs.md](docs/what-runs.md) says what each script does and when it runs.
 
 ## What that catches
 
@@ -141,8 +155,9 @@ agent emits about itself, and its README says to rely on the counter rather than
 Here the loop cannot reach a certified exit until a reviewer that did not write the work passes it,
 on a revision that has actually run, with no blocking findings left over from any earlier pass. It
 can still end other ways, and the report names which: stopped by you, shipped at an alarm with
-findings open, or closed with a punch list of what it did not fix. What it never does is present an
-uncertified ending as a clean one.
+findings open or with a punch list of what it did not fix, blocked on a question only you can answer,
+or unable to continue, with what would restart it. What it never does is present an uncertified
+ending as a clean one.
 
 Independent review and gating are both documented practice rather than inventions here. Anthropic's
 own docs describe an adversarial reviewer in a fresh context, a stop hook that blocks a turn until a
@@ -204,9 +219,9 @@ dotted keys and the setting is unset, it leaves that line as it is and prints ho
 by hand.
 `doctrine-pane` needs the same install on Codex.
 
-Codex has no setting that turns automatic compaction off. `model_auto_compact_token_limit` in
-`config.toml` can only make it come earlier, and by default Codex compacts at 90% of the model's
-context window. So for auto-cycle on Codex, set the tier on the record's `auto-cycle: on cap <n> tier
+Codex documents no setting that turns automatic compaction off. `model_auto_compact_token_limit` in
+`config.toml` only sets the token count it starts at, and unset it uses the model's default. So for
+auto-cycle on Codex, set the tier on the record's `auto-cycle: on cap <n> tier
 <tokens or percent>` line low enough that the gauge warns, and the handoff that follows the warning
 finishes, before that point.
 
@@ -226,8 +241,9 @@ system binary such as `/bin/sleep` or `/bin/zsh`, so a background command run th
 that way and pauses after 60 seconds rather than waiting quietly for it to finish.
 
 After a Codex, Claude Code or herdr update, run `node <plugin-root>/hooks/dctr-doctor.mjs`, with
-`--host codex` or `--host claude` to check one. It drives each installed host in scratch homes under
-its own herdr server, never writes `~/.codex` or `~/.claude`, and prints a row for each host signal
+`--host codex` or `--host claude` to check one. Without `--host` it drives both hosts, and either one
+missing makes it exit 2. It drives them in scratch homes under its own herdr server, copies your
+Claude Code login and `~/.codex/auth.json` into them, never writes `~/.codex` or `~/.claude`, and prints a row for each host signal
 the hooks depend on, the areas its drive does not exercise, and a verdict. Exit 0 means every signal
 it observed holds; a signal the run could not observe prints `unobs` on its row and the verdict names
 it. Exit 1 means drift, with the row naming each drifted signal, and 2 means it could not run, with the
@@ -236,7 +252,8 @@ message saying why. A run takes a minute or two and two cheap model turns per ho
 ## Try it on one file
 
 Do not start with a big audit. Point it at one file you suspect: `use doctrine-audit on
-src/whatever.ts (scope is that file only)`. It asks what counts as a bug before changing anything,
+src/whatever.ts (scope is that file only)`. Before changing anything it asks whether to fix or only
+report, whether it may write at all, and how severe an issue must be to be filed rather than fixed,
 runs whatever your repo has written down as a gate, and puts the verdict at the top of its report,
 ahead of the work:
 
@@ -254,7 +271,7 @@ open.
 
 | Skill | Use it for |
 |---|---|
-| [`doctrine`](docs/skills/doctrine.md) | The shared posture. The nine wrappers invoke it. |
+| [`doctrine`](docs/skills/doctrine.md) | The shared posture. The nine wrappers invoke it, and it also applies before merging, pushing or deploying work no phase reviewed. |
 | [`doctrine-code`](docs/skills/doctrine-code.md) | Features, specs and tickets. |
 | [`doctrine-debug`](docs/skills/doctrine-debug.md) | Anything broken, throwing, failing or slow. |
 | [`doctrine-audit`](docs/skills/doctrine-audit.md) | Bug hunts and deep code audits. |
@@ -265,10 +282,10 @@ open.
 | [`doctrine-project`](docs/skills/doctrine-project.md) | Starting or adopting a repo's project and epic tracking, with a checkable meaning of done. |
 | [`doctrine-orchestrate`](docs/skills/doctrine-orchestrate.md) | Several phases of one epic run at once, one lane session each, landed one at a time behind a gate. |
 | [`doctrine-pane`](docs/skills/doctrine-pane.md) | An interactive terminal session in a pane you can take over. Not a wrapper: it does not load the posture. |
-| [`doctrine-backup`](skills/doctrine-backup/SKILL.md) | Saving the session's memory file for the next session, red-teamed before it is done. |
-| [`doctrine-handoff`](skills/doctrine-handoff/SKILL.md) | A detailed handoff under `docs/handoffs/`, tied to the plan, so nothing is lost across a cleared session. |
-| [`doctrine-resume`](skills/doctrine-resume/SKILL.md) | Picking up where the last session left off: state, handoff, drift. |
-| [`doctrine-primer`](skills/doctrine-primer/SKILL.md) | A cold start: everything `doctrine-resume` restores, plus a tour of the project. |
+| [`doctrine-backup`](docs/skills/doctrine-backup.md) | Saving the session's memory file for the next session, red-teamed before it is done. |
+| [`doctrine-handoff`](docs/skills/doctrine-handoff.md) | A detailed handoff under `docs/handoffs/`, tied to the plan, so nothing is lost across a cleared session. |
+| [`doctrine-resume`](docs/skills/doctrine-resume.md) | Picking up where the last session left off: state, handoff, drift. |
+| [`doctrine-primer`](docs/skills/doctrine-primer.md) | A cold start: everything `doctrine-resume` restores, plus a tour of the project. |
 
 ## What it costs
 
@@ -297,7 +314,7 @@ Claude Code's own `/code-review`. This plugin does not bundle it.
 
 ## Requirements
 
-**Twelve of the fifteen skills need nothing installed.** `doctrine-gauntlet` judges rendered pages, so it
+**Twelve of the fifteen skills need nothing installed** beyond `node` on your `PATH`, which the plugin's hooks run under. `doctrine-gauntlet` judges rendered pages, so it
 needs a browser, and without one its harness refuses to run rather than report a pass.
 `doctrine-pane` needs [herdr](https://herdr.dev) 0.8.2 or later, and outside herdr it refuses.
 `doctrine-orchestrate` needs herdr too, with every session of the run in a herdr pane, and runs on Claude Code only in a repo carrying `docs/PROJECT.md`: without herdr it refuses to start a run and says why.
@@ -311,8 +328,7 @@ what happens when each is missing.
 
 Auto-cycle is off by default and switched on per phase in its record. Using it needs these set up
 once: herdr, with the session running in a herdr pane and herdr's Claude integration installed
-(`herdr integration install claude`); auto-compaction off, with `claude config set -g autoCompactEnabled false` (a global config
-key in `~/.claude.json`, not settings.json), since the phase resets by `/clear` and a compaction
+(`herdr integration install claude`); auto-compaction off, with the `Auto-compact` row in `/config`, since the phase resets by `/clear` and a compaction
 mid-phase discards the session's context and the gauge's reading; and the statusline bridge, installed
 with `node <plugin-root>/hooks/dctr-bridge.mjs install` and re-run after every plugin update. [docs/requirements.md](docs/requirements.md#auto-cycle-setup) says what each one
 does, and [docs/watching-a-run.md](docs/watching-a-run.md) gives the `$autocycle` sidebar row that shows
