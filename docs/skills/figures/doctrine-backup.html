@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- The doctrine-backup figure, started from specimen.html. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-backup/SKILL.md@fd771a279ff355196f7643b93949e2945505ced5">
+<title>Figure: doctrine-backup</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 12/15</span><span>doctrine-backup</span></header>
+
+<section class="title">
+  <h1>Update the memory file, red-team it, commit it, never push</h1>
+  <p>Session state for the next session: SESSION_MEMORY.md, beside the handoff that directs the work.</p>
+</section>
+
+<section class="row">
+  <div class="label">Before the<br>review</div>
+  <div class="flow">
+    <div class="box"><b>Conform</b><span>one SESSION_MEMORY.md; handoffs under docs/handoffs/</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Gather</b><span>branch, dirty count, PRs, CI, open issues</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Carry forward</b><span>true gotchas, 🔴 rows, the Runtime block</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Write</b><span>six sections; the kickoff names handoff and state</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">The review</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box" id="files"><b>Red team</b><span>fresh and read-only, other model family where present; handed the new and old memory files and the handoff</span></div></div>
+    <svg class="wires" data-from="#files" data-to=".q"></svg>
+    <div class="col" style="width:412px">
+      <div class="box q"><b>Correctness</b><span>what the repo, record or log contradicts</span></div>
+      <div class="box q"><b>Completeness</b><span>session work, plan items, live context left out</span></div>
+      <div class="box q"><b>Standard</b><span>the memory file’s sections and rules</span></div>
+      <div class="box q"><b>Law</b><span>CLAUDE.md, AGENTS.md, the review checklist</span></div>
+    </div>
+    <svg class="wires" data-from=".q" data-to="#commit"></svg>
+    <div class="col" style="flex:1"><div class="box" id="commit"><b>Verify, then commit</b><span>word count, kickoff present, git state; commit by pathspec, never push</span></div></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>Update, never compose: carry forward what the run cannot disprove.</p>
+  <p>Unshipped work is the headline, with a 🔴 row.</p>
+  <p>Target 400 words; 700 for an orchestrator.</p>
+  <p>Under auto-cycle a question pauses the run in the record.</p>
+  <p>With a handoff: three more checks on the handoff itself.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-backup/SKILL.md at blob fd771a2</footer>
+<script src="figure.js"></script>
+</body>
+</html>
