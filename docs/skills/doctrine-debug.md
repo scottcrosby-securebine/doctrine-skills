@@ -1,107 +1,111 @@
 # doctrine-debug
 
-Diagnosing and fixing one reported defect under the doctrine: a feedback loop first, parallel hypothesis probes, a red team on the diagnosis before any fix is written, and a gate on the fix.
+Diagnose and fix one reported defect under the doctrine. The run builds a command that fails on the bug, tests hypotheses in parallel against it, red-teams the diagnosis before any fix is written, and then gates the fix.
 
-## When to use it, and when not
+![doctrine-debug in two phases. Diagnosis: ask, build the feedback loop, a wave of isolated probes with one hypothesis each, a new list when all die, then a red team on the root-cause claim. Fix: regression test first, minimal fix, simplification, then the gate of loop, project checks, matts-code-review and red team, repeated until one pass comes clean, then delivery.](doctrine-debug.png)
 
-Use it when you can point at something that is broken, throwing, failing or slow, and you want it diagnosed and fixed rather than only found. The trigger in the skill's description is a report of a defect plus a request to fix it with the doctrine.
+## When it fires
 
-It is not the skill for a hunt. If you do not yet have a symptom and want the codebase searched for drift, gaps and bugs, that is `doctrine-audit`. If the work is a feature, a spec or a ticket rather than a defect, that is `doctrine-code`. For a documentation sweep, use `doctrine-docs`; for a proposal, brief, PRD or report, use `doctrine-write`. The hub itself says it is not for one-off questions or a one-off edit to a single file nothing else reads, and that holds here: a typo you can see and fix in one line does not need two phases and a red team.
+Use it when something is broken, throwing, failing or slow and you want it diagnosed and fixed with the doctrine. It is a wrapper: it loads the [`doctrine`](doctrine.md) hub, which supplies the posture (the anchor, the gate, the red team, the alarms and delivery), and adds the shape of a debugging run.
 
-The shape this wrapper assumes is a bug with a reproduction you can build. Where no local reproduction seam exists (no local database, a UI behind auth), it uses your project's documented CI or production-probe paths, or stops and asks you. It will not hypothesize without a loop.
+Pick another skill when the work is not one known defect. A hunt for bugs you have not seen yet is [`doctrine-audit`](doctrine-audit.md). A feature, spec or ticket is [`doctrine-code`](doctrine-code.md). A documentation sweep is [`doctrine-docs`](doctrine-docs.md), and a proposal, brief or report is [`doctrine-write`](doctrine-write.md). The hub is not meant for a one-off question or a one-off edit to a single file nothing else reads.
 
-## What it asks you first
+## What it asks you
 
-The run opens with the open questions about the bug: reproduction steps, when it last worked, and the environment it fails in. Your answers, in your words, go verbatim into the record (doctrine step 1) and from there into every reviewer's brief, so a red team judges the fix against what you said the problem was and not against the agent's paraphrase.
+It starts with the open questions about the bug: how to reproduce it, when it last worked, and the environment it fails in. Your answers go into the run's record verbatim as the anchor, and every reviewer gets them, so the fix is judged against what you said was wrong.
 
-Two more things are yours to say up front if you want them. A pane: where the feedback loop has to run on a device or host the agent logs into (a router, a switch, a console, a box over SSH), the agent opens a `doctrine-pane` session only if you asked for one, since that skill refuses to open a pane nobody requested. Unasked, it runs the command non-interactively and the report says a pane would have shown more. And the alarm figures: the round count and time budget the hub's alarms fire on come from your words where you give them, and sit at the hub's defaults (4 rounds, two hours) where you do not.
+If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more.
 
-## How the work runs
+You can also set the two alarm figures. One is how many review rounds may find a blocking problem before the run stops and asks you. It stops again at each multiple of that figure. The other is a time budget, counted from when the last round closed, or from the start of the phase before any has. Without them the hub's defaults apply, 4 rounds and two hours. Only a ruling you give after an alarm fires restarts the run.
 
-The core discipline is Matt Pocock's `diagnosing-bugs` skill, followed phase by phase. This wrapper adds the posture around it and splits the work into two doctrine phases: the diagnosis (from loop-building through hypothesis testing) is one phase, and the fix is the second.
+Before the fix is gated, the agent may also ask you to choose between the full gate and a reduced one, as Phase two describes.
 
-The diagnosis phase begins with the feedback loop, built per `diagnosing-bugs` Phase 1. The wrapper calls this the skill and tells the agent to spend disproportionate effort on it. Phase 1 does not end until the agent can name one already-run command that goes red on this bug. That command is the artifact everything after it depends on.
+## How a run goes
 
-When more than one hypothesis is live, the agent tests them as a parallel wave (doctrine step 2): one probe per hypothesis, each reporting evidence for and against. Each probe's prompt is assembled, never summarized, around the loop: the exact command, the invocation and output already in hand, the symptom, the single hypothesis the probe owns, and its isolation mode, with read-only stated as a constraint in the prompt itself because worktrees can be imposed from outside and read-only can only be instructed. Probes are isolated so one variable changes at a time. A probe handed "test hypothesis 3" and nothing to run reads code and returns code-reading with the word evidence on it, which is why the loop command is in every brief. Hypotheses die on evidence. If every hypothesis dies, the agent regenerates from the new evidence rather than recycling the old list.
+The core discipline is Matt Pocock's `diagnosing-bugs` skill, followed phase by phase. This wrapper splits it into two doctrine phases: the diagnosis, from building the loop through testing hypotheses, and the fix.
 
-The diagnosis phase has its own counter in place of the hub's round alarm, because the hub's alarm counts review rounds that found a blocker and this phase runs no gate. The agent counts hypothesis waves, adding one for every wave that did not end in a confirmed root cause: a wave where every hypothesis died, and equally a wave where one survived without becoming provable or the evidence came back inconclusive. The second kind is the worse sign, since it is the wave a stuck diagnosis repeats. That count is kept on disk with the rest of the run state, because a compaction loses an in-context count without telling anyone. When it reaches the alarm figure the agent stops and puts the hub's diagnosis to you (doctrine step 5), with the wave count where the round count would be. The hub's time alarm applies to this phase as written.
+### Phase one: the diagnosis
 
-Before any regression test or fix, the surviving diagnosis is red-teamed (doctrine step 4): the red team gets the symptom, the loop, the root-cause claim, the surviving probe's return, each killed hypothesis with its probe's evidence, and `diagnosing-bugs`' Phase 1 section pasted as the loop standard, and is asked to refute the claim on two named axes: whether the loop reproduces the reported symptom rather than a neighbouring one, and whether every rival hypothesis died on evidence from the loop rather than on code-reading. Its counter-claims are verified from source. The phase exits only when the claim survives both that refutation and the agent's own source-level trace. The surviving claim is then written down, one paragraph, where the fix lands: the symptom, the loop command, the root cause, the source evidence. That paragraph is the diagnosis phase's deliverable, what a fresh context resumes from after a compaction, and the spec the review reads in the fix phase.
+**Build the feedback loop.** The wrapper tells the agent to spend disproportionate effort here. The loop is done only when the agent can name one command, already run, that goes red on this bug. Without a local way to reproduce it (no local database, a UI behind a login), the agent uses your project's documented CI or production-probe paths, or stops and asks you. It does not guess at causes without a loop.
 
-The fix phase follows `diagnosing-bugs` Phase 5: regression test first, then the minimal fix. It then loops under the hub's gate (doctrine step 5) as written: loop green, native checks (doctrine step 3), the designated review, and a red team on the diff, until one pass comes clean. For an intermittent bug, green means the full stress run clean, sized against the reproduction rate Phase 1 pinned, never one lucky pass and never a rate nobody measured. A simplification review runs on the fix before the certifying pass (doctrine step 6); the wrapper's own line on it is that a fix which adds a new abstraction is usually the wrong fix. Delivery is by your project's norm (doctrine step 7).
+**Test hypotheses as a wave.** When more than one cause is live, the agent sends one probe per hypothesis, in parallel. Each probe's prompt carries the loop command, the output already in hand, the symptom, the one hypothesis it owns, and its isolation, with read-only stated in the prompt itself. A probe handed only "test hypothesis 3" reads code and calls that evidence, which is why the command goes in every prompt. Hypotheses die on evidence from the loop. If all of them die, the agent builds a new list from what it learned rather than reusing the old one.
 
-## What the gate is for this shape
+**Count the waves that fail.** This phase runs no review gate, so the hub's round alarm would never fire here. The wrapper counts instead: one for every wave that ends without a confirmed root cause, whether every hypothesis died, a survivor could not be proved, or the evidence was inconclusive. The count is kept on disk. When it reaches a multiple of the rounds figure, the run stops and asks you whether to go on, with the diagnosis described under [How it ends](#how-it-ends) and this count where the round count would be. The hub's time alarm applies as written.
 
-The core discipline is `diagnosing-bugs`. The designated review is `matts-code-review` on the fix diff, and the wrapper adds three instructions so that review runs on the right thing. First, the agent pins the fixed point itself: the SHA the fix phase started from, read with `git rev-parse HEAD` before it writes the regression test. Dispatched without one, the review stops and asks you, twice a phase. Given `main` or the merge-base, it reviews everything already merged and re-files those findings, which the hub then counts as outstanding against the pass you are in. Second, the agent gives the review a spec source: the bug's tracker issue, or the root-cause paragraph from the diagnosis phase. Without one the review's Spec sub-agent skips with "no spec available" and the gate's designated review runs one axis of two. Issue references resolve only where Matt's `docs/agents/issue-tracker.md` exists; otherwise the agent passes the file path. Third, the agent hands the review the standards sources' contents as they read at the fixed point (`git show <sha>:<path>` for each, or a worktree kept at the fixed point until the pass returns) and tells it to give its Standards sub-agent those in place of the paths, since told only the SHA it reads them from the changed tree and judges a loosened standard by its loosened form.
+**Red-team the diagnosis before any fix.** The red team gets the symptom, the loop, the root-cause claim, the surviving probe's return, each killed hypothesis with its evidence, and Phase 1 of `diagnosing-bugs` as the standard for the loop. It is asked to refute the claim on two points: does the loop reproduce the symptom you reported, not a neighbouring one, and did every rival hypothesis die on evidence from the loop rather than on code-reading. The agent checks each counter-claim against source.
 
-The red team is the hub's: the `codex:codex-rescue` subagent where the codex plugin is installed, otherwise a fresh-context subagent prompted to refute. In the diagnosis phase it is handed what the paragraph above lists and answers on those two axes. In the fix phase it runs on the diff with what the hub gives every reviewer seat (the diff itself, your words verbatim, the blocking definition, closed questions and refuted claims, the project's own law as it read at the fixed point, a non-mutating bound, and word that it loads no doctrine skill), plus the written root-cause claim, the reproduction rate Phase 1 pinned (or that the loop is deterministic) and the fixed-point standards, and it answers on three axes: whether the regression test fails without the fix, whether the fix is minimal, and whether other callers carry the same fault. A return that says "no findings" with no list of what it attacked is a failed seat and no pass counts clean on it.
+The diagnosis phase ends when the claim survives that red team and the agent's own trace through the source. The agent then writes the claim down where the fix will land, in one paragraph: the symptom, the loop command, the root cause and the source evidence. That paragraph is the phase's deliverable, the point a later session resumes from, and the spec the fix's review reads.
 
-The record follows the hub's default, since the wrapper names no path of its own: beside the work in the target repo, excluded from version control, with the report naming where it is. It carries the anchor, the wave count, and for the fix phase each round's revision, findings and state. Run state the reviewers must not see (counters, retries, substituted seats) is kept out of what a reviewer is handed.
+### Phase two: the fix
 
-When a dependency is missing, the hub's Fallbacks table fills the slot. Without `diagnosing-bugs` the agent runs the discipline inline: reproduce first, regression test before the fix. Without `matts-code-review` it runs `/code-review`, or two parallel subagents (Standards and Spec) handed the fixed point, the spec, the diff command and the repo's standards sources. Without the codex plugin the red team is a same-model fresh context, and the report names it as such because its blind spots correlate with the author's. Without `doctrine-pane` or herdr, the interactive step runs non-interactively and is recorded as not run, never as passed. Every substitution is written in the record and named in the exit statement.
+**Test first, then the smallest fix.** Per `diagnosing-bugs` Phase 5, the agent writes a regression test that fails, then the minimal change that makes it pass.
 
-## A worked example
+**Simplify before the gate.** A simplification review of the fix runs and is committed before the gate's checks start, and again on each repair before the pass that re-checks it. The wrapper's rule of thumb: a bug fix that adds a new abstraction is usually the wrong fix.
 
-This example is illustrative: it shows the shape of a run, not a recorded one.
+**Gate the fix.** By default each pass runs four checks: the loop (which must be green), the project's own documented checks, `matts-code-review` on the fix diff, and a red team on the diff. A pass is clean when it finds no blocking problem, none stands open from an earlier pass, and one complete path has run end to end on the real code for that revision, with the fix's effect observed, where the work ships or the nearest place that runs the real code. A unit-test fake does not count, and where no such place is reachable the run is recorded as not run and the pass is not called clean. The phase exits on one clean pass.
 
-You report that the nightly export job has started failing with a `KeyError` since some time last week, and you ask for it fixed with the doctrine. The agent asks three questions: the exact command that fails, when it last succeeded, and whether the failure is on your machine or only in CI. You answer that it fails locally with `npm run export -- --since=2026-09-01`, that it passed on the third, and that CI shows the same trace. Those three answers go into the record verbatim as the anchor, with the alarm figures at the defaults since you gave none.
+A pass that finds a blocking problem leads to a repair and another pass, aimed at the repair first. For each blocking problem the agent also asks where else the same fault would show, repairs every such site it may touch, and reports the sites outside its scope rather than fixing or dropping them silently. For an intermittent bug, green means the full stress run clean, sized against the reproduction rate Phase 1 measured, never one lucky run.
 
-The agent builds the loop. It runs your command, gets the trace, and trims it to a single test that fails in under a second. That test is the artifact; the record names it and its output. Three hypotheses are live: a schema change in the source table, a date-parsing change in a dependency bump, and a config default that moved. The agent dispatches three probes in one wave, each carrying the test command, its output, the symptom, its one hypothesis, and the line "read-only: report evidence, change nothing". Two probes return killing evidence for their hypotheses. The third returns the dependency bump's changelog entry and a diff of the parsing call, and the agent's own trace from the trace back to that call confirms it. The wave count stays at zero: the wave ended in a confirmed root cause.
+The fix's red team also gets the written root-cause claim, that reproduction rate (or word that the loop is deterministic), and your project's standards as they read before the fix. It answers three questions: does the regression test fail without the fix, is the fix minimal, and do other callers carry the same fault.
 
-The red team gets the symptom, the loop command, the claim, the third probe's return, the two killed hypotheses with their evidence, and the Phase 1 section as the loop standard, and returns two counter-claims. One says the schema also changed; the agent checks the migration history from source and refutes it, with the evidence written in the record. The other is an improvement suggestion, filed non-blocking. The claim survives, and the agent writes the one-paragraph root-cause statement beside the fix: symptom, loop command, cause, the source lines that show it. The diagnosis phase is Exited.
+You can choose a lighter gate for the fix. The agent searches for what reads or calls the code the fix changes, proposes a gate with that evidence, and you choose: the full gate above, or a reduced gate: the project's own checks plus one adversarial review by a context that did not write the fix, repeated on any repair. The reduced gate drops the full gate's review loop and both alarms for the fix phase. No answer means the full gate, and if a re-run of that review finds another blocking problem, the phase moves to the full gate. The end-to-end run is required either way.
 
-The fix phase opens. The agent records the SHA it started from, writes the regression test (which fails), then the minimal fix (the test passes, the loop is green). The simplification review runs on the fix and finds nothing to delete. Native checks run: the project's lint, typecheck and full test suite, each in the form the repo documents. `matts-code-review` runs from the pinned SHA with the root-cause paragraph as its spec. The red team runs on the diff. Round 1 returns one blocking finding: the fix handles the new date format but a second call site three files over still parses the old way. The class question turns up that site and no others, the repair covers both, and round 2 runs the full gate again on the repaired revision, with the repair diff beside the full one. It comes clean, and the real run, the export command end to end on a copy of the data, is on record for that revision. The simplification review had already run before round 2 and removed a helper the first repair introduced.
+Every reviewer works under the same limits. It changes nothing it reviews, and a reviewer that did would void the pass. It gets the questions you have closed and the claims already refuted, so it does not reopen them, and it never sees the run's counters. It loads no doctrine skill. A reviewer that reports "no findings" without listing what it attacked has failed, and no pass counts clean on it.
 
-The report opens with the gate line, in the form the README shows:
+### How the review is pointed
+
+The agent gives `matts-code-review` three things so it reviews the fix and nothing else:
+
+- **The fixed point.** The agent reads `git rev-parse HEAD` before writing the regression test and passes that commit. Sent without one, the review stops to ask you for it, twice a phase. Given `main` or the merge-base, it re-files findings from work already merged, and the gate counts them against the current pass.
+- **A spec.** The bug's tracker issue, or the root-cause paragraph. Without one, its Spec reviewer skips with "no spec available" and the review covers one axis of two. An issue reference resolves only where `docs/agents/issue-tracker.md` exists, so otherwise the agent passes a file path.
+- **The standards as they were.** Each standards file as it read at the fixed point, from `git show <sha>:<path>` or a worktree kept at that commit until the review returns. If the review read the standards from the changed tree, a fix that loosened a standard would be judged by the loosened version.
+
+## How it ends
+
+Delivery follows your repository's norm, a commit or a pull request. The report opens with one line saying whether the shipping revision passed the gate clean and what is still open, for example:
 
 ```text
-Gate: clean pass on 9f2c1ab, real run on record. No blockers open.
+Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
-Below it, the record's path, the phase state for each of the two phases, the seats that filled each slot (with any substitution named), the deferred list carrying the red team's non-blocking suggestion, and a walk through your request: the failing command now passes, the regression test is in the suite, the second call site was also fixed and why. Delivery is by your repo's norm, a commit or a PR.
+Below that line the report names what filled each slot of the gate, lists the improvements it deferred, gives the path of the run's record (kept beside the work, outside version control), and walks your original request item by item, saying where each landed or why it was deferred.
 
-Had rounds 1 to 4 each found a blocker, the round alarm would have fired at round 4 and the run would have stopped with a diagnosis: what shipping now would mean, why the loop had not closed, and whether the exit was reachable at all, asking you to continue or ship. Had you chosen ship, the report would have opened on the other form:
+Each phase ends in one of the hub's five states: Exited (certified, the only clean ending), Stopped (you ended it), Shipped at an escalation (you chose to deliver when an alarm stopped it), Blocked (the session ended waiting on your answer to a question that decides the work's direction), or Unable (it cannot resume by itself, for example because credentials are gone).
 
-```text
-Gate: shipped at an escalation, round 4, zero clean passes. Open: 1 blocking finding.
-```
-
-with the diagnosis you ruled on under it, and the one open blocker named.
+A run that an alarm stops asks you whether to continue or ship, with a diagnosis in three parts: what shipping now would mean and what continuing would cost, why the loop has not closed, and whether its exit can be reached at all. Where the gate has stopped telling good work from bad, the diagnosis proposes a narrower definition of a blocking problem for you to rule on.
 
 ## How to invoke it
 
-The trigger is a report of something broken, throwing, failing or slow, plus a request to diagnose and fix it with the doctrine. A sample prompt:
+Say what fails and what you know about when it broke. Those are the first questions it would ask.
 
 ```text
-use doctrine-debug: `npm run export -- --since=2026-09-01` throws a KeyError since last week, passed on the 3rd, same trace in CI. Diagnose and fix it.
+use doctrine-debug: `npm run export -- --since=2026-09-01` throws `TypeError: Cannot read properties of undefined` since last week, passed on the 3rd, same trace in CI. Diagnose and fix it.
 ```
-
-Put the failing command and what you know about when it broke in the prompt; those are the first questions it would ask anyway.
 
 ## Requirements
 
-Nothing must be installed for this skill to run. Each named dependency has a fallback, in the hub's table or the wrapper's own text:
+Nothing must be installed. Each dependency has a fallback:
 
-- Matt Pocock's `diagnosing-bugs`: the core discipline. Without it, inline: reproduce first, regression test before the fix.
-- `matts-code-review`: the designated review on the fix diff. You install it yourself as a renamed copy of Matt Pocock's `code-review`, since the plugin does not bundle it. Without it, `/code-review` or two parallel Standards and Spec subagents.
-- The OpenAI codex plugin: the different-model red team. Without it, a same-model fresh context, named as such in the report.
-- superpowers: parallel dispatch and worktrees for the probe wave. Without it, parallel Agent tool calls with each prompt assembled in full.
-- ponytail: the simplification review. Without it, `/simplify` or a manual YAGNI pass.
-- `doctrine-pane` and herdr (0.8.2 or later): the interactive session on a remote host, only when you ask for one. Without them, the step runs non-interactively and is recorded as not run.
+- Matt Pocock's `diagnosing-bugs`: the core discipline. Without it, the agent works inline: reproduce first, regression test before the fix.
+- `matts-code-review`: the review on the fix. You install it yourself as a renamed copy of Matt Pocock's `code-review`. Without it, `/code-review` or two parallel reviewers, one for standards and one for the spec.
+- A red team from the other model family: on Claude Code, the `codex:codex-rescue` subagent from OpenAI's codex plugin. Without it, a fresh-context subagent of the same model, and the report says so.
+- superpowers, for the parallel probe wave. Without it, parallel subagents, each with its prompt written out in full.
+- ponytail, for the simplification review. Without it, `/simplify` or a manual pass that deletes what nobody asked for.
+- `doctrine-pane` and [herdr](https://herdr.dev) 0.8.2 or later, only for a pane you asked for. Without them the agent runs the commands non-interactively and records the interactive step as not run.
 
-Install commands are in [docs/requirements.md](../requirements.md). Watching the probe wave and the seats as they run needs herdr: [watching a run](../watching-a-run.md).
+Every substitution is written in the record and named in the exit statement. Install commands are in [requirements](../requirements.md).
+
+Optionally, on Claude Code, run it inside herdr and every probe and reviewer gets a live pane you can read while it works: [watching a run](../watching-a-run.md). On Codex the panes also need the plugin's hooks installed, as the [README](../../README.md#install) shows.
 
 ## Red flags
 
-The wrapper lists six failure modes. If you see one in a run, the run is off its own doctrine:
+If you see one of these, the run has left its own rules:
 
-- A fix appears before the feedback loop has gone red on this bug.
-- A root cause is accepted because the red team agreed, with no source-level trace behind it.
-- A flaky bug is declared fixed on a single green run.
-- Probes are dispatched with "test hypothesis N" and no command to run; what returns is code-reading labelled evidence.
-- Hypothesis waves keep dying on evidence with no count kept, and you are never asked whether to keep going.
-- `matts-code-review` runs against `main` on the fix diff and re-files findings from work that shipped weeks ago.
+- A fix appears before the loop has gone red on this bug.
+- A root cause is accepted because the red team agreed, with no trace through the source behind it.
+- An intermittent bug is declared fixed after one green run.
+- Probes go out with "test hypothesis N" and no command to run.
+- Hypothesis waves keep failing, nobody counts them, and you are never asked whether to go on.
+- `matts-code-review` runs against `main` and re-files findings from work that shipped long ago.
 
-The hub's page is [doctrine.md](doctrine.md), and the README is [here](../../README.md).
-
-The specification is [`skills/doctrine-debug/SKILL.md`](../../skills/doctrine-debug/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine-debug/SKILL.md`](../../skills/doctrine-debug/SKILL.md). Where this page and it disagree, trust the specification.

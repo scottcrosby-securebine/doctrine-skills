@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Figure source for doctrine-debug, copied from specimen.html. Render from the repo root:
+       node docs/skills/figures/render.mjs docs/skills/figures/doctrine-debug.html docs/skills/doctrine-debug.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-debug/SKILL.md@891bf25c343d0b398a34ffb3ec1d32ebb272c002">
+<title>Figure: doctrine-debug</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 03/15</span><span>doctrine-debug</span></header>
+
+<section class="title">
+  <h1>No fix before a command fails on the bug and the diagnosis survives a red team</h1>
+  <p>Something broken, throwing, failing or slow: diagnosed in one phase, fixed in a second.</p>
+</section>
+
+<section class="row">
+  <div class="label">Phase one:<br>diagnosis</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box"><b>Ask</b><span>how to reproduce it, when it last worked, where it fails</span></div><div class="box" id="loop"><b>Build the loop</b><span>one already-run command that goes red on this bug</span></div></div>
+    <svg class="wires" data-from="#loop" data-to=".probe"></svg>
+    <div class="col" style="width:330px">
+      <div class="box probe"><b>Probe: hypothesis A</b><span>the loop command, isolated</span></div>
+      <div class="box probe"><b>Probe: hypothesis B</b><span>killed on loop evidence</span></div>
+      <div class="box probe"><b>Probe: hypothesis C</b><span>one hypothesis per probe</span></div>
+    </div>
+    <svg class="wires" data-from=".probe" data-to="#red"></svg>
+    <div class="col" style="flex:1"><div class="box" id="red"><b>Red team the claim</b><span>right symptom? rivals died on the loop? then a source trace and one written paragraph</span></div></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">Phase two:<br>the fix</div>
+  <div class="flow">
+    <div class="box"><b>Regression test</b><span>fails first</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Minimal fix</b><span>the test passes</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Simplify</b><span>committed before the gate</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Gate</b><span>loop, project checks, matts-code-review, red team; repeat until one pass is clean</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Deliver</b><span>by the repo’s norm</span></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>If every hypothesis dies, a new list from the new evidence.</p>
+  <p>Every wave without a confirmed cause counts toward the alarm.</p>
+  <p>The review gets a pinned SHA, the issue or root-cause paragraph as spec, standards as they were.</p>
+  <p>An intermittent bug is green only on a full stress run.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-debug/SKILL.md at blob 891bf25</footer>
+<script src="figure.js"></script>
+</body>
+</html>
