@@ -2,7 +2,7 @@
 
 A documentation sweep. The agent checks your docs against the code, fixes every claim the code no longer bears out, writes up shipped behaviour no doc mentions, and lands the result the way your repo ships work. It changes docs only.
 
-![The doctrine-docs flow. Scope questions and an inventory of doc areas, run once, fan out to parallel Accuracy and Coverage seats per area, which merge, with the code deciding facts. Then verify, edit, native checks, one red team that is also the review, and delivery by the repo's norm.](doctrine-docs.png)
+![The doctrine-docs flow. Scope questions and an inventory of doc areas, run once, fan out to parallel Accuracy and Coverage seats per area, which merge, with the code deciding facts. Then verify, edit, native checks, one red team that is also the review, and delivery by the repo's norm. A loop row shows a blocking finding repaired at every site with the same mark and checked again, until one clean pass or a closing round.](doctrine-docs.png)
 
 ## When to use it, and when not
 
@@ -16,21 +16,21 @@ Use another skill for these:
 - A document that is itself the deliverable, such as a proposal, brief or report: `doctrine-write`. Researched content for a multi-source question: `doctrine-research`. `doctrine-write`'s own text gives codebase-doc sweeps to this skill, and `doctrine-write` can be chained after a sweep.
 - A one-off question, or a one-off edit to one file nothing else reads, needs no wrapper.
 
-`doctrine-docs` is a wrapper. It loads the [`doctrine`](doctrine.md) skill first, which supplies the gate, the anchor, the record, the two alarms and the end states, and it adds the task shape described here.
+`doctrine-docs` is a wrapper. It loads the [`doctrine`](doctrine.md) skill first, which supplies the gate, the anchor (your own words for what the work is for), the record (a file on disk holding the run's state), the two alarms and the end states, and it adds the task shape described here.
 
 ## What it asks you
 
 It asks only what your request left open and the repository cannot answer:
 
 1. **Which doc trees count**: README, `docs/`, CLAUDE.md, playbooks, or a subset.
-2. **The Coverage horizon**: the point in history after which the run looks for undocumented changes. The run asks this only where history does not settle it. Where the repository offers more than one defensible horizon, the run takes the widest, never the nearest: the last commit to touch the docs says when somebody last wrote, not when the code last changed. Where the candidates do not order, as with two branches neither of which contains the other, it gives each its own range. It waits on your answer only where even that coverage would still be a guess about what you want covered. No Coverage seat goes out until the horizon is a concrete ref: a SHA, a tag or a date.
+2. **The Coverage horizon**: the point in history after which the run looks for undocumented changes. The run asks this only where history does not settle it. Where the repository offers more than one defensible horizon, the run takes the widest, never the nearest: the last commit to touch the docs says when somebody last wrote, not when the code last changed. Where the candidates do not order, as with two branches neither of which contains the other, it gives each its own range. It waits on your answer only where even that coverage would still be a guess about what you want covered. No Coverage seat (an agent the run dispatches) goes out until the horizon is a concrete ref: a SHA, a tag or a date.
 3. **How the sweep lands**: whether you want a PR at all, and if so one PR or one per area. The default is one PR where your repo's norm is PRs.
 
 Your request and your answers become the anchor, which the doctrine writes to disk verbatim and hands to every agent that judges the work. The record also holds the two alarm bounds: a round count, 4 by default, and a time budget, two hours by default.
 
 Later in the run, the following can come back to you:
 
-- **A gate proposal**, before any wave goes out. See "Which gate" below. If you do not answer, the sweep runs the full gate.
+- **A gate proposal**, before any wave goes out. See "Which gate" below.
 - **A direction question.** When the two axes agree on what the code does and disagree on what the doc should say about it, the run puts that through the doctrine's direction test. If only you can answer it and the doc reads differently either way, the run waits for you. Otherwise it decides and writes the ruling and its reason into the record.
 - **An alarm.** The round alarm fires at every multiple of the round count, counting rounds that found a blocking finding. The time alarm fires when the time since the last round closed, or since the sweep began where no round has, passes the budget. Either one stops the loop and puts a diagnosis to you: what shipping now would mean, why the loop has not closed, and whether it can. The time alarm waits for your ruling. At the round alarm's first firing this skill's exit takes over (see "Exit" below), and the closing round opens without waiting unless you say stop.
 
@@ -53,6 +53,8 @@ Later in the run, the following can come back to you:
 
 **The command check never runs the command.** It confirms that the command still resolves: the binary exists, the script name is in the task runner, the flags match `--help`. The run never executes a documented command for its effects, such as `npm run migrate` or `terraform apply`. Where only running a command could verify a claim, the claim is marked unverified and the summary says so. This boundary is written into every Accuracy prompt and every red-team brief, because the seat told to verify a command is the one that would otherwise run it. The doctrine's gate requires one run in the real environment, and for docs, which do not execute, re-verifying the edited claims plus the link and path check is that run.
 
+**Which gate.** Before any wave goes out, the run finds out who reads the docs in scope and proposes a gate to you: the full gate, or the doctrine's reduced gate, which is your project's checks and the three checks above, plus one adversarial review, re-run on its repair, with no loop and no alarms. If that re-run finds another blocking finding, the sweep moves to the full gate for good. If the review names readers of the docs the search missed, the run puts a revised proposal to you and runs the full gate until you answer it. Only your choice puts the sweep on the reduced gate, and with no answer it runs the full one. If readers the search missed turn up after a reduced-gate sweep is certified, the sweep reopens and runs the full gate.
+
 **The red team is also the review.** This skill names no separate review. One adversarial pass per round fills both slots, so its brief is the whole review. The skill hands it:
 
 - the doc diff itself, never filenames, with each edited doc whole beside it;
@@ -67,8 +69,6 @@ The doctrine adds more, including the anchor, the definition of a blocking findi
 
 The red team comes from the other model family where it can: the codex plugin's `codex:codex-rescue` seat on Claude Code, and the Claude Code CLI on Codex CLI. Without it, a fresh-context subagent of the same model takes the seat, and the report names the substitution.
 
-**Which gate.** Before any wave goes out, the run finds out who reads the docs in scope and proposes a gate to you: the full gate, or the doctrine's reduced gate, which is your project's checks and the three checks above, plus one adversarial review, re-run on its repair, with no loop and no alarms. If that re-run finds another blocking finding, the sweep moves to the full gate for good. If the review names readers of the docs the search missed, the run puts a revised proposal to you and runs the full gate until you answer it. Only your choice puts the sweep on the reduced gate, and with no answer it runs the full one. If readers the search missed turn up after a reduced-gate sweep is certified, the sweep reopens and runs the full gate.
-
 **Exit.** On the full gate, the sweep exits on one clean pass: no blocking finding, none left open from an earlier pass, and the checks above on record for that revision. A finding blocks when someone acting on the docs as they stand would do the wrong thing; a false claim about what the product does is the standing case. The skill adopts the doctrine's prose-deliverable exit: where no pass has come clean by the round alarm's first firing, one closing round reviews only what changed since the last fully reviewed revision, or the whole sweep where none was. The sweep then ships at an escalation, not certified, with a punch list of what it did not fix. The doctrine's other endings also apply: you can stop the loop, or choose to ship at an escalation when an alarm stops it, the run can end blocked on a question you have not answered, or it can end unable to continue, and the report names which. Docs written during the loop are not deferred to after it, as the doctrine defers other documentation, because here the docs are the deliverable.
 
 The gate line takes the form the README shows, for example `Gate: clean pass on b71c2e0, real run on record. No blockers open.`
@@ -79,11 +79,11 @@ The gate line takes the form the README shows, for example `Gate: clean pass on 
 
 This is illustrative, not a recorded run.
 
-In a Node project whose `package.json` has a `lint:docs` script, you type `use doctrine-docs on this repo; the API docs are behind the code`. The run asks which trees count and how to land; you answer README and `docs/`, one PR. It does not ask the horizon, because the repo has release tags and it takes the widest defensible one. Four seats go out, Accuracy and Coverage for each of two areas. Of seven findings, verification drops one as a false positive and turns one into a filed bug with an annotated doc. After the edits, `npm run lint:docs` passes, and every edited claim, link and command is checked, none executed. The first red-team pass finds that the new text names an environment variable the code reads under another name. The fix is verified, the run finds no other place the same mistake appears, and the second pass comes back clean. One PR opens, with the gate line first and the sweep summary under it.
+In a Node project whose `package.json` has a `lint:docs` script, you type `use doctrine-docs on this repo; the API docs are behind the code`. The run asks which trees count and how to land; you answer README and `docs/`, one PR. It does not ask the horizon, because the repo has release tags and it takes the widest defensible one, `v2.3.0`. It searches who reads the docs, finds the API docs published for outside users, and proposes the full gate; you accept. Four seats go out, Accuracy and Coverage for each of two areas. Of seven findings, verification drops one as a false positive and turns one into a filed bug with an annotated doc. After the edits, `npm run lint:docs` passes, and every edited claim, link and command is checked, none executed. The first red-team pass finds that the new text names an environment variable the code reads under another name. The fix is verified, the run finds no other place the same mistake appears, and the second pass comes back clean. One PR opens, with the gate line first and the sweep summary under it.
 
 ## How to invoke it
 
-Ask for a documentation sweep, or run `/doctrine:doctrine-docs`. Naming the trees, the horizon and the landing up front answers every scope question, so the only thing left to come back before the work starts is the gate proposal, which runs the full gate if you ignore it:
+Ask for a documentation sweep, or run `/doctrine:doctrine-docs`. Naming the trees, the horizon and the landing up front answers every scope question, so the only thing left to come back before the work starts is the gate proposal:
 
 ```text
 use doctrine-docs: sweep README and docs/ against the code since v2.3.0, one PR

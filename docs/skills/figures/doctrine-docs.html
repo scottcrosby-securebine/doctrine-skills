@@ -45,11 +45,24 @@
   </div>
 </section>
 
+<section class="row">
+  <div class="label">Loop</div>
+  <div class="flow">
+    <div class="box"><b>Blocking finding</b><span>verified against source</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Repair</b><span>and every other site with the same mark</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Again</b><span>checks and red team on the repair</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Exit</b><span>one clean pass, or a closing round, not certified</span></div>
+  </div>
+</section>
+
 <section class="notes">
-  <p>A command check means the command still resolves. It is never run for its effects.</p>
-  <p>A code bug is filed where it can be, and the doc annotated with what the code does today. No invented issue numbers.</p>
-  <p>CLAUDE.md and AGENTS.md edits are flagged separately in the PR.</p>
-  <p>Exit: one clean pass, or a closing round and delivery at an escalation, not certified.</p>
+  <p>A command check: it resolves, it is never run.</p>
+  <p>A code bug: filed where possible, doc annotated.</p>
+  <p>CLAUDE.md and AGENTS.md edits flagged in the PR.</p>
+  <p>Alarms stop the loop for your ruling.</p>
 </section>
 
 <footer class="foot">Drawn from skills/doctrine-docs/SKILL.md at blob 6a5cf61</footer>
