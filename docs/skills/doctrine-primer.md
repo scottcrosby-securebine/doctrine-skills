@@ -66,7 +66,7 @@ give me a situation report on this repo
 
 ## Requirements
 
-Nothing beyond the plugin must be installed. The GitHub CLI `gh` supplies the open PRs, the build status and the issue count. Where `gh` fails, resume's drift check says so once and continues on git alone. Install commands for the plugin's optional pieces are in [docs/requirements.md](../requirements.md).
+Nothing beyond the plugin must be installed. The GitHub CLI `gh` supplies the open PRs, the build status and the issue count. Where `gh` fails, resume's drift check says so once and continues on git alone. The plugin's own requirements are in [docs/requirements.md](../requirements.md).
 
 The hub's page is [doctrine.md](doctrine.md), and the README is [here](../../README.md).
 
