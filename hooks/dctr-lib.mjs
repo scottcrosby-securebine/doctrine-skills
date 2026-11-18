@@ -791,9 +791,8 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
 
 /** The capacity check `doctrine-orchestrate` starts a role on (E15-D51, Q5): accept only when the role's resume
  *  load plus the handoff cost is strictly below its tier, and the tier is at most its window. Pure: the caller
- *  takes the window from the statusline bridge, or from the model id where there is no bridge reading or the transcript
- *  is unreadable or names another model, reads the load from the transcript and refuses on any `resolveTier` error
- *  first (`hooks/dctr-orchestrate.mjs`). */
+ *  takes the window from the host's own reading for the session and refuses where there is none, reads the load
+ *  from the transcript and refuses on any `resolveTier` error first (`hooks/dctr-orchestrate.mjs`). */
 export function capacityDecision({ window, load, tier }) {
   const need = load + HANDOFF_COST_TOKENS
   const accept = need < tier && tier <= window

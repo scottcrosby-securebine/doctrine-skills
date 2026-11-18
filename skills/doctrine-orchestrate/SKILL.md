@@ -24,7 +24,7 @@ Run every check here before anything else, and stop at the first that fails, say
 
 A run has three kinds of session, each a Claude Code session in its own herdr pane: you; one lane session per phase; and the merge session. The lane watcher and the sender are scripts, not sessions, and the owner answers questions. A lane is not a seat (doctrine step 5): you never wait on one, and you cycle on your own schedule.
 
-Every session reads its role and its run from its own environment, set by its launch line, so a `/clear`, a restart or a seat keeps them. `<run>` holds `inbox/`, `held/<role>/`, `pending/<role>/`, `launch/<role>.sh`, `model/<role>`, `waiting-questions.md`, `limits.log`, `events.log`, `guard.log`, `lane.log`, `tmpdir` and `wake-all.lock`. `node hooks/dctr-project.mjs board` writes `board.md`, one row per lane phase, into the Records path, and is how you read the run at a glance.
+Every session reads its role and its run from its own environment, set by its launch line, so a `/clear`, a restart or a seat keeps them. `<run>` holds `inbox/`, `held/<role>/`, `pending/<role>/`, `launch/<role>.sh`, `model/<role>`, `waiting-questions.md`, `limits.log`, `events.log`, `guard.log`, `lane.log`, `permission-mode`, `tmpdir` and `wake-all.lock`. `node hooks/dctr-project.mjs board` writes `board.md`, one row per lane phase, into the Records path, and is how you read the run at a glance.
 
 The only text any session or script types into a run session's pane is one of four fixed lines: `/clear`, `RESUME_LINE` from `hooks/dctr-lib.mjs`, the nudge "Read your brief and your held folder, then act on them.", and a role's launch line as `lane.log` records it. Everything else is message text and goes through the sender.
 
