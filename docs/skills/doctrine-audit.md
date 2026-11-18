@@ -69,7 +69,7 @@ Larger architectural refactors found along the way are not rewritten mid-audit. 
 
 **Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. A pass counts as clean only once one complete path has also run end to end in the environment the work ships to, or the nearest one that runs the real code, with the change's effect observed. Where no such environment is reachable, the run says the check is unrun and never calls the pass clean.
 
-Every blocking finding gets the hub's class question: where else would the same defect have left the same mark? The agent looks at every such site, fixes the ones inside your scope, and lists those outside it in the report, or asks you where it cannot tell. A site outside your scope that the work leaves broken still blocks. A fix to one call site therefore often lands in the shared code they all use.
+Every blocking finding gets the hub's class question: where else would the same defect have left the same mark? The agent looks at every such site, fixes the ones inside your scope, and lists those outside it in the report, or asks you where it cannot tell. A fix to one call site therefore often lands in the shared code they all use. A site outside your scope that the work leaves broken still blocks.
 
 Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate. It keeps your checks, the end-to-end run and an adversarial review, re-run on each repair, but drops the loop, the designated review and the alarms, and a second blocking finding moves the phase to the full gate. If you do not answer, the phase runs the full gate.
 
@@ -130,7 +130,7 @@ Ask for a bug hunt or a deep code audit done with the doctrine, and name the are
 use doctrine-audit on src/whatever.ts (scope is that file only)
 ```
 
-A fuller request answers most of the scope questions up front, leaving only the filing line to ask, which in report-first mode changes nothing, since every confirmed issue is filed: `Run doctrine-audit on packages/billing, report-first, read-only. I want drift between the docs and the code, and anything that writes a price.`
+A fuller request answers most of the scope questions up front, leaving only the filing line to ask, which report-first mode does not use, since that mode files every confirmed issue rather than only those above a line: `Run doctrine-audit on packages/billing, report-first, read-only. I want drift between the docs and the code, and anything that writes a price.`
 
 ## Requirements
 
