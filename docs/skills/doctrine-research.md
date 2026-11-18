@@ -4,8 +4,6 @@ Use it when you need an answer you do not have yet: a question spread across man
 
 ![Round 1 sends the anchor to two blind engines whose claims merge into a claim table. Then a logic critique reads the merged research, the gap ledger lists what is missing, and each loop runs gap-fill, a red team and the critique again until a pass comes clean or the closing round delivers.](doctrine-research.png)
 
-The figure's top row is round 1; the bottom row is everything after it.
-
 ## When to use it, and when not
 
 It fires when you ask for deep research done with the doctrine: a multi-source question that needs a grounded, fact-checked recommendation.
@@ -70,7 +68,7 @@ An engine 2 that answered from memory does not corroborate anything. A claim bot
 
 ### The logic critique and the gap ledger
 
-A dedicated agent reads the merged research for unsupported leaps, circular sourcing (many citations tracing to one origin), survivorship and recency bias, adjacent questions conflated, and drift from the anchor. It returns the divergence flag described above when it sees one. Your ruling goes into the dossier's settled section, so the next loop's fresh critique does not reopen it. If a later reviewer files a question you already ruled on and the run accepts it, that is a blocking finding against the pass it lands in.
+A dedicated agent reads the merged research for unsupported leaps, circular sourcing (many citations tracing to one origin), survivorship and recency bias, adjacent questions conflated, and drift from the anchor. Its prompt carries the anchor verbatim and names the divergence flag described above as a return format. Your ruling goes into the dossier's settled section, so the next loop's fresh critique does not reopen it. If a later reviewer files a question you already ruled on and the run accepts it, that is a blocking finding against the pass it lands in.
 
 Every unknown and every unverified claim then gets a gap ledger entry: what is missing and what was already tried.
 
@@ -79,7 +77,7 @@ Every unknown and every unverified claim then gets a gap ledger entry: what is m
 Each loop is:
 
 1. **Gap-fill**: a targeted fan-out over ledger entries only, never a full re-run. Each agent gets the anchor, its entries with the searches already tried, and the tag rule.
-2. **Red team**: attacks the claim table and the drafted report together, holding the gap ledger so it does not repeat searches already tried. It refutes and extends the table, and anything it adds counts only once verified from its cited source.
+2. **Red team**: attacks the claim table and the drafted report together, holding the gap ledger so it does not repeat searches already tried. It refutes and extends the table, and anything it adds carries engine 2's tag rule, stated in its prompt, and counts only once verified from its cited source.
 3. **Logic critique** again, on whatever changed.
 
 Before either reviewer goes out, the run fetches every citation and hands both reviewers its URL and the excerpt the claim rests on, both engines' original returns, the rule that an unsourced engine 2 does not corroborate, the blocking instances below and your settled rulings. Neither reviewer opens a link, so without the excerpts neither could see a misread citation.
@@ -111,7 +109,7 @@ The exit is the hub's prose-deliverable exit. The phase exits on one clean pass 
 
 The time alarm is separate: it stops the loop, puts the same diagnosis to you and waits for your ruling. By default it fires two hours after the last round closed, or, if no round has closed yet, two hours after the phase opened. Both defaults give way to your own figures when you state them at the start.
 
-A run ends in one of the hub's five states: Exited (the only clean one), Stopped, Shipped at an escalation, Blocked on a question only you can answer, or Unable to continue. The dossier records which. Delivery opens with one line saying whether the report is certified, which blocking findings are still open, and any punch list.
+A run ends in one of the hub's five states: Exited (the only clean one), Stopped, Shipped at an escalation, Blocked on a question only you can answer, or Unable to continue. The dossier records which. Delivery opens with one line saying whether the report is certified, which blocking findings are still open, the diff between certified and shipping where they differ, and any punch list.
 
 Delivery writes the report to the agreed path and commits it by your project's norm. Its sections, in order:
 
@@ -142,7 +140,7 @@ The report opens with its gate line, in the form the [README](../../README.md) s
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
-"Real run" here is the link and path check: the deliverable does not execute, so that check is its real run. The sections follow in the order above, and in chat you get the recommendation and one question: whether the worknotes file ships beside the report.
+"Real run" here is the link and path check, since the deliverable does not execute. In chat you get the recommendation and one question: whether the worknotes file ships.
 
 ## How to invoke it
 
@@ -156,7 +154,7 @@ It asks for the success criteria and scope bounds before it dispatches anything.
 
 ## Requirements
 
-Nothing has to be installed. Each dependency has a fallback, and the report names every substitution.
+Nothing has to be installed beyond `node` on your `PATH`, which the plugin's hooks run under. Each dependency has a fallback, and the report names every substitution.
 
 - **On Claude Code**: the `deep-research` workflow, built into Claude Code on hosts that carry it. It is a workflow, not a skill, so it does not show in a skills list. Without it, engine 1 is a fan-out of web-search agents with per-claim adversarial verification.
 - **On Claude Code**: OpenAI's codex plugin with the Codex CLI logged in, for engine 2 and the red team. `/codex:setup` checks it. For engine 2 to search, set top-level `web_search = "live"` in `~/.codex/config.toml`; otherwise it may answer from a cache or from model knowledge.
