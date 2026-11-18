@@ -29,7 +29,7 @@ Before step 1 it reads the project instruction files. Your host loads one for it
 
 1. **Restore.** It loads `doctrine-resume` first and makes no call before it except reading the instruction files, because resume decides what has to come before the phase's wrapper. It then runs resume's steps 1 to 4: read the memory file, act on the kickoff's first line, check drift, hydrate the Active Work table, and write resume's report. That report goes at the very top of the reply, since its kickoff is a live instruction from the previous session and not history.
 
-   Where resume finds drift or a backup that never landed, the primer takes resume's step 5 as resume writes it. Through those steps, when the record the current handoff names is Open or Blocked, the session loads that phase's wrapper and then the `doctrine` skill, or `doctrine` alone where the record names no wrapper.
+   Where resume finds drift or a backup that never landed, the primer takes resume's step 5 as resume writes it. Through those steps, when the record the current handoff names is Open or Blocked, the session loads that phase's wrapper and then the `doctrine` skill. The wrapper comes from the record's last `wrapper:` line, else the handoff header's. With `wrapper: none`, or no wrapper line in either place, it loads `doctrine` alone.
 
    Two cases differ from a plain resume. With no memory file, resume would stop; the primer says there is none, runs resume's drift batch anyway for the branch, uncommitted work, open PRs and the build, and goes on to recon. With a memory file that has no `## Next Session Kickoff` section, it says so plainly: `doctrine-backup` is required to write that section, so its absence means the last handoff was lost.
 
@@ -54,7 +54,10 @@ Before step 1 it reads the project instruction files. Your host loads one for it
 
 It is done when resume's report leads the reply, with the kickoff quoted or its absence flagged, and all six parts of the explanation are covered.
 
-One case ends sooner. Where the handoff's first action may already have run and a phase record was read, resume appends a paused line to that record and ends the turn after its report, so you get the report and no tour until that is settled.
+Two cases end sooner, before recon and the tour:
+
+- Where the handoff's first action may already have run and a phase record was read, resume appends a paused line to that record and ends the turn after its report, until that is settled.
+- Where `doctrine-backup` runs during the restore, for a resync you accepted or a backup that never landed, it commits the memory file locally, never pushes, and its own text says to stop once it has committed. Under auto-cycle, a question `doctrine-backup` would ask is instead appended to the phase record as a pause, and the turn ends.
 
 The primer writes no file of its own. A file changes only through the steps it runs:
 
