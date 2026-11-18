@@ -16,8 +16,9 @@
 // source `rollout`. A Claude Code transcript gives the statusline bridge's per-session file for its session, the
 // session id being the transcript's file name, source `bridge`: a file that is missing, does not parse, names another
 // session, carries no numeric window or is older than the lane watcher's BRIDGE_EXPIRY_MS is no bridge reading. With
-// no reading it refuses with the window unknown and the fix: the bridge install command on Claude Code, and on Codex
-// that the rollout has no window yet. The load is the transcript's FIRST main-thread usage reading, the resume load,
+// no reading it refuses with the window unknown and the fix: on Claude Code, that there is no fresh bridge reading,
+// to let the statusline draw once, and the bridge install command where the bridge is not installed; on Codex, that
+// the rollout has no window yet. The load is the transcript's FIRST main-thread usage reading, the resume load,
 // a rollout's first token_count with input on Codex. The tier
 // is read as the gauge reads it (`resolveTier`: a number, `<n>%` or `default`), and any error it reports refuses, its
 // floor raise included. The arithmetic is `capacityDecision` in dctr-lib.mjs. It reads the transcript once and the
@@ -53,7 +54,7 @@ export function hostWindow(transcript, text) {
 }
 
 const NO_WINDOW = {
-  claude: 'there is no statusline bridge reading for this session; install the bridge with node hooks/dctr-bridge.mjs install and let the statusline draw once',
+  claude: 'there is no fresh statusline bridge reading for this session; let the statusline draw once, and where the bridge is not installed install it with node hooks/dctr-bridge.mjs install',
   codex: 'the rollout carries no model_context_window yet',
 }
 

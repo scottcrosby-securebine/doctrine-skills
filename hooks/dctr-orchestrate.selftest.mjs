@@ -179,21 +179,22 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
 }
 {
   const b = runIn(emptyTmp, 'capacity', '220000', orch), w = runIn(emptyTmp, 'capacity', '220000', codexNoWindow)
-  clause('clause 2u — a refused unknown window names its fix: on Claude Code no statusline bridge reading and the bridge install command, on Codex no model_context_window in the rollout yet',
-    unknownWindow(b) && b.out.includes('no statusline bridge reading for this session') && b.out.includes('node hooks/dctr-bridge.mjs install') &&
+  clause('clause 2u — a refused unknown window names its fix: on Claude Code no fresh statusline bridge reading, to let the statusline draw once, and the bridge install command where it is not installed, on Codex no model_context_window in the rollout yet',
+    unknownWindow(b) && b.out.includes('no fresh statusline bridge reading for this session') && b.out.includes('let the statusline draw once') && b.out.includes('where the bridge is not installed') && b.out.includes('node hooks/dctr-bridge.mjs install') &&
       unknownWindow(w) && w.out.includes('carries no model_context_window yet') && !w.out.includes('bridge'), `${show(b)}; ${show(w)}`)
 }
 {
-  const pane = 'w1:p7', modeTmp = path.join(tmp, 'tmpdir-mode'); fs.mkdirSync(modeTmp)
-  const flags = (env) => { const r = spawnSync(process.execPath, [cli, 'launch-flags'], { encoding: 'utf8', env: { ...process.env, TMPDIR: modeTmp, ...env } }); return { code: r.status, out: r.stdout } }
+  // A config dir that does not exist: launch-flags names the mode file under it and makes nothing.
+  const pane = 'w1:p7', modeCfg = path.join(tmp, 'config-mode')
+  const flags = (env) => { const r = spawnSync(process.execPath, [cli, 'launch-flags'], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: modeCfg, ...env } }); return { code: r.status, out: r.stdout } }
   const { launchFlags, shq } = await import('./dctr-lib.mjs'), { modeFile } = await import('./dctr-state.mjs')
-  const was = process.env.TMPDIR
-  process.env.TMPDIR = modeTmp
+  const was = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = modeCfg
   const want = launchFlags(modeFile(pane))
-  if (was === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = was
+  if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was
   const on = flags({ HERDR_PANE_ID: pane }), off = flags({ HERDR_PANE_ID: '' })
-  clause('clause 2v — launch-flags prints launchFlags of the calling pane\'s mode file and exits 0, and with no HERDR_PANE_ID an empty line and exits 0',
-    on.code === 0 && on.out === `${want}\n` && want.includes(shq(path.join(modeTmp, 'dctr-autocycle', 'pane-w1_p7.mode'))) && off.code === 0 && off.out === '\n', JSON.stringify([want, on, off]))
+  clause('clause 2v — launch-flags prints launchFlags of the calling pane\'s mode file, <config dir>/doctrine/modes/pane-<pane>.mode, and exits 0, and with no HERDR_PANE_ID an empty line and exits 0; neither run, nor computing the path, creates the config dir',
+    on.code === 0 && on.out === `${want}\n` && want.includes(shq(path.join(modeCfg, 'doctrine', 'modes', 'pane-w1_p7.mode'))) && off.code === 0 && off.out === '\n' && !fs.existsSync(modeCfg), JSON.stringify([want, on, off, fs.existsSync(modeCfg)]))
 }
 {
   const { capacity, hostWindow } = await import('./dctr-orchestrate.mjs')

@@ -21,6 +21,9 @@ const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-lanewatc
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const T = path.join(tmp, 'T'); fs.mkdirSync(T)
 process.env.TMPDIR = T
+// start names the pane's mode file under the config dir, which must never be the real one here; nothing makes it.
+const CFG = path.join(tmp, 'config')
+process.env.CLAUDE_CONFIG_DIR = CFG
 for (const k of Object.keys(process.env)) if (/^(DCTR_|HERDR_)/.test(k)) delete process.env[k]
 const write = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t) }
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -919,6 +922,8 @@ clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended t
   const pm = fixture({}), pmPane = 'w0:pm'
   write(path.join(pm.run, 'model', 'orchestrator'), 'claude-opus-5-5\n')
   const env = { ...loEnv, DCTR_RUN: pm.run, SHIM_DIR: pm.dir, HERDR_PANE_ID: pmPane }
+  clause('clause 2bi0 — every start before this one, the 2bh start included, made no config dir',
+    rLo.code === 0 && !fs.existsSync(CFG), JSON.stringify([rLo.code, fs.existsSync(CFG)]))
   write(modeFile(pmPane), 'bypassPermissions\n')
   const r = await proc(['start'], env, pm.repo)
   await proc(['stop'], env)

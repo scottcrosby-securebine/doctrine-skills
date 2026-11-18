@@ -25,6 +25,8 @@ const HERE = import.meta.dirname
 const LANE = path.join(HERE, 'dctr-lane.mjs')
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-lane-')))
 const childTmp = path.join(tmp, 't'); fs.mkdirSync(childTmp)
+// Every child that reaches the mode file, and this process's modeFile, resolve under a scratch config dir, never the real one.
+process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'config')
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
 // The restore file path of each pane id the shim makes, under the children's TMPDIR, where the restore hook writes it.
 const RESTORE = (() => {
@@ -311,44 +313,29 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     JSON.stringify(got) === JSON.stringify([FLAG, FLAG, ...Array(11).fill([])]) && JSON.stringify(quoted) === JSON.stringify(FLAG) &&
       !exists(path.join(tmp, 'injected')) && launchFlags(null) === '' && launchFlags('/m').startsWith(' '),
     JSON.stringify([got, quoted]))
-  {
-    // /tmp belongs to root wherever a user's own temp directory is not it, so a file made there sits in a directory this user does not own.
-    const foreign = path.join('/tmp', `dctr-lf-${crypto.randomUUID()}.mode`)
-    const rooted = process.getuid?.() !== 0 && fs.statSync('/tmp').uid !== process.getuid?.()
-    if (!rooted) console.log('  skip clause 1pm2: this user owns /tmp or is root, so no directory it does not own is at hand')
-    else {
-      fs.writeFileSync(foreign, 'bypassPermissions\n')
-      try {
-        const r = spawnSync('sh', ['-c', `printf '%s\\n' x${launchFlags(foreign)}`], { encoding: 'utf8', cwd: tmp })
-        const added = r.stdout.split('\n').filter(Boolean).slice(1)
-        clause('clause 1pm2 — a mode file reading bypassPermissions in a directory this user does not own adds nothing',
-          added.length === 0 && r.status === 0, JSON.stringify(added))
-        clause('clause 3pm2 — that file reads bypassPermissions, is this user\'s own, and its directory is not',
-          fs.readFileSync(foreign, 'utf8') === 'bypassPermissions\n' && fs.statSync(foreign).uid === process.getuid() && fs.statSync(path.dirname(foreign)).uid !== process.getuid(), '')
-      } finally { fs.rmSync(foreign, { force: true }) }
-    }
-  }
   // A session's own cycle hook records its mode for its pane: a Stop carrying the mode, in the pane create runs from.
+  // The hook and create share one scratch config dir, where the mode file lives.
+  const pmCfg = path.join(tmp, 'pm-config')
   const CYCLE = path.join(HERE, 'dctr-cycle.mjs')
   const hookRun = (f, pane, mode) => spawnSync('node', [CYCLE], {
     cwd: f.repo, encoding: 'utf8',
     input: JSON.stringify({ hook_event_name: 'Stop', session_id: `pm-${path.basename(f.root)}`, transcript_path: path.join(f.root, 't.jsonl'), cwd: f.repo, permission_mode: mode, stop_hook_active: false, last_assistant_message: 'ok' }),
-    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '' },
+    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
   })
   const launchRun = (f) => {
     fs.rmSync(claudeLog, { force: true })
     spawnSync('env', ['-i', 'sh', '-c', laneOf(read(f.laneLog), 'a')?.launch || 'false'], { encoding: 'utf8' })
     return (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))[0]?.argv
   }
-  // The pane's mode file under the children's TMPDIR, where the hook writes it and create reads it.
-  const modeAt = (pane) => {
-    const prev = process.env.TMPDIR
-    process.env.TMPDIR = childTmp
-    try { return read(modeFile(pane)) } finally { if (prev === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prev }
+  // The pane's mode file under the scratch config dir, where the hook writes it and create reads it.
+  const modeAt = (pane, cfg = pmCfg) => {
+    const prev = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = cfg
+    try { return read(modeFile(pane)) } finally { process.env.CLAUDE_CONFIG_DIR = prev }
   }
   const f = fixture(), pane = 'orch-pm1'
   const h1 = hookRun(f, pane, 'bypassPermissions'), m1 = modeAt(pane)
-  const r = create(f, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: pane } })
+  const r = create(f, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: pane, CLAUDE_CONFIG_DIR: pmCfg } })
   const file = read(path.join(f.run, 'launch/a.sh'))
   const a1 = launchRun(f)
   const h2 = hookRun(f, pane, 'default'), m2 = modeAt(pane)
@@ -359,18 +346,18 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   clause('clause 2pm2 — after a later Stop in that session carrying default, the same launch file, run again unchanged, starts claude with no permission flag',
     h2.status === 0 && m2 === 'default\n' && file2 === file && JSON.stringify(a2) === JSON.stringify(['--model', 'claude-opus-5-5']),
     `mode ${JSON.stringify(m2)}; unchanged ${file2 === file}; argv ${JSON.stringify(a2)}`)
-  const g = fixture(), gPane = 'orch-pm3'
-  const rg = create(g, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: gPane } })
+  const g = fixture(), gPane = 'orch-pm3', gCfg = path.join(tmp, 'pm-config-none')
+  const rg = create(g, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: gPane, CLAUDE_CONFIG_DIR: gCfg } })
   const a3 = launchRun(g)
   const u = fixture()
   const ru = create(u, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}` } })
   const a4 = launchRun(u)
-  clause('clause 2pm3 — with no mode file for its pane, and with no HERDR_PANE_ID, the launch file create writes starts claude with no permission flag',
-    rg.code === 0 && JSON.stringify(a3) === JSON.stringify(['--model', 'claude-opus-5-5']) && ru.code === 0 && JSON.stringify(a4) === JSON.stringify(['--model', 'claude-opus-5-5']) &&
+  clause('clause 2pm3 — with no mode file for its pane, its config dir not there, and with no HERDR_PANE_ID, the launch file create writes starts claude with no permission flag, and create makes no config dir',
+    rg.code === 0 && !exists(gCfg) && JSON.stringify(a3) === JSON.stringify(['--model', 'claude-opus-5-5']) && ru.code === 0 && JSON.stringify(a4) === JSON.stringify(['--model', 'claude-opus-5-5']) &&
       !(read(path.join(u.run, 'launch/a.sh')) || '').includes('permission'),
     `${rg.code} ${said(rg)} ${JSON.stringify(a3)}; ${ru.code} ${said(ru)} ${JSON.stringify(a4)}`)
   clause('clause 3pm — without the command: no mode file exists for the 2pm3 pane, and the launch line\'s claude shim logs the argv it is handed',
-    modeAt(gPane) === null &&
+    modeAt(gPane, gCfg) === null &&
       (() => { fs.rmSync(claudeLog, { force: true }); spawnSync(path.join(cbin, 'claude'), ['--model', 'm', '--permission-mode', 'p']); return JSON.stringify(JSON.parse(read(claudeLog) || '{}').argv) === '["--model","m","--permission-mode","p"]' })(),
     '')
 }

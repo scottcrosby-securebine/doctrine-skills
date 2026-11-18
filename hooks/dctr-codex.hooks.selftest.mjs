@@ -45,6 +45,8 @@ process.on('exit', () => {
   try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }) } catch (e) { console.log(`FAIL  the suite's temp dir ${tmp} was not removed: ${e.code || e.message}`); process.exitCode = 1 }
 })
 process.env.TMPDIR = tmp
+// A Claude Code payload in a pane writes the pane's mode file under the config dir, which must never be the real one here.
+process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'config')
 const { CODEX_RESUME_LINE, LAUNCH_MESSAGE, codexBackground } = await import('./dctr-lib.mjs')
 const { stateDir, seatsDir, restoreFile, stopFactsFile, stopHeldFile, processListing } = await import('./dctr-state.mjs')
 
