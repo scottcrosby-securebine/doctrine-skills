@@ -1,121 +1,123 @@
 # doctrine-write
 
-Use it when the document itself is the deliverable: a proposal, a brief, a PRD, a handoff or a report that has to be clear, accurate, and airtight, and you want it written or rewritten under the same gate the code skills run.
+Use `doctrine-write` when the document itself is the deliverable: a proposal, a brief, a PRD, a handoff, a report, or any prose that must be clear, accurate and airtight. One author drafts from a ledger of sourced claims, the project's native checks and four review lenses check the draft, a red team reads it whole, and the run loops until one pass of the gate comes back clean or, if the round alarm fires first, one closing round ends it.
 
-![The doctrine-write shape: one author drafts in one voice from a claim ledger, four review lenses read the draft in parallel, then a red team reads it whole, and the loop exits on one clean pass or the prose-deliverable closing round.](doctrine-write.png)
+![The doctrine-write figure. Top row, before the draft: Ask records the audience and what the reader does afterward as the anchor, Ground builds a claim ledger with a source line per fact, and Draft is written in one voice. Bottom row, the gate: native checks run on the draft, and the draft and its pasted ledger fan out to four lenses (clarity, accuracy, audience fit, structure), which feed one red team, followed by the prose-deliverable exit. Notes list what blocks, that simplification runs once before the certifying pass, that a fact missing from the ledger is not asserted, and that delivery commits by the repository's norm.](doctrine-write.png)
 
-The figure shows the shape this page walks through: one author, a ledger, a wave of four lenses, a red team, and the gate they feed.
+## When it fires
 
-## When to use it, and when not
+It fires on a request for an important document written or rewritten "with the doctrine". It loads the `doctrine` skill first, and the hub supplies the posture this page refers to as doctrine steps 1 to 7.
 
-The trigger is a request for an important document written or rewritten with the doctrine. The description names proposals, briefs, PRDs, handoffs and reports, and it reaches any prose deliverable where a wrong sentence costs something.
+It has two modes:
 
-It has two modes. In authoring mode the run writes the document from source material you supply. In rewrite mode your existing text enters as draft 1 and the run keeps your meaning: it tightens the words and does not change the claims. The difference matters at the gate, because in rewrite mode a change to what a sentence claims is a defect, not an improvement.
+- **Authoring.** The run writes the document from the source material you supply.
+- **Rewrite.** Your text enters as draft 1. The run tightens the words and keeps your meaning, so it never changes a claim the sources do not refute. A claim a source line contradicts is corrected to what that line says, recorded in the ledger, and named to you at delivery.
 
-Two neighbours own adjacent work. `doctrine-docs` owns sweeps of a codebase's documentation against its implementation. `doctrine-research` owns producing researched content, the multi-source question that needs a fact-checked answer. `doctrine-write` is for when the writing is the deliverable, and the spec says to chain it after either of those when you have both a research job and a document to write from it.
+Two neighbours own nearby work. `doctrine-docs` owns sweeps of a codebase's documentation, and `doctrine-research` produces researched content. You can run `doctrine-write` after either one, for example to write a document from what `doctrine-research` found.
 
-It is not for quick edits or informal messages. A single clarity pass covers those, and the gate here costs more than a message is worth.
+It is not for quick edits or informal messages. A single clarity pass covers those.
 
-## What it asks you first
+## What it asks you
 
-Before drafting, the run asks what your request left open. Expect questions on:
+Before anything is drafted, the run asks what your request left open:
 
-- Audience, and what the reader should know or do afterward. Your answer is written down verbatim as the document's anchor, and every review lens later grades sections against it.
-- Register, format and length.
-- Source material, and whether the run may use web sources. It may not unless you say so.
-- Destination: where the finished file lands.
+- **Audience, and what the reader should know or do afterward.** Your answer is recorded verbatim as the document's anchor, and every lens grades against it.
+- **Register, format and length.** A length bound is recorded in one unit only: the unit you named, or words if you named none. Every length the run measures, of your original and of each draft, is recorded with the command that produced it (`wc -w <file>` for words), so rerunning that command on the same text gives the same count.
+- **Source material.** The run uses no web sources unless you authorize them.
+- **Destination:** where the finished file lands.
 
-For the highest-stakes documents it offers a judge panel: two or three candidate drafts in different structures, each written whole by one agent, then a fresh-context judge, handed the anchor, the ledger, the agreed register, format and length, and the drafts under neutral filenames, that grades on one question, which structure gets this reader to what they must know or do, and what each losing draft does better. The panel is off by default because it triples drafting cost. If you take it, it runs after the ledger is built, not at the questions step, since every draft needs the ledger and the settled register, format and length to draft against.
+A question whose answer changes how the work is aimed blocks the run until you answer it. It never becomes a default (doctrine step 1).
 
-The hub's rule on questions applies (doctrine step 1): a question only you can answer, where the work would be aimed differently depending on the answer, blocks the phase and never becomes a default.
+For the highest-stakes documents it also offers a **judge panel**. Two or three agents each write a whole draft in a different structure. A fresh-context judge reads the drafts under neutral filenames, so it cannot rank them by author. It asks one question: which structure gets this reader to what they must know or do, and what does each losing draft do better? The run then writes up the winner, folding in what the judge salvaged. The panel is off by default because it triples drafting cost, and if you take it, it runs after the ledger is built.
 
-## How the work runs
+## How a run goes
 
-The wrapper maps the hub's posture onto seven steps of its own.
+1. **Ask**, as above.
+2. **Ground.** The run builds a claim ledger from your sources: every fact and number the document may assert, each with its source line. A fact missing from the ledger is not the document's to assert. A gap in the sources appears in the document as an explicit unknown, never as a plausible guess.
+3. **Draft in one voice.** The run writes the draft itself. It never hands sections to parallel agents, because stitched sections read as several authors. Rewrite mode skips this step.
+4. **Review wave.** Four lenses run in parallel, and none of them is the author:
+   - **Clarity** applies Strunk's rules through the `writing-clearly-and-concisely` skill and returns findings with line references.
+   - **Accuracy** checks every checkable claim against the ledger, and each ledger line against the source it cites. An unsourced claim is cut or moved to unknowns. In rewrite mode the lens flags an unsourced claim in your own text instead of cutting it, the run puts it to you, and your ruling goes into the ledger for the next round's lenses. This lens also compares a rewrite with your original for any change in meaning.
+   - **Audience fit** asks whether each section serves the anchor, and what this reader would skip, misread or push back on.
+   - **Structure** checks for the bottom line first, one idea per paragraph, headings that earn their place, and length within the agreed bound.
 
-1. Ask, as above, and record the anchor.
-2. Ground. The run builds a claim ledger from your source material: every fact and number the document may assert, each with its source line, in enough detail that someone holding the ledger and not the sources could check the document against it. A fact the ledger does not carry is not the document's to assert. A gap in the sources becomes an explicit unknown in the document, never a plausible guess.
-3. Draft in one voice. The orchestrator writes the draft directly rather than handing sections to parallel agents, because stitched sections produce Frankenstein prose. The doctrine's parallelism belongs in review. The judge panel is the one exception, and it keeps the rule: each panel agent writes a whole draft, and only one survives, so no delivered sentence has two authors. Rewrite mode skips this step.
-4. Review wave. Four independent lenses run in parallel, none of them the author. Findings are merged, deduplicated and applied.
-5. Red team (doctrine step 4). After the wave has passed the document, an adversary reads the whole thing as a hostile reader.
-6. Loop to the hub's gate (doctrine step 5) until it exits.
-7. Deliver (doctrine step 7). The document is written to the destination you agreed at step 1. That agreement is the authorization to write, and the run does not ask again. Whether it commits follows your repository's delivery norm: where the norm is to commit, it commits its own paths; where the norm is a patch handoff, it hands you the diff and says so. An unrelated dirty file in your tree is not a reason for it to stop. In chat you get the document's one-line thrust plus anything that needs your judgment.
+   Once the four return, the run merges their findings, drops duplicates and edits the draft.
+5. **Red team** (doctrine step 4). After the wave, an adversary reads the whole document as a hostile reader. It reports where it got confused, misled or bored, and the strongest case against the document's conclusion. Each finding is checked against the ledger and the sources before anything changes, because adversarial reviewers report false positives.
+6. **Loop** until the gate exits, as described below.
+7. **Deliver** (doctrine step 7), as described in "How it ends".
 
-## What the gate is for this shape
+## The anchor and the claim ledger
 
-The gate is the hub's full three parts, and the wrapper says what fills each.
+Both live in one file, built before a word is drafted. By default it sits beside the destination as `<doc>-ledger.md`. It goes instead in your project's place for working notes where there is one, or in the session's scratchpad where the repository is not writable or you want no working files in it. The report names the path, and at delivery the run asks whether the ledger ships with the document or is dropped.
 
-Native checks (doctrine step 3) are every check your project documents as a gate for the place the document lands: a prose or markdown linter such as `vale` or `markdownlint`, a docs build, a link, spelling or frontmatter check, whatever your `CLAUDE.md`, README, review checklist or task runner lists. The run reads `package.json` scripts or their equivalent itself rather than trusting a summary, since a project with no build step still has gates. On top of those it runs the doctrine's docs-diff form: re-verify every edited claim against its source, then run a link and path check over the result. Where the destination has no tooling around it at all, the docs-diff form is the whole of native checks, and the spec calls that a complete answer rather than a gap. Because a document does not execute, the docs-diff check is also what stands in for the hub's real-environment run.
+The file is amended and never frozen. It takes in later sources, your rulings on flagged claims, corrections to refuted claims, and every red-team finding verified or refuted. Run state, such as the round counters, goes under a trailing `## Run state (orchestrator only)` heading that no reviewer is handed.
 
-The designated review is the four-lens wave:
+The run pastes the file into every prompt rather than pointing at its path, along with what each reviewer grades against:
 
-- Clarity applies Strunk's rules through the `writing-clearly-and-concisely` skill and returns findings with line references.
-- Accuracy checks every checkable claim against the ledger and the sources. An unsourced claim is cut or moved to unknowns. In rewrite mode an unsourced claim in your own text is flagged rather than cut, put to you when the lens returns, and your ruling is recorded in the ledger where the next loop's lenses read it. This lens also diffs a rewrite against the original for semantic drift, so it is handed the original text.
-- Audience fit asks whether each section serves the anchor, and what this reader would skip, misread or push back on.
-- Structure checks for BLUF first, one idea per paragraph, headings that earn their place, and length within the bound you agreed.
+- Every lens and the red team get the list of what blocks in a document, beside the hub's general definition of a blocking finding.
+- Accuracy and the red team get the source material itself. An accuracy lens handed only the draft reports that the claims look sourced, which is also what an invented fact looks like.
+- Audience fit, structure and the red team get the register, length bound and format you agreed.
+- In rewrite mode, accuracy and the red team get your original text.
 
-The wave is not native checks. The spec is explicit that collapsing the two reports a two-part gate as the full three.
+The clarity method is resolved before any seat goes out. The run finds the installed `elements-of-style.md` and hands the lens and the red team its absolute path, with an instruction to read it. Where the skill is not installed, both seats get Strunk's core rules inline: omit needless words, use the active voice, prefer definite and concrete language, and keep one idea per paragraph.
 
-The red team reads the document as the hostile reader: where it got confused, misled or bored, and the strongest case against its conclusion. It is handed what it needs to refute the document at the level it was written: the anchor and the ledger, the list of what blocks in a document, the source material the ledger was built from, the agreed register, length and format, the clarity method, and in rewrite mode the original text. Every finding is verified against the ledger and the source material behind it before anything is changed, because adversarial reviewers produce false positives.
+## The gate
 
-What blocks in a document is narrower than "could be better": a false or unsourced claim, a section that does not serve the anchor, a structural defect, semantic drift in a rewrite, or a failed check. A sentence that could be shorter and means the right thing is not a finding. The bar is what the reader does next, never the polish of the wording. Which bucket a finding lands in follows the hub's three-bucket rule unchanged.
+The gate is the hub's full three parts: native checks, the review wave, and the red team.
 
-The exit is the hub's prose-deliverable exit, adopted by name. A phase exits on one clean pass of the full gate. Where no pass has come clean by the round alarm's first firing (every fourth round that found a blocker, unless you set a different figure), the run takes one closing round scoped to the diff since the last fully reviewed revision, or to the whole document where no revision was fully reviewed, then ends as Shipped at an escalation, with a punch list of what it did not fix, named in the record and in the delivery line. That first firing still puts its diagnosis to you, and the closing round starts without waiting for an answer; say stop if you do not want it to run. The time alarm, two hours by default, still stops the loop for your decision. The spec calls out one hub rule as biting hardest in prose: simplification runs once, before the pass that certifies the document, as a pass that deletes redundancy and decoration, and never again after it, because a simplification landed after the certifying pass ships uncertified.
+**Native checks** (doctrine step 3) are every check your project documents as a gate for the place the document lands. That means a prose or markdown linter such as `vale` or `markdownlint`, a docs build, or a link, spelling or frontmatter check, whatever your `CLAUDE.md`, README, review checklist or task runner lists. The run reads your `package.json` scripts or their equivalent itself, because a project with no build step still has gates. On top of those it re-verifies every edited claim against its source and checks every link and path. Where the destination has no tooling, that re-check is the whole of native checks. Because a document does not execute, this re-check also stands in for the hub's real-environment run, the "real run" the gate line below reports. The review wave does not count as native checks.
 
-The anchor and the claim ledger are two artifacts in one file, built before a word is drafted and handed to every lens, the red team, the panel if it runs, and any agent that touches the document. The file lives beside the destination as `<doc>-ledger.md`, or in your project's own place for working notes, or in the session's scratchpad where the repo is not writable or you do not want working files in it. The report names its path, and at delivery the run asks whether it ships with the document or is dropped. It is amended, never frozen: later sources, your rulings on flagged claims, and every red-team finding verified or refuted go into it, with run state under a trailing orchestrator-only heading that no reviewer is handed. Its contents are pasted into each lens prompt, never pointed at, since a lens cannot open a path nobody resolved for it. An accuracy lens handed a draft alone reports that the claims look sourced, which is what an invented fact looks like too.
+**What blocks** in a document is a false or unsourced claim, a section that does not serve the anchor, a structural defect, a change in meaning in a rewrite (a claim the sources do not refute, altered or dropped), or a failed check. A sentence that could be shorter but means the right thing is not a finding. The test is what the reader does next, not the polish of the wording.
 
-## A worked example
+**Simplification** runs once, before the pass meant to certify the document, and it deletes redundancy and decoration. It never runs after that pass, because a cut landed after certification ships uncertified.
 
-This example is illustrative: it shows the shape of a run, not a recorded one.
+**The exit** is the hub's prose-deliverable exit. The run exits on one clean pass. Two alarms bound the loop (doctrine step 5):
 
-You ask for a handoff document for a service another team is inheriting, and you have the service's README, its runbook and a page of your own notes. The run asks who the reader is and what they should be able to do afterward; you answer "the on-call engineer on the receiving team, able to restart the service and roll back a deploy without calling us." That sentence goes verbatim into `docs/handoff-ledger.md` as the anchor, with the round alarm at its default of 4 and the time budget at its default of two hours. You decline the judge panel. You say the run may not use web sources, and that the document lands at `docs/handoff.md`.
+- **Round alarm.** It fires at every Nth round that found a blocking finding. N is your figure, or 4 by default.
+- **Time alarm.** It fires when more time than your budget passes without a round closing. The budget is two hours by default, and the loop stops until you rule.
 
-The run builds the ledger from the three sources: each restart command, each rollback step, each port and each owner, one line each with its source line. Your notes mention a rate limit with no figure. That goes under Unknowns, and the draft says the limit is not recorded rather than guessing one.
+If no pass has come clean when the round alarm first fires, the run puts its diagnosis to you and then opens one closing round without waiting for your answer. Say stop if you want otherwise. That round reviews the diff since the last revision every seat fully reviewed, or the whole document where none was. A finding inside the diff is repaired, and a false claim is never left standing as written. A finding outside the diff goes on a punch list rather than blocking. The run then delivers as Shipped at an escalation, with the punch list.
 
-The draft is written in one voice. The run resolves `elements-of-style.md` to its absolute path and dispatches the four lenses in parallel, each prompt carrying the draft, the anchor, the ledger, the hub's blocking definition and the list of what blocks in a document, with the runbook and notes the ledger came from for accuracy and the agreed register and length for audience fit and structure. Accuracy returns that one rollback step cites a flag the runbook does not name; that is a false claim and blocks. Audience fit returns that the history section does not help the on-call engineer do either task; that section is cut. Clarity and structure return non-blocking items that are applied. The run repairs the draft, then dispatches the red team with the repaired draft, the anchor, the ledger, the source material, the register and length, the document blocking list and the clarity method's path. It returns the strongest case against the document: the rollback procedure assumes the previous image is still present. The run checks the runbook, finds the retention rule there, and adds one sourced sentence. Because that repair changed a claim, the next round is a full pass over the repaired revision.
+## How it ends
 
-This project has no documented prose tooling, so native checks are the docs-diff form: every edited claim re-verified against the runbook and README, and a link and path check over the result. The second round's lenses and red team come back with no blocking findings, the round's checks are on record, and the simplification pass has already run. The run writes `docs/handoff.md`, and since the repository's CLAUDE.md says work lands as a commit, it commits that file and the ledger's path is named for your decision.
+The run writes the document to the destination you agreed. That agreement authorizes the write, so the run does not ask again. Committing follows your repository's delivery norm, from its `CLAUDE.md` or its history. Where the norm is to commit, the run commits its own paths and is not stopped by an unrelated dirty file. Where the norm is a patch handoff, it hands you the diff and says so. Agreeing a destination does not, on its own, agree a commit.
 
-The report opens with the gate line, in the form the README shows:
+The report opens with the gate line, for example:
 
 ```text
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
-Under it, the shape the spec asks for: the document's one-line thrust, the ledger path and the question of whether it ships, a note that the clarity lens ran the installed skill rather than the inline fallback, the one Unknown the reader will see in the document, and the deferred list of non-blocking items not applied. Had the loop reached round 4 without a clean pass, the closing round would have run over the diff since the last fully reviewed revision and the line would instead name that ending: Shipped at an escalation, with the punch list of what the phase did not fix, in a wording the README says varies.
+Below that come the document's one-line thrust, anything that needs your judgment, the ledger's path and whether it ships, which clarity method the clarity lens and red team got, any corrected claims, and the deferred non-blocking items. The run's record names one of the hub's five end states: Exited (the only clean one), Stopped, Shipped at an escalation, Blocked on an unanswered question, or Unable to continue.
 
 ## How to invoke it
 
-The description fires on a request for an important document written or rewritten with the doctrine. One sample prompt:
-
 ```text
-use doctrine-write to rewrite docs/proposal.md for the finance committee; keep every claim, sources are in docs/proposal-sources/
+use doctrine-write to rewrite docs/proposal.md for the finance committee; keep my meaning, sources are in docs/proposal-sources/
 ```
 
-Naming the reader and the sources in the prompt shortens the questions step; the run still records your words as the anchor before it drafts.
+If you name the reader and the sources in the prompt, the questions step is shorter. State a round-alarm figure or a time budget too if you want other than the defaults: the alarm at every fourth round that found a blocking finding, and two hours.
 
 ## Requirements
 
-Nothing must be installed. Two optional skills change what fills a seat, and the report says which it got.
+The plugin needs nothing else installed. Optional pieces change what fills a seat:
 
-- `writing-clearly-and-concisely` (Strunk's Elements of Style as a skill, by Josh Thomas via softaworks). With it, the clarity lens and the red team are handed the absolute path to `elements-of-style.md` and told to read it; the path rather than the text, because the file runs to over 12,000 words. Without it, both get Strunk's core rules inline: omit needless words, active voice, definite concrete language, one idea per paragraph. A lens working from remembered Strunk returns findings that look like a real pass, which is why the report must say which of the two they got.
-- The OpenAI codex plugin, with the Codex CLI logged in, supplies the different-model red team. Without it the hub's fallback applies: a fresh-context subagent prompted to refute the document, with the verify-from-source rule in its brief. That substitute is same-model, its blind spots correlate with the author's, and the exit statement names it as a substitution.
+- [`writing-clearly-and-concisely`](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) supplies the clarity method. Without it, the inline Strunk rules above apply.
+- The red team from the other model family needs one piece per host. On Claude Code it is [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), with the Codex CLI logged in. On Codex it is the Claude Code CLI (`claude`), installed and signed in, and run from a Codex session outside Codex's per-call sandbox. [requirements.md](../requirements.md) has the detail. Where that piece is missing, or its seat still fails after the retries the hub allows, a fresh-context subagent prompted to refute the document takes the seat. That substitute is the same model, so its blind spots overlap with the author's, and the exit statement names the substitution.
 
-Install commands and what happens when each is missing are in [docs/requirements.md](../requirements.md). To watch the lenses and the red team work as they run, see [watching a run](../watching-a-run.md).
+Install commands are in [requirements.md](../requirements.md). To watch the lenses and the red team as they run, see [watching a run](../watching-a-run.md).
 
 ## Red flags
 
-The spec lists the ways a run goes wrong. In reader terms, stop and ask if you see any of these:
+If you see any of these, stop the run and ask why:
 
-- A lens reports the claims look sourced, and its prompt carried the draft but no ledger.
-- The clarity lens is quoting Strunk from memory because nobody resolved the skill's path.
-- A number appears in the document that no line of the ledger accounts for.
-- Every loop tightens one more sentence and the phase never closes.
-- A rewrite improved a claim instead of the words carrying it.
-- The document landed in a repo whose docs linter nobody ran.
-- By the third loop the anchor and the round counters exist only in the conversation, not on disk.
+- A lens reports that the claims look sourced, and its prompt carried the draft but no ledger.
+- The clarity lens is working from remembered Strunk because nobody resolved the skill's path.
+- The document has a number that no ledger line accounts for.
+- Every loop tightens one more sentence and the run never closes.
+- A rewrite improved a claim the sources do not refute instead of the words carrying it.
+- The document landed in a repository whose docs linter nobody ran.
+- By the third loop the anchor and the counters exist only in the conversation, not on disk.
 - Sections were drafted by parallel agents and stitched together.
 
-The hub's page is [doctrine.md](doctrine.md), and the README is [here](../../README.md).
-
-The specification is [`skills/doctrine-write/SKILL.md`](../../skills/doctrine-write/SKILL.md); trust it over this page wherever the two disagree.
+The hub's page is [doctrine.md](doctrine.md). The specification is [`skills/doctrine-write/SKILL.md`](../../skills/doctrine-write/SKILL.md). Where this page and the specification disagree, trust the specification.
