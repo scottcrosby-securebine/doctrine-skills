@@ -58,9 +58,9 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills): `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content.
 
-  **Install standalone, not as the `mattpocock-skills` plugin.** The wrappers call them by bare name and read `~/.claude/skills/<name>/SKILL.md`; a plugin install namespaces them as `mattpocock-skills:<name>` instead. Copy the `skills/engineering/<name>/` folders into `~/.claude/skills/`.
+  **Install standalone, not as the `mattpocock-skills` plugin.** The wrappers call them by bare name and read their `SKILL.md` from your host's skill folder; a plugin install namespaces them as `mattpocock-skills:<name>` instead. Copy the `skills/engineering/<name>/` folders into `~/.claude/skills/` on Claude Code, or into `~/.agents/skills/` on Codex CLI, which also reads `.agents/skills/` in the project and `$CODEX_HOME/skills/`.
 
-  One special case: install `code-review` as `matts-code-review`, because the original name collides with Claude Code's own `/code-review`. Copy it to `~/.claude/skills/matts-code-review/` and set its frontmatter `name:` to match. It is a copy, not a symlink, so re-sync it when his repo changes.
+  One special case: install `code-review` as `matts-code-review`, because the original name collides with Claude Code's own `/code-review`. Copy it to `matts-code-review/` in that same folder and set its frontmatter `name:` to match. It is a copy, not a symlink, so re-sync it when his repo changes.
 
   Without them: the `doctrine` skill's fallback table names a substitute for each. `matts-code-review` degrades to `/code-review` or two parallel review subagents.
 
