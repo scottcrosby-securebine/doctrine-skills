@@ -1203,50 +1203,55 @@ clause('clause 2y6 — a StopFailure in a session with no DCTR_ROLE and no DCTR_
   strayLimits.status === 0 && strayLimits.stdout === '' && !fs.existsSync(path.join(noRunFx.dir, 'run')) &&
   JSON.stringify(paused(noRunFx)) === '["- auto-cycle paused: Claude API error: rate_limit"]', JSON.stringify([strayLimits.stdout, paused(noRunFx)]))
 
-// R4: the orchestrator's permission mode, recorded in <run>/permission-mode for the launch files to read.
+// The session's permission mode, recorded per pane for the launch files to read when they run.
 {
-  const modeOf = (f) => { try { return fs.readFileSync(path.join(limitsRun(f), 'permission-mode'), 'utf8') } catch { return null } }
-  const orchEnv = (f) => ({ DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: limitsRun(f), DCTR_NOW_MS: String(NOW) })
+  let paneN = 0
+  const pane = () => `w9:pm${++paneN}`
+  const modeOf = (p) => { try { return fs.readFileSync(state.modeFile(p), 'utf8') } catch { return null } }
   const events = {
     Stop: {}, UserPromptSubmit: { hook_event_name: 'UserPromptSubmit', prompt: 'go' },
     Notification: { hook_event_name: 'Notification', notification_type: 'idle_prompt' }, StopFailure: failure(LIMIT_TEXTS.server, 'server_error'),
   }
   const perEvent = Object.entries(events).map(([ev, more]) => {
-    const f = fixture(`pm-${ev}`)
-    const r = run(f, { ...more, permission_mode: 'bypassPermissions' }, orchEnv(f))
-    return { ev, code: r.code, mode: modeOf(f) }
+    const f = fixture(`pm-${ev}`), p = pane()
+    const r = run(f, { ...more, permission_mode: 'bypassPermissions' }, { HERDR_PANE_ID: p })
+    return { ev, code: r.code, mode: modeOf(p) }
   })
-  clause('clause 2pm — in an orchestrator session each of Stop, UserPromptSubmit, Notification and StopFailure carrying permission_mode bypassPermissions writes <run>/permission-mode as that one line (R4, S4)',
+  clause('clause 2pm — in a main session with no role and no run, each of Stop, UserPromptSubmit, Notification and StopFailure carrying permission_mode bypassPermissions writes its pane\'s mode file as that one line',
     perEvent.every((e) => e.code === 0 && e.mode === 'bypassPermissions\n'), JSON.stringify(perEvent))
-  const latest = fixture('pm-latest')
-  run(latest, { permission_mode: 'bypassPermissions' }, orchEnv(latest))
-  const afterBypass = modeOf(latest)
-  run(latest, { hook_event_name: 'UserPromptSubmit', prompt: 'go', permission_mode: 'default' }, orchEnv(latest))
-  clause('clause 2pm2 — a later event carrying permission_mode default replaces bypassPermissions: the file holds the latest mode (R4)',
-    afterBypass === 'bypassPermissions\n' && modeOf(latest) === 'default\n', JSON.stringify([afterBypass, modeOf(latest)]))
+  const latest = fixture('pm-latest'), lp = pane()
+  run(latest, { permission_mode: 'bypassPermissions' }, { HERDR_PANE_ID: lp })
+  const afterBypass = modeOf(lp)
+  run(latest, { hook_event_name: 'UserPromptSubmit', prompt: 'go', permission_mode: 'default' }, { HERDR_PANE_ID: lp })
+  clause('clause 2pm2 — a later event carrying permission_mode default replaces bypassPermissions: the file holds the latest mode',
+    afterBypass === 'bypassPermissions\n' && modeOf(lp) === 'default\n', JSON.stringify([afterBypass, modeOf(lp)]))
   const pmOff = fixture('pm-off', { lines: ['- auto-cycle: off'] }), pmChainless = fixture('pm-chainless'), pmExited = fixture('pm-exited', { state: 'Exited' })
   fs.rmSync(path.join(pmChainless.proj, 'SESSION_MEMORY.md'))
-  const standing = [pmOff, pmChainless, pmExited].map((f) => ({ name: f.name, r: run(f, { permission_mode: 'bypassPermissions' }, orchEnv(f)), mode: modeOf(f) }))
-  clause('clause 2pm3 — the mode is written with auto-cycle off, with no kickoff chain and with an Exited record, each Stop standing down after it (R4)',
+  const orchEnv = (f) => ({ DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: limitsRun(f), DCTR_NOW_MS: String(NOW) })
+  const standing = [[pmOff, {}], [pmChainless, laneEnv(pmChainless)], [pmExited, orchEnv(pmExited)]].map(([f, env]) => {
+    const p = pane()
+    return { name: f.name, r: run(f, { permission_mode: 'bypassPermissions' }, { ...env, HERDR_PANE_ID: p }), mode: modeOf(p) }
+  })
+  clause('clause 2pm3 — the mode is written with auto-cycle off and no role, with no kickoff chain in a lane, and with an Exited record in an orchestrator, each Stop standing down after it',
     standing.every((s) => s.r.code === 0 && /auto-cycle skipped/.test(s.r.err) && s.mode === 'bypassPermissions\n'), JSON.stringify(standing.map((s) => [s.name, s.r.err.trim(), s.mode])))
-  const pmSeat = fixture('pm-seat')
-  const seat = run(pmSeat, { ...failure(LIMIT_TEXTS.server, 'server_error'), agent_id: 'seat-1', permission_mode: 'bypassPermissions' }, orchEnv(pmSeat))
-  clause('clause 2pm4 — a subagent\'s event in the orchestrator\'s session carrying bypassPermissions writes no permission-mode file, the hook having stood down on the subagent (R4)',
-    seat.code === 0 && /a subagent event/.test(seat.err) && modeOf(pmSeat) === null && !fs.existsSync(limitsRun(pmSeat)), JSON.stringify([seat.err, modeOf(pmSeat)]))
-  const pmLane = fixture('pm-lane')
-  const laneRun = run(pmLane, { ...failure(LIMIT_TEXTS.server, 'server_error'), permission_mode: 'bypassPermissions' }, laneEnv(pmLane))
-  clause('clause 2pm5 — a lane session\'s StopFailure carrying bypassPermissions writes its limits.log line into the run and no permission-mode file (R4)',
-    laneRun.code === 0 && limitsOf(pmLane).length === 1 && modeOf(pmLane) === null, JSON.stringify([limitsOf(pmLane), modeOf(pmLane)]))
-  const pmNone = fixture('pm-none')
-  run(pmNone, {}, orchEnv(pmNone))
-  clause('clause 2pm6 — an orchestrator event carrying no permission_mode writes no permission-mode file (R4)',
-    modeOf(pmNone) === null, JSON.stringify(modeOf(pmNone)))
-  clause('clause 3pm — without the hook: the orchestrator environment names role orchestrator and the fixture\'s run, the lane one role a; the seat payload carries agent_id; the off, chainless and Exited fixtures are what 2pm3 says; no fixture\'s run held a permission-mode file before the hook',
-    orchEnv(pmSeat).DCTR_ROLE === 'orchestrator' && orchEnv(pmSeat).DCTR_RUN === limitsRun(pmSeat) && laneEnv(pmLane).DCTR_ROLE === 'a' &&
-    'agent_id' in { ...failure(LIMIT_TEXTS.server), agent_id: 'seat-1' } && !('permission_mode' in payload(pmNone)) &&
+  const pmSeat = fixture('pm-seat'), sp = pane()
+  const seat = run(pmSeat, { agent_id: 'seat-1', permission_mode: 'bypassPermissions' }, { HERDR_PANE_ID: sp })
+  clause('clause 2pm4 — a subagent\'s event carrying bypassPermissions writes no mode file, the hook having stood down on the subagent',
+    seat.code === 0 && /a subagent event/.test(seat.err) && modeOf(sp) === null, JSON.stringify([seat.err, modeOf(sp)]))
+  const pmNoPane = fixture('pm-nopane'), before = fs.readdirSync(path.dirname(state.modeFile('x'))).filter((n) => n.endsWith('.mode')).sort()
+  const np = run(pmNoPane, { permission_mode: 'bypassPermissions' }, { HERDR_PANE_ID: '' })
+  const after = fs.readdirSync(path.dirname(state.modeFile('x'))).filter((n) => n.endsWith('.mode')).sort()
+  clause('clause 2pm5 — a main session with no HERDR_PANE_ID carrying bypassPermissions writes no mode file',
+    np.code === 0 && JSON.stringify(after) === JSON.stringify(before), JSON.stringify([before, after]))
+  const pmNone = fixture('pm-none'), nonep = pane()
+  run(pmNone, {}, { HERDR_PANE_ID: nonep })
+  clause('clause 2pm6 — an event carrying no permission_mode writes no mode file',
+    modeOf(nonep) === null, JSON.stringify(modeOf(nonep)))
+  clause('clause 3pm — without the hook: every pane id the clauses use has a mode file path of its own, and a pane no clause used has none; the seat payload carries agent_id; the no-mode payload carries no permission_mode; the off, chainless and Exited fixtures are what 2pm3 says',
+    new Set(Array.from({ length: paneN }, (_, i) => `w9:pm${i + 1}`).map((p) => state.modeFile(p))).size === paneN &&
+    'agent_id' in payload(pmSeat, { agent_id: 'seat-1' }) && !('permission_mode' in payload(pmNone)) &&
     /- auto-cycle: off/.test(fs.readFileSync(pmOff.record, 'utf8')) && !fs.existsSync(path.join(pmChainless.proj, 'SESSION_MEMORY.md')) &&
-    /- State: Exited/.test(fs.readFileSync(pmExited.record, 'utf8')) &&
-    ['pm-fresh-a', 'pm-fresh-b'].map((n) => fixture(n)).every((f) => modeOf(f) === null), '')
+    /- State: Exited/.test(fs.readFileSync(pmExited.record, 'utf8')) && modeOf('w9:pm-never-used') === null, '')
 }
 
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
@@ -1550,10 +1555,11 @@ const FORBIDDEN = [...D2_REASONS, ...D2_FIXED,
 const restatedIn = (text) => FORBIDDEN.filter((t) => text.toLowerCase().includes(t.toLowerCase()))
 const guardMisses = D2_REASONS.filter((r) => restatedIn(`${hjd} ${r}`).length === 0)
 const restated = restatedIn(hjd)
-clause('clause 2r2 — hooks.json names the four events, says each stands down unless auto-cycle is on for the kickoff\'s record, points at cycleDecision and notifyDecision, says UserPromptSubmit only records the turn end and a contained session calls no herdr, and restates no pause reason or condition those functions own, and the guard flags every D2 reason (RB3, DS6-B1, DR11, RB12-1)',
+clause('clause 2r2 — hooks.json names the four events, says each stands down unless auto-cycle is on for the kickoff\'s record, points at cycleDecision and notifyDecision, says a main session\'s event records its permission mode for its pane, that past the stand-down UserPromptSubmit only records the turn end, and that a contained session calls no herdr, and restates no pause reason or condition those functions own, and the guard flags every D2 reason (RB3, DS6-B1, DR11, RB12-1)',
   hjd.includes('Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit run dctr-cycle.mjs') &&
   hjd.includes('unless that record is Open or Blocked and its last auto-cycle on/off line is on') && hjd.includes('cycleDecision in hooks/dctr-lib.mjs') &&
-  hjd.includes('notifyDecision') && hjd.includes('UserPromptSubmit only records where the session\'s turn ended.') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
+  hjd.includes('notifyDecision') && hjd.includes('Past that, UserPromptSubmit only records where the session\'s turn ended.') &&
+  hjd.includes('a main session\'s event in a herdr pane that carries permission_mode writes that mode as the one line of the pane\'s mode file, whatever the record says') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
   !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0 && D2_REASONS.length >= 18 && guardMisses.length === 0,
   `restated ${JSON.stringify(restated)} guard misses ${JSON.stringify(guardMisses)} | ${hjd.slice(-1400)}`)
 

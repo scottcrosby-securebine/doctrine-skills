@@ -9,9 +9,14 @@
 // one paused line, writes nothing, or launches dctr-typer.mjs detached with the facts it needs (pausing instead when
 // the transcript it would hand the typer cannot be read). On Notification and StopFailure it appends the paused line
 // notifyDecision returns, if any; a StopFailure in a session of the run first appends its limits.log line (limitLine:
-// the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time). In a
-// session whose role is `orchestrator`, every one of the four events that is not a subagent's and carries
-// permission_mode first writes that mode as the one line of <run>/permission-mode, before any other stand-down. Every paused line goes through appendPaused, whose dedup is pauseStands. Stop,
+// the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time).
+//
+// The order of the first steps: it stands down on an unreadable payload, on a Codex session under Claude Code, on an
+// event that is not one of the four, and on a subagent's event; then, in a herdr pane (HERDR_PANE_ID) whose payload
+// carries permission_mode, it writes that mode as the one line of the pane's mode file (modeFile), whatever the role,
+// the run or the record; then the StopFailure limits.log line; then every other stand-down. The mode file is one any
+// process of the owner's can write, so the mode a launch file reads from it is trusted, not verified. Every paused
+// line goes through appendPaused, whose dedup is pauseStands. Stop,
 // StopFailure and UserPromptSubmit record the session's turn end (writeTurnEnd), which that dedup reads;
 // UserPromptSubmit does nothing else.
 //
@@ -34,7 +39,7 @@ import {
 import { parseRecord } from './dctr-record.mjs'
 import {
   hookLog, standDown, stateDir, writeMarker, herdr, claimFile, stopFactsFile, stopHeldFile, paneClaimHeld,
-  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, turnEndLine, publishToken, liveWork, treeHash, handoffLanded, processListing,
+  appendPaused, alertPaused, pauseMessageOnce, sessionStartLine, writeTurnEnd, turnEndLine, publishToken, liveWork, treeHash, handoffLanded, processListing, modeFile,
 } from './dctr-state.mjs'
 
 const EVENTS = ['Stop', 'Notification', 'StopFailure', 'UserPromptSubmit']
@@ -67,16 +72,10 @@ try {
   }
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
-  // The orchestrator's latest permission mode, which the launch files it writes read (launchFlags), so a session it
-  // launches runs in its mode; whatever auto-cycle or the record says.
-  if (runRole() === 'orchestrator' && typeof payload.permission_mode === 'string') {
-    const run = runRoot(process.env, payload.cwd || process.cwd())
-    if (run) {
-      try {
-        fs.mkdirSync(run, { recursive: true })
-        fs.writeFileSync(path.join(run, 'permission-mode'), `${payload.permission_mode}\n`)
-      } catch (e) { hookLog(payload.session_id || 'none', `permission-mode not written (${String(e.message).split('\n')[0]})`) }
-    }
+  // The session's latest permission mode, which a launch file written in this pane reads when it runs (launchFlags),
+  // so a session it starts runs in this one's mode; whatever auto-cycle or the record says.
+  if (process.env.HERDR_PANE_ID && typeof payload.permission_mode === 'string') {
+    try { fs.writeFileSync(modeFile(process.env.HERDR_PANE_ID), `${payload.permission_mode}\n`) } catch (e) { hookLog(payload.session_id || 'none', `mode file not written (${String(e.message).split('\n')[0]})`) }
   }
   // E15 Recovery: a StopFailure in a session of the run appends its limits.log line first, before any paused line and
   // whatever auto-cycle says; outside a run nothing (E15-D114, D115). A failed append never stops the R9 below it.

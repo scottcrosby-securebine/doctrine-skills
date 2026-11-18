@@ -819,6 +819,8 @@ export function sessionStartLine(recordPath) {
   try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
 }
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+/** Where the cycle hook records the permission mode of the main session in this pane, one line; launchFlags reads it. */
+export const modeFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.mode`)
 /** Where the prompt gate records that it blocked a line the auto-cycle typed in this pane: `{ session_id, at }`. The
  *  typer removes it before its /clear and reads it after the resume line (E10 S1). */
 export const gatedFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.gated`)

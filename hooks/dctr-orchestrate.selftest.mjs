@@ -89,6 +89,9 @@ const rollout = (id, lines) => transcript(`rollout-2026-09-28T18-52-46-${id}.jso
 const codexMillion = rollout('million', F.TUI_TURN.map((l) => l.replaceAll('"model_context_window":258400', '"model_context_window":1000000')))
 const codexNoWindow = rollout('nowindow', F.TUI_TURN.map((l) => l.replaceAll(/,"model_context_window":258400/g, '')))
 const codexNoCount = rollout('nocount', F.RUN3.slice(0, F.RUN3.findIndex((l) => l.includes('POST-MARKER'))))
+// TUI_TURN with its first token_count's window left at 258,400 and its last one made 1,000,000: the window changes between readings.
+const codexGrown = rollout('grown', (() => { const ls = [...F.TUI_TURN], i = ls.findLastIndex((l) => l.includes('"model_context_window":258400'))
+  ls[i] = ls[i].replace('"model_context_window":258400', '"model_context_window":1000000'); return ls })())
 
 // Each run gets a TMPDIR of its own, so the bridge file it reads is the one its clause wrote (E15-D256).
 const runIn = (tmpdir, ...args) => {
@@ -170,6 +173,29 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
     unknownWindow(w) && unknownWindow(c), `${show(w)}; ${show(c)}`)
 }
 {
+  const r = runIn(emptyTmp, 'capacity', '220000', codexGrown)
+  clause('clause 2c2 — a Codex rollout whose model_context_window grows from 258,400 to 1,000,000 between its readings: accept at the latest window, the load still its first token_count',
+    r.code === 0 && /^accept window 1000000 from rollout load 17401 tier 220000\b/.test(r.out), show(r))
+}
+{
+  const b = runIn(emptyTmp, 'capacity', '220000', orch), w = runIn(emptyTmp, 'capacity', '220000', codexNoWindow)
+  clause('clause 2u — a refused unknown window names its fix: on Claude Code no statusline bridge reading and the bridge install command, on Codex no model_context_window in the rollout yet',
+    unknownWindow(b) && b.out.includes('no statusline bridge reading for this session') && b.out.includes('node hooks/dctr-bridge.mjs install') &&
+      unknownWindow(w) && w.out.includes('carries no model_context_window yet') && !w.out.includes('bridge'), `${show(b)}; ${show(w)}`)
+}
+{
+  const pane = 'w1:p7', modeTmp = path.join(tmp, 'tmpdir-mode'); fs.mkdirSync(modeTmp)
+  const flags = (env) => { const r = spawnSync(process.execPath, [cli, 'launch-flags'], { encoding: 'utf8', env: { ...process.env, TMPDIR: modeTmp, ...env } }); return { code: r.status, out: r.stdout } }
+  const { launchFlags, shq } = await import('./dctr-lib.mjs'), { modeFile } = await import('./dctr-state.mjs')
+  const was = process.env.TMPDIR
+  process.env.TMPDIR = modeTmp
+  const want = launchFlags(modeFile(pane))
+  if (was === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = was
+  const on = flags({ HERDR_PANE_ID: pane }), off = flags({ HERDR_PANE_ID: '' })
+  clause('clause 2v — launch-flags prints launchFlags of the calling pane\'s mode file and exits 0, and with no HERDR_PANE_ID an empty line and exits 0',
+    on.code === 0 && on.out === `${want}\n` && want.includes(shq(path.join(modeTmp, 'dctr-autocycle', 'pane-w1_p7.mode'))) && off.code === 0 && off.out === '\n', JSON.stringify([want, on, off]))
+}
+{
   const { capacity, hostWindow } = await import('./dctr-orchestrate.mjs')
   const text = (f) => fs.readFileSync(f, 'utf8')
   const none = capacity('220000', text(orch), null), br = capacity('220000', text(orch), { window: 1000000, source: 'bridge' })
@@ -183,6 +209,13 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
   process.env.TMPDIR = emptyTmp
   got.push(hostWindow(orch))
   process.env.TMPDIR = was
+  const grown = hostWindow(codexGrown), given = hostWindow(codexNoWindow, text(codexMillion))
+  clause('clause 2t2 — hostWindow takes a rollout\'s latest window, and reads the rollout text it is handed rather than the file',
+    JSON.stringify(grown) === JSON.stringify({ window: 1000000, source: 'rollout' }) && JSON.stringify(given) === JSON.stringify({ window: 1000000, source: 'rollout' }), JSON.stringify([grown, given]))
+  const cc = capacity('220000', text(orch), null, 'claude'), cx = capacity('220000', text(codexNoWindow), null, 'codex')
+  clause('clause 2s2 — capacity, pure, with no reading: the Claude Code refusal names the bridge install command, the Codex one the missing model_context_window, and the three-argument form keeps the Claude Code one',
+    cc.accept === false && cc.line.includes('node hooks/dctr-bridge.mjs install') && cx.accept === false && cx.line.includes('carries no model_context_window yet') && none.line === cc.line,
+    JSON.stringify([cc, cx, none]))
   clause('clause 2t — hostWindow: a Claude Code transcript with a bridge reading gives it from bridge, a rollout carrying model_context_window from rollout, and a rollout without one, a missing rollout and a transcript with no bridge reading give null',
     JSON.stringify(got) === JSON.stringify([{ window: 1000000, source: 'bridge' }, { window: 1000000, source: 'rollout' }, null, null, null]), JSON.stringify(got))
 }
@@ -237,6 +270,8 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
       !fs.readFileSync(codexNoWindow, 'utf8').includes('model_context_window') && counts(codexNoCount).length === 0 &&
       [codexMillion, codexNoWindow, codexNoCount].every((f) => path.basename(f).startsWith('rollout-')),
     `${JSON.stringify(counts(codexMillion))} ${JSON.stringify(counts(codexNoWindow))} ${counts(codexNoCount).length}`)
+  clause('clause 3l — the grown rollout reads 17,401 at window 258,400, then 17,503 at window 1,000,000, and is named rollout-',
+    JSON.stringify(counts(codexGrown)) === '[[17401,258400],[17503,1000000]]' && path.basename(codexGrown).startsWith('rollout-'), JSON.stringify(counts(codexGrown)))
 }
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
