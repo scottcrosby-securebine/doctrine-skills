@@ -311,6 +311,23 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     JSON.stringify(got) === JSON.stringify([FLAG, FLAG, ...Array(11).fill([])]) && JSON.stringify(quoted) === JSON.stringify(FLAG) &&
       !exists(path.join(tmp, 'injected')) && launchFlags(null) === '' && launchFlags('/m').startsWith(' '),
     JSON.stringify([got, quoted]))
+  {
+    // /tmp belongs to root wherever a user's own temp directory is not it, so a file made there sits in a directory this user does not own.
+    const foreign = path.join('/tmp', `dctr-lf-${crypto.randomUUID()}.mode`)
+    const rooted = process.getuid?.() !== 0 && fs.statSync('/tmp').uid !== process.getuid?.()
+    if (!rooted) console.log('  skip clause 1pm2: this user owns /tmp or is root, so no directory it does not own is at hand')
+    else {
+      fs.writeFileSync(foreign, 'bypassPermissions\n')
+      try {
+        const r = spawnSync('sh', ['-c', `printf '%s\\n' x${launchFlags(foreign)}`], { encoding: 'utf8', cwd: tmp })
+        const added = r.stdout.split('\n').filter(Boolean).slice(1)
+        clause('clause 1pm2 — a mode file reading bypassPermissions in a directory this user does not own adds nothing',
+          added.length === 0 && r.status === 0, JSON.stringify(added))
+        clause('clause 3pm2 — that file reads bypassPermissions, is this user\'s own, and its directory is not',
+          fs.readFileSync(foreign, 'utf8') === 'bypassPermissions\n' && fs.statSync(foreign).uid === process.getuid() && fs.statSync(path.dirname(foreign)).uid !== process.getuid(), '')
+      } finally { fs.rmSync(foreign, { force: true }) }
+    }
+  }
   // A session's own cycle hook records its mode for its pane: a Stop carrying the mode, in the pane create runs from.
   const CYCLE = path.join(HERE, 'dctr-cycle.mjs')
   const hookRun = (f, pane, mode) => spawnSync('node', [CYCLE], {

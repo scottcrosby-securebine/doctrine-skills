@@ -1220,9 +1220,11 @@ export const runRole = (env = process.env) => env.DCTR_ROLE || null
 /** The shell fragment a launch command ends with, for the mode file at `file` (modeFile), or '' for null: evaluated
  *  when the command runs, so a launch file written once follows the session's latest mode. It adds the two words
  *  `--permission-mode bypassPermissions` while the file reads bypassPermissions and nothing otherwise, a missing file
- *  included; the file's text is only compared, so none of it reaches the command line. */
+ *  included; the file's text is only compared, so none of it reaches the command line. The file counts only in a
+ *  directory the user running the command owns: where the temp directory is shared, as /tmp is, another user could
+ *  otherwise make that directory first and plant the file. */
 export const launchFlags = (file) => (file === null ? ''
-  : ` $([ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
+  : ` $([ -O ${shq(path.dirname(file))} ] && [ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
 
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
