@@ -80,7 +80,7 @@ If no pass has come clean when the round alarm first fires, the run puts its dia
 
 ## How it ends
 
-The run writes the document to the destination you agreed. That agreement authorizes the write, so the run does not ask again. Committing follows your repository's delivery norm, from its `CLAUDE.md` or its history. Where the norm is to commit, the run commits its own paths and is not stopped by an unrelated dirty file. Where the norm is a patch handoff, it hands you the diff and says so. Agreeing a destination does not, on its own, agree a commit.
+The run writes the document to the destination you agreed. That agreement authorizes the write, so the run does not ask again. Committing follows your repository's delivery norm, from its `CLAUDE.md` or its history. Where the norm is to commit, the run commits its own paths and is not stopped by an unrelated dirty file. Only a real conflict stops it: someone else's in-flight work in the files the run touched. Where the norm is a patch handoff, it hands you the diff and says so. Agreeing a destination does not, on its own, agree a commit.
 
 The report opens with the gate line, for example:
 
