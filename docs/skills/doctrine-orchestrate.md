@@ -6,11 +6,11 @@ Use it to run several doctrine phases of one epic at once and land them one at a
 
 The figure shows the shape this page walks through: the checks that refuse a run, the order a run starts in, the sessions and scripts that carry it, and the gate each lane lands behind.
 
-Commands on this page that start `hooks/` are the plugin's own: run them as `node <plugin-root>/hooks/...`, where `<plugin-root>` is the directory the plugin is installed in.
+Commands on this page that start `hooks/` are the plugin's own scripts, which the run's sessions invoke as `node <plugin-root>/hooks/...`, `<plugin-root>` being the directory the plugin is installed in. You run only two commands yourself: the launch line under How to invoke it, and `wake-all` under Usage limits.
 
 ## When to use it, and when not
 
-The trigger is a request to run several doctrine phases at once as an orchestrated run. Use it when an epic has phases that can run at the same time in files the others do not touch, and you want them built in parallel and merged behind a gate, with your own part limited to answering questions and the few steps under Usage limits.
+The trigger is a request to run several doctrine phases at once as an orchestrated run. Use it when an epic has phases that can run at the same time in files the others do not touch, and you want them built in parallel and merged behind a gate, with your own part limited to starting the orchestrator, answering its questions, fixing any ignore rule it names, and the few steps under Usage limits.
 
 Before anything else the skill runs four checks, in this order, and stops at the first that fails, saying which:
 
@@ -38,18 +38,18 @@ After that, questions come to you one at a time. Every question a lane has reach
 A run has three kinds of session, each a Claude Code session in its own herdr pane:
 
 - **The orchestrator**, in your checkout, on a branch of its own and never the integration branch.
-- **One lane per phase.** Each lane is its own doctrine phase under its own wrapper, with its own `- phase` line under the epic's `## Members`, its own Coverage line, record, worktree, review and red team. A lane is not a review seat, so the orchestrator never waits on one.
+- **One lane per phase.** Each lane is its own doctrine phase under its own wrapper, with its own `- phase` line under the epic's `## Members`, its own Coverage line, record, worktree, review and red team. A lane is not a seat, the hub's word for an agent the orchestrator dispatches and waits on, so the orchestrator never waits on one.
 - **The merge session**, in its own worktree, which merges one lane at a time.
 
 Each session reads its role and its run from the environment its launch line set, so a `/clear` or a restart keeps them. A session with no `DCTR_ROLE`, such as one you open by hand in the same checkout, is not in the run.
 
 The run directory is the absolute path of `orchestrate/` under the project file's `Records:` path, written `<run>` below. It holds the inbox, a held and a pending folder per role, each role's launch script and model file, `waiting-questions.md`, and the logs `limits.log`, `events.log`, `guard.log` and `lane.log`.
 
-The orchestrator runs `hooks/dctr-project.mjs board`, which writes `board.md` into the Records path, one row per lane phase. Read that file to see the run at a glance.
+The orchestrator runs `hooks/dctr-project.mjs board`, which writes `board.md` into the Records path, one row per `- phase` member of the current epic, the lanes among them. Read that file to see the run at a glance.
 
 ### Run start
 
-In this order:
+The orchestrator does these, in this order. You run none of them:
 
 1. Check the orchestrator's branch is its own.
 2. In every repo of the run, run `git check-ignore SESSION_MEMORY.md docs/handoffs/ '<Records>/'`. The orchestrator never edits `.gitignore`, so where a path is not ignored it stops and tells you which path in which repo to add.
@@ -59,18 +59,18 @@ In this order:
 6. Write each lane's and the merge session's tier and cycle cap into that session's first handoff. Each session writes its own `auto-cycle: on` line from it.
 7. Start the lane watcher: `hooks/dctr-lanewatch.mjs start`.
 8. Create the merge session before any lane: `hooks/dctr-lane.mjs create merge '<repo>' <integration branch> '<handoff>'`. If that refuses, the run stops and no lane is created.
-9. Prove the write guard is on: one Write outside the allowed paths, to `guard-probe.txt` in the checkout, must add its line to `guard.log`. An error from the Write alone does not count, since a guard failing open also errors and logs nothing.
+9. Prove the write guard is on: one Write outside the allowed paths, to `guard-probe.txt` in the checkout, must add its line to `guard.log`. An error from the Write alone does not count, since a broken guard can return an error without refusing anything, and then logs no line. The allowed paths are listed under The orchestrator's boundary.
 10. Create each lane with `hooks/dctr-lane.mjs create <role> '<repo>' <base> '<handoff>'`. That makes a worktree at `<repo>/.claude/worktrees/<role>` on a branch of the same name, copies the first handoff and writes the record there, opens the role's own herdr tab, and types its launch line, `/clear` and the resume line.
 11. Run `board`.
 12. Run [doctrine-handoff](../../skills/doctrine-handoff/SKILL.md) for its own phase, so its own auto-cycle has a kickoff chain from the start.
 
 ### What a lane and the merge session are told
 
-Each lane's first handoff, and the merge session's, opens with a brief that says:
+Each lane's first handoff, and the merge session's, opens with a brief that tells the session to:
 
-- Read your held folder at each resume, before each commit and after each report you send, and act on what is there.
-- Keep your phase Open until a held message says the run has ended, then write the state your exit gives.
-- Send every question for you, the owner, to the orchestrator as a `question` report, never to you directly.
+- Read its held folder at each resume, before each commit and after each report it sends, and act on what is there.
+- Keep its phase Open until a held message says the run has ended, then write the state its exit gives.
+- Send every question for the owner to the orchestrator as a `question` report, never to the owner directly.
 - Ask the orchestrator for each write to the project file or an epic record as a `request` report, and take no step that needs it until the answer arrives.
 - Send other reports as `report` reports, and make no worktree transition.
 
@@ -83,9 +83,9 @@ The sender, `hooks/dctr-send.mjs`, is the only way a message reaches a session o
 - `wake <role>` clears and resumes a session that handed off, and otherwise nudges it. A paused lane is woken only by this or by `wake-all`.
 - `wake-all <run>` wakes every session an account-wide usage limit stopped.
 
-No session or script of the run types anything into a run session's pane except four fixed lines: `/clear`, the resume line `/doctrine:doctrine-resume` with its marker, the nudge "Read your brief and your held folder, then act on them.", and the role's launch line. The one thing you type into a pane yourself is `/model`, under Usage limits. The sender writes a `relay:` line for each send and wake, and the orchestrator writes one for each report it passes to you.
+No session or script of the run types anything into a run session's pane except four fixed lines: `/clear`, the resume line `/doctrine:doctrine-resume` with its marker, the nudge "Read your brief and your held folder, then act on them.", and the role's launch line. You talk to the run in the orchestrator's pane, where you answer its questions. Into a lane's or the merge session's pane you type only `/model`, under Usage limits, and you restart by hand any pane the orchestrator reports has no agent. The sender writes a `relay:` line for each send and wake, and the orchestrator writes one for each report it passes to you.
 
-The lane watcher, `hooks/dctr-lanewatch.mjs`, reads each pane and writes one line per new fact to `<run>/events.log`, and types nothing. The orchestrator waits on that file through Claude Code's Monitor tool and reads it from a cursor it keeps in its record, so a restart misses no event and acts on none twice. When the watcher reports a held message whose nudge was never typed, the orchestrator nudges that role with `wake <role>`. A session that stops idle is not put to you: the orchestrator wakes it once if it stopped after a context warning, and otherwise notes the pause.
+The lane watcher, `hooks/dctr-lanewatch.mjs`, reads each pane and writes one line per new fact to `<run>/events.log`, and types nothing. The orchestrator waits on that file through Claude Code's Monitor tool and reads it from a cursor it keeps in its record, so a restart misses no event and acts on none twice. When the watcher reports a held message whose nudge was never typed, the orchestrator nudges that role with `wake <role>`. A session that stops idle is not put to you: the orchestrator wakes it once if it stopped after a context warning, and otherwise notes the pause. Only a wake that fails comes to you.
 
 ### Usage limits
 
@@ -96,13 +96,13 @@ On every stop caused by an API error, the cycle hook writes a line to `limits.lo
 
 ### The orchestrator's boundary
 
-The orchestrator and its seats change no tracked file outside its record, the Records path, `docs/PROJECT.md`, `docs/epics/`, its memory file, `docs/handoffs/` and the `.doctrine/auto-cycle` files. `hooks/dctr-guard.mjs` refuses its Write, Edit, MultiEdit and NotebookEdit calls anywhere else and logs each to `guard.log`. The guard does not see Bash or MCP writes, so for those the boundary holds only as a rule the orchestrator follows. Only the orchestrator writes the project file and the epic records.
+The orchestrator and its seats change no tracked file outside these paths: its record, every file under the Records path, `docs/PROJECT.md`, `docs/epics/`, its memory file, `docs/handoffs/` and the `.doctrine/auto-cycle` files. `hooks/dctr-guard.mjs` refuses its Write, Edit, MultiEdit and NotebookEdit calls anywhere else and logs each to `guard.log`. The guard does not see Bash or MCP writes, so for those the boundary holds only as a rule the orchestrator follows. Only the orchestrator writes the project file and the epic records.
 
 Every worktree is made, reset, archived and removed by `hooks/dctr-lane.mjs` and nothing else. A lane is archived before it is removed, and never removed while its session runs.
 
 ## What the gate is for this shape
 
-Each lane passes its own phase gate under its own wrapper. This shape adds the merged-revision gate. When the orchestrator asks through the sender, the merge session merges one lane with `git merge --no-ff` at the integration branch's tip and runs the tests through the gate launcher, `hooks/dctr-gate.mjs`. It keeps the merge only when the result reads `exit=0` with no `capture=incomplete` line, and otherwise resets the integration branch to the commit before the merge. Either way it reports. Only after a landed report does the orchestrator write the lane's checked-in line and ask for the next merge. A lane repaired after its merge merges again, and the checked-in line names its last merge.
+Each lane passes its own phase gate under its own wrapper. This shape adds the merged-revision gate. When the orchestrator asks through the sender, the merge session merges one lane with `git merge --no-ff` at the integration branch's tip and runs the tests through the gate launcher, `hooks/dctr-gate.mjs`, with the time and `git rev-parse HEAD` printed before them and the time after. Until the gate's result is written it starts no merge and changes nothing. It keeps the merge only when the result reads `exit=0` with no `capture=incomplete` line, and otherwise resets the integration branch to the commit before the merge. Either way it reports. Only after a landed report does the orchestrator write the lane's checked-in line and ask for the next merge. A lane repaired after its merge merges again, and the checked-in line names its last merge.
 
 Ordering is a clause on a lane's Members line, `after <lane> merged`, one per line, which the orchestrator alone writes. That lane starts only from its predecessor's checked-in revision. While the predecessor's gate has not passed, or when the predecessor's phase ends Stopped, Shipped at an escalation or reopens, the later lane is held and you are told.
 
