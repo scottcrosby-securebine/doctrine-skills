@@ -53,15 +53,15 @@ Until you rule an item it binds nothing: no seat (an agent the run dispatches) t
 
 **Two tracked files.** The project lives in `docs/PROJECT.md` and each epic in `docs/epics/<ID>.md`, both committed and never gitignored. The project file holds the end state, the never-becomes list, the epic roster, the current epic, a row for each open item adoption took in, the history index, and your rulings and the exit-pass returns. An epic record holds what the epic is, its Done means, its members and its own rulings and returns. The exact format, every ruling kind included, is in [`skills/doctrine-project/formats.md`](../../skills/doctrine-project/formats.md). Each phase's run record stays out of version control, under the path the project file's `Records:` line names, `.doctrine/records` unless the repo names another. An optional `Tracks:` line names another repo when the tracking files live apart from the work, and `status` then reads live seats and Codex jobs for that repo.
 
-**Format rules you will meet.** `check` holds both files to these, among the rest of `formats.md`:
+**Format rules you will meet.** Both files follow these, among the rest of `formats.md`. `check` reports a breach of most of them, but not a phase name, item ID or entry ID repeated across files, and not a quote that paraphrases a `Combined check:` line:
 
 - Every ID and every phase name matches `[A-Za-z0-9][A-Za-z0-9_-]{0,23}`, at most 24 characters, so it publishes as a sidebar token unchanged. An ID is unique within its kind across the project.
 - Unknown extra sections are allowed and ignored. In the sections `check` reads (End state, Done means, Epics, Open issues, Members, and Rulings and returns), every non-blank line must take a form `formats.md` shows, and `check` reports any other line.
-- An `## Open issues` row is never removed. When its issue closes the row stays, so every `destination` ruling keeps the row it names.
-- A Members line may order a phase after another: `- phase b: after a merged`, meaning a's branch is merged and the orchestrator's gate passed on the merged revision. `check` reports a clause naming a phase that is not a member, a phase ordered after itself and a cycle. A misspelling with no space, such as `after-a-merged`, reads as a record path and is not caught.
+- An `## Open issues` row is never removed. When its issue or item closes the row stays, so every `destination` ruling keeps the row it names.
+- A Members line may order a phase after another: `- phase b: after a merged`, meaning phase `a`'s branch is merged and the orchestrator's gate passed on the merged revision. `check` reports a clause naming a phase that is not a member, a phase ordered after itself and a cycle. A misspelling with no space, such as `after-a-merged`, reads as a record path and is not caught.
 - `Combined check: none` is legal only while an epic is Proposed, Dropped or Superseded.
-- A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of a split item. A retired ID still resolves in entries written before the ruling, in the ruling itself, in an `impact` ruling, and in a return graded under an earlier baseline. A later regression, or a return on that baseline or a later one, must name a current item.
-- A `baseline` ruling's quote carries the `Combined check:` line, from what runs through the pass rule, verbatim, never a description of it.
+- A `done-means-change` ruling's Items name every item it adds, changes or removes, including the old ID of a split item. A retired ID still resolves in entries written before the ruling, in the ruling itself, in an `impact` ruling, and in a return graded under an earlier baseline. A regression written after the ruling, or a return whose Baseline is that ruling or a later one, must name a current item.
+- An epic's `baseline` ruling that rules or changes its `Combined check:` line quotes that whole line, what runs and the pass rule, verbatim, never a description of it.
 
 **Epic states.** An epic is Proposed, Not started, Open, Done, Dropped or Superseded.
 
