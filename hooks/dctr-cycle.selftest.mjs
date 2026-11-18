@@ -1203,6 +1203,52 @@ clause('clause 2y6 — a StopFailure in a session with no DCTR_ROLE and no DCTR_
   strayLimits.status === 0 && strayLimits.stdout === '' && !fs.existsSync(path.join(noRunFx.dir, 'run')) &&
   JSON.stringify(paused(noRunFx)) === '["- auto-cycle paused: Claude API error: rate_limit"]', JSON.stringify([strayLimits.stdout, paused(noRunFx)]))
 
+// R4: the orchestrator's permission mode, recorded in <run>/permission-mode for the launch files to read.
+{
+  const modeOf = (f) => { try { return fs.readFileSync(path.join(limitsRun(f), 'permission-mode'), 'utf8') } catch { return null } }
+  const orchEnv = (f) => ({ DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: limitsRun(f), DCTR_NOW_MS: String(NOW) })
+  const events = {
+    Stop: {}, UserPromptSubmit: { hook_event_name: 'UserPromptSubmit', prompt: 'go' },
+    Notification: { hook_event_name: 'Notification', notification_type: 'idle_prompt' }, StopFailure: failure(LIMIT_TEXTS.server, 'server_error'),
+  }
+  const perEvent = Object.entries(events).map(([ev, more]) => {
+    const f = fixture(`pm-${ev}`)
+    const r = run(f, { ...more, permission_mode: 'bypassPermissions' }, orchEnv(f))
+    return { ev, code: r.code, mode: modeOf(f) }
+  })
+  clause('clause 2pm — in an orchestrator session each of Stop, UserPromptSubmit, Notification and StopFailure carrying permission_mode bypassPermissions writes <run>/permission-mode as that one line (R4, S4)',
+    perEvent.every((e) => e.code === 0 && e.mode === 'bypassPermissions\n'), JSON.stringify(perEvent))
+  const latest = fixture('pm-latest')
+  run(latest, { permission_mode: 'bypassPermissions' }, orchEnv(latest))
+  const afterBypass = modeOf(latest)
+  run(latest, { hook_event_name: 'UserPromptSubmit', prompt: 'go', permission_mode: 'default' }, orchEnv(latest))
+  clause('clause 2pm2 — a later event carrying permission_mode default replaces bypassPermissions: the file holds the latest mode (R4)',
+    afterBypass === 'bypassPermissions\n' && modeOf(latest) === 'default\n', JSON.stringify([afterBypass, modeOf(latest)]))
+  const pmOff = fixture('pm-off', { lines: ['- auto-cycle: off'] }), pmChainless = fixture('pm-chainless'), pmExited = fixture('pm-exited', { state: 'Exited' })
+  fs.rmSync(path.join(pmChainless.proj, 'SESSION_MEMORY.md'))
+  const standing = [pmOff, pmChainless, pmExited].map((f) => ({ name: f.name, r: run(f, { permission_mode: 'bypassPermissions' }, orchEnv(f)), mode: modeOf(f) }))
+  clause('clause 2pm3 — the mode is written with auto-cycle off, with no kickoff chain and with an Exited record, each Stop standing down after it (R4)',
+    standing.every((s) => s.r.code === 0 && /auto-cycle skipped/.test(s.r.err) && s.mode === 'bypassPermissions\n'), JSON.stringify(standing.map((s) => [s.name, s.r.err.trim(), s.mode])))
+  const pmSeat = fixture('pm-seat')
+  const seat = run(pmSeat, { ...failure(LIMIT_TEXTS.server, 'server_error'), agent_id: 'seat-1', permission_mode: 'bypassPermissions' }, orchEnv(pmSeat))
+  clause('clause 2pm4 — a subagent\'s event in the orchestrator\'s session carrying bypassPermissions writes no permission-mode file, the hook having stood down on the subagent (R4)',
+    seat.code === 0 && /a subagent event/.test(seat.err) && modeOf(pmSeat) === null && !fs.existsSync(limitsRun(pmSeat)), JSON.stringify([seat.err, modeOf(pmSeat)]))
+  const pmLane = fixture('pm-lane')
+  const laneRun = run(pmLane, { ...failure(LIMIT_TEXTS.server, 'server_error'), permission_mode: 'bypassPermissions' }, laneEnv(pmLane))
+  clause('clause 2pm5 — a lane session\'s StopFailure carrying bypassPermissions writes its limits.log line into the run and no permission-mode file (R4)',
+    laneRun.code === 0 && limitsOf(pmLane).length === 1 && modeOf(pmLane) === null, JSON.stringify([limitsOf(pmLane), modeOf(pmLane)]))
+  const pmNone = fixture('pm-none')
+  run(pmNone, {}, orchEnv(pmNone))
+  clause('clause 2pm6 — an orchestrator event carrying no permission_mode writes no permission-mode file (R4)',
+    modeOf(pmNone) === null, JSON.stringify(modeOf(pmNone)))
+  clause('clause 3pm — without the hook: the orchestrator environment names role orchestrator and the fixture\'s run, the lane one role a; the seat payload carries agent_id; the off, chainless and Exited fixtures are what 2pm3 says; no fixture\'s run held a permission-mode file before the hook',
+    orchEnv(pmSeat).DCTR_ROLE === 'orchestrator' && orchEnv(pmSeat).DCTR_RUN === limitsRun(pmSeat) && laneEnv(pmLane).DCTR_ROLE === 'a' &&
+    'agent_id' in { ...failure(LIMIT_TEXTS.server), agent_id: 'seat-1' } && !('permission_mode' in payload(pmNone)) &&
+    /- auto-cycle: off/.test(fs.readFileSync(pmOff.record, 'utf8')) && !fs.existsSync(path.join(pmChainless.proj, 'SESSION_MEMORY.md')) &&
+    /- State: Exited/.test(fs.readFileSync(pmExited.record, 'utf8')) &&
+    ['pm-fresh-a', 'pm-fresh-b'].map((n) => fixture(n)).every((f) => modeOf(f) === null), '')
+}
+
 clause('clause 2n2 — with the stop file present a Notification writes nothing: it acts only while auto-cycle is active (B6)',
   paused(nStop).length === 0 && calls(nStop).length === 0, show(nStop, { code: 0, msg: '', err: '' }))
 const iPaused = fixture('i-paused', { lines: ['- auto-cycle paused: session idle, waiting for you'] }); stopFacts(iPaused, { backgroundEmpty: true, cronsEmpty: true, ready: false }); note(iPaused, 'idle_prompt')

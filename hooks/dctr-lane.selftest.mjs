@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq } from './dctr-lib.mjs'
+import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq, launchFlags } from './dctr-lib.mjs'
 import { parseDoc } from './dctr-project.mjs'
 import { restoreFile } from './dctr-state.mjs'
 
@@ -290,6 +290,47 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp, shown)
   clause('clause 2j2 — the same line, run again after the model file changes, starts claude on the model the file names when the line runs: claude-opus-5-5 first, claude-sonnet-5 second (E15-D219)',
     r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']), shown)
+}
+
+// ---------------------------------------------------------------- clause 2: the orchestrator's permission mode (R4, S4)
+
+{
+  const BYPASS = ' --permission-mode bypassPermissions'
+  const odd = ['bypassPermissions', 'bypassPermissions\n', ' bypassPermissions \n', 'default\n', 'acceptEdits\n', 'plan\n', '', 'bypassPermissions\nbypassPermissions\n',
+    'bypassPermissions; touch /tmp/x\n', 'BypassPermissions\n', null, undefined]
+  const got = odd.map((t) => launchFlags(t))
+  clause('clause 1pm — launchFlags: the flag for the text bypassPermissions alone, with or without its newline or spaces around it, and the empty string for every other mode, an empty, doubled, extended or differently cased text, and no file',
+    JSON.stringify(got) === JSON.stringify([BYPASS, BYPASS, BYPASS, '', '', '', '', '', '', '', '', '']), JSON.stringify(got))
+  // The orchestrator's own hook writes the file: a Stop carrying the mode, in its checkout, under its role and run.
+  const CYCLE = path.join(HERE, 'dctr-cycle.mjs')
+  const hookRun = (f, mode) => spawnSync('node', [CYCLE], {
+    cwd: f.repo, encoding: 'utf8',
+    input: JSON.stringify({ hook_event_name: 'Stop', session_id: `pm-${path.basename(f.root)}`, transcript_path: path.join(f.root, 't.jsonl'), cwd: f.repo, permission_mode: mode, stop_hook_active: false, last_assistant_message: 'ok' }),
+    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '' },
+  })
+  const cases = [['2pm', 'bypassPermissions', ['--model', 'claude-opus-5-5', '--permission-mode', 'bypassPermissions']], ['2pm2', 'default', ['--model', 'claude-opus-5-5']], ['2pm3', null, ['--model', 'claude-opus-5-5']]]
+  const ran = {}
+  for (const [n, mode, want] of cases) {
+    const f = fixture()
+    const h = mode === null ? null : hookRun(f, mode)
+    const modeFile = read(path.join(f.run, 'permission-mode'))
+    const r = create(f, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}` } })
+    const file = read(path.join(f.run, 'launch/a.sh')) || ''
+    fs.rmSync(claudeLog, { force: true })
+    spawnSync('env', ['-i', 'sh', '-c', laneOf(read(f.laneLog), 'a')?.launch || 'false'], { encoding: 'utf8' })
+    const e = (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))[0]
+    ran[n] = { f, modeFile }
+    const what = mode === 'bypassPermissions' ? 'writes <run>/permission-mode bypassPermissions, and create then writes a launch file whose command carries --permission-mode bypassPermissions, which claude receives'
+      : mode === 'default' ? 'writes <run>/permission-mode default, and create then writes a launch file with no permission flag' : 'never ran, so no permission-mode file exists, and create writes a launch file with no permission flag'
+    clause(`clause ${n} — an orchestrator session's Stop hook carrying permission_mode ${mode} ${what} (R4, S4)`,
+      (mode === null ? modeFile === null : h.status === 0 && modeFile === `${mode}\n`) && r.code === 0 &&
+        (mode === 'bypassPermissions' ? file.includes(BYPASS) : !file.includes('--permission-mode')) && JSON.stringify(e?.argv) === JSON.stringify(want),
+      `hook ${JSON.stringify(h && [h.status, h.stderr.trim()])}; mode file ${JSON.stringify(modeFile)}; create exit ${r.code} ${said(r)}; launch ${JSON.stringify(file)}; argv ${JSON.stringify(e?.argv)}`)
+  }
+  clause('clause 3pm — without the command: the three fixtures\' runs start with no permission-mode file and the same model file, and the launch line\'s claude shim logs the argv it is handed',
+    [fixture(), fixture()].every((f) => read(path.join(f.run, 'permission-mode')) === null && read(path.join(f.run, 'model/a')) === 'claude-opus-5-5\n') &&
+      (() => { fs.rmSync(claudeLog, { force: true }); spawnSync(path.join(cbin, 'claude'), ['--model', 'm', '--permission-mode', 'p']); return JSON.stringify(JSON.parse(read(claudeLog) || '{}').argv) === '["--model","m","--permission-mode","p"]' })(),
+    JSON.stringify(Object.fromEntries(Object.entries(ran).map(([n, v]) => [n, v.modeFile]))))
 }
 
 // ---------------------------------------------------------------- clause 2: a PATH past herdr's line limit (E15-D251)
