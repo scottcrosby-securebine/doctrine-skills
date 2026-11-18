@@ -54,16 +54,15 @@ Before step 1 it reads the project instruction files. Your host loads one for it
 
 It is done when resume's report leads the reply, with the kickoff quoted or its absence flagged, and all six parts of the explanation are covered.
 
-Two cases end sooner, before recon and the tour:
+One case ends sooner, before recon and the tour. Where the handoff's first action may already have run and a phase record was read, resume appends a paused line to that record and ends the turn after its report, until that is settled.
 
-- Where the handoff's first action may already have run and a phase record was read, resume appends a paused line to that record and ends the turn after its report, until that is settled.
-- Where `doctrine-backup` runs during the restore, for a resync you accepted or a backup that never landed, it commits the memory file locally, never pushes, and its own text says to stop once it has committed. Under auto-cycle, a question `doctrine-backup` would ask is instead appended to the phase record as a pause, and the turn ends.
+Where `doctrine-backup` runs during the restore, for a resync you accepted or a backup that never landed, it follows its own rules. It never pushes. It commits only the files it may name, so an ignored memory file is not committed, and it stops once it has committed or found nothing to commit. The primer's text does not say whether recon follows. Under auto-cycle, where a phase record exists, a question `doctrine-backup` would ask is appended to that record as a pause, and the turn ends.
 
 The primer writes no file of its own. A file changes only through the steps it runs:
 
 - `doctrine-backup`, when you say yes to a resync, accept the end-of-session backup it offers, or a backup never landed.
 - One line naming the drift in the phase record, when auto-cycle is on and resume finds drift.
-- One paused line appended to the phase record, in the case above.
+- One paused line appended to the phase record, in the first-action case above.
 
 ## A worked example
 
