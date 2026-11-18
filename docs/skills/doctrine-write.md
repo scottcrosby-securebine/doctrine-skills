@@ -21,7 +21,7 @@ It is not for quick edits or informal messages. A single clarity pass covers tho
 
 Before anything is drafted, the run asks what your request left open:
 
-- **Audience, and what the reader should know or do afterward.** Your answer is recorded verbatim as the document's anchor, and every lens grades against it.
+- **Audience, and what the reader should know or do afterward.** Your answer is recorded verbatim as the document's anchor, and every lens grades against it. Where the document serves an epic in a repo that tracks one, the anchor also carries the Done means items it serves.
 - **Register, format and length.** A length bound is recorded in one unit only: the unit you named, or words if you named none. Every length the run measures, of your original and of each draft, is recorded with the command that produced it (`wc -w <file>` for words), so rerunning that command on the same text gives the same count.
 - **Source material.** The run uses no web sources unless you authorize them.
 - **Destination:** where the finished file lands.
@@ -100,7 +100,7 @@ If you name the reader and the sources in the prompt, the questions step is shor
 
 ## Requirements
 
-The plugin needs nothing else installed. Optional pieces change what fills a seat:
+This skill needs nothing installed beyond `node` on your `PATH`, which the plugin's hooks run under. Optional pieces change what fills a seat:
 
 - [`writing-clearly-and-concisely`](https://github.com/softaworks/agent-toolkit/tree/main/skills/writing-clearly-and-concisely) supplies the clarity method. Without it, the inline Strunk rules above apply.
 - The red team from the other model family needs one piece per host. On Claude Code it is [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), with the Codex CLI logged in. On Codex it is the Claude Code CLI (`claude`), installed and signed in, and run from a Codex session outside Codex's per-call sandbox. [requirements.md](../requirements.md) has the detail. Where that piece is missing, or its seat still fails after the retries the hub allows, a fresh-context subagent prompted to refute the document takes the seat. That substitute is the same model, so its blind spots overlap with the author's, and the exit statement names the substitution.
