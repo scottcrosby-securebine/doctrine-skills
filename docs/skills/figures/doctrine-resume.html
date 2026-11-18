@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- Figure source for doctrine-resume, started from specimen.html. Render from the repo root:
+     node docs/skills/figures/render.mjs docs/skills/figures/doctrine-resume.html docs/skills/doctrine-resume.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="drawn-from" content="skills/doctrine-resume/SKILL.md@78ae5da7e02f0ee72f823cb334d71acd174c3e8d">
+<title>Figure: doctrine-resume</title>
+<link rel="stylesheet" href="figure.css">
+</head>
+<body>
+<header class="head"><span>Doctrine skills</span><span class="no">FIG 14/15</span><span>doctrine-resume</span></header>
+
+<section class="title">
+  <h1>Read the saved state, let the record route, then report what drifted</h1>
+  <p>State only: no tour of the codebase.</p>
+</section>
+
+<section class="row">
+  <div class="label">Find the<br>state</div>
+  <div class="flow">
+    <div class="box"><b>Memory file</b><span>ls the root; usually SESSION_MEMORY.md</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Kickoff</b><span>its first line names a handoff</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Handoff</b><span>read in full, by that path</span></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Record</b><span>its last state and wrapper lines</span></div>
+  </div>
+</section>
+
+<section class="row">
+  <div class="label">Route on<br>the record</div>
+  <div class="fan">
+    <div class="col" style="width:226px"><div class="box" id="state"><b>What the record says</b><span>its last state line outranks the kickoff</span></div></div>
+    <svg class="wires" data-from="#state" data-to=".route"></svg>
+    <div class="col" style="width:412px">
+      <div class="box route"><b>Open or Blocked</b><span>load the wrapper, then the doctrine</span></div>
+      <div class="box route"><b>Any other state</b><span>load neither, whatever the kickoff says</span></div>
+      <div class="box route"><b>No record found</b><span>kickoff says open: load the doctrine</span></div>
+    </div>
+    <svg class="wires" data-from=".route" data-to="#report"></svg>
+    <div class="col" style="flex:1"><div class="box" id="report"><b>Drift and report</b><span>git and gh against the file; trust the repo</span></div></div>
+  </div>
+</section>
+
+<section class="notes">
+  <p>The handoff's first action: done, ambiguous (take it zero times and pause), or due.</p>
+  <p>An interrupted backup: the resume finishes it and never writes a second handoff.</p>
+  <p>Stale memory: ask to resync, or under auto-cycle leave it to the next backup.</p>
+  <p>Under auto-cycle the report does not end the turn: the phase carries on.</p>
+</section>
+
+<footer class="foot">Drawn from skills/doctrine-resume/SKILL.md at blob 78ae5da</footer>
+<script src="figure.js"></script>
+</body>
+</html>
