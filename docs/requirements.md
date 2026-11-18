@@ -29,7 +29,7 @@ For everything else except auto-cycle, below, herdr is optional and runs outside
 Auto-cycle is off by default. A phase switches it on by appending an `auto-cycle: on` line to its record and then writing a handoff, since the hooks find the record only through the memory file's kickoff and the handoff it names. These are needed only to use it:
 
 - **herdr**, with the session running in a herdr pane. Auto-cycle types `/clear` and the resume command into that pane, and it asks herdr which Claude session the pane runs, which herdr reports once its Claude integration is installed: `herdr integration install claude`. Outside a herdr pane, the Stop that would cycle pauses instead and writes `auto-cycle paused: could not type into the pane: this session is not in a herdr pane` to the record. The [`$autocycle` sidebar row](watching-a-run.md) shows the pause at a glance.
-- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
+- **Auto-compaction off**: set the Auto-compact row in `/config` to off. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
 - **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
 
   ```text
