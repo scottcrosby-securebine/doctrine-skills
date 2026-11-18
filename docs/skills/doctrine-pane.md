@@ -8,7 +8,7 @@ The agent runs an interactive terminal session in a herdr pane beside your sessi
 
 Ask for it in its own terms: pop a pane, ssh into a box, log into a router or switch, get onto a console, or tail or monitor a log while the agent works. Those requests open a pane. Nothing else does: the skill has no heuristic for "this looks interactive".
 
-Ten devices you asked to watch get ten sessions. One device you did not ask to watch gets a script. Work nobody asked to watch stays where the project already runs it, on an MCP server or a plain command, because parsed output is what makes many results comparable.
+Your request decides, never the shape of the work. Ten devices you asked to watch get ten sessions. One device you did not ask to watch gets a script. Work nobody asked to watch stays where the project already runs it, on an MCP server or a plain command, because parsed output is what makes many results comparable.
 
 There are two kinds of pane:
 
@@ -49,7 +49,7 @@ The agent then works through one loop:
 5. **`type`, then `enter`, as two separate calls.** The agent reads the echo of what it typed before it presses Enter.
 6. **`read` until the agent judges the command finished.**
 
-The launcher only refuses. Reading the screen is the agent's job, and no code parses the terminal, because a shell prompt is an arbitrary string, a pager prompt looks like a device prompt, and output going quiet does not mean a command ended.
+The launcher only enforces. Reading the screen is the agent's job, and no code parses the terminal, because a shell prompt is an arbitrary string, a pager prompt looks like a device prompt, and output going quiet does not mean a command ended.
 
 The launcher refuses to send when:
 
@@ -86,7 +86,7 @@ You close the pane. The agent never does, and closing the pane kills the session
 
 The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, or when the file holds a transcript and nothing records which pane wrote it.
 
-When `open` refuses, there is no weaker version of the skill: the agent quotes the refusal and does not start the session another way. In a doctrine run, the run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
+There is no weaker version of the skill. When `open` refuses because the session is outside herdr or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
 
 ## An example
 
@@ -131,7 +131,7 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## How it is checked
 
-The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push: every refusal trips and calls herdr zero times, a valid session is not refused, the broken fixtures are shown to be broken without the launcher, and both the macOS and Linux forms of `script(1)` are asserted. A doctrine phase that uses a pane still runs its own gate.
+The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push: every refusal trips, the refusals that come before the launcher looks up the pane are shown to call herdr zero times, output arriving during that lookup stops the send, a valid session is not refused, the broken fixtures are shown to be broken without the launcher, and both the macOS and Linux forms of `script(1)` are asserted. A doctrine phase that uses a pane still runs its own gate.
 
 ## Signs it is being misused
 
