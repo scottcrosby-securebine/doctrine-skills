@@ -1,145 +1,162 @@
 # doctrine
 
-The shared posture every doctrine-* wrapper runs on: what the work is judged by, the checks that prove it, and the loop that will not call a result clean until an outside reviewer has passed it.
+The hub every doctrine wrapper loads. It sets what the work is judged by, the checks that prove it, and a loop that will not call a result clean until a reviewer that did not write it has passed it.
 
-![A run moves through phases; inside each, waves of parallel seats build, native checks, the designated review and a red team gate the result, and the loop repeats until one pass is clean or an alarm stops it.](doctrine.png)
+![The doctrine's seven posture steps in a row, with step 6, Simplify, drawn before step 5's clean pass, the pass the loop of steps 3 and 4 runs until one is clean; below them one round of the gate, where one frozen revision fans out to native checks, the designated review and a red team and joins at a clean pass; then the five end states a phase can reach, and notes on the alarm defaults, the blocking test, the class question and the record.](doctrine.png)
 
-The figure shows the shape of one phase: seats, gate, loop, and the end states the loop can reach.
+## When it fires
 
-## When to use it, and when not
+It loads in two ways:
 
-You do not normally invoke this skill yourself. The nine wrappers (`doctrine-code`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`, `doctrine-write`, `doctrine-gauntlet`, `doctrine-project`, `doctrine-orchestrate`) load it, and each of them supplies what this file leaves open: the core discipline for the task, the review skill the phase gate uses, the axes the red team attacks on, and where the run's record lives. `doctrine-pane` cites it but is not a wrapper and does not load the posture.
+- **A wrapper loads it.** The nine wrappers are `doctrine-code`, `doctrine-gauntlet`, `doctrine-debug`, `doctrine-audit`, `doctrine-docs`, `doctrine-research`, `doctrine-write`, `doctrine-project` and `doctrine-orchestrate`. This is the usual route: you ask for the wrapper and it loads the hub.
+- **You ask for work done "with the doctrine"** and no wrapper fits. The hub then runs the phase on its own, and a fresh-context review of the deliverable against your words fills the review slot a wrapper would name.
 
-Use it directly when your task fits none of the nine shapes and you still want the gate: parallel seats, an adversary that did not write the work, a loop that exits on one clean pass, and a report that says what it certified. Ask for the work "with the doctrine" and the hub runs the phase without a wrapper; the review slot a wrapper would name is then filled by a fresh-context review of the deliverable against your own words.
+It also applies before you merge, push to the default branch or deploy shipped work that no doctrine phase reviewed, such as a fix made after a phase closed. The agent names what reviewed that work, or proposes a gate for it. Work under a workflow you named for it, and work you already ruled shipped, are exempt.
 
-Do not use it for a one-off question or a one-off edit to a single file nothing else reads. The gate costs more time and tokens than a single pass, and the spec's own description excludes those two cases. It does apply before you merge, push to the default branch or deploy work no phase reviewed, such as a fix made after a phase closed: name what reviewed it, or propose a gate by its reach. If a wrapper fits, use the wrapper: its page is one of the other ten linked from the [README](../../README.md).
+It is not for a one-off question, or a one-off edit to a single file nothing else reads. The gate costs more time and more tokens than a single pass.
+
+`doctrine-pane` cites the hub without loading it. `doctrine-backup`, `doctrine-handoff`, `doctrine-resume` and `doctrine-primer` carry a session's state and handoff to the next session.
+
+## What the hub supplies and what a wrapper adds
+
+The hub supplies the standard the work is judged by and the checks that evidence it. A wrapper supplies the rest: the core discipline for the task, the review skill its gate uses, the axes its red team attacks on, and where the run's record lives. The hub invokes other authors' skills by name and never copies them, so their updates reach you.
+
+The hub's own words, used throughout this page:
+
+- **Orchestrator:** the agent running the work.
+- **Seat:** any agent it dispatches: a builder, a finder, a reviewer, a red team.
+- **Phase:** a unit of work with its own checkable exit gate.
+- **Wave:** one dispatch of parallel seats inside a phase.
+- **Round:** one full pass of the gate over one revision, with the repairs that answer its findings.
+- **Record:** the file on disk that step 1 opens and every later step writes to.
+- **Report:** what you get at step 7, the delivery line first.
+
+## The seven standards
+
+The hub states seven outcomes, and every step below exists to show one of them holds. The work:
+
+1. is judged against your own words for what it is for, never the agent's reading of them;
+2. is certified by nothing that produced it;
+3. passes every check your project defines, not only the ones the agent thought of;
+4. contains nothing you did not ask for and rebuilds nothing your codebase or an installed dependency already has;
+5. keeps everything that decides the outcome on disk, so a compaction or a crash loses none of it;
+6. has run in the real environment, end to end on one complete path, before it is certified;
+7. reaches a named end state, at a cost that is bounded and visible to you.
 
 ## What it asks you first
 
-Before any work is aimed, the agent needs a standard in your words. Three things come out of that exchange.
+**The anchor.** Before any work is aimed, the record opens with your own words for what the work is for and how it will be judged, verbatim. When nothing needs asking, the anchor is your request as you typed it. Every reviewer and red-team seat receives it, because a reviewer without it grades the work against itself.
 
-**The anchor.** Your own words for what the work is for and how it will be judged, verbatim, never the agent's paraphrase. If nothing needs asking, the anchor is your request as you typed it. Every reviewer and red-team seat later receives it, because a reviewer without it grades the deliverable against itself.
+**Direction questions only.** A question blocks the phase when only you can answer it and the answer changes where the work is aimed. It never turns into a default. Where several answers would each give you acceptable work, the agent takes the narrower reading of what it changes and records the readings it rejected. A missing value inside a settled direction does not stop the run: the agent leaves a visible gap, a labelled placeholder or an explicit "unknown", and the delivery line names it. Anything the agent has put to you for a ruling binds no one until you rule. Later it also asks, for example, which gate a phase runs under (step 2), and whether to continue or ship when an alarm fires.
 
-The agent asks only questions it cannot default. A direction question is one only you can answer, where the work is aimed differently depending on the answer; left unanswered it blocks the phase and never turns into a guess. Where several answers are defensible and the result is acceptable under each, the agent takes the narrower reading of what it changes and records the readings it rejected for the report. A missing value inside a settled direction does not stop the run: the agent builds what holds it and leaves a visible gap, a labelled placeholder or an explicit "unknown" that the delivery line names.
+**Two bounds.** The anchor records the bounds the two alarms fire on: a round count, default 4, and a time budget, default two hours. To change them, state your figures in the request.
 
-**Two figures.** The loop has two alarms, and the anchor records the bound each fires on: a round count, default 4, and a time budget, default two hours. Give your own figures if you want different ones. The source gives no syntax for stating them; say them in the request and they go in the anchor.
+**The record.** A file on disk. It lives where the wrapper says, or else beside the work in your repo, excluded from version control and from every reviewer's diff and search. The report names its path. Its first part holds the anchor and a line naming the wrapper, `wrapper: <skill name>`, or `wrapper: none`.
 
-**The record.** A file on disk, opened at this step and written to by every later one. It lives where the wrapper says, and where no wrapper names a place, beside the work in your repo, excluded from version control and from every reviewer's diff and search. The report names its path. The spec does not name the file, so what you will see is a path in the report, not a fixed filename. Everything that decides the outcome goes there so a compaction or a crash loses none of it, and a resumed session reads phase state, counters and open findings from it rather than from memory.
+**Project tracking.** Where your repo carries `docs/PROJECT.md`, a phase follows `doctrine-project`'s lifecycle, and a phase that belongs to an epic carries the Done means items it serves in its anchor, each with its obligation: satisfy, contribute or preserve.
 
-## How the work runs
+## The seven steps
 
-Seven steps. Steps 3 to 6 repeat as a loop; the spec calls each pass a round.
+Steps 3 to 5 repeat as a loop, and step 6 runs once before the pass expected to certify the work. Each pass of the gate is a round.
 
-**Step 1.** The questions above, the anchor, the two figures and the record. You see questions, or nothing if your request was already the standard.
+**1. Ask questions first.** The anchor, the bounds and the record, as above.
 
-**Step 2.** The agent splits the job into phases, each with a checkable exit, and dispatches independent work as parallel seats. Whether a phase earns the full gate is decided by reach, not size: the agent searches for the callers, readers and consumers of what it changes, and a one-line change to a shared contract earns the gate while a sweep nothing reads may not. The agent never decides it: it proposes a gate with that evidence and you choose, a search that could not settle the question is proposed as what it is, and where you do not answer the phase runs the full gate. Work you put on the smaller gate is certified once, by native checks and one outside review, with any blocking finding from that review repaired and the review re-run on the repair, and the record names which gate the phase ran under, the reach evidence, the revision that evidence was bound to, and your choice. Each seat that edits gets its own worktree, output directory and port. What you see is a quiet terminal while seats run; [watching-a-run](../watching-a-run.md) says how to get a pane per seat.
+**2. Phases and waves.** The agent splits the work into phases and dispatches independent work as parallel seats. Each seat gets a prompt assembled from the artifact, the facts it may rely on, the standard and what to return. An empty slot or an unfilled template marker in that prompt is a failed dispatch. Each seat that edits files gets its own git worktree (`git worktree add`), output directory and port, with dependencies hardlinked by `cp -al`.
 
-**Step 3.** Every phase ends with native checks: every check your project documents as a gate in its CLAUDE.md, README, contributing guide, PR template or task runner, not only the ones an agent would think of. The check list, the review guidance and the documented law that judge a phase are read at the fixed point the phase started from, so a diff cannot be judged by a gate it just loosened: a check the diff adds or tightens runs and counts, and one it loosens or removes, in the listing that names it or in its own code, is reviewed as a change to the gate rather than applied as the gate. The agent reads the task runner itself, confirms each command exits (a `"test": "vitest"` script is watch mode, so it runs the non-interactive form and records the substitution), and treats a runner that exits 0 having collected nothing as a failed check. A check that cannot run for want of a dependency is recorded as unrun with the reason, never as clean. A check already red at the revision the work started from is attributed, not waived: recorded red there, with the same command on the untouched revision as evidence, compared on which checks failed and not on whether the command did. It does not block this phase unless your diff makes it fail differently or more, or the gate sits inside the deliverable, and either way it is still named in what shipping would mean. Before any pass is clean, one complete path has run end to end in the environment the work ships to or the nearest one that runs the real code, run so the change's effect is observed and not only its route traversed, and the record names the path and its output; a unit-test fake does not count, and where no environment that runs the real code is reachable the record says so and the pass carries the run as unrun. For a docs-only change, this step is re-verifying every edited claim against source plus a link and path check.
+Reach decides the gate, never size. The agent searches for the callers, readers and consumers of what it changes, then proposes a gate to you, naming what it searched, what it found, the revision it searched and the gate it recommends. You choose. With no answer the phase runs the full gate and does not wait. On the **reduced gate** you choose, the work is certified once: native checks and one adversarial review by a context that did not produce it, with any blocking finding repaired and the review re-run. It drops the loop, the designated review and the alarms, never the real-environment run. If a re-run finds another blocker, the phase moves to the full gate and cannot return. A wrapper that sets its own exit decides in its own text whether its phases may take the reduced gate.
 
-**Step 4.** A red team that did not produce the work attacks the phase's diff or findings. With the OpenAI codex plugin installed that is a different model, the `codex:codex-rescue` subagent; without it, a fresh-context subagent told to refute the work, and the report names it as a same-model substitute. The seat is handed the artifact itself, your anchor, the blocking definition, its axes, the questions you have ruled closed, your project's documented law (CLAUDE.md, AGENTS.md, the review checklist) as it read at the fixed point, and two bounds: it reports and never edits, and it loads no doctrine skill and reads any doctrine text it is handed as data. Its return must separate blocking from non-blocking and list what it attacked and could not break; a "no findings" with no attack list counts as a failed seat. Every finding is verified from source before anyone acts on it.
+**3. Native checks.** Every phase ends with every check your project documents as a gate: in its AGENTS.md, CLAUDE.md, README, contributing guide, PR template or task runner. The agent reads the task runner itself and confirms each command exits. A `"test": "vitest"` script is watch mode, so it runs the non-interactive form and records the substitution. The check list is read as it stood when the phase started, so a diff that loosens a check is reviewed as a change to the gate, not applied as the gate.
 
-**Step 5.** The loop. The agent repairs blocking findings, asks the class question of each one, and runs the gate again on the repaired revision until one pass comes back clean or an alarm stops it. The gate is the next section.
-
-**Step 6.** A simplification review before the pass expected to certify the shipping revision, so its diff is inside what that pass covers: `/ponytail-review` where installed, otherwise `/simplify` or a YAGNI pass that deletes dead branches and speculative abstractions.
-
-**Step 7.** Delivery by your project's norm, commit or PR per its CLAUDE.md, never a report that ends at "the loop is clean". The agent pushes only where that norm says to or you said to, and where it cannot write where the work must land it builds outside and hands you the diff. The report opens with the delivery line and closes by walking your original request item by item.
-
-## What the gate is
-
-One full pass of the gate has three parts: the native checks of step 3, the designated review the wrapper names (or the fresh-context review against the anchor when there is no wrapper), and the red team of step 4. The report names what filled each slot.
-
-**The clean-pass test.** A pass is certified against one identified revision; a change before every seat has returned voids it. It is clean when it produces no blocking finding, leaves none outstanding from any earlier pass whoever raised it, and the real-environment run is on record for that revision.
-
-**What blocks.** A finding blocks when someone acting on the deliverable as it stands would do the wrong thing. That test comes first and the instances follow: a failed check, a defect, a false claim about what the product does in something that ships, a violation of your brief or your project's documented law, a seam the change introduces or crosses with no test, or work that misses the anchor's bar. Three things never block: a statement about the loop's own instruments (a count, a round number, a commit message), wording whose meaning is correct however imprecise, and a steering document (the spec, your anchor, the decision log, the record) in that role; a spec or report that is the deliverable blocks like any other. A check the deliverable itself ships is not one of the loop's instruments: a false comment inside it describes product behaviour and blocks. A finding the agent cannot yet grade is graded by step 1's test above, and only the case that is acceptable under each answer stays non-blocking. Non-blocking improvements go on a deferred list you see at delivery. A finding you decline is ruled closed and later reviewers are told so. A red-team claim verified false from source is refuted, with the evidence recorded.
-
-**Repairs.** A certified revision stays certified through a repair to wording, a comment, a test, a gate instrument or a steering document, unless that repair loosens or removes a check, which needs its own clean pass like any repair to shipping code. A repair to a non-comment line of shipping code, or to a claim about what it does, needs its own clean pass, and the agent judges which from the diff, not from a label. The next pass takes the repair as its first target: half of the blocking findings on record landed inside the previous round's repair.
-
-**The class question.** Every blocking finding that survives verification is asked where else whatever produced it would have left the same mark, and whether a check exists for its class. The fix goes to every site the question turns up that the agent may touch, and a class a script can catch is caught by that script every round after.
-
-**Five end states.** A phase ends as Exited, the only clean one; Stopped, when you end the loop with findings open; Shipped at an escalation, when you choose to deliver from an alarm's stop or the prose-deliverable exit's closing round delivers; Blocked, when a session ends with a direction question unanswered; or Unable, when execution ended and cannot resume by itself. A phase still running is Open. The four non-clean endings reach you as what they are, never as certified.
-
-**Two alarms.** The round alarm counts rounds that found a blocking finding and stops at every multiple of your figure, default 4. The time alarm stops when the time since the last round closed, or since the phase opened if no round has closed, exceeds your budget, default two hours. Either one stops the loop and puts a diagnosis to you, in three parts: what shipping now would mean (defective or not, each open blocker as its consequence for a user, each unrun gate, and what continuing would cost), why the loop has not closed (which artifacts the findings landed in, whether the class question found other sites), and whether the exit is reachable at all. That last part matters when the gate has stopped discriminating: several adversarial seats over a long prose deliverable return a blocking finding every round however good it gets, and in that case the agent proposes a narrower blocking definition for you to rule on. You are asked to continue or ship. A standing "continue" or "do not ask" given in advance does not switch the alarms off; only a ruling given after one fires restarts the loop. This exit and these alarms are the hub's default. A wrapper replaces them only by stating its own exit, counters and reason: `doctrine-gauntlet` does, and the prose wrappers adopt the hub's prose-deliverable exit, under which the round alarm's first firing still puts its diagnosis to you but the closing round opens without waiting for your ruling unless you say stop. Each wrapper's page says which exit it runs.
-
-## A worked example
-
-This example is illustrative: it shows the shape of a run, not a recorded one.
-
-You type: `with the doctrine: /api/records returns 500 when a record has no owner. Return the record with the owner field empty instead.` This task fits `doctrine-debug`, and in practice you would type `use doctrine-debug` for it; the example runs the bare hub only to show which slot the hub fills on its own when no wrapper names a review.
-
-**Step 1.** The agent asks one direction question: empty as `null` or as an empty string, since callers are aimed differently by the answer. You say `null`. The record opens at `.doctrine/record.md` beside the work, gitignored, and its first part holds your request and your answer verbatim. You gave no figures, so the anchor records the round alarm at 4 and the time budget at two hours.
-
-**Step 2.** One phase. The agent searches for callers of the record serializer and finds the JSON endpoint and a CSV export that share it, so the change has reach: the agent proposes the full gate with those two consumers as its evidence, and you take it. One builder seat runs in its own worktree.
-
-**Step 3.** The agent reads `package.json`: `"test": "vitest"` is watch mode, so it runs `vitest run` and records the substitution, then `eslint .` because the README lists lint as a gate. Both exit 0. It starts the dev server, requests a record with no owner over the wire, and pastes the response into the record as the real-environment run.
-
-**Step 4.** The codex plugin is installed, so the red team is `codex:codex-rescue`, handed the diff verbatim, the anchor, the blocking definition, the axis "does every consumer of the serializer survive a null owner", the project's CLAUDE.md as it read at the fixed point, and the non-mutating and no-doctrine bounds. It returns one blocking finding: the CSV export still throws on `null`. The agent verifies it from source. True.
-
-**Step 5, round 1.** The class question: where else would the same mark be? The agent finds a third consumer, an audit log formatter, with the same call. The fix goes into the shared serializer rather than the endpoint, which clears all three. Round 1 closed with a blocking finding, so the round alarm's count is 1.
-
-**Step 6.** `/ponytail-review` runs on the diff before the certifying pass; it removes a helper the repair introduced that one call site did not need.
-
-**Step 5, round 2.** The repair touched shipping code, so it needs its own pass. Native checks rerun and pass. The red team is pointed at the repair diff first, then the whole. It returns no blocking finding, one non-blocking naming suggestion, and a list of what it attacked. The fresh-context review against the anchor fills the designated-review slot, since this run has no wrapper to name one, and returns nothing blocking. The real run is on record for revision `f30a9b7`. Clean pass. The record's last state line reads Exited.
-
-**Step 7.** The repo's CLAUDE.md says commit locally, no PR, so the agent commits and does not push. The report opens:
+Every check runs through the gate launcher:
 
 ```text
-Gate: clean pass on f30a9b7, real run on record. No blockers open.
+node <plugin-root>/hooks/dctr-gate.mjs <label> <out-file> -- <command>
 ```
 
-Then, in order: the record's path and its state; what filled each slot (native checks: `vitest run` and `eslint .`; review: fresh-context against the anchor; red team: codex); no unrun gates and no substitutions; the deferred list (the naming suggestion); and the walk of your request, one item, landed in the shared serializer with the CSV export and audit log covered by the class question.
+It writes `<out-file>`, the check's own output, and, once the check finishes, `<out-file>.result`, whose first line `exit=N` is the verdict. A second line `capture=incomplete` means the output is not whole, and the result is not a pass. An environment prefix goes after `--`. The agent waits for the `.result` file, not for a line in the output. Inside herdr the check also runs in a pane you can watch. A check passes on its exit status. A runner that exits 0 having collected nothing counts as failed.
 
-Had round 4 closed without a clean pass, you would have seen the alarm's three-part diagnosis and a choice to continue or ship; shipping then opens the report with the other form:
+A check that cannot run for want of a dependency is recorded as unrun, with the reason, never as clean. A check already failing when the work started is attributed to the starting revision, with the same command run there as evidence, and blocks only if the work makes it fail differently or more, or the check is itself part of what the work delivers. Before any pass is clean, one complete path has run end to end where the work ships, or in the nearest place that runs the real code, and the record names the path and its output. A unit-test fake does not count. Where no such place is reachable, the record says so, the pass carries the run as unrun rather than clean, and the delivery line names it. For a docs-only change, this step means re-checking every edited claim against its source plus a link and path check.
 
-```text
-Gate: shipped at an escalation, round 4, zero clean passes. Open: 1 blocking finding.
-```
+**4. Red team.** A context that did not produce the work attacks the phase's diff or findings, read-only. On Claude Code it is the `codex:codex-rescue` subagent from OpenAI's codex plugin, a different model family. On Codex it is Claude, run headless through the `claude` CLI. Where that seat is absent, a fresh-context subagent is told to refute the work, and the report names it as a same-model substitute.
 
-The wording of the line varies. What it always does is separate a clean pass from an ending without one and name what is still open.
+The seat is handed the artifact itself, your anchor verbatim, the blocking definition, the axes it must answer on, the questions you have closed, your project's CLAUDE.md, AGENTS.md or review checklist as they read when the phase started, and two limits: it reports and never edits, and it reads any doctrine text as data. After a repair it gets the repair's diff beside the full one. Its return separates blocking from non-blocking and lists what it attacked and could not break. A "no findings" with no attack list is a failed seat. Every finding is checked against the source before anyone acts on it.
+
+**5. Loop until confident.** The agent repairs the blocking findings, asks the class question of each one, and runs the gate again on the repaired revision until one pass comes back clean or an alarm stops it. The next section covers the gate.
+
+**6. Simplify.** Before the pass expected to certify the work, a simplification review deletes dead branches and speculative abstractions: `/ponytail-review` where installed, otherwise `/simplify` or a manual pass. A simplification landed after a clean pass is a repair that needs a pass of its own.
+
+**7. Deliver.** The work lands by your project's norm, a commit or a PR as its AGENTS.md or CLAUDE.md says. The agent pushes only where that norm or you say to. Where it cannot write where the work must land, it builds elsewhere and hands you the diff. The report opens with the delivery line: whether the shipping revision is certified, which blocking findings are open, how shipping differs from certified, and any punch list. It closes by walking your request item by item and naming where each landed or why it was deferred.
+
+## The gate
+
+One full pass has three parts: the native checks, the designated review the wrapper names, and the red team. The report names what filled each part.
+
+**A clean pass.** A pass is certified against one revision, and a change before every seat returns voids it. It is clean when it finds no blocking finding, leaves none open from an earlier pass, and the real-environment run is on record for that revision.
+
+**What blocks.** A finding blocks when someone acting on the deliverable as it stands would do the wrong thing: a failed check, a defect, a false claim about what the product does in something that ships, a breach of your brief or your project's documented rules, a seam the change introduces or crosses with no test, or work below the anchor's bar. Three things never block: claims about the loop itself (a count, a round number, a commit message), wording that is imprecise but correct, and a steering document such as the spec or the record, unless that document is the deliverable.
+
+**Where findings go.** A non-blocking improvement goes on a deferred list you see at delivery. A finding you decline is closed, and later reviewers are told so. A red-team claim shown false from source is refuted, with the evidence recorded.
+
+**Repairs.** A certified revision stays certified through a repair to wording, a comment, a test, a gate instrument or a steering document, unless the repair loosens or removes a check. A repair to shipping code, or to a claim about what it does, needs its own clean pass, judged from the diff. The next pass attacks the repair first, because half of the blocking findings recorded in past doctrine runs landed inside the previous round's repair.
+
+**The class question.** For every blocking finding that survives checking, the agent asks where else the same cause would have left the same mark, and whether a check exists for that kind of mark. The fix goes to every site the agent may touch. A kind of mark a script can catch is caught by that script every round after.
+
+**Two alarms.** The round alarm counts rounds that found a blocking finding and fires at every multiple of your figure, default 4. The time alarm fires when the time since the last round closed, or since the phase opened, passes your budget, default two hours. Either one stops the loop and puts a diagnosis to you: what shipping now would mean, why the loop has not closed, and whether a clean pass is reachable at all. Where it is not, the agent may propose a narrower blocking definition for you to rule on. You choose to continue or ship. A "continue" given in advance does not switch an alarm off: only a ruling given after it fires restarts the loop.
+
+**Other exits.** A wrapper replaces this exit only by stating its own. `doctrine-gauntlet` does. Wrappers whose deliverable is prose, `doctrine-write` among them, adopt the hub's **prose-deliverable exit** by name. That exit is one clean pass as usual, but if none has come by the round alarm's first firing, one closing round covers the changes since the last fully reviewed revision, or the whole deliverable where none was, and the phase ships at an escalation with a punch list. The diagnosis still reaches you, and the closing round starts without waiting for your ruling unless you say stop.
+
+**Five end states.** A phase ends as:
+
+- **Exited:** certified, the only clean ending.
+- **Stopped:** you ended the loop, and its open findings stay open.
+- **Shipped at an escalation:** you chose to deliver at an alarm, or the prose-deliverable exit's closing round delivered.
+- **Blocked:** the session ended with a direction question unanswered.
+- **Unable:** execution ended and cannot resume by itself, for example when credentials are gone.
+
+A phase that has not ended is Open. The four non-clean endings reach you under those names, never as certified. A phase certified on the reduced gate reopens, and runs the full gate, if it later turns out to have had wider reach than the search found.
+
+## The record, handoffs and auto-cycle
+
+The record is the run's memory. It holds the time the phase opened, every wave as it goes out (the seat, what it was handed, a handle to find its result, the clock time), and for each round the revision, the time it closed, every finding and the alarm counts. On resume the record outranks anything the session remembers, and a wrong value is corrected by appending a line, never by starting over. Its run state sits in a part no reviewer is handed.
+
+Each event is one line in a fixed form that `hooks/dctr-record.mjs` parses: `wave:`, `round:`, `finding:`, `ruling:`, `alarm:`, `question:`, `relay:`, `State:` and the `auto-cycle` lines. Inside herdr, each round's counters are published as sidebar tokens with `node <plugin-root>/hooks/dctr-token.mjs <round> <exit-count> <valve>`, shown once your herdr config renders them. On Claude Code inside herdr, `hooks/dctr-roundguard.mjs` refuses a round line written without that publish, or one that names a gate output file kept in the temp directory.
+
+A handoff is a dated snapshot of the record for a session that will resume it. `doctrine-handoff` writes it, `doctrine-backup` writes the memory file that points at it, and `doctrine-resume` and `doctrine-primer` load the phase's wrapper and the hub when the record the handoff names is Open or Blocked.
+
+**Auto-cycle** lets a long phase clear its context and resume on its own. It runs on Claude Code, and on Codex once the hooks are installed. On Claude Code it needs one-time setup: the session running in a herdr pane with herdr's Claude integration, auto-compaction off, and the statusline bridge, as [requirements](../requirements.md#auto-cycle-setup) gives them. Outside a herdr pane it pauses instead of cycling, and without the bridge a percent or default tier never warns. Codex has no setting that turns automatic compaction off, so there set the tier low enough that the warning and the handoff after it finish before Codex compacts. Ask for it when a phase will run long. The agent turns it on by appending `auto-cycle: on cap <n> tier <tokens or percent>` to the record and running `doctrine-handoff`: the cap bounds how many times it cycles, and the tier is the context use, in tokens or a percent, at which the context gauge warns. When the gauge warns, the agent starts nothing new, waits for the seats already out, writes a handoff and ends its turn with `auto-cycle: ready`. Once focus moves off the session's pane, the hook types `/clear` and the resume command into it. An `auto-cycle: off` line appended to the record switches it off. A file named `.doctrine/auto-cycle.stop` in the session's repo or the record's repo stops it, and deleting the file lets it resume, except that a session the file paused after its context warning cycles again only once you run `/clear` and type the resume command yourself. When the agent pauses auto-cycle itself, for an alarm, a Blocked phase or an open question, it writes `auto-cycle paused: <reason>` to the record and sends a notification reading `<phase>: doctrine auto-cycle paused, <reason>`.
+
+## On Claude Code and on Codex
+
+The same skill text runs on both. Before its first seat the agent reads a host reference beside the skill, `references/claude-code.md` or `references/codex.md`, which says how that host loads a skill, dispatches a seat, waits on a file and notifies you, and which seat is the red team from the other model family. On Codex the agent reads long files in chunks, and the hooks run only once you install them with `node <plugin-root>/hooks/dctr-codex.mjs install`, run again after each plugin update.
+
+## When something is not installed
+
+The hub runs with nothing else installed. Each skill it names has a substitute:
+
+| Missing | Substitute |
+|---|---|
+| The red team from the other model family | A fresh-context subagent told to refute the work, named in the report as a same-model red team |
+| ponytail | `/simplify` or a manual pass over the run's own diff. For an audit lens, a read-only manual pass, never `/simplify` |
+| matts-code-review | `/code-review`, or two parallel subagents, Standards and Spec, handed the same inputs |
+| Matt's `tdd` | Red-green-refactor done inline |
+| Matt's `diagnosing-bugs` | Reproduce first, regression test before the fix, inline |
+| Matt's `implement` or `improve-codebase-architecture` | Its SKILL.md read from your skill directory if present, otherwise the wrapper's inline fallback |
+| superpowers | Parallel seat dispatches with assembled prompts. Each seat pastes its check output and the agent re-runs the checks |
+
+A seat that reports its own tool as not installed is substituted at once. A seat whose tool is installed but fails is retried once in the round and once in a later round, then substituted for the rest of the phase. Every seat has a deadline set when it is dispatched, and one past it with no new output is a failed seat. Each substitution is recorded and named in the exit statement. `matts-code-review` is Matt Pocock's `code-review`, installed by you under a new name; this plugin does not bundle it. [requirements](../requirements.md) has the install commands, and [watching-a-run](../watching-a-run.md) shows how each seat gets a pane in herdr.
 
 ## How to invoke it
 
-The skill fires when a doctrine-* wrapper invokes it, or when you ask for work done "with the doctrine". For most tasks you type the wrapper's prompt, in the form the README shows:
+Most of the time, ask for a wrapper and it loads the hub:
 
 ```text
 use doctrine-audit on src/whatever.ts (scope is that file only)
 ```
 
-and the wrapper loads this skill for you. To run the hub with no wrapper:
+To run the hub with no wrapper:
 
 ```text
 with the doctrine: <your request, with any round count or time budget you want>
 ```
 
-## Requirements
-
-Nothing must be installed; twelve of the fifteen skills, this one included, run with no prerequisites. Each external skill the hub names has a fallback, and a run that uses one says so in its exit statement. [docs/requirements.md](../requirements.md) has the install commands.
-
-| Missing | What happens |
-|---|---|
-| codex plugin | A fresh-context subagent is prompted to refute the work, with the verify-from-source rule; the report names it as a same-model substitute |
-| ponytail | `/simplify` or a manual YAGNI pass on the run's own diff; a non-mutating manual read for an audit lens |
-| matts-code-review | `/code-review`, or two parallel subagents (Standards, Spec) handed the same inputs; without Matt's file on disk the seat runs on documented standards alone and the report says so |
-| Matt's `tdd` | Inline red-green-refactor |
-| Matt's `diagnosing-bugs` | Inline: reproduce first, regression test before the fix |
-| Matt's `implement` / `improve-codebase-architecture` | Read `~/.claude/skills/<name>/SKILL.md` if present, otherwise the wrapper's inline fallback |
-| superpowers | Parallel Agent tool calls, each prompt assembled rather than summarized; the seat pastes its checks and the agent re-runs them; brainstorming becomes an interview with you |
-
-`matts-code-review` is Matt Pocock's `code-review` installed by you under a new name, because the original collides with Claude Code's own `/code-review`; this plugin does not bundle it. A seat whose tool is installed but fails is retried once in the round and once more in a later round, then substituted for the rest of the phase, with the retries recorded.
-
-## Red flags
-
-The spec has no section by this name. These are the failures its steps exist to stop, and each is a reason to distrust a report that shows it.
-
-- A report that omits a check that could not run, or its reason. A check that could not run and a check that passed look identical in a report that names neither; the spec requires every unrun gate to be named with its reason.
-- A pass called clean by the context that wrote the code. Nothing that produced the work certifies it, the agent's own edits included.
-- A red team returning "no findings" with no list of what it attacked. That is a failed seat, and no pass is clean on it.
-- Green checks over a diff that never ran. Every gate can pass over code that was never executed; the real-environment run must be on record.
-- A fix in the one place the round was looking. The class question exists because the same cause leaves the same mark elsewhere, and a round that clears the instance has scheduled the next finding.
-- A defect inside the previous repair. Half of recorded blockers landed there, which is why the next pass targets the repair first.
-- A counter rebuilt from memory after a compaction. The record on disk is authoritative on resume, and a value believed wrong is corrected by appending, never by starting over.
-- A "continue" given in advance that the run treats as permission to pass an alarm. It is not; the alarm fires so a diagnosis reaches you that no earlier instruction could have weighed.
-- An ending presented as certified that is not. Stopped, Shipped at an escalation, Blocked and Unable reach you under those names.
-
-How these rules are checked, and what the checks cannot reach, is in [how-this-is-tested](../how-this-is-tested.md).
-
-The specification is [`skills/doctrine/SKILL.md`](../../skills/doctrine/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine/SKILL.md`](../../skills/doctrine/SKILL.md). Where this page and the specification disagree, the specification is right. [how-this-is-tested](../how-this-is-tested.md) says how the rules are checked.
