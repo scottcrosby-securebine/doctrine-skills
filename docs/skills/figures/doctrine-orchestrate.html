@@ -12,7 +12,7 @@
 <header class="head"><span>Doctrine skills</span><span class="no">FIG 10/15</span><span>doctrine-orchestrate</span></header>
 
 <section class="title">
-  <h1>One orchestrator relays, each lane runs its own phase, and a merge session lands them one at a time</h1>
+  <h1>Lanes run their own phases, and a merge session lands each one</h1>
   <p>Several doctrine phases of one epic at once, on Claude Code, each session in its own herdr pane.</p>
 </section>
 
@@ -49,7 +49,7 @@
 <section class="notes">
   <p>A merge stays only on exit=0 with no capture=incomplete; otherwise the integration branch is reset.</p>
   <p>The lane watcher logs each event; the orchestrator wakes on events.log.</p>
-  <p>Account-wide usage limit: you roll, then run wake-all once.</p>
+  <p>Account-wide usage limit: once past it, you run wake-all once.</p>
   <p>Ends: each session told the run ended, then the watcher stops.</p>
 </section>
 
