@@ -9,7 +9,11 @@ per CLAUDE.md, internal review history does not ship.
 
 ## Open
 
-None open.
+**Moving a seat's pane leaks it** ([#100](https://github.com/scottcrosby-securebine/doctrine-skills/issues/100)). When the seat hook places a seat it drops the marker of every side seat whose pane is not in the session tab's layout (`staleSideSeats` in `hooks/dctr-lib.mjs`), without asking herdr whether the pane still exists elsewhere. A seat pane you move to another tab therefore loses its marker on the next placement, and its SubagentStop closes nothing, so the pane stays open until you close it. Until it is fixed, leave seat panes where the hook put them.
+
+**`dctr-project.mjs board` overwrites whatever `board.md` is** ([#101](https://github.com/scottcrosby-securebine/doctrine-skills/issues/101)). It writes `<Records>/board.md` whole and unconditionally, so a phase record of that name would be replaced, and a `board.md` that is a symlink has its target overwritten, which can lie outside the records folder. No record is named `board.md` today, since records are date-prefixed.
+
+**On macOS a Codex background command run through a system binary always reads as running.** On Codex, auto-cycle tells live background work by its environment, read from `ps` on macOS, and `ps` shows no environment for a system binary such as `/bin/sleep` or `/bin/zsh`. Such a command holds a Stop back, and after 60 seconds the record gets a paused line saying the doctrine could not tell. The README's Codex section has the detail.
 
 ## Settled, with the evidence
 
@@ -26,7 +30,7 @@ ever gains an optional field.
 written in `hooks/dctr-mutations.mjs`'s header. A repair under `tools/` is pinned by that tool's own
 three-clause tamper test, which runs in CI.
 
-**A nested spawn inside a codex seat can fail while reporting success, on this host.** Probed
+**A nested spawn inside a codex seat can fail while reporting success, on the Linux host it was probed on.** Probed
 2026-09-12 under `codex:codex-rescue` in `--sandbox read-only`. The seat ran this repo's gates
 directly without trouble (`node tools/doc-check.mjs` exit 0 with its findings count, and
 `node hooks/dctr-seat.selftest.mjs` exit 0 with its PASS lines). What failed was a spawn from inside
@@ -35,7 +39,7 @@ a node process: `spawnSync(process.execPath, ["tools/doc-check.mjs"])` returned
 call in an unsandboxed shell on the same host returns `status: 0` with the gate's real output and no
 error, which is the control. A runner that spawns its own workers (most test runners do) can therefore
 come back looking green with nothing behind it, depending on whether it reads the spawn error; the status alone does not separate the two, the error and the absent output do.
-**What is not established**: the enforcing mechanism. This host sets
-`apparmor_restrict_unprivileged_userns=1` and `unshare -Ur true` fails in a plain shell here, but the
+**What is not established**: the enforcing mechanism. That host sets
+`apparmor_restrict_unprivileged_userns=1` and `unshare -Ur true` fails in a plain shell there, but the
 same command returned 0 inside the seat, so the user-namespace restriction is not a sufficient
 explanation and no second host has been tested. Do not write a rule that asserts codex cannot spawn.
