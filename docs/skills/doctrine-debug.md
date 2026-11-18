@@ -14,7 +14,7 @@ Pick another skill when the work is not one known defect. A hunt for bugs you ha
 
 It starts with the open questions about the bug: how to reproduce it, when it last worked, and the environment it fails in. Your answers go into the run's record verbatim as the anchor, and every reviewer gets them, so the fix is judged against what you said was wrong.
 
-Two other things are yours to set. If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more.
+If the bug lives on a host the agent must log into (a router, a switch, a console, a box over SSH), say whether you want a [`doctrine-pane`](doctrine-pane.md) session to watch and take over. The agent opens one only if you ask. Otherwise it runs the commands non-interactively and the report says a pane would have shown more.
 
 You can also set the two alarm figures. One is how many review rounds may find a blocking problem before the run stops and asks you. It stops again at each multiple of that figure. The other is a time budget, counted from when the last round closed, or from the start of the phase before any has. Without them the hub's defaults apply, 4 rounds and two hours. Only a ruling you give after an alarm fires restarts the run.
 
