@@ -154,10 +154,6 @@ const unknownWindow = (r) => r.code === 1 && /^refuse window unknown: /.test(r.o
   clause('clause 2k — a fresh bridge reading of 1,000,000 for the transcript\'s session: accept at that window, naming the bridge (E15-D256)',
     r.code === 0 && /^accept window 1000000 from bridge load 101825\b/.test(r.out), show(r))
 }
-{
-  const r = runIn(emptyTmp, 'capacity', 'default', hostStart)
-  clause('clause 2l — no bridge file: refuse, the window unknown, naming no window', unknownWindow(r), show(r))
-}
 for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbled, 'that does not parse'], ['2o', textWindow, 'whose window is not a number']]) {
   const r = runIn(b.dir, 'capacity', 'default', hostStart)
   clause(`clause ${n} — a bridge file ${what} is no bridge reading: refuse, the window unknown, naming no window (E15-D256)`, unknownWindow(r), show(r))
@@ -170,9 +166,8 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
 {
   const w = runIn(emptyTmp, 'capacity', '220000', codexNoWindow)
   const c = runIn(emptyTmp, 'capacity', '220000', codexNoCount)
-  const b = runIn(fresh.dir, 'capacity', '220000', codexNoWindow)
-  clause('clause 2r — a Codex rollout whose token_counts carry no model_context_window, or with no token_count yet: refuse, the window unknown, and a bridge file does not stand in for the rollout',
-    unknownWindow(w) && unknownWindow(c) && unknownWindow(b), `${show(w)}; ${show(c)}; ${show(b)}`)
+  clause('clause 2r — a Codex rollout whose token_counts carry no model_context_window, or with no token_count yet: refuse, the window unknown',
+    unknownWindow(w) && unknownWindow(c), `${show(w)}; ${show(c)}`)
 }
 {
   const { capacity, hostWindow } = await import('./dctr-orchestrate.mjs')

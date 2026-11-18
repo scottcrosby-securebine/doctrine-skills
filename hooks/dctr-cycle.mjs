@@ -68,7 +68,7 @@ try {
   if (!EVENTS.includes(event)) stand_down(`not a Stop, Notification, StopFailure or UserPromptSubmit event (${event})`)
   if ('agent_id' in payload) stand_down('a subagent event')
   // The orchestrator's latest permission mode, which the launch files it writes read (launchFlags), so a session it
-  // launches runs in its mode; whatever auto-cycle or the record says. A failed write is logged and changes nothing else.
+  // launches runs in its mode; whatever auto-cycle or the record says.
   if (runRole() === 'orchestrator' && typeof payload.permission_mode === 'string') {
     const run = runRoot(process.env, payload.cwd || process.cwd())
     if (run) {

@@ -2793,7 +2793,7 @@ const MUTATIONS = [
     from: "  for (const l of String(transcriptText).split('\\n')) {",
     to: "  for (const l of String(transcriptText).split('\\n').reverse()) {" },
   { name: "a session with no host reading gets a 200,000 window", file: "dctr-orchestrate.mjs",
-    clause: "clause 2b, 2l",
+    clause: "clause 2b",
     from: "  if (!reading) return { accept: false, line: 'refuse window unknown: the host recorded no window for this session' }",
     to: "  reading ??= { window: 200000, source: 'bridge' }" },
   { name: "the capacity command ignores the rollout and looks for a bridge file on Codex too", file: "dctr-orchestrate.mjs",

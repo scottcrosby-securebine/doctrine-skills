@@ -319,7 +319,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     fs.rmSync(claudeLog, { force: true })
     spawnSync('env', ['-i', 'sh', '-c', laneOf(read(f.laneLog), 'a')?.launch || 'false'], { encoding: 'utf8' })
     const e = (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))[0]
-    ran[n] = { f, modeFile }
+    ran[n] = modeFile
     const what = mode === 'bypassPermissions' ? 'writes <run>/permission-mode bypassPermissions, and create then writes a launch file whose command carries --permission-mode bypassPermissions, which claude receives'
       : mode === 'default' ? 'writes <run>/permission-mode default, and create then writes a launch file with no permission flag' : 'never ran, so no permission-mode file exists, and create writes a launch file with no permission flag'
     clause(`clause ${n} — an orchestrator session's Stop hook carrying permission_mode ${mode} ${what} (R4, S4)`,
@@ -330,7 +330,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   clause('clause 3pm — without the command: the three fixtures\' runs start with no permission-mode file and the same model file, and the launch line\'s claude shim logs the argv it is handed',
     [fixture(), fixture()].every((f) => read(path.join(f.run, 'permission-mode')) === null && read(path.join(f.run, 'model/a')) === 'claude-opus-5-5\n') &&
       (() => { fs.rmSync(claudeLog, { force: true }); spawnSync(path.join(cbin, 'claude'), ['--model', 'm', '--permission-mode', 'p']); return JSON.stringify(JSON.parse(read(claudeLog) || '{}').argv) === '["--model","m","--permission-mode","p"]' })(),
-    JSON.stringify(Object.fromEntries(Object.entries(ran).map(([n, v]) => [n, v.modeFile]))))
+    JSON.stringify(ran))
 }
 
 // ---------------------------------------------------------------- clause 2: a PATH past herdr's line limit (E15-D251)

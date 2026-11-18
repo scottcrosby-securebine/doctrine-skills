@@ -923,14 +923,14 @@ for (const [n, text] of [['2bi', 'bypassPermissions\n'], ['2bi2', 'default\n'], 
   const r = await proc(['start'], env, f.repo)
   await proc(['stop'], env)
   const file = (() => { try { return fs.readFileSync(path.join(f.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()
-  pmStarts.push({ f, text })
+  pmStarts.push(f)
   const flagged = file.includes(' --permission-mode bypassPermissions')
   clause(`clause ${n} — with <run>/permission-mode ${text === null ? 'absent' : JSON.stringify(text)}, start writes an orchestrator launch file ${text === 'bypassPermissions\n' ? 'whose claude command carries --permission-mode bypassPermissions' : 'with no permission flag'} (R4, S4)`,
     r.code === 0 && / claude --model /.test(file) && (text === 'bypassPermissions\n' ? flagged && file.trimEnd().endsWith(' --permission-mode bypassPermissions') : !file.includes('--permission-mode')),
     JSON.stringify([r, file]))
 }
 clause('clause 3bi — without the watcher: the three fixtures\' runs hold permission-mode bypassPermissions, default and no file',
-  JSON.stringify(pmStarts.map(({ f }) => { try { return fs.readFileSync(path.join(f.run, 'permission-mode'), 'utf8') } catch { return null } })) === JSON.stringify(['bypassPermissions\n', 'default\n', null]), '')
+  JSON.stringify(pmStarts.map((f) => { try { return fs.readFileSync(path.join(f.run, 'permission-mode'), 'utf8') } catch { return null } })) === JSON.stringify(['bypassPermissions\n', 'default\n', null]), '')
 
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
