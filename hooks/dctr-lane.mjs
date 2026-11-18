@@ -21,7 +21,7 @@
 // name and one `State: Open` line, points the memory file kickoff at the copy, sets skip-worktree on a tracked memory
 // file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh` (ending in
 // launchFlags for the mode file of the pane create runs in, so the session starts in bypassPermissions exactly when
-// that file reads it as the launch file runs), types the launch line
+// that file reads it as the launch file runs, and with no permission flag when create runs outside a pane), types the launch line
 // `sh <run>/launch/<role>.sh`, `/clear` and RESUME_LINE each once the pane reads ready, and only then appends
 // `create <role> <pane> <worktree> <launch line>`. The launch line carries no PATH value, so it stays within herdr's
 // 1,024-byte limit on a typed line whatever the PATH. Before the launch line, ready is a `pane get` that answered with
