@@ -42,7 +42,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
+import { capacityDecision, firstUsage, hostOf, launchFlags, launchCommand, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
 import { modeFile, herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
@@ -117,9 +117,7 @@ function start(model, request) {
   let file
   try {
     file = path.join(fs.mkdtempSync(path.join(tmp, `${PREFIX}-orchestrator-`)), 'launch.sh')
-    fs.writeFileSync(file, `cd ${shq(top)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
-      `CLAUDE_CONFIG_DIR=${shq(env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(env.PATH ?? '')} ` +
-      `TMPDIR=${shq(tmp)} claude --model ${shq(model)}${launchFlags(env.HERDR_PANE_ID ? modeFile(env.HERDR_PANE_ID) : null)}` +
+    fs.writeFileSync(file, `${launchCommand({ cwd: top, role: 'orchestrator', run, model: shq(model), flags: launchFlags(env.HERDR_PANE_ID ? modeFile(env.HERDR_PANE_ID) : null) })}` +
       `${text === null ? '' : ` -- ${shq(text)}`}\n`)
   } catch (e) { fail(`the launch file could not be written (${e.code || e.message})${file ? `; ${file} may be left in place` : ''}`) }
   let pane

@@ -351,7 +351,7 @@ const rStart = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_CALLER: '
 const orch = laneOf(fs.readFileSync(path.join(st.run, 'lane.log'), 'utf8'), 'orchestrator')
 clause('clause 2q — start appends an orchestrator create line that laneOf reads as the orchestrator\'s pane and checkout (E15-D244)',
   rStart.code === 0 && orch?.pane === 'w0:p0' && orch?.worktree === st.repo && orch?.caller === 'orchestrator' &&
-    /DCTR_ROLE=orchestrator/.test((() => { try { return fs.readFileSync(path.join(st.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()),
+    /DCTR_ROLE='?orchestrator'? /.test((() => { try { return fs.readFileSync(path.join(st.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()),
   JSON.stringify([rStart, orch]))
 clause('clause 2r — start writes its TMPDIR to <run>/tmpdir (E15-D248)',
   fs.existsSync(path.join(st.run, 'tmpdir')) && fs.readFileSync(path.join(st.run, 'tmpdir'), 'utf8') === T2, JSON.stringify(rStart))

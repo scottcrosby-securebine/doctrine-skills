@@ -69,7 +69,7 @@ import { herdr } from './dctr-state.mjs'
 import { restoreFile, modeFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier, pauseCode,
-  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags,
+  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags, launchCommand,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -332,9 +332,7 @@ function start(run) {
   }
   fs.writeFileSync(path.join(run, 'tmpdir'), tmp)
   const launchFile = path.join(run, 'launch', 'orchestrator.sh')
-  const launch = `cd ${shq(checkout)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
-    `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(envPath)} ` +
-    `TMPDIR=${shq(tmp)} claude --model "$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"${launchFlags(modeFile(pane))}`
+  const launch = launchCommand({ cwd: checkout, role: 'orchestrator', run, model: `"$(cat ${shq(path.join(run, 'model', 'orchestrator'))})"`, flags: launchFlags(modeFile(pane)) })
   fs.mkdirSync(path.dirname(launchFile), { recursive: true })
   fs.writeFileSync(launchFile, `${launch}\n`)
   fs.appendFileSync(path.join(run, 'lane.log'), `${new Date().toISOString()} orchestrator create orchestrator ${pane} ${checkout} sh ${shq(launchFile)}\n`)
