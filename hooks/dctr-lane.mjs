@@ -78,9 +78,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, launchCommand,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, launchCommand,
 } from './dctr-lib.mjs'
-import { herdr, isPaneNotFound, isTabNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
+import { herdr, isTabNotFound, modeFile, waitReady } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 const MEMORY = 'SESSION_MEMORY.md'
@@ -311,31 +311,12 @@ function create() {
     made.push(`the launch file ${script}`)
     const launch = `sh ${shq(script)}`
     for (const [k, line] of [launch, '/clear', RESUME_LINE].entries()) {
-      waitReady(pane, k === 0, fail, k === 2)
+      waitReady(pane, { fresh: k === 0, resume: k === 2, times, fail })
       if (k === 2) resumeTyped = true // from this call on the role's session may be working, so a failure undoes nothing
       herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, which undoes only before RESUME_LINE
     }
     append(`${role} ${pane} ${wt} ${launch}`)
   } catch (e) { fail(why(e)) }
-}
-
-/** Polls `pane get` until the pane reads ready (L7), or fails past the wait. `fresh`: before the launch line, ready is a
- *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES. `resume`: before
- *  RESUME_LINE, also the pane's restore file naming the session herdr reports. */
-function waitReady(pane, fresh, fail, resume) {
-  for (let waited = 0; ; waited += times.poll) {
-    let p = null
-    try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone`) }
-    if (resume && p && !restored(pane, p)) p = null // not ready for RESUME_LINE until the restore file names its session
-    if (p && (fresh ? !p.agent_session?.value && p.agent_status === 'unknown' : READY_STATUSES.includes(p.agent_status))) return
-    if (waited >= times.ready) fail(`the pane ${pane} did not read ready ${fresh ? 'for the launch line' : resume ? 'after /clear, its restore file naming the session herdr reports there,' : 'after the launch line'} within ${times.ready}ms`)
-    sleepMs(times.poll)
-  }
-}
-
-/** Whether the pane's restore file names the session herdr reports in `p`; a file that cannot be read or parsed does not. */
-function restored(pane, p) {
-  try { return Boolean(p.agent_session?.value) && JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === p.agent_session.value } catch { return false }
 }
 
 // ---------------------------------------------------------------- reset

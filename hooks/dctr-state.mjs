@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process'
 import {
   PREFIX, parseHerdr, movedGateName, movedGateVerdict, paneToken, pausedLine, pauseCode, EVENT_PAUSES, standingPauses, ownPauses, pauseStands, pauseMessage, pauseActionAt, autocycleToken,
   autocycleTokenArgs, pauseToastArgs, seatLive, codexTaskName, GATE_ROLE, agentName, nextIndex, CODEX_ROLE, codexJobMatch, repoOf, followLinks,
+  READY_STATUSES,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 
@@ -819,6 +820,26 @@ export function sessionStartLine(recordPath) {
   try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
 }
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+/** Whether the pane's restore file names `session`; no session, or a file that cannot be read or parsed, does not. */
+export function restored(pane, session) {
+  try { return Boolean(session) && JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === session } catch { return false }
+}
+
+/** Polls `pane get` every `times.poll` ms until the pane reads ready (L7), calling `fail` with why past `times.ready`
+ *  ms or when herdr reports the pane gone; `fail` must not return. `fresh`: ready is a pane holding no agent session
+ *  and reading agent_status unknown, as a new pane does before anything runs in it; else a status in READY_STATUSES.
+ *  `resume`: also the pane's restore file naming the session herdr reports. A reply that fails or carries no pane is
+ *  not ready. */
+export function waitReady(pane, { fresh, resume, times, fail }) {
+  for (let waited = 0; ; waited += times.poll) {
+    let p = null
+    try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone`) }
+    if (resume && p && !restored(pane, p.agent_session?.value)) p = null // not ready for RESUME_LINE until the restore file names its session
+    if (p && (fresh ? !p.agent_session?.value && p.agent_status === 'unknown' : READY_STATUSES.includes(p.agent_status))) return
+    if (waited >= times.ready) fail(`the pane ${pane} did not read ready ${fresh ? 'for the launch line' : resume ? 'after /clear, its restore file naming the session herdr reports there,' : 'after the launch line'} within ${times.ready}ms`)
+    sleepMs(times.poll)
+  }
+}
 /** Where the cycle hook records the permission mode of the main session in this pane, one line; launchFlags reads it.
  *  It sits in the user's own config dir, whose settings.json can already set the permission mode, so whoever can
  *  write it could already grant bypass; a shared temp directory would let another user plant it. Creates nothing. */
