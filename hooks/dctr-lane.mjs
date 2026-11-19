@@ -7,7 +7,12 @@
 //
 // Four subcommands and no others. Each runs only where runRole() is `orchestrator`, reads the run from runRoot(),
 // and refuses, exiting 1 and making nothing, on anything it checks before it writes. A failure after it writes exits 1
-// and writes no lane.log line, but leaves what it made: a create, its worktree, which it names; a reset, its side
+// and writes no lane.log line. A create that fails before the call typing RESUME_LINE undoes what it made and says
+// so: it closes the tab by the id its own tab create returned, then removes the worktree, a lane's branch (never
+// merge's, the integration branch) and the launch file, so the same create can run again; where that tab close fails
+// other than the tab being gone, or tab create returned a pane and no tab id, it removes nothing and names what it
+// left. Any other failure leaves what it made: a create failing at or after that call, a failed send of RESUME_LINE
+// included, its pane, worktree and launch file, which it names, since the role's session may already be working; a reset, its side
 // branch, which it names, with HEAD already at the revision when only the memory file's restore or the lane.log append
 // failed; an archive, the copies it made and any epic it repointed before an epic write failed, naming the copies'
 // directory and the epics when only the lane.log append failed; a remove whose lane.log append fails, naming the
@@ -76,7 +81,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import {
   runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags,
 } from './dctr-lib.mjs'
-import { herdr, isPaneNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
+import { herdr, isPaneNotFound, isTabNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 const MEMORY = 'SESSION_MEMORY.md'
@@ -235,7 +240,40 @@ function create() {
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
   const made = [`the worktree ${wt}`]
-  const fail = (why) => { process.stderr.write(`dctr-lane: create failed, ${why}; made ${made.join(', ')}, left in place, and lane.log not written\n`); process.exit(1) }
+  let tabId = null, script = null, resumeTyped = false
+  const fail = (why) => {
+    // Before RESUME_LINE no session holds the lane's work, so what create made is undone and the role can be created again.
+    const left = resumeTyped ? null : undo()
+    if (left === '') process.stderr.write(`dctr-lane: create failed, ${why}; undid what it made (${undid.join(', ')}), and lane.log not written\n`)
+    else process.stderr.write(`dctr-lane: create failed, ${why}; ${[left, made.length ? `made ${made.join(', ')}, left in place` : ''].filter(Boolean).join(', so ')}, and lane.log not written\n`)
+    process.exit(1)
+  }
+  const undid = []
+  const drop = (thing) => { const i = made.findIndex((m) => m.startsWith(thing)); if (i >= 0) made.splice(i, 1) }
+  /** Closes the tab by the id its own tab create returned, removes the worktree, a lane's branch (never merge's, the
+   *  integration branch) and the launch file. Returns '' when all is undone, else why it stopped, having removed nothing
+   *  past that step; a tab close that fails other than the tab being gone removes nothing. */
+  const undo = () => {
+    if (made.length > 1 && !tabId) return 'tab create returned no tab id to close'
+    if (tabId) {
+      try { herdr(['tab', 'close', tabId]) } catch (e) { if (!isTabNotFound(e)) return `the tab ${tabId} could not be closed (${why(e)})` }
+      undid.push(`closed the tab ${tabId}`)
+      drop('the herdr pane')
+    }
+    try { git(repo, 'worktree', 'remove', '--force', wt) } catch (e) { return `${undid.join(', ')}${undid.length ? ', but ' : ''}the worktree could not be removed (${why(e)})` }
+    undid.push(`removed the worktree ${wt}`)
+    drop('the worktree')
+    if (!merge) {
+      try { git(repo, 'branch', '-D', role) } catch (e) { return `${undid.join(', ')}, but the branch ${role} could not be deleted (${why(e)})` }
+      undid.push(`deleted the branch ${role}`)
+    }
+    if (script) {
+      try { fs.rmSync(script, { force: true }) } catch (e) { return `${undid.join(', ')}, but the launch file could not be removed (${why(e)})` }
+      undid.push(`removed the launch file ${script}`)
+      drop('the launch file')
+    }
+    return ''
+  }
   try {
     git(repo, 'worktree', 'add', '--quiet', ...(merge ? [wt, base] : ['-b', role, wt, base]))
   } catch (e) { refuse(`git worktree add failed (${why(e)})`) }
@@ -260,22 +298,24 @@ function create() {
     fs.writeFileSync(memory, lines.join('\n'))
     if (gitOk(wt, 'ls-files', '--error-unmatch', MEMORY)) git(wt, 'update-index', '--skip-worktree', MEMORY)
 
-    // herdr-lint: a failed or empty tab create fails the create, which leaves what it made and closes nothing
+    // herdr-lint: a failed or empty tab create fails the create, which closes only a tab id this reply carries
     const tab = herdr(tabCreateArgs(workspace, `${PREFIX} · ${role}`, wt))
+    tabId = tab?.result?.tab?.tab_id ?? null
     pane = tab?.result?.root_pane?.pane_id ?? null
     if (!pane) fail('herdr made no pane')
     made.push(`the herdr pane ${pane}`)
     const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
       `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null)}`
-    const script = path.join(run, 'launch', `${role}.sh`)
+    script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)
     made.push(`the launch file ${script}`)
     const launch = `sh ${shq(script)}`
     for (const [k, line] of [launch, '/clear', RESUME_LINE].entries()) {
       waitReady(pane, k === 0, fail, k === 2)
-      herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, so nothing follows it and nothing is closed
+      if (k === 2) resumeTyped = true // from this call on the role's session may be working, so a failure undoes nothing
+      herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, which undoes only before RESUME_LINE
     }
     append(`${role} ${pane} ${wt} ${launch}`)
   } catch (e) { fail(why(e)) }
