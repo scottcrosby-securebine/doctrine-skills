@@ -224,10 +224,9 @@ function deliver(pane, lane, claim, role) {
       if (left() <= 0) return say(`${pane} never read ready: gave up before ${line}`)
       r = readPane(pane)
       if (!r) return
-      // The restore hook names only the session the /clear started, so the resume line waits for it, as create's does.
-      if (line === RESUME_LINE && r.session !== session && !restored(pane, r.session)) { sleepMs(Math.min(POLL_MS, Math.max(0, left()))); continue }
-      // After /clear the pane is ready for the resume line once it reports a session other than the cleared one.
-      if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || r.session !== session)) break
+      // After /clear the pane is ready for the resume line once it reports a session other than the cleared one, and
+      // its restore file names that session, which the restore hook writes only for the session a /clear started.
+      if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || (r.session !== session && restored(pane, r.session)))) break
       sleepMs(Math.min(POLL_MS, Math.max(0, left())))
     }
     if (line === RESUME_LINE) session = r.session
