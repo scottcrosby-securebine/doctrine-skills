@@ -2,6 +2,7 @@
 //
 //   node hooks/dctr-orchestrate.mjs capacity <tier> <transcript path>
 //   node hooks/dctr-orchestrate.mjs launch-flags
+//   node hooks/dctr-orchestrate.mjs start <model id> [<request file>]
 //
 // capacity prints one line: `accept window <n> from <bridge|rollout> load <n> tier <n> margin <n>`, or `refuse` with
 // the window and its source where the host recorded one and every reason. Exit 0 accept, 1 refuse, 2 malformed
@@ -23,11 +24,26 @@
 // is read as the gauge reads it (`resolveTier`: a number, `<n>%` or `default`), and any error it reports refuses, its
 // floor raise included. The arithmetic is `capacityDecision` in dctr-lib.mjs. It reads the transcript once and the
 // bridge file, and calls nothing else.
+//
+// start (E15-SK10) starts the run's orchestrator session from a session with no DCTR_ROLE, inside herdr, in a repo
+// carrying docs/PROJECT.md. It writes the launch command to `launch.sh` in a new directory under TMPDIR, never under the
+// run: `claude` started in the checkout's top level with DCTR_ROLE and DCTR_CALLER `orchestrator`, DCTR_RUN the absolute
+// `<Records>/orchestrate`, the caller's config dir, PATH and TMPDIR, `--model <model id>`, launchFlags for the mode file
+// of the calling pane (HERDR_PANE_ID), read as the file runs, and, with a request file, `--` and its text as the first
+// prompt, so a request opening with `-` is never read as an option. It then makes one tab in HERDR_WORKSPACE_ID, polls
+// `pane get` of the new pane until a reply answers with no agent session, types the one line `sh '<file>'`, which carries
+// no PATH and so fits herdr's 1,024-byte limit on a typed line, and prints `dctr-orchestrate: started the orchestrator
+// in <pane>`, exit 0. It refuses, exit 1 with one line, making no tab and no file and typing nothing: with DCTR_ROLE set,
+// with DCTR_VIEW_REQUEST_DIR set, with no HERDR_WORKSPACE_ID, in a repo with no docs/PROJECT.md or no Records path, or
+// with a request file it cannot read. A failure once the tab is made exits 1 with one line naming the pane and the
+// launch file as left in place, and closes and removes nothing. DCTR_START_TIMES ({"poll","ready"}, ms) overrides the
+// poll interval and the wait for the fresh pane.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS } from './dctr-lib.mjs'
-import { modeFile } from './dctr-state.mjs'
+import os from 'node:os'
+import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
+import { modeFile, herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
 
@@ -79,15 +95,65 @@ export function capacity(tierText, transcriptText, reading, host = 'claude') {
   return { accept: false, line: `refuse ${facts}: load plus margin ${d.need} is not below the tier` }
 }
 
+let times = { poll: 1000, ready: 300000 }
+try { times = { ...times, ...JSON.parse(process.env.DCTR_START_TIMES || '{}') } } catch { /* the defaults */ }
+
+/** start (E15-SK10): starts the run's orchestrator session in a tab of its own, as the header says; exits 1 on a refusal
+ *  or a failure, with one line. */
+function start(model, request) {
+  const refuse = (m) => { console.error(`dctr-orchestrate: start refused: ${m}`); process.exit(1) }
+  const env = process.env
+  if (env.DCTR_ROLE) refuse(`this session's DCTR_ROLE is ${env.DCTR_ROLE}, so it is in a run already`)
+  if (env.DCTR_VIEW_REQUEST_DIR) refuse('a contained session (DCTR_VIEW_REQUEST_DIR set) makes no herdr tab')
+  if (!env.HERDR_WORKSPACE_ID) refuse('no HERDR_WORKSPACE_ID, so there is no herdr workspace to make the tab in')
+  let top
+  try { top = fs.realpathSync(repoOf(path.join(process.cwd(), '.git'), fs.existsSync)) } catch (e) { refuse(`the checkout could not be read (${e.code || e.message})`) }
+  const run = runRoot({ DCTR_ROLE: 'orchestrator' }, top)
+  if (!run) refuse(`${top} names no run: it carries no docs/PROJECT.md giving a Records path`)
+  let text = null
+  if (request) try { text = fs.readFileSync(request, 'utf8') } catch (e) { refuse(`the request file ${request} could not be read (${e.code || e.message})`) }
+  const tmp = env.TMPDIR || os.tmpdir()
+  const fail = (m) => { console.error(`dctr-orchestrate: start failed: ${m}`); process.exit(1) }
+  let file
+  try {
+    file = path.join(fs.mkdtempSync(path.join(tmp, `${PREFIX}-orchestrator-`)), 'launch.sh')
+    fs.writeFileSync(file, `cd ${shq(top)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
+      `CLAUDE_CONFIG_DIR=${shq(env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(env.PATH ?? '')} ` +
+      `TMPDIR=${shq(tmp)} claude --model ${shq(model)}${launchFlags(env.HERDR_PANE_ID ? modeFile(env.HERDR_PANE_ID) : null)}` +
+      `${text === null ? '' : ` -- ${shq(text)}`}\n`)
+  } catch (e) { fail(`the launch file could not be written (${e.code || e.message})${file ? `; ${file} may be left in place` : ''}`) }
+  let pane
+  // herdr-lint: any failure here ends start and closes nothing, so a failed reply is never read as an answer
+  try { pane = herdr(tabCreateArgs(env.HERDR_WORKSPACE_ID, `${PREFIX} · orchestrator`, top))?.result?.root_pane?.pane_id } catch (e) { fail(`herdr made no tab (${e.message.split('\n')[0]}); the launch file ${file} is left in place`) }
+  if (!pane) fail(`herdr's tab create named no pane; the launch file ${file} is left in place`)
+  const left = `the pane ${pane} and the launch file ${file} are left in place`
+  for (let waited = 0; ; waited += times.poll) {
+    let p = null
+    try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone; the launch file ${file} is left in place`) }
+    if (p && !p.agent_session?.value) break
+    if (waited >= times.ready) fail(`the pane ${pane} did not answer with no agent session within ${times.ready}ms; ${left}`)
+    sleepMs(times.poll)
+  }
+  try { herdr(['pane', 'run', pane, `sh ${shq(file)}`]) } catch (e) { fail(`the launch line was not typed (${e.message.split('\n')[0]}); ${left}`) }
+  console.log(`dctr-orchestrate: started the orchestrator in ${pane}`)
+}
+
+const USAGE = 'usage: node hooks/dctr-orchestrate.mjs capacity <tier> <transcript path> | node hooks/dctr-orchestrate.mjs launch-flags | node hooks/dctr-orchestrate.mjs start <model id> [<request file>]'
+
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(import.meta.filename) } catch { return false } })()
 if (isMain) {
   const [cmd, tierText, transcript, ...extra] = process.argv.slice(2)
+  if (cmd === 'start') {
+    if (!tierText || extra.length) { console.error(USAGE); process.exit(2) }
+    start(tierText, transcript)
+    process.exit(0)
+  }
   if (cmd === 'launch-flags' && !tierText) {
     console.log(launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null))
     process.exit(0)
   }
   if (cmd !== 'capacity' || !tierText || !transcript || extra.length) {
-    console.error('usage: node hooks/dctr-orchestrate.mjs capacity <tier> <transcript path> | node hooks/dctr-orchestrate.mjs launch-flags')
+    console.error(USAGE)
     process.exit(2)
   }
   let text = null
