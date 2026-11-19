@@ -17,9 +17,11 @@
 // record names, that record read after the pane. `wake` types /clear, RESUME_LINE and the nudge, each after a fresh
 // reading shows the pane ready, only when a warned line names the pane's session, the handoff landed after it, no R16
 // paused line follows it, and the session's transcript holds no turn start at or after the handoff's modification
-// time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone. Before each line it
+// time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone, and `wake`, though
+// not wake-all, types nothing into a session a warned line names, leaving its pending markers. Before each line it
 // reads again: the pane must report the session the line is for (the one it decided on, and after /clear the new
-// one the pane reports in its place), and before /clear the record, latch, handoff and transcript must still clear
+// one the pane reports in its place, which the pane's restore file must also name before RESUME_LINE), and before
+// /clear the record, latch, handoff and transcript must still clear
 // that session; otherwise it stops typing. Each wait for a ready reading gives up WAKE_GIVE_UP_MS after it starts, the
 // first at the wake's start: its pane reads and git calls are bounded by that wait's time left, none starts past it,
 // and a wait that gives up types nothing more. A line already decided on a ready reading inside the window is typed
@@ -126,6 +128,11 @@ function turnSince(pane, session, since) {
   })
 }
 
+/** Whether the pane's restore file names `session`; a file that cannot be read or parsed does not. */
+function restored(pane, session) {
+  try { return JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === session } catch { return false }
+}
+
 /** Whether a wake may clear the session: warned in the record, handoff landed after, no R16 after, no turn since. */
 function handedOff(rec, pane, session) {
   const warned = sessionWarned(rec.record.entries, session)
@@ -210,6 +217,8 @@ function deliver(pane, lane, claim, role) {
   // wake: each line typed only after a fresh reading shows the pane ready on the session that line is for, within
   // the give-up of that line's wait.
   const lines = handedOff(rec, pane, first.session) ? ['/clear', RESUME_LINE, NUDGE] : [NUDGE]
+  // A warned session that has not handed off is the cycle's to wake; wake-all still nudges it.
+  if (sub === 'wake' && lines.length === 1 && sessionWarned(rec.record.entries, first.session)) return say(`a warned line names ${first.session}: nothing typed`)
   typing.planned = lines.length
   let session = first.session
   for (const [i, line] of lines.entries()) {
@@ -220,6 +229,8 @@ function deliver(pane, lane, claim, role) {
       if (left() <= 0) return say(`${pane} never read ready: gave up before ${line}`)
       r = readPane(pane)
       if (!r) return
+      // The restore hook names only the session the /clear started, so the resume line waits for it, as create's does.
+      if (line === RESUME_LINE && r.session !== session && !restored(pane, r.session)) { sleepMs(Math.min(POLL_MS, Math.max(0, left()))); continue }
       // After /clear the pane is ready for the resume line once it reports a session other than the cleared one.
       if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || r.session !== session)) break
       sleepMs(Math.min(POLL_MS, Math.max(0, left())))

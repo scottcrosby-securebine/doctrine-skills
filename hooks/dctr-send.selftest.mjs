@@ -44,6 +44,8 @@ if (a[0] === 'pane' && a[1] === 'get') {
   if (s.listDir) entry.claims = fs.readdirSync(s.listDir).filter((f) => f.endsWith('.claim')).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(s.listDir, f), 'utf8')) } catch { return {} } })
   if (s.onFirstRead && !s.firstDone) { s.firstDone = true; fs.appendFileSync(s.onFirstRead.file, s.onFirstRead.line + '\\n'); entry.appended = true }
   s.gets = (s.gets || 0) + 1
+  // A restore file the /clear's new session writes late: on the given pane read after the /clear, before the reply.
+  if (s.restoreDue && --s.restoreDue.gets <= 0) { fs.mkdirSync(path.dirname(s.restoreDue.file), { recursive: true }); fs.writeFileSync(s.restoreDue.file, JSON.stringify({ session_id: s.restoreDue.session })); s.restoreDue = null }
   for (const x of s.events || []) if (x.n === s.gets) { if (x.file) fs.appendFileSync(x.file, x.line + '\\n'); if (x.session) s.panes[a[2]].session = x.session; entry.event = x.n }
   if (s.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.delayMs)
   if (s.paneGet === 'fail') fail('{"error":{"code":"server_error"}}')
@@ -60,9 +62,17 @@ if (a[0] === 'pane' && a[1] === 'get') {
 }
 if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send-keys']].some(([x, y]) => a[0] === x && a[1] === y)) {
   entry.typed = { pane: a[2], text: a.slice(3).join(' ') }
-  const p = s.panes[a[2]]
+  const p = s.panes[a[2]], rf = s.restore?.[a[2]]
+  // What the pane and its restore file name at the typing call, before this line changes either.
+  if (p) entry.paneSession = p.session
+  if (rf) { try { entry.restored = JSON.parse(fs.readFileSync(rf, 'utf8')).session_id } catch { entry.restored = null } }
   if (p && p.typeFail) fail('{"error":{"code":"server_error"}}')
-  if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) p.session = s.clearSession }
+  if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) {
+    p.session = s.clearSession
+    // The new session's restore hook names it in the pane's restore file, at once or after restoreAfterGets pane reads.
+    if (rf && s.restoreAfterGets) s.restoreDue = { file: rf, session: s.clearSession, gets: s.restoreAfterGets }
+    else if (rf) { fs.mkdirSync(path.dirname(rf), { recursive: true }); fs.writeFileSync(rf, JSON.stringify({ session_id: s.clearSession })) }
+  } }
   if (s.onType && entry.typed.text === s.onType.text) fs.appendFileSync(s.onType.file, s.onType.line + '\\n')
   // A slow reply: the line is delivered (logged) at once and the call returns only after runDelayMs.
   if (s.runDelayMs) { fs.appendFileSync(lg, JSON.stringify(entry) + '\\n'); fs.writeFileSync(st, JSON.stringify(s)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s.runDelayMs); process.stdout.write('{"result":{}}\\n'); process.exit(0) }
@@ -94,7 +104,7 @@ function fixture({ status = 'idle', session = 'S', laneRecord = '- State: Open\n
   const launch = `cd ${lane} && env DCTR_ROLE=a DCTR_RUN=${run} claude`
   write(path.join(run, 'lane.log'), laneLog ? laneLog(lane, launch) : `2026-11-08T09:00:00Z orchestrator create a ${PANE} ${lane} ${launch}\n`)
   const bin = path.join(dir, 'bin'); write(path.join(bin, 'herdr'), SHIM); fs.chmodSync(path.join(bin, 'herdr'), 0o755)
-  write(path.join(dir, 'shim.json'), JSON.stringify({ panes: { [PANE]: { status, session, busy: 0 } }, ...shim }))
+  write(path.join(dir, 'shim.json'), JSON.stringify({ panes: { [PANE]: { status, session, busy: 0 } }, restore: { [PANE]: at({ T }, () => restoreFile(PANE)) }, ...shim }))
   write(path.join(dir, 'shim.log'), '')
   return { dir, T, own, run, lane, handoff, record, orchRecord, bin }
 }
@@ -113,13 +123,13 @@ function sender(fx, args, { env = {}, cwd = fx.own } = {}) {
   for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k]
   return new Promise((resolve) => {
     const t0 = Date.now(), c = spawn(process.execPath, [SEND, ...args], { cwd, env: e, stdio: ['ignore', 'pipe', 'pipe'] })
-    let err = ''
-    c.stderr.on('data', (d) => { err += d })
+    let err = '', out = ''
+    c.stdout.on('data', (d) => { out += d }); c.stderr.on('data', (d) => { err += d })
     const kill = setTimeout(() => c.kill('SIGKILL'), 30000)
-    c.on('close', (code) => { clearTimeout(kill); resolve({ code, err: err.trim(), pid: c.pid, took: Date.now() - t0 }) })
+    c.on('close', (code) => { clearTimeout(kill); resolve({ code, out: out.trim(), err: err.trim(), pid: c.pid, took: Date.now() - t0 }) })
   })
 }
-const show = (fx, r) => JSON.stringify({ code: r?.code, err: r?.err, typed: typed(fx), held: held(fx).map((f) => path.basename(f)), calls: shimLog(fx).map((e) => e.argv.slice(0, 3).join(' ')) })
+const show = (fx, r) => JSON.stringify({ code: r?.code, out: r?.out, err: r?.err, typed: typed(fx), held: held(fx).map((f) => path.basename(f)), calls: shimLog(fx).map((e) => e.argv.slice(0, 3).join(' ')) })
 
 // Wake fixtures: the gauge latch for each session, the restore file naming the pane's transcript, the handoff's mtime.
 const ts = (ms) => new Date(ms).toISOString()
@@ -276,9 +286,11 @@ for (const [label, h, lines, session] of UNHANDED) {
   const fx = fixture({ session, laneRecord: `- State: Open\n${lines}` })
   handed(fx, { handoffAt: H, ...h }); unhandedFx.push([label, fx, h, session])
   const r = await sender(fx, ['wake', 'a'])
-  if (r.code !== 0 || JSON.stringify(typed(fx)) !== JSON.stringify(nudged())) unhandedBad.push(`${label}: ${show(fx, r)}`)
+  // Only the row whose warning names another session is nudged; every other row's session is warned, so nothing is typed (E15-D277).
+  const want = label === 'warned S1, the pane on S2' ? nudged() : []
+  if (r.code !== 0 || JSON.stringify(typed(fx)) !== JSON.stringify(want)) unhandedBad.push(`${label}: ${show(fx, r)}`)
 }
-clause('clause 2l — wake types only the nudge when the handoff predates the warning, the warning names another session, an R16 line follows it, the session started a turn since the handoff, its transcript is damaged, or no restore file names it (D103)',
+clause('clause 2l — wake types no /clear when the handoff predates the warning, the warning names another session, an R16 line follows it, the session started a turn since the handoff, its transcript is damaged, or no restore file names it: the nudge alone where the warning names another session, nothing where it names the pane\'s (D103, E15-D277)',
   unhandedBad.length === 0, unhandedBad.join(' || '))
 
 const burst = fixture({ status: 'working' })
@@ -943,6 +955,51 @@ const rNoTmp = await wakeAll(refusals)
 clause('clause 2x12 — wake-all refuses with no pane call contained, and with no <run>/tmpdir rather than use the system temp directory',
   rCont2.code !== 0 && rNoTmp.code !== 0 && shimLog(refusals).length === 0 && evLines(refusals).length === 0, wshow(refusals, rNoTmp))
 
+// E15-D276: after /clear the pane reports the new session at once and reads ready, and only on the third pane read
+// after it does the restore file name that session. The resume line waits for the restore file.
+const lateRestore = () => {
+  const fx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { clearSession: 'S-next', restoreAfterGets: 3 } })
+  handed(fx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+  return fx
+}
+const lateFx = lateRestore()
+const rLateRestore = await sender(lateFx, ['wake', 'a'])
+const resumeAt = shimLog(lateFx).filter((e) => e.typed?.text === RESUME_LINE)
+clause('clause 2z — wake on a handed-off pane whose restore file names the new session only some pane reads after /clear: /clear and the resume line typed once each, the resume line only once the restore file names the session herdr reports (E15-D276)',
+  rLateRestore.code === 0 && JSON.stringify(typed(lateFx)) === JSON.stringify([`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`, `${PANE}|${NUDGE}`]) &&
+  resumeAt.length === 1 && resumeAt[0].paneSession === 'S-next' && resumeAt[0].restored === 'S-next', show(lateFx, rLateRestore) + ` at the resume line ${JSON.stringify(resumeAt.map((e) => [e.paneSession, e.restored]))}`)
+
+// The same pane whose restore file never names the new session: the wake gives up before the resume line.
+const neverFx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { clearSession: 'S-next', restoreAfterGets: 1e9 } })
+handed(neverFx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+const rNever = await sender(neverFx, ['wake', 'a'])
+clause('clause 2z2 — wake on a handed-off pane whose restore file never names the new session: /clear typed, then nothing more, the wake giving up by itself (E15-D276)',
+  rNever.code === 0 && JSON.stringify(typed(neverFx)) === JSON.stringify([`${PANE}|/clear`]) && /gave up before/.test(rNever.out) && rNever.took <= 21000, `${rNever.took} ms; ${show(neverFx, rNever)}`)
+
+// E15-D277: a warned session not handed off (its handoff predates the warning), with one held message and its marker;
+// its twin carries no warned line. wake types nothing into the first and nudges the second; wake-all nudges the first.
+const HELD = '20261118T000000000Z.1.md'
+const warnedFx = (warned) => {
+  const fx = fixture({ laneRecord: `- State: Open\n${warned ? '- auto-cycle: warned S 20%\n' : ''}` })
+  handed(fx, { latch: ['S'], warnedAt: H + 60000, handoffAt: H, session: 'S', transcript: clean })
+  write(path.join(fx.run, 'held/a', HELD), 'probe message'); write(path.join(fx.run, 'pending/a', HELD), '')
+  return fx
+}
+const wWarned = warnedFx(true), wTwin = warnedFx(false)
+const rWarned = await sender(wWarned, ['wake', 'a']), rTwin = await sender(wTwin, ['wake', 'a'])
+clause('clause 2z3 — wake on a warned session that has not handed off types nothing, prints that a warned line names it, and leaves the held message and its pending marker; its twin with no warned line is nudged once (E15-D277)',
+  rWarned.code === 0 && typed(wWarned).length === 0 && /a warned line names S: nothing typed/.test(rWarned.out) &&
+  fs.readFileSync(path.join(wWarned.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(wWarned), [HELD]) &&
+  rTwin.code === 0 && JSON.stringify(typed(wTwin)) === JSON.stringify(nudged()) && same(pendingOf(wTwin), []),
+  show(wWarned, rWarned) + ' ' + show(wTwin, rTwin))
+
+const waWarned = wakeFx({ a: { session: 'S' } }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+write(waWarned.record, '- State: Open\n- auto-cycle: warned S 20%\n')
+handed(waWarned, { latch: ['S'], warnedAt: H + 60000, handoffAt: H, session: 'S', transcript: clean })
+const rWaWarned = await wakeAll(waWarned)
+clause('clause 2z4 — wake-all on a warned session that has not handed off still nudges it once and reports it woken (E15-D277)',
+  rWaWarned.code === 0 && JSON.stringify(typedTo(waWarned, 'a').map((e) => e.typed.text)) === JSON.stringify([NUDGE]) && JSON.stringify(rWaWarned.words) === '["a woken"]', wshow(waWarned, rWaWarned))
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 const probe = fixture()
@@ -1274,6 +1331,26 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   const g = herdr('pane', 'get', PANE), afterGet = fs.readdirSync(dir), t = herdr('pane', 'run', PANE, NUDGE), afterType = fs.readdirSync(dir)
   clause('clause 3m2 — without the sender: 2y3\'s shim writes no marker on a pane read, and writes B.md under pending/a/ on the nudge\'s typing call, which succeeds',
     g.status === 0 && afterGet.length === 0 && t.status === 0 && same(afterType, ['B.md']), JSON.stringify([g.status, afterGet, t.status, afterType]))
+}
+
+// E15-D276 and E15-D277, without the sender: the late-restore shim reports the new session ready at once after /clear
+// and names it in the restore file only on the third pane read after; the never shim never names it; the warned
+// fixture's record names S with its handoff older than the warning, its twin's record names no session.
+{
+  const fx = lateRestore(), rf = at(fx, () => restoreFile(PANE)), herdr = (...a) => spawnSync(path.join(fx.bin, 'herdr'), a, { encoding: 'utf8' })
+  const named = () => { try { return JSON.parse(fs.readFileSync(rf, 'utf8')).session_id } catch { return null } }
+  const before = named(), c = herdr('pane', 'run', PANE, '/clear'), seen = []
+  for (let i = 0; i < 3; i++) { const p = JSON.parse(herdr('pane', 'get', PANE).stdout).result.pane; seen.push([p.agent_session.value, p.agent_status, named()]) }
+  clause('clause 3z — without the sender: the late-restore shim, after /clear, reads S-next idle at once while the restore file still names S, and names S-next there only on the third pane read',
+    before === 'S' && c.status === 0 && same(seen, [['S-next', 'idle', 'S'], ['S-next', 'idle', 'S'], ['S-next', 'idle', 'S-next']]), JSON.stringify([before, c.status, seen]))
+  const n = fixture({ shim: { clearSession: 'S-next', restoreAfterGets: 1e9 } }), nrf = at(n, () => restoreFile(PANE))
+  spawnSync(path.join(n.bin, 'herdr'), ['pane', 'run', PANE, '/clear']); for (let i = 0; i < 5; i++) spawnSync(path.join(n.bin, 'herdr'), ['pane', 'get', PANE])
+  clause('clause 3z2 — without the sender: the never shim, after /clear and five pane reads, has written no restore file',
+    !fs.existsSync(nrf), nrf)
+  const w = warnedFx(true), t = warnedFx(false), entries = (x) => parseRecord(fs.readFileSync(x.record, 'utf8')).entries
+  clause('clause 3z3 — without the sender: the warned fixture names S in a warned line and its handoff predates the warning, its twin names no session, and each holds the held message and its marker',
+    sessionWarned(entries(w), 'S') !== null && !handoffLanded({ handoffPath: w.handoff, memoryPath: memory(w), warnedAt: latchOf(w, 'S') }) && sessionWarned(entries(t), 'S') === null &&
+    [w, t].every((x) => fs.readFileSync(path.join(x.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(x), [HELD])), 'warned fixtures wrong')
 }
 
 process.exit(bad ? 1 : 0)
