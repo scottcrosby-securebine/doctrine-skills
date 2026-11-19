@@ -4,7 +4,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="drawn-from" content="skills/doctrine-orchestrate/SKILL.md@d1e2b0903d31385b2e1a6183cced7bd6f019e12c">
+<meta name="drawn-from" content="skills/doctrine-orchestrate/SKILL.md@86736e40a47d70eb3549b174a55b2d47eb418222">
 <title>Figure: doctrine-orchestrate</title>
 <link rel="stylesheet" href="figure.css">
 </head>
@@ -23,9 +23,9 @@
     <div class="arrow">→</div>
     <div class="box"><b>Ask once</b><span>model id, tier and cycle cap per role; the time budget</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>Capacity</b><span>dctr-orchestrate.mjs capacity: accept, or the role does not start</span></div>
+    <div class="box"><b>Capacity</b><span>the orchestrator runs dctr-orchestrate.mjs capacity on its own transcript</span></div>
     <div class="arrow">→</div>
-    <div class="box"><b>Start</b><span>watcher, merge session, guard probe, then each lane</span></div>
+    <div class="box"><b>Start</b><span>watcher, merge session, guard probe, then each lane; each new session runs capacity on itself first</span></div>
   </div>
 </section>
 
@@ -53,7 +53,7 @@
   <p>Ends: each session told the run ended, then the watcher stops.</p>
 </section>
 
-<footer class="foot">Drawn from skills/doctrine-orchestrate/SKILL.md at blob d1e2b09</footer>
+<footer class="foot">Drawn from skills/doctrine-orchestrate/SKILL.md at blob 86736e4</footer>
 <script src="figure.js"></script>
 </body>
 </html>
