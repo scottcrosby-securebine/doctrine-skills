@@ -239,9 +239,8 @@ function create() {
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
   const made = [`the worktree ${wt}`]
-  let tabId = null, script = null, resumeTyped = false
+  let tabId = null, pane = null, script = null, resumeTyped = false
   const fail = (why) => {
-    // Before RESUME_LINE no session holds the lane's work, so what create made is undone and the role can be created again.
     const left = resumeTyped ? null : undo()
     if (left === '') process.stderr.write(`dctr-lane: create failed, ${why}; undid what it made (${undid.join(', ')}), and lane.log not written\n`)
     else process.stderr.write(`dctr-lane: create failed, ${why}; ${[left, made.length ? `made ${made.join(', ')}, left in place` : ''].filter(Boolean).join(', so ')}, and lane.log not written\n`)
@@ -253,7 +252,7 @@ function create() {
    *  integration branch) and the launch file. Returns '' when all is undone, else why it stopped, having removed nothing
    *  past that step; a tab close that fails other than the tab being gone removes nothing. */
   const undo = () => {
-    if (made.length > 1 && !tabId) return 'tab create returned no tab id to close'
+    if (pane && !tabId) return 'tab create returned no tab id to close'
     if (tabId) {
       try { herdr(['tab', 'close', tabId]) } catch (e) { if (!isTabNotFound(e)) return `the tab ${tabId} could not be closed (${why(e)})` }
       undid.push(`closed the tab ${tabId}`)
@@ -276,7 +275,6 @@ function create() {
   try {
     git(repo, 'worktree', 'add', '--quiet', ...(merge ? [wt, base] : ['-b', role, wt, base]))
   } catch (e) { refuse(`git worktree add failed (${why(e)})`) }
-  let pane = null
   try {
     const real = fs.realpathSync(wt)
     const escapes = [handoffRel, header.record, MEMORY].filter((p) => !inside(real, realish(path.resolve(wt, p))))

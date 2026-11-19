@@ -4242,7 +4242,7 @@ const MUTATIONS = [
     from: 'if (!isTabNotFound(e)) return `the tab', to: 'if (true) return `the tab' },
   { name: 'a tab create with a pane and no tab id goes on to remove the worktree', file: 'dctr-lane.mjs',
     clause: 'clause 1by3 — when tab create answered a pane and no tab id, create closes nothing, removes nothing ... (E15-D266)',
-    from: 'if (made.length > 1 && !tabId) return', to: 'if (false) return' },
+    from: 'if (pane && !tabId) return', to: 'if (false) return' },
   { name: "the sender reads the pane holding no claim on it", file: "dctr-send.mjs",
     clause: "clause 2e \u2014 the sender takes its claim before it reads the pane",
     from: "writeMarker(claim, { pid: process.pid, pane: lane.pane })\n",
