@@ -1,7 +1,7 @@
 # Requirements
 
 The two hard requirements in full, the one-time auto-cycle setup, then every optional integration and what happens without it. The
-[README](../README.md#requirements) names them all; this page is the detail.
+[README](../README.md#requirements) names them all; this page is the detail. [What runs on your machine](what-runs.md) lists every script the plugin's hooks run and every one its skills invoke.
 
 ## A browser, for `doctrine-gauntlet`
 
@@ -20,16 +20,16 @@ The README states the requirement. The detail it leaves out: inside a container 
 process on the host, so a contained session refuses for the same reason a non-herdr one does. See
 [watching a run](watching-a-run.md).
 
-`doctrine-orchestrate` puts every session of a run, the orchestrator, each lane and the merge session, in its own herdr pane, and its sender types into those panes and its lane watcher reads them, so without herdr, or in a contained session, it refuses to start a run and says why. Install herdr's Claude integration (`herdr integration install claude`) so herdr reports which session each pane runs, and set up auto-cycle, below, since each session of the run cycles on its own.
+`doctrine-orchestrate` puts every session of a run, the orchestrator, each lane and the merge session, in its own herdr pane, and its sender types into those panes and its lane watcher reads them, so without herdr, or in a contained session, it refuses to start a run and says why. It also refuses on Codex and in a repo without `docs/PROJECT.md`, and stops before the run starts unless every repo of the run already ignores `SESSION_MEMORY.md`, `docs/handoffs/` and the project's records folder in `.gitignore`. Install herdr's Claude integration (`herdr integration install claude`) so herdr reports which session each pane runs, and set up auto-cycle, below, since each session of the run cycles on its own.
 
-For everything else except auto-cycle, below, the herdr integration is optional and runs outside the skills entirely: without it the hooks bow out and doctrine behaves exactly as it does today; only the pane is missing.
+For everything else except auto-cycle, below, herdr is optional and runs outside the skills entirely. Without it there are no seat or gate panes and no sidebar tokens, and a gate runs detached, or to completion inside Codex's Linux sandbox, and writes the same result files. The hooks that do not need a pane, such as the restore after `/clear` and the orchestrator's write guard, run either way. On Codex, the seat panes and `doctrine-pane` also need the doctrine hooks installed, below.
 
 ## Auto-cycle setup
 
-Auto-cycle is off by default, and a phase switches it on in its own record. These are needed only to use it:
+Auto-cycle is off by default. A phase switches it on by appending an `auto-cycle: on` line to its record and then writing a handoff, since the hooks find the record only through the memory file's kickoff and the handoff it names. These are needed only to use it:
 
 - **herdr**, with the session running in a herdr pane. Auto-cycle types `/clear` and the resume command into that pane, and it asks herdr which Claude session the pane runs, which herdr reports once its Claude integration is installed: `herdr integration install claude`. Outside a herdr pane, the Stop that would cycle pauses instead and writes `auto-cycle paused: could not type into the pane: this session is not in a herdr pane` to the record. The [`$autocycle` sidebar row](watching-a-run.md) shows the pause at a glance.
-- **Auto-compaction off**: `claude config set -g autoCompactEnabled false`. It is a global config key, stored in `~/.claude.json`, not a settings.json key. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
+- **Auto-compaction off**: set the Auto-compact row in `/config` to off. The phase resets by `/clear` after a handoff, and a compaction mid-phase discards the session's context and the gauge's reading.
 - **The statusline bridge**, which tells the context gauge the session's window size and how much of it is used:
 
   ```text
@@ -40,15 +40,27 @@ Auto-cycle is off by default, and a phase switches it on in its own record. Thes
 
   Without it, while auto-cycle is on, the gauge reports the window as unknown on every batch: a tier given in tokens still warns, and a percent or default tier cannot resolve and does not.
 
+On Codex CLI the steps differ:
+
+- **The doctrine hooks**, installed into your Codex home, with `--codex-home <dir>` for a home other than `$CODEX_HOME` or `~/.codex`:
+
+  ```text
+  node <plugin-root>/hooks/dctr-codex.mjs install
+  ```
+
+  Re-run it after every plugin update. Without it none of auto-cycle's hooks run on Codex, and neither do the seat panes or the restore after `/clear`. `skills/doctrine/references/codex.md` says what the install writes.
+- **herdr**, with the session running in a herdr pane.
+- **A tier below Codex's compaction point.** Codex has no setting that turns automatic compaction off, and by default it compacts at 90% of the window, so set the tier on the record's on line low enough that the warning and the handoff after it finish first. The statusline bridge is not needed there: the gauge reads the window from the session's own rollout.
+
 ## Optional integrations and their fallbacks
 
 Each entry says what happens when it is missing. Every one has a fallback, and a tool that is installed but reports itself unusable degrades the same way rather than stalling the run.
 
 - [Matt Pocock's engineering skills](https://github.com/mattpocock/skills): `diagnosing-bugs`, `tdd`, `implement`, `improve-codebase-architecture`, `code-review`. The wrappers invoke these by name and never fork their content.
 
-  **Install standalone, not as the `mattpocock-skills` plugin.** The wrappers call them by bare name and read `~/.claude/skills/<name>/SKILL.md`; a plugin install namespaces them as `mattpocock-skills:<name>` instead. Copy the `skills/engineering/<name>/` folders into `~/.claude/skills/`.
+  **Install standalone, not as the `mattpocock-skills` plugin.** The wrappers call them by bare name and read their `SKILL.md` from your host's skill folder; a plugin install namespaces them as `mattpocock-skills:<name>` instead. Copy the `skills/engineering/<name>/` folders into `~/.claude/skills/` on Claude Code, or into `~/.agents/skills/` on Codex CLI, which also reads `.agents/skills/` in the project and `$CODEX_HOME/skills/`.
 
-  One special case: install `code-review` as `matts-code-review`, because the original name collides with Claude Code's own `/code-review`. Copy it to `~/.claude/skills/matts-code-review/` and set its frontmatter `name:` to match. It is a copy, not a symlink, so re-sync it when his repo changes.
+  One special case: install `code-review` as `matts-code-review`, because the original name collides with Claude Code's own `/code-review`. Copy it to `matts-code-review/` in that same folder and set its frontmatter `name:` to match. It is a copy, not a symlink, so re-sync it when his repo changes.
 
   Without them: the `doctrine` skill's fallback table names a substitute for each. `matts-code-review` degrades to `/code-review` or two parallel review subagents.
 
@@ -56,9 +68,9 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 
   Without it: parallel Agent calls with check output pasted before claiming done, `git worktree add` for isolation, and a one-question-at-a-time interview for brainstorming.
 
-- [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), plus the Codex CLI logged in. Run `/codex:setup` to verify. Supplies the default red team, `doctrine-research`'s second engine, and the gauntlet's image generation.
+- [OpenAI's codex plugin](https://github.com/openai/codex-plugin-cc), plus the Codex CLI logged in. Run `/codex:setup` to verify. Supplies the default red team and `doctrine-research`'s second engine. `doctrine-gauntlet` is the exception: it calls the Codex CLI itself (`codex exec`) for its image generation and its visual red team, so it needs the `codex` command, not the plugin.
 
-  Without it, or with the plugin installed and its CLI unreachable: a fresh-context subagent prompted to refute. Research loses cross-model diversity and says so in its report; the gauntlet directs native CSS, SVG and canvas art instead of generated assets.
+  Without it, or with the plugin installed and its CLI unreachable: a fresh-context subagent prompted to refute. Research loses cross-model diversity and says so in its report. With no `codex` command, or a generation seat that failed both retries, the gauntlet directs native CSS, SVG and canvas art instead of generated assets.
 
 - On Codex CLI, the Claude Code CLI (`claude`), installed and signed in, and run from a Codex shell outside Codex's per-call sandbox, for example a session started with `--dangerously-bypass-approvals-and-sandbox` and no managed network. On Linux, inside that sandbox, the detached seat ends when its shell call returns. `skills/doctrine/references/codex.md` says what is known on each platform. It supplies the red team from the other model family and `doctrine-research`'s second engine there, run as `skills/doctrine/references/codex.md` gives. That file's chunked reads also use `python3`.
 
@@ -76,7 +88,7 @@ Each entry says what happens when it is missing. Every one has a fallback, and a
 
   Without it: a fan-out of web-search agents with per-claim adversarial verification.
 
-- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it, nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script where the other-family red-team seat (the codex plugin's, on Claude Code) is absent. With that seat present, the round runs through `harness/round.codex.mjs` instead, which needs nothing installed, so its red team reaches the other model family.
+- **Claude Code's Workflow tool**, built into Claude Code on hosts that carry it, nothing to install. Lets one gauntlet round run as a journaled, crash-resumable script where the other-family red-team seat (Codex, on Claude Code) is absent. With that seat present, the round runs through `harness/round.codex.mjs` instead, which needs nothing installed, so its red team reaches the other model family.
 
   Without it: the round runs through `round.codex.mjs` on Codex and wherever the other-family red-team seat is present, and otherwise the prose flow in the skill is the round, unchanged.
 

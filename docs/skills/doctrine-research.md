@@ -1,113 +1,180 @@
 # doctrine-research
 
-Research under the doctrine: two engines answer the same question without seeing each other, their claims merge into one table, and the report recommends only what that table carries.
+Use it when you need an answer you do not have yet: a question spread across many sources, where a wrong answer is expensive and you want a recommendation whose claims are each tagged with where they came from. Two engines from different model families answer the question without seeing each other. Their claims merge into one table, every gap gets written down, and the report recommends only what the table carries.
 
-![Two engines run blind on one question, merge into a claim table with a gap ledger, and loop through a logic critique and a red team until a pass comes clean or the prose-deliverable closing round ends the phase.](doctrine-research.png)
-
-The figure shows the shape of a run in two rows: round 1 runs the anchor into two engines and out to the claim table; the second row is the logic critique, the gap ledger, the gap-fill fan-out, the red team and delivery, with the loop bracket under gap ledger through red team, labelled with what each loop runs. Its footnotes are the independence rule, native checks, the report's sections and the honest-unknown rule.
+![Round 1 sends the anchor to two blind engines whose claims merge into a claim table. Then a logic critique reads the merged research, the gap ledger lists what is missing, and each loop runs gap-fill, a red team and the critique again until a pass comes clean or the closing round delivers.](doctrine-research.png)
 
 ## When to use it, and when not
 
-Use it when you have a multi-source research question that needs a grounded, fact-checked recommendation: something where the answer is spread across web pages, docs and vendor claims, where a wrong answer is expensive, and where you want to see which claims two independent sources agree on and which they do not.
+It fires when you ask for deep research done with the doctrine: a multi-source question that needs a grounded, fact-checked recommendation.
 
-Do not use it for a quick fact lookup. A plain search answers that faster and the gate would cost more than the answer is worth. Do not use it for questions about your own codebase: that is `doctrine-audit`, which reads code rather than sources.
+Do not use it for a quick fact lookup, which a plain search answers faster. Do not use it for questions about your own code: that is [`doctrine-audit`](doctrine-audit.md), which reads code, not sources.
 
-The boundary against the two other prose wrappers is what the deliverable is. `doctrine-write` produces a document you already know the content of, a proposal, a brief, a PRD, a report, and its gate is about the prose being clear, accurate and airtight. `doctrine-docs` sweeps existing documentation against the current implementation. `doctrine-research` produces an answer you do not yet have, and its gate is about whether every claim behind that answer traces to a source someone actually fetched.
+Against the other prose skills, the line is what you start with. [`doctrine-write`](doctrine-write.md) writes a document whose content you already have. [`doctrine-docs`](doctrine-docs.md) brings existing documentation in line with the code. `doctrine-research` produces the content itself, and `doctrine-write` can run after it to turn the report into a finished document.
+
+It is a wrapper: it loads the [`doctrine`](doctrine.md) skill first and takes its posture from there. The hub supplies the record, the gate, the two alarms and the end states. This skill supplies the research shape: the engines, the claim table, the gap ledger and what blocks in a report. A phase is one research question, and the hub's loop runs inside it. The dossier, described below, is the hub's record for that phase.
 
 ## What it asks you first
 
-Before any engine is dispatched, the run asks you whichever of three things your request left open and writes the answers, and what you already supplied, down verbatim as the anchor:
+Before any engine starts, it asks whichever of these your request left open:
 
-- The decision this research informs.
+- The decision the research informs.
 - Its success criteria.
 - Its scope bounds: timeframe, region, budget, constraints.
 
-Scope is part of the anchor, not a note beside it. Research that answers the right question about the wrong region has drifted, and a critique that holds the anchor without the bounds cannot see that.
+All three, in your own words, are the anchor, the standard every later check compares against. Where the research serves an epic in a repo that tracks one, the anchor also carries the Done means items it serves. Scope sits inside the anchor because research that answers the right question about the wrong region has drifted, and a critique cannot see that without the bounds.
 
-It then asks where the report should land. The suggested form is a `docs/` subfolder of the current project, such as `docs/research/YYYY-MM-DD-<topic>.md`. That destination is agreed once, at kickoff, so delivery needs no second ask.
+It then asks where the report should land, suggesting `docs/research/YYYY-MM-DD-<topic>.md` in the current project. That answer is also your permission to write and commit the report there, so delivery does not ask again.
 
-A question only you can answer, and where the work would be aimed differently depending on the answer, blocks the run until you answer it (doctrine step 1). A value missing inside a direction you have settled does not block: the report carries a visible unknown in that spot, never a guess.
+A question only you can answer, where the work would be aimed differently depending on the answer, blocks the run until you answer it. A value missing inside a direction you have settled does not block: the report shows it as an unknown, never a guess.
+
+Later it may come back to you with three more things:
+
+- **A divergence flag.** When the data suggests the real question differs from the one you asked, the logic critique says so, and you decide whether to re-aim or stay. It never pivots on its own.
+- **An alarm.** When the loop runs long, it stops and puts a diagnosis to you (see [How it ends](#how-it-ends)).
+- **The dossier.** At delivery, whether the working file ships beside the report or is dropped.
 
 ## How the work runs
 
-The wrapper maps its shape onto the hub like this. A phase is one research question, and the hub's loop (doctrine step 5) runs inside it. The dossier, one file opened before the first engine goes out, is the hub's record (doctrine step 1): it holds the anchor, the claim table as it currently stands, and the gap ledger.
+### The dossier
 
-Round 1 is dual-engine. Two engines get the same refined question, concurrently, and neither sees the other's output. Engine 1 is Claude, through the stock `deep-research` workflow. Engine 2 is the codex plugin's `codex:codex-rescue` agent, run as a read-only research task, with every claim it returns tagged `[web]` with a fetchable URL or `[model-knowledge]`. Independence is what makes the cross-examination mean anything: a second engine that critiques your draft is anchored to your frame and finds only your kind of gaps.
+Before the first engine goes out, the run opens one working file, the dossier, beside the report with a `-worknotes` suffix (`docs/research/YYYY-MM-DD-<topic>-worknotes.md`). Where that directory is not writable, or you do not want working files in the repo, it goes in the session's scratchpad instead. It holds the anchor, the claim table as it stands, the gap ledger, and a settled section listing every divergence and finding you have ruled on. Loop counts and round history sit under a trailing `## Run state (orchestrator only)` heading that no reviewer is handed, so no reviewer knows how badly a pass needs to come clean.
 
-The run checks whether engine 2 can actually search before counting it as a second sourced engine. That agent's only tool is Bash and it shells out to the Codex CLI, whose web search is opt-in per user config, so on a default install engine 2 answers from model knowledge. The run reads the `web_search` setting in `~/.codex/config.toml` before dispatch and checks again on return: a `[web]` tag with no URL you can fetch is model knowledge whatever it says. The dispatch also says to run in the foreground, because that agent prefers background execution for open-ended work and cannot fetch its own results, so a deep question otherwise comes back as a job handle.
+The run pastes what each agent needs into its prompt rather than pointing at the file. An agent pointed at a file works from its own summary of it.
 
-The merge (the wrapper's step 3) puts every claim into one table under one of four labels: agree, where both engines assert it; conflict, where they disagree and both sides are kept with their sources, since conflicts are report content and are never resolved silently; single-engine, unverified until a second source or a check confirms it; and unknown. An unsourced engine 2 does not turn an agreement into corroboration. A claim both engines assert when one of them answered from memory is one search result plus one recollection, and the table files it as single-engine, model-corroborated, with the report saying plainly that the run had one sourced engine. What an unsourced engine 2 is still good for is divergence: where it contradicts engine 1 it has found you something to go and check.
+### Round 1: two engines, blind
 
-Then the loop. Every unknown and every unverified claim gets a gap ledger entry recording what is missing and what was already tried. Each loop is a targeted gap-fill fan-out over ledger items only, never a full re-run, then a red-team round, then the logic critique re-run on whatever changed. Parallel seats go out the way the hub says (doctrine step 2), and the loop ends the way the hub's prose-deliverable exit says (doctrine step 5). Delivery (doctrine step 7) writes the report to the agreed path and commits it by your project's norm.
+Both engines get the same refined question at the same time, and neither sees the other's output. Independence is the point: an engine that reads the run's draft first finds only that draft's kind of gaps.
+
+| | Engine 1, your own model family | Engine 2, the other model family |
+|---|---|---|
+| On Claude Code | the built-in `deep-research` workflow, unmodified | the codex plugin's `codex:codex-rescue` agent, which shells out to the Codex CLI |
+| On Codex | a fan-out of web-search agents, each claim adversarially verified | the Claude Code CLI run headless (`claude -p`), with web search and fetch allowed |
+
+Engine 2 runs as a read-only research task and tags every claim `[web]` with a fetchable URL, or `[model-knowledge]`. The run checks that it can really search before counting it as a second sourced engine, and checks again on return: a `[web]` tag with no URL that fetches is model knowledge. On Claude Code that means reading the top-level `web_search` setting in `~/.codex/config.toml`. Only `"live"` reaches the live web. On Codex, engine 2 searches with the web search and fetch tools it is allowed, and it is engine 1 that needs `web_search = "live"`, in `$CODEX_HOME/config.toml`.
+
+On Claude Code the dispatch asks engine 2 to run in the foreground, because the codex agent tends to background open-ended work. If a job handle comes back anyway, the run retrieves the result with `/codex:status <job-id>`. A handle is never merged as an answer: an engine 2 that has not returned by merge time is unavailable, and the report says so.
+
+### The claim table
+
+The merge files every claim under one of four labels:
+
+- **Agree**: both engines assert it.
+- **Conflict**: they disagree. Both sides stay, with their sources. A conflict is report content and is never resolved silently.
+- **Single-engine**: unverified until a second source or a check confirms it.
+- **Unknown**: neither engine established it.
+
+An engine 2 that answered from memory does not corroborate anything. A claim both engines assert, when one of them only recalled it, is filed as single-engine, model-corroborated, and the report says plainly that the run had one sourced engine. Such an engine still earns its place by disagreeing: where it contradicts engine 1, the conflict gets a fetch.
+
+### The logic critique and the gap ledger
+
+A dedicated agent reads the merged research for unsupported leaps, circular sourcing (many citations tracing to one origin), survivorship and recency bias, adjacent questions conflated, and drift from the anchor. Its prompt carries the anchor verbatim and names the divergence flag described above as a return format. Your ruling goes into the dossier's settled section, so the next loop's fresh critique does not reopen it. If a later reviewer files a question you already ruled on and the run accepts it, that is a blocking finding against the pass it lands in.
+
+Every unknown and every unverified claim then gets a gap ledger entry: what is missing and what was already tried.
+
+### The loop
+
+Each loop is:
+
+1. **Gap-fill**: a targeted fan-out over ledger entries only, never a full re-run. Each agent gets the anchor, its entries with the searches already tried, and the tag rule.
+2. **Red team**: attacks the claim table and the drafted report together, holding the gap ledger so it does not repeat searches already tried. It refutes and extends the table, and anything it adds carries engine 2's tag rule, stated in its prompt, and counts only once verified from its cited source.
+3. **Logic critique** again, on whatever changed.
+
+Before either reviewer goes out, the run fetches every citation and hands both reviewers its URL and the excerpt the claim rests on, both engines' original returns, the rule that an unsourced engine 2 does not corroborate, the blocking instances below and your settled rulings. Neither reviewer opens a link, so without the excerpts neither could see a misread citation.
 
 ## What the gate is for this shape
 
-The hub's gate has three parts and the wrapper fills each slot.
+The hub's gate has three parts, and this skill fills each one:
 
-Native checks (doctrine step 3) take the docs-diff form, since there is no code to run: re-verify every edited claim against the source it cites, then run a link and path check, every URL fetched and still carrying the cited content, every repo path or filename in the report resolved on disk. A citation that 404s, redirects to a homepage, or no longer says what you quoted is a blocking finding, and nothing else in the flow looks for one: the red team argues about claims and the logic critique argues about reasoning, and neither opens a link. On top of that come whatever checks your project documents as a gate for the directory the report lands in, a markdown linter, a docs build, a link checker, read from your task runner rather than assumed absent. Where the destination has none, the docs-diff form is the whole of native checks.
+- **Native checks**: every claim edited since the last pass is re-verified against its cited source. Every URL is fetched again and must still carry the cited content, and every repo path must resolve. On top of that runs whatever your project documents as a gate for the directory the report lands in, such as a Markdown linter or a link checker, read from your task runner rather than assumed absent. Where the destination has none, the fetch and path check is the whole of native checks. The reviewers never open a link and nothing else checks that a citation still holds, so a dead citation is caught here or nowhere.
+- **Designated review**: the logic critique. The report's Method appendix says so.
+- **Red team**: the other-model-family seat, attacking the table and the report together.
 
-The designated review is the logic critique: a dedicated agent that reads the merged research for unsupported leaps, circular sourcing (many citations tracing to one origin), survivorship and recency bias, conflated adjacent questions, and drift from the anchor. It is handed the anchor verbatim, because its whole drift axis is drift from the anchor, and a critique handed the findings alone grades them against themselves. It is also told that a divergence flag is a return format: if the data suggests the real question differs from the one you asked, it returns that as a named finding, and the run puts it to you on receipt. Re-aim or stay is your call. Your ruling goes into the dossier's settled section, so the next loop's fresh critique does not re-open it. Both reviewers, the critique and the red team, are also handed for each citation its URL and the excerpt fetched from it that the claim rests on (fetched before dispatch, since neither opens a link), both engines' original returns beside the merged table, the merge rule that an unsourced engine 2 does not make an agreement corroborated, and the research blocking instances below.
+A finding blocks the pass when it is:
 
-The red team (doctrine step 4), handed the same evidence as the critique plus the gap ledger with its "already tried" column, attacks the merged claim table and the drafted report together, never a single source or a lone finding, because a table without the report's conclusion cannot catch a conclusion the table does not carry. Its axes are the wrapper's blocking instances: a dead, redirected or misread citation; a chain of citations that widens to four sources and narrows to one origin while the report calls it corroborated; a conclusion the claim table does not carry; drift off the anchor; a gap neither closed nor written up; a failed native check. It both refutes and extends the table, and anything it adds is verified from its cited source before it counts. One more confirming source on a claim already sourced is non-blocking and goes on the deferred list; a cleaner phrasing is not a finding.
+- a dead, redirected or misread citation;
+- a chain of citations that narrows to one origin while the report calls it corroborated;
+- a conclusion the claim table does not carry;
+- drift off the anchor;
+- a gap neither closed nor written up;
+- a failed native check.
 
-The record lives beside the report, the agreed destination with a `-worknotes` suffix (`docs/research/YYYY-MM-DD-<topic>-worknotes.md`), or in the scratchpad where that directory is not writable or you do not want working files in the repo. Either way the Method appendix names its path, and at delivery the run asks whether it ships beside the report or is dropped. Its counters and round history sit under a trailing run-state heading marked orchestrator-only, which no reviewer is handed: a red team told how badly the pass needs to be clean holds the one fact it must not.
+One more confirming source for a claim already sourced does not block. It goes on a deferred list named at delivery. A cleaner phrasing is not a finding at all.
 
-The exit is the hub's prose-deliverable exit, adopted by name, with one research-shaped precondition on its closing round: every remaining gap closed or written up as unanswerable with the attempts shown. A pass is clean when it produces no blocking finding and leaves none outstanding from an earlier pass. "No new findings" is not the test: an unsupported leap filed in loop 3 and filed again in loop 4 is outstanding, not new. When the round alarm first fires without a clean pass, the gap ledger as it stands goes to you inside the hub's diagnosis, and unless you say stop the run takes one closing round scoped to the diff since the last fully reviewed revision, or to the whole deliverable where no revision was fully reviewed, subject to the gap precondition above, then ends the phase as Shipped at an escalation, with a punch list of what it did not fix, named in the delivery line. The time alarm is separate and does wait: by default it fires two hours after the last round closed, or after the phase opened where none has, puts the same diagnosis to you, and the run continues only on your ruling.
+A pass is clean when it raises no blocking finding and none stands open from an earlier pass. "No new findings" is not the test: a leap filed in loop 3 and filed again in loop 4 is still outstanding.
 
-When a dependency is missing: without the `deep-research` workflow, engine 1 is a fan-out of parallel web-search agents with per-claim adversarial verification. Without the codex plugin, engine 2 is a fresh-context subagent with web access, and the report notes that engine diversity was reduced. If engine 2 returns a job handle and has not returned by the time you would merge, it is treated as unavailable and the report says so. The logic critique is a fresh agent and needs nothing installed.
+### How it ends
+
+The exit is the hub's prose-deliverable exit. The phase exits on one clean pass of all three parts. If no pass has come clean when the round alarm first fires (by default after four rounds that found a blocking finding), you get a diagnosis with the gap ledger as it stands inside it. Unless you say stop, one closing round then runs, scoped to the changes since the last fully reviewed revision, or to the whole report if none was. Before that round, every remaining gap must be closed or written up as unanswerable, with the attempts shown. The phase then ends Shipped at an escalation, with a punch list of what it did not fix.
+
+The time alarm is separate: it stops the loop, puts the same diagnosis to you and waits for your ruling. By default it fires two hours after the last round closed, or, if no round has closed yet, two hours after the phase opened. Both defaults give way to your own figures when you state them at the start.
+
+A run ends in one of the hub's five states: Exited (the only clean one), Stopped, Shipped at an escalation, Blocked on a question only you can answer, or Unable to continue. The dossier records which. Delivery opens with one line saying whether the report is certified, which blocking findings are still open, the diff between certified and shipping where they differ, and any punch list.
+
+Delivery writes the report to the agreed path and commits it by your project's norm. Its sections, in order:
+
+1. **Recommendation**, bottom line first, grounded in the claim table.
+2. **Findings**, ranked by confidence, each cited and tagged both-engines, single-engine or contested.
+3. **Conflicts**.
+4. **Gaps and unknowns**.
+5. **Divergence notes**, if any, and how you ruled.
+6. **Method appendix**: loops run, sources, red-team rounds, the logic critique named as the designated review, which native checks ran and which could not and why, the deferred list, and the dossier's path.
+
+In chat you get the recommendation and anything that needs your judgment.
 
 ## A worked example
 
 This example is illustrative: it shows the shape of a run, not a recorded one.
 
-You ask for research on which of three managed message queues to adopt for an internal event bus. The run asks first. The decision: which queue the platform team commits to for the next contract term. Success criteria: at-least-once delivery, a documented retention ceiling that meets the audit requirement, and a hosted option in the region you operate in. Scope: that region only, current vendor documentation only, no pricing beyond list. It writes those words into `docs/research/2026-09-10-event-bus-worknotes.md` as the anchor, agrees the report lands at `docs/research/2026-09-10-event-bus.md`, and checks that the repo documents a markdown lint as a gate for `docs/`.
+You ask which of three managed message queues the platform team should adopt for an internal event bus. The run asks first. The decision: which queue the team commits to for the next contract term. Success criteria: at-least-once delivery, a documented retention ceiling that meets the audit requirement, and a hosted option in your region. Scope: that region only, current vendor documentation only, no pricing beyond list. It writes those words into `docs/research/2026-09-10-event-bus-worknotes.md` as the anchor, agrees the report lands at `docs/research/2026-09-10-event-bus.md`, and finds that the repo documents a Markdown lint as a gate for `docs/`.
 
-It reads `~/.codex/config.toml`, finds `web_search` enabled, and dispatches both engines in the foreground with the same refined question. Engine 1 returns findings with URLs. Engine 2 returns a tagged list, and on return every `[web]` tag carries a URL the run can fetch, so it counts as a second sourced engine.
+On Claude Code it reads `~/.codex/config.toml`, finds `web_search = "live"`, and dispatches both engines with the same refined question, engine 2 in the foreground. Engine 1 returns findings with URLs. Engine 2 returns a tagged list in which every `[web]` tag carries a URL the run can fetch, so it counts as a second sourced engine.
 
-The merge fills the claim table. Both engines cite the same retention ceiling for vendor A from its docs page: agree. Engine 1 says vendor B's regional endpoint is generally available and engine 2 says it is in preview, each with a different page: conflict, both sides kept. Only engine 1 found vendor C's delivery guarantee: single-engine. Nobody found vendor C's retention ceiling: unknown, and a gap ledger entry with the searches already tried.
+The merge fills the claim table. Both engines cite the same retention ceiling for vendor A from its docs page: agree. Engine 1 says vendor B's regional endpoint is generally available and engine 2 says it is in preview, each citing a different page: conflict, both sides kept. Only engine 1 found vendor C's delivery guarantee: single-engine. Nobody found vendor C's retention ceiling: unknown. Both of vendor C's rows get gap ledger entries listing the searches already tried.
 
-Loop 1's gap-fill fan-out chases the ledger entries with the anchor pasted in. It finds vendor C's ceiling on a page linked from its changelog. The red team, handed the table, the drafted report, each citation's fetched excerpt, both engines' returns and the gap ledger, files one blocking finding: the draft recommends vendor A partly on a cost claim that the table does not carry, since pricing beyond list was out of scope. The logic critique re-runs on the diff and files nothing blocking. The run strikes the cost sentence, and because that repair changed a claim in the deliverable, loop 2 runs the full pass on the new revision. Native checks re-fetch every URL, resolve every path, and run the repo's markdown lint. The red team's attack list names the four remaining claims it tried to break and could not. The logic critique returns clean, with no divergence flag. That is one clean pass with nothing outstanding, so the phase exits.
+Loop 1's gap-fill finds vendor C's ceiling on a page linked from its changelog, and a second page confirming its delivery guarantee. The red team files one blocking finding: the draft recommends vendor A partly on a cost claim the table does not carry, since pricing beyond list was out of scope. The run strikes the sentence, and because that repair changed a claim, loop 2 runs the full pass on the new revision. Native checks re-fetch every URL, resolve every path and run the Markdown lint. The red team lists the claims it tried to break and could not, and the logic critique returns clean with no divergence flag. That is one clean pass with nothing outstanding, so the phase exits.
 
-The report opens with its gate line, in the form the README shows for a clean pass:
+The report opens with its gate line, in the form the [README](../../README.md) shows for a clean pass:
 
 ```text
 Gate: clean pass on 4a3e4ca, real run on record. No blockers open.
 ```
 
-Here "real run" is the docs-only check: the deliverable does not execute, so the link and path check is that run. Under the line, the report's sections come in the wrapper's order. Recommendation: vendor A, grounded in the table's agree and single-engine rows. Findings ranked by confidence, each cited and tagged both-engines, single-engine or contested. Conflicts: the vendor B endpoint status, both sources shown. Gaps and unknowns: none open, one closed with its search trail. Divergence notes: none. Method appendix: two loops, the source list, one red-team round per loop, the logic critique named as the designated review, the native checks that ran and none that could not, the deferred non-blocking list, and the worknotes path. In chat you get the recommendation and one question: whether the worknotes file ships beside the report or is dropped. Nothing else needed your judgment. The run then commits the report by whatever norm your repo documents.
+"Real run" here is the link and path check, since the deliverable does not execute. In chat you get the recommendation and one question: whether the worknotes file ships.
 
 ## How to invoke it
 
-The trigger is deep research done with the doctrine: a multi-source research question that needs a grounded, fact-checked recommendation. Say what the decision is and name the doctrine:
+Name the doctrine and the decision:
 
 ```text
 use doctrine-research: which managed message queue should the platform team adopt for the internal event bus? Recommend one, with sources.
 ```
 
-It will ask for the success criteria and scope bounds before it dispatches anything.
+It asks for the success criteria and scope bounds before it dispatches anything.
 
 ## Requirements
 
-Nothing has to be installed. Each named dependency has a fallback, and the report names every substitution.
+Nothing has to be installed beyond `node` on your `PATH`, which the plugin's hooks run under. Each dependency has a fallback, and the report names every substitution.
 
-- Claude Code's `deep-research` workflow, engine 1. Built into Claude Code on hosts that carry it, nothing to install; it is a workflow, not a skill, so it does not show in a skills list. Without it: a fan-out of parallel web-search agents with per-claim adversarial verification.
-- OpenAI's codex plugin with the Codex CLI logged in, engine 2 and the hub's different-model red team. `/codex:setup` verifies it. Without it: a fresh-context subagent with web access as engine 2, with the report noting reduced engine diversity, and a fresh-context subagent prompted to refute, with the verify-from-source rule in its brief, as the red team.
-- superpowers, for parallel dispatch. Without it: parallel Agent tool calls, each prompt assembled rather than summarised.
-- herdr, optional, gives every subagent a live pane you can read while it works. Nothing depends on it. See [watching a run](../watching-a-run.md).
+- **On Claude Code**: the `deep-research` workflow, built into Claude Code on hosts that carry it. It is a workflow, not a skill, so it does not show in a skills list. Without it, engine 1 is a fan-out of web-search agents with per-claim adversarial verification.
+- **On Claude Code**: OpenAI's codex plugin with the Codex CLI logged in, for engine 2 and the red team. `/codex:setup` checks it. For engine 2 to search, set top-level `web_search = "live"` in `~/.codex/config.toml`; otherwise it may answer from a cache or from model knowledge.
+- **On Codex**: the Claude Code CLI (`claude`), installed and signed in, and run from a Codex shell outside Codex's per-call sandbox, for engine 2 and the red team. [`skills/doctrine/references/codex.md`](../../skills/doctrine/references/codex.md) says what is known on each platform.
+- Without the other-model-family seat, engine 2 is a fresh-context agent with web access and the report notes reduced engine diversity. The red team becomes a fresh-context agent prompted to refute, with the verify-from-source rule in its brief: a same-model red team, and the record says so.
+- superpowers, for parallel dispatch. Without it, the run dispatches parallel agents itself, each prompt assembled rather than summarised.
 
-The install commands and what each absence means are in [docs/requirements.md](../requirements.md). The hub's page, [doctrine.md](doctrine.md), has the full Fallbacks table.
+The install commands and what each absence costs are in [docs/requirements.md](../requirements.md). The hub's page, [doctrine.md](doctrine.md), has the full fallbacks table. To watch the agents work in live panes, see [watching a run](../watching-a-run.md).
 
 ## Red flags
 
-Signs a run went wrong, in the order you are likely to see them:
+Signs a run went wrong:
 
-- Both engines "agree" and neither one fetched a page. That is two recollections, not corroboration.
-- Engine 2 came back as a job handle and the handle was merged as if it were an answer.
-- The logic critique was sent the merged findings without the anchor, so it graded the findings against themselves.
+- Both engines "agree" and neither fetched a page.
+- Engine 2 returned a job handle and the handle was merged as an answer.
+- The logic critique got the merged findings without the anchor, so it graded them against themselves.
 - Four citations trace to one origin and the report calls the claim corroborated.
 - A gap was filled with a plausible number because the loop was otherwise clean.
-- A finding the previous loop filed was re-filed and waved through as "not new".
+- A finding filed in the last loop was filed again and waved through as "not new".
 - The report shipped with a URL nobody re-fetched or a repo path nobody resolved.
-- On loop 3 the gap ledger and the counters exist only in the conversation, where a compaction takes them.
+- On loop 3, the gap ledger and the counters exist only in the conversation, where a compaction takes them.
 
-The specification is [`skills/doctrine-research/SKILL.md`](../../skills/doctrine-research/SKILL.md); trust it over this page wherever the two disagree.
+The specification is [`skills/doctrine-research/SKILL.md`](../../skills/doctrine-research/SKILL.md). Trust it over this page wherever the two disagree.

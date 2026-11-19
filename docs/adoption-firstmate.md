@@ -7,6 +7,8 @@ this host are cited as `<repo>/<path>:<line>` under `/home/radadmin/claude/proje
 record (claim table, 43 rejection entries, the triage table with every ruling) is local and untracked,
 per this repo's convention for phase records.
 
+**Status, 2026-11-18.** Both recommended sentences shipped in `dbaf762` and stand in the hub at this revision, so the hub no longer has the gaps the report describes in the present tense. The report is kept as written: its line numbers refer to the tree at `62fc297`, and "this host" is the Linux machine the research ran on, whose project paths were under `/home/radadmin/claude/projects/`.
+
 ## Recommendation
 
 Adopt two sentences into the hub, `skills/doctrine/SKILL.md`. Nothing else in the firstmate stack
