@@ -101,7 +101,8 @@ const events = (fx) => { try { return fs.readFileSync(path.join(fx.run, 'events.
 const notes = (fx) => shimLog(fx).filter((e) => e.argv[0] === 'notification')
 /** `k` polls of watcher `w` over fixture `fx`. */
 const polls = (fx, w, k = 1) => { process.env.SHIM_DIR = fx.dir; for (let j = 0; j < k; j++) w.poll() }
-const watcher = (fx, mod = { createWatcher }) => { process.env.SHIM_DIR = fx.dir; return mod.createWatcher(fx.run, { plugin: '/plugin' }) }
+/** A watcher over `fx` whose pane output collects in fx.out, so the suite's own stdout stays its verdict lines. */
+const watcher = (fx, mod = { createWatcher }) => { process.env.SHIM_DIR = fx.dir; fx.out = ''; return mod.createWatcher(fx.run, { plugin: '/plugin', out: (s) => { fx.out += s } }) }
 const show = (fx) => JSON.stringify({ events: events(fx), calls: shimLog(fx).map((e) => e.argv.slice(0, 3).join(' ')) })
 const ago = (ms) => new Date(Date.now() - ms).toISOString()
 
@@ -718,7 +719,7 @@ clause('clause 2au — a stale bridge raised before a restart, fresh at the firs
   write(path.join(sRun, 'limits.log'), limLine(1, 'a', 'account', RESET) + '\n'); write(path.join(sRun, 'lane.log'), '\n')
   const shimDir = path.join(tmp, 'acct-shim'); write(path.join(shimDir, 'shim.json'), JSON.stringify({ panes: {} })); write(path.join(shimDir, 'shim.log'), '')
   process.env.SHIM_DIR = shimDir
-  createWatcher(sRun, { plugin: path.join(tmp, 'plug in') }).poll()
+  createWatcher(sRun, { plugin: path.join(tmp, 'plug in'), out: () => {} }).poll()
   const line = fs.readFileSync(path.join(sRun, 'events.log'), 'utf8').split('\n').find((l) => / limit a account /.test(l)) ?? ''
   const cmd = line.split('roll, then run: ')[1] ?? ''
   const stubDir = path.join(tmp, 'argv-stub'), argvLog = path.join(tmp, 'argv.json')
@@ -754,7 +755,7 @@ const owns = state.ownsRunLock ?? ((l) => { try { return fs.readFileSync(l + '/p
 const { clearDeadLock } = kind === 'stop' ? await import(watchPath) : {}
 const note = (t) => { let h = Atomics.load(seen, id); for (const c of t) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; Atomics.store(seen, id, h) }
 const stop = () => { if (Atomics.load(go, 1)) throw new Error('abandoned') }
-const gate = () => { stop(); Atomics.store(phase, id, 1); Atomics.notify(phase, id); Atomics.wait(turn, id, 0); Atomics.store(turn, id, 0); stop(); Atomics.store(phase, id, 0) }
+const gate = () => { stop(); Atomics.store(phase, id, 1); Atomics.notify(phase, id); while (Atomics.exchange(turn, id, 0) === 0) Atomics.wait(turn, id, 0); stop(); Atomics.store(phase, id, 0) }
 const orig = {}
 for (const m of ['mkdirSync', 'writeFileSync', 'readFileSync', 'renameSync', 'rmSync', 'statSync', 'utimesSync', 'chmodSync', 'linkSync', 'openSync', 'writeSync', 'closeSync']) orig[m] = fs[m]
 // A stat's result enters the observation by what the code can judge from it: older than the gate's limit or not.
@@ -867,6 +868,38 @@ for (;;) {
   }
 }
 
+// E15-D278: a contender's gate takes a step only on a grant it consumes. Its own stop and gate lines, read from this
+// file, run in one worker: the grant for its first gate is stored before it arrives, a notify carrying no grant is
+// delivered to its second gate's wait, as from a main thread paused between storing a grant and notifying, and then
+// one real grant is sent.
+{
+  const { Worker } = await import('node:worker_threads')
+  const own = fs.readFileSync(import.meta.filename, 'utf8')
+  const stopLine = /^const stop = .*$/m.exec(own)?.[0], gateLine = /^const gate = .*$/m.exec(own)?.[0]
+  const sab = new SharedArrayBuffer(32)
+  const turn = new Int32Array(sab, 0, 1), phase = new Int32Array(sab, 4, 1), go = new Int32Array(sab, 8, 2), steps = new Int32Array(sab, 16, 1)
+  const w = new Worker(`const { workerData: sab } = require('node:worker_threads')
+const id = 0, turn = new Int32Array(sab, 0, 1), phase = new Int32Array(sab, 4, 1), go = new Int32Array(sab, 8, 2), steps = new Int32Array(sab, 16, 1)
+${stopLine}
+${gateLine}
+Atomics.wait(go, 0, 0)
+gate(); Atomics.store(steps, 0, 1)
+gate(); Atomics.store(steps, 0, 2)`, { eval: true, workerData: sab })
+  const until = (f, ms) => { const t = Date.now() + ms; while (!f()) { if (Date.now() > t) return false; sleep(5) } return true }
+  Atomics.store(turn, 0, 1)
+  Atomics.store(go, 0, 1); Atomics.notify(go, 0)
+  const parked = until(() => Atomics.load(steps, 0) === 1 && Atomics.load(phase, 0) === 1, 5000)
+  const woke = until(() => Atomics.notify(turn, 0) > 0, 5000)
+  sleep(300)
+  const afterLate = Atomics.load(steps, 0)
+  Atomics.store(turn, 0, 1); Atomics.notify(turn, 0)
+  until(() => Atomics.load(steps, 0) === 2, 2000)
+  const afterGrant = Atomics.load(steps, 0)
+  await w.terminate()
+  clause('clause 2ap2 — a contender\'s gate, given a notify with no grant pending at its second gate, takes no step, and takes one on the real grant after it (E15-D278)',
+    Boolean(stopLine && gateLine) && parked && woke && afterLate === 1 && afterGrant === 2, JSON.stringify({ parked, woke, afterLate, afterGrant }))
+}
+
 // ---------------------------------------------------------------- clause 2: held messages and the launch file
 
 // E15-D254: a pending marker the sender left for a role whose pane was not ready. b has none, as a send that nudged
@@ -949,7 +982,118 @@ clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended t
     !fs.existsSync(modeFile(pmPane)) && JSON.stringify(argvRun(`${shq(path.join(claudeStub, 'claude'))} a "b c"`)) === JSON.stringify(['a', 'b c']), '')
 }
 
+// ---------------------------------------------------------------- clause 2: what the watcher's own pane shows
+
+// E15-D272 to D275. A row is what a terminal shows between newlines: the text after its last carriage return.
+const paneRows = (out) => out.split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1)).filter(Boolean)
+const STATUS_ROW = /^last poll (\S+) · (\d+) roles$/
+const upRows = (out) => paneRows(out).filter((l) => / up /.test(l) && !Number.isNaN(Date.parse(l.split(' ')[0]))).map((l) => l.split(' ').slice(1).join(' '))
+const fullEvents = (fx) => { try { return fs.readFileSync(path.join(fx.run, 'events.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+const LOUD = '>>> WAITING ON YOU: '
+const { pausedLine, pauseReason, parseWakeLines, parseLimits, pauseCode, standingPauses } = await import('./dctr-lib.mjs')
+const { parseRecord } = await import('./dctr-record.mjs')
+/** The watcher run as start's pane runs it, its stdout read until its first status line, then ended by SIGTERM. */
+function liveWatcher(fx) {
+  return new Promise((resolve) => {
+    const c = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_CALLER: 'watcher', DCTR_RUN: fx.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: fx.dir }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let o = ''
+    c.stdout.on('data', (d) => { o += d; if (/last poll /.test(o)) c.kill('SIGTERM') })
+    const kill = setTimeout(() => c.kill('SIGKILL'), 20000)
+    c.on('close', (code, sig) => { clearTimeout(kill); resolve({ code, sig, out: o }) })
+  })
+}
+
+{
+  const up = fixture({ a: {}, b: {} })
+  const live = await liveWatcher(up)
+  const first = live.out.split('\n')[0]
+  const wu = watcher(up)
+  polls(up, wu)
+  const once = upRows(up.out)
+  polls(up, wu)
+  const twice = upRows(up.out)
+  fs.appendFileSync(path.join(up.run, 'lane.log'), `2026-11-09T09:10:00Z orchestrator create a w1:p9 ${up.wt.a} cd x\n2026-11-09T09:11:00Z orchestrator create c w1:p8 ${up.wt.a} cd x\n`)
+  polls(up, wu)
+  const later = upRows(up.out)
+  const again = watcher(up); polls(up, again)
+  clause('clause 2bj — the watcher\'s first line names its run and its 30 s poll interval, and each role\'s latest create line gets one `<ISO time> up <role> <pane>` line: at the first poll for those already there, at the poll that first reads a later one, never twice, and again from a watcher started anew (E15-D272)',
+    first === `dctr-lanewatch: watching ${up.run}, polling every 30 s` && upRows(live.out).join('|') === `up a ${up.pane.a}|up b ${up.pane.b}` &&
+      once.join('|') === `up a ${up.pane.a}|up b ${up.pane.b}` && twice.join('|') === once.join('|') &&
+      later.join('|') === `${once.join('|')}|up a w1:p9|up c w1:p8` && upRows(up.out).join('|') === `up a w1:p9|up b ${up.pane.b}|up c w1:p8`,
+    JSON.stringify([live, once, twice, later, up.out]))
+}
+
+{
+  const ev = fixture({ a: { record: '- State: Blocked. waits on Q2\n' } })
+  write(path.join(ev.run, 'inbox/r1.md'), 'done')
+  const we = watcher(ev)
+  polls(ev, we)
+  const shown = paneRows(ev.out).filter((l) => !/ up /.test(l) && !l.startsWith(LOUD) && !STATUS_ROW.test(l))
+  const raised = fullEvents(ev)
+  const re = watcher(ev); polls(ev, re)
+  write(path.join(ev.run, 'inbox/r2.md'), 'done'); polls(ev, re)
+  const restartShown = paneRows(ev.out).filter((l) => !/ up /.test(l) && !STATUS_ROW.test(l))
+  const newOne = fullEvents(ev).at(-1)
+  clause('clause 2bk — every line the watcher appends to events.log reaches its pane byte for byte as it appends it, and a watcher started anew prints nothing for an event it does not raise again, and prints the next one it raises (E15-D273)',
+    raised.length === 2 && JSON.stringify(shown) === JSON.stringify(raised) && restartShown.length === 1 && restartShown[0] === newOne && / report r2\.md$/.test(newOne),
+    JSON.stringify([raised, shown, ev.out]))
+}
+
+// The loud fixture: lane a Blocked with an open question, p paused on a permission prompt, m paused idle (R8), an
+// account and a model limit, a report, and wake-all's unwoken lines for the orchestrator and for a.
+const loudFx = fixture({
+  a: { record: '- State: Blocked. waits on Q1\n- question: Q1 opened 2026-11-09T09:00:00Z which way?\n' },
+  p: { record: `- State: Open\n${pausedLine(pauseReason('R7'), 'S-p')}\n` },
+  m: { record: `- State: Open\n${pausedLine(pauseReason('R8'), 'S-m')}\n` },
+})
+const UNWOKEN_O = '2026-11-09T10:00:00.000Z unwoken orchestrator 2026-11-09T09:30:00Z', UNWOKEN_A = '2026-11-09T10:00:00.001Z unwoken a 2026-11-09T09:30:00Z'
+write(path.join(loudFx.run, 'events.log'), `${UNWOKEN_O}\n${UNWOKEN_A}\n`)
+write(path.join(loudFx.run, 'limits.log'), '2026-11-09T09:20:00Z a account 3am\n2026-11-09T09:21:00Z b model -\n')
+write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
+{
+  const wl = watcher(loudFx)
+  polls(loudFx, wl)
+  const rows = paneRows(loudFx.out), raised = fullEvents(loudFx).slice(2), text = (l) => l.split(' ').slice(1).join(' ')
+  const loud = rows.filter((l) => l.startsWith(LOUD)).map((l) => l.slice(LOUD.length))
+  const want = [...raised.filter((l) => / pause [ap] /.test(l) || / limit a account /.test(l)).map(text), text(UNWOKEN_O)]
+  // Each mark sits on the row after the line it marks: the event's own line, or the stall's notified line.
+  const beside = rows.every((l, i) => !l.startsWith(LOUD) || (rows[i - 1] && (rows[i - 1].endsWith(l.slice(LOUD.length)) || / notified 0 unwoken$/.test(rows[i - 1]))))
+  const re = watcher(loudFx); polls(loudFx, re)
+  clause('clause 2bl — the pane marks with one `>>> WAITING ON YOU: ` line, beside its own, each pause but an R8 idle stop\'s, each account limit and each unwoken line naming the orchestrator it notifies, carrying that line\'s text; the idle pause, the model limit, the report, the notified line and a\'s unwoken line get none, and a watcher started anew marks nothing again (E15-D274)',
+    want.length === 5 && JSON.stringify([...loud].sort()) === JSON.stringify([...want].sort()) && beside &&
+      raised.some((l) => / pause m /.test(l)) && raised.some((l) => / report r1\.md$/.test(l)) && raised.some((l) => / limit b model /.test(l)) && !loudFx.out.includes(LOUD),
+    JSON.stringify([want, loud, rows]))
+}
+
+{
+  const sf = fixture({ a: {}, b: {} })
+  const ws = watcher(sf)
+  let waits = 0
+  const marks = []
+  const t0 = Date.now()
+  await lanewatch.watch(ws, async () => { marks.push(sf.out.length); if (++waits === 2) write(path.join(sf.run, 'inbox/r2.md'), 'done') }, () => waits < 3)
+  const t1 = Date.now(), out = sf.out
+  const quietPoll = out.slice(marks[0], marks[1]), eventPoll = out.slice(marks[1])
+  const tail = out.split(/\r|\n/).at(-1), m = STATUS_ROW.exec(tail), report = fullEvents(sf).find((l) => / report r2\.md$/.test(l))
+  const reportRow = paneRows(out).find((r) => report && r.includes(report))
+  clause('clause 2bm — after each poll the pane gets one status line, `\\r` then `last poll <ISO time> · <n> roles` and no newline, so a quiet poll adds no row; a later line starts on a row of its own, holding no status text (E15-D275)',
+    (out.match(/\r/g) ?? []).length === 3 && /^\rlast poll \S+ · 2 roles$/.test(quietPoll) && Boolean(m) && m[2] === '2' && Date.parse(m[1]) >= t0 && Date.parse(m[1]) <= t1 &&
+      eventPoll.startsWith('\n') && reportRow === report && !out.endsWith('\n'),
+    JSON.stringify([out, marks, report]))
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
+
+{
+  // The pane clauses' fixtures, without the watcher: m's paused line is an R8 idle stop and p's is not, the seeded lines
+  // are wake-all stall lines for the orchestrator and for a, and limits.log holds one account and one model line.
+  const reason = (r) => standingPauses(parseRecord(fs.readFileSync(loudFx.record[r], 'utf8')).entries).map((x) => pauseCode(x.reason))
+  const wake = parseWakeLines(`${UNWOKEN_O}\n${UNWOKEN_A}\n`), lim = parseLimits(fs.readFileSync(path.join(loudFx.run, 'limits.log'), 'utf8'))
+  clause('clause 3h — without the watcher: the loud fixture\'s m record stands paused on R8 and p\'s on R7, its two seeded lines are unwoken lines naming the orchestrator and a, and its limits.log reads one account and one model line',
+    JSON.stringify(reason('m')) === '["R8"]' && JSON.stringify(reason('p')) === '["R7"]' &&
+      JSON.stringify(wake.map((w) => [w.word, w.role, w.index])) === '[["unwoken","orchestrator",0],["unwoken","a",1]]' && JSON.stringify(lim.map((l) => l.kind)) === '["account","model"]',
+    JSON.stringify([reason('m'), reason('p'), wake, lim]))
+}
 
 {
   // 2bh2's stub, without start: sh runs what it appends to a launch file whose command has no exec, and not otherwise.
