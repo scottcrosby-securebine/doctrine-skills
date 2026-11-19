@@ -50,6 +50,15 @@
 // line or a past-tier context for the same session; an exit or unknown context already there is not raised again while
 // its state holds. Once a poll reads any of these states clear, before the restart or after it, it is raised again
 // when it returns; a read that fails clears nothing.
+//
+// Its own pane (stdout) shows what is up and what waits on the owner. The watcher's first line is `dctr-lanewatch:
+// watching <run>, polling every 30 s`; everything after it comes through createWatcher's `out`. Each role's latest
+// create line gets one `<ISO time> up <role> <pane>` line, at the first poll for those already there and at the poll
+// that first reads a later one. Each line appended to events.log is printed as appended, the same text, so an event a
+// restart does not raise again prints nothing. A `>>> WAITING ON YOU: <text>` line follows each pause event but an idle
+// stop's (R8), each account limit event, and each notified stall, carrying the event's text or the stall line's own,
+// time aside. After each poll `\r` then `last poll <ISO time> · <n> roles`, with no newline, rewrites the status row in
+// place; a line printed after it first ends that row, so it sits on a row of its own.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -59,7 +68,7 @@ import { fileURLToPath } from 'node:url'
 import { herdr } from './dctr-state.mjs'
 import { restoreFile, modeFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
-  laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier,
+  laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier, pauseCode,
   lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
@@ -88,16 +97,25 @@ function recordOf(dir) {
 }
 
 /** The watcher's state over one run; `poll()` reads every source once and appends what is new. */
-export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) } = {}) {
+export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)), out = (s) => process.stdout.write(s) } = {}) {
   const eventsFile = path.join(run, 'events.log'), name = runName(run)
-  const emit = (text) => { fs.mkdirSync(run, { recursive: true }); fs.appendFileSync(eventsFile, `${new Date().toISOString()} ${text}\n`) }
+  // The pane: a line printed while the status row stands ends that row first, so it sits on a row of its own.
+  let statusRow = false
+  const say = (line) => { out(`${statusRow ? '\n' : ''}${line}\n`); statusRow = false }
+  const loud = (text) => say(`>>> WAITING ON YOU: ${text}`)
+  const emit = (text, waits = false) => {
+    const line = `${new Date().toISOString()} ${text}`
+    fs.mkdirSync(run, { recursive: true }); fs.appendFileSync(eventsFile, `${line}\n`)
+    say(line)
+    if (waits) loud(text)
+  }
   const notify = (title) => { try { herdr(['notification', 'show', title, '--sound', 'request']) } catch { /* shown or not, never sent again */ } }
   // An event an earlier watcher raised is not raised again after a restart: `restored` holds the events.log texts (a
   // past-tier line by its prefix), and a raise it holds is dropped once, after which the in-process sets carry it. The
   // texts carry the identity those sets key on: a deadline its wave line, a ready its entry, a pause its record line, an
   // exit or unknown context its state. A poll that reads an exit or unknown context clear drops its entry, so it is raised
   // when it returns; a read that fails drops nothing. A pause that returns is a new record line, so a new entry.
-  const raise = (text, key = text) => { if (!restored.delete(key)) emit(text) }
+  const raise = (text, key = text, waits = false) => { if (!restored.delete(key)) emit(text, waits) }
   const completeLines = () => { const t = readText(eventsFile) ?? ''; return t.split('\n').slice(0, -1) }
 
   // What events.log already reports is never raised again, a restart included: limits.log only grows, so the count of
@@ -132,18 +150,20 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
       limitsSeen += 1
       if (l.kind === 'model') { emit(`limit ${l.role} model ${l.time} /model`); continue }
       if (l.kind === 'other') { emit(`limit ${l.role} other ${l.time} error ${l.field}`); continue }
-      emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${shq(path.join(plugin, 'hooks/dctr-send.mjs'))} wake-all ${shq(run)}`)
+      emit(`limit ${l.role} account ${l.time} reset ${l.field} roll, then run: node ${shq(path.join(plugin, 'hooks/dctr-send.mjs'))} wake-all ${shq(run)}`, true)
       const woken = parseWakeLines(readText(eventsFile)).some((w) => w.word === 'woken' && w.index > notifiedAt)
       if (notifiedAt === null || woken) { notifiedAt = completeLines().length - 1; notify(`${name} run: account limit, reset ${l.field}; roll, then wake-all`) }
     }
   }
 
   function stalls() {
-    for (const w of parseWakeLines(completeLines().join('\n'))) {
+    const lines = completeLines()
+    for (const w of parseWakeLines(lines.join('\n'))) {
       const key = `${w.index} ${w.word}`
       if (w.role !== 'orchestrator' || !['unwoken', 'unfinished', 'skip'].includes(w.word) || notifiedStalls.has(key)) continue
       notifiedStalls.add(key)
       emit(`notified ${key}`)
+      loud(lines[w.index].split(' ').slice(1).join(' '))
       notify(`${name} run: orchestrator ${w.word} by wake-all`)
     }
   }
@@ -183,15 +203,18 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
 
   function standing(role, entries, paneSessionId) {
     // Each pause is named by the record line that stands for it, so a new pause with the same reason is a new event.
-    const now = new Set(), last = (pred) => entries.filter(pred).at(-1)?.line
-    // The session skip (ownPauses in dctr-lib.mjs), for the role's last read session.
-    for (const p of ownPauses(standingPauses(entries), paneSessionId)) now.add(`pause ${role} line ${p.line} auto-cycle paused: ${p.reason}`)
+    const now = new Set(), idle = new Set(), last = (pred) => entries.filter(pred).at(-1)?.line
+    // The session skip (ownPauses in dctr-lib.mjs), for the role's last read session. An idle stop (R8) waits on nobody.
+    for (const p of ownPauses(standingPauses(entries), paneSessionId)) {
+      const t = `pause ${role} line ${p.line} auto-cycle paused: ${p.reason}`
+      now.add(t); if (pauseCode(p.reason) === 'R8') idle.add(t)
+    }
     const st = pausingStates(entries)
     if (st.blocked) now.add(`pause ${role} line ${last((e) => e.kind === 'state')} ${st.blocked}`)
     if (st.alarm) now.add(`pause ${role} line ${last((e) => e.kind === 'alarm' && e.which === st.alarm)} ${st.alarm} alarm with no ruling`)
     if (st.question) now.add(`pause ${role} line ${last((e) => e.kind === 'question-opened' && e.id === st.question.id)} question ${st.question.id} unanswered: ${st.question.text}`)
     const before = pauses.get(role) ?? new Set()
-    for (const t of now) if (!before.has(t)) raise(t)
+    for (const t of now) if (!before.has(t)) raise(t, t, !idle.has(t))
     pauses.set(role, now)
   }
 
@@ -243,13 +266,23 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)) }
     if (n >= 2 && !sessionWarned(entries, s) && !contextRaised.has(s)) { contextRaised.add(s); raise(`context ${role} ${s} past tier ${tier} at ${b.used}`, `context ${role} ${s} past tier`) }
   }
 
+  // The create line each role's up line named, so a later one for the role is announced once and an old one never again.
+  const upSeen = new Map()
+  function upLine(role, lane) {
+    const up = `${lane.time} ${lane.pane} ${lane.worktree} ${lane.launch}`
+    if (upSeen.get(role) !== up) { upSeen.set(role, up); say(`${new Date().toISOString()} up ${role} ${lane.pane}`) }
+  }
   return {
     poll() {
+      const at = new Date().toISOString()
       inbox()
       limits()
       stalls()
       const laneText = readText(path.join(run, 'lane.log'))
-      for (const role of laneRoles(laneText)) { const lane = laneOf(laneText, role); if (lane) session(role, lane) }
+      let watched = 0
+      for (const role of laneRoles(laneText)) { const lane = laneOf(laneText, role); if (lane) { watched += 1; upLine(role, lane); session(role, lane) } }
+      // Rewritten in place: a poll with no event adds no row to the pane.
+      out(`\rlast poll ${at} · ${watched} roles`); statusRow = true
     },
   }
 }
@@ -358,6 +391,7 @@ if (isMain) {
     if (!takeRunLock(lock, process.env.DCTR_WATCH_TOKEN ?? '')) fail(`a watcher already holds ${lock}`)
     process.on('exit', () => releaseRunLock(lock))
     for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(0))
+    process.stdout.write(`dctr-lanewatch: watching ${run}, polling every ${POLL_MS / 1000} s\n`)
     // A timer, never a blocking sleep, so stop's SIGTERM reaches the handler that releases the lock.
     // Each poll first re-reads the lock and renews it; one that no longer names this watcher ends it.
     await watch(createWatcher(run), undefined, () => ownsRunLock(lock))
