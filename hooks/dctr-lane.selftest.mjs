@@ -4,7 +4,8 @@
 //
 // Drives dctr-lane.mjs end to end over real git fixture repos under one temp dir, with GIT_CEILING_DIRECTORIES at
 // that dir, TMPDIR inside it, and a logging herdr shim first on PATH that plays the new pane. Clause 1 confirms each
-// refusal refuses and makes nothing (the failed-create partial excepted, which leaves its worktree and says so);
+// refusal refuses and makes nothing (a create failing after its worktree is made undoes it, or past RESUME_LINE leaves
+// it and says so);
 // clause 2 confirms create, reset, archive and remove do what the seams say, the launch line and the restore-hook and
 // prompt-gate chain a create sets up included; clause 3 proves the fixtures carry what those clauses rest on without
 // running dctr-lane.mjs. laneOf, the pure lane.log reader in dctr-lib.mjs, is pinned here too.
@@ -45,7 +46,8 @@ const SHORT_PATH = [cbin, bin, ...SYS_PATH].join(':')
 // working for two reads and then idle with a session, s1 from the launch line on. /clear writes the pane's restore
 // file (its path from HERDR_SHIM_RESTORE) naming s2 and the pane then holds s2; in mode late-restore the pane reads
 // idle under s1 for three reads first, and in mode no-restore it never writes the file and keeps s1. A typed line over
-// 1,024 bytes is refused, as herdr refuses it. HERDR_SHIM_MODE changes one answer per fixture. Every call is logged
+// 1,024 bytes is refused, as herdr refuses it. HERDR_SHIM_MODE changes one answer per fixture, and HERDR_SHIM_CLOSE
+// makes tab close fail (`fail`) or answer tab_not_found (`gone`); HERDR_SHIM_NOTAB answers tab create with no tab id. Every call is logged
 // with what it answered, a typed line with the pane's session and its restore file's session when it was typed, and
 // whether lane.log and the watched files existed at that moment.
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/usr/bin/env node
@@ -62,7 +64,7 @@ const clearTo = (id, p) => { const f = restoreOf(id); if (f) { fs.mkdirSync(path
 const watch = JSON.parse(process.env.HERDR_SHIM_WATCH || '[]').map((f) => fs.existsSync(f))
 if (args[0] === 'tab' && args[1] === 'create') {
   if (mode === 'tab-fail') { code = 1; err = 'transport down' }
-  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0, session: null, late: 0 }; if (restoreOf(id)) fs.rmSync(restoreOf(id), { force: true }); made = { tab: 't' + st.n, pane: id }; out = JSON.stringify({ result: { tab: { tab_id: made.tab }, root_pane: { pane_id: id } } }) }
+  else { const id = 'p' + (++st.n); st.panes[id] = { typed: 0, busy: 0, session: null, late: 0 }; if (restoreOf(id)) fs.rmSync(restoreOf(id), { force: true }); made = { tab: 't' + st.n, pane: id }; out = JSON.stringify({ result: { ...(process.env.HERDR_SHIM_NOTAB ? {} : { tab: { tab_id: made.tab } }), root_pane: { pane_id: id } } }) }
 } else if (args[0] === 'pane' && args[1] === 'get') {
   const p = st.panes[args[2]]
   if (mode === 'get-fail') { code = 1; err = 'transport down' }
@@ -89,7 +91,9 @@ if (args[0] === 'tab' && args[1] === 'create') {
     }
     out = JSON.stringify({ result: {} })
   }
-} else out = JSON.stringify({ result: {} })
+} else if (args[0] === 'tab' && args[1] === 'close' && process.env.HERDR_SHIM_CLOSE === 'fail') { code = 1; err = 'transport down' }
+else if (args[0] === 'tab' && args[1] === 'close' && process.env.HERDR_SHIM_CLOSE === 'gone') { code = 1; err = JSON.stringify({ error: { code: 'tab_not_found' } }) }
+else out = JSON.stringify({ result: {} })
 fs.writeFileSync(stFile, JSON.stringify(st))
 fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, at, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
 if (err) process.stderr.write(err + '\\n')
@@ -704,34 +708,87 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
     r2.code !== 0 && git(code, 'worktree', 'list', '--porcelain').out === before2 && shimLog(comp).length === 0 && laneLines(comp).length === 0, `exit ${r2.code} ${said(r2)}`)
 }
 
-// The failed-create partial (L6) and readiness (L7): each leaves the worktree, names it, writes no lane.log line.
+// The failed create before RESUME_LINE (L6, L7, E15-D266): it closes the tab its own tab create returned, removes the
+// worktree, deletes the lane's branch and the launch file, names what failed and that it undid it, writes no lane.log
+// line, and the same create then succeeds.
+const tabCloses = (f) => shimLog(f).filter((e) => e.args[0] === 'tab' && e.args[1] === 'close').map((e) => e.args[2])
+const madeTabs = (f) => shimLog(f).filter((e) => e.made).map((e) => e.made.tab)
+const undone = (f, role, r, tabs) => r.code === 1 && /create failed, .*; undid what it made/.test(r.err) && (r.out + r.err).includes(f.wt(role)) &&
+  !exists(f.wt(role)) && !branches(f.repo).some((b) => b.startsWith(`${role} `)) && !exists(path.join(f.run, 'launch', `${role}.sh`)) &&
+  JSON.stringify(tabCloses(f)) === JSON.stringify(tabs) && laneLines(f).length === 0
 for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every read'], ['1o', 'get-empty', 0, 'pane get answers nothing'],
   ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line'],
   ['1bd', 'session-before', 0, 'the new pane reads agent_status unknown and already holds an agent session'],
   ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown'],
-  ['1bw', 'no-restore', 2, 'the pane never writes its restore file or holds a new session after /clear (E15-D252)']]) {
+  ['1bw', 'no-restore', 2, 'the pane never writes its restore file or holds a new session after /clear (E15-D252, E15-D266)']]) {
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode, PATH: SHORT_PATH } })
   const t = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run').length
-  clause(`clause ${n} — when ${why}, create exits non-zero naming the worktree it made, leaves it, types ${typed} line${typed === 1 ? '' : 's'} and writes no lane.log line (L6, L7)`,
-    r.code !== 0 && exists(f.wt('a')) && (r.out + r.err).includes(f.wt('a')) && t === typed && laneLines(f).length === 0, `exit ${r.code} ${said(r)}; typed ${t}`)
-  const again = create(f, 'a')
-  clause(`clause ${n}2 — a second create of that role then refuses`, again.code !== 0 && laneLines(f).length === 0, `exit ${again.code} ${said(again)}`)
+  clause(`clause ${n} — when ${why}, create exits 1 naming the worktree, types ${typed} line${typed === 1 ? '' : 's'}, closes the tab it made, removes the worktree, branch a and the launch file, and writes no lane.log line (L6, L7, E15-D266)`,
+    t === typed && undone(f, 'a', r, madeTabs(f)) && madeTabs(f).length === 1, `exit ${r.code} ${said(r)}; typed ${t}; closed ${JSON.stringify(tabCloses(f))} of ${JSON.stringify(madeTabs(f))}`)
+  const again = create(f, 'a', { env: { PATH: SHORT_PATH } })
+  clause(`clause ${n}2 — the same create of that role then succeeds and writes its create line (E15-D266)`, again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
 }
-// The failed create (E15-D203 to D206, D220): herdr fails tab create after the worktree is made; a second create of
-// the role, with tab create answering, then refuses.
+// The failed create (E15-D203, D205, D220, D266): herdr fails tab create after the worktree is made, so no tab is
+// closed; the worktree and branch are removed, and the same create, tab create answering, then succeeds.
 {
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'tab-fail' } })
   const listed = git(f.repo, 'worktree', 'list', '--porcelain').out
   clause('clause 1r — a create whose tab create fails after the worktree is made appends no line to lane.log (E15-D203)', laneLines(f).length === 0 && !exists(f.laneLog), JSON.stringify(read(f.laneLog)))
-  clause('clause 1r2 — it leaves the worktree, which git worktree list still lists (E15-D204)', exists(f.wt('a')) && listed.includes(`worktree ${f.wt('a')}\n`), listed)
+  clause('clause 1r2 — it removes the worktree, which git worktree list no longer lists, and branch a, closing no tab (E15-D266)', undone(f, 'a', r, []) && !listed.includes(`worktree ${f.wt('a')}\n`), `${said(r)} ${listed}`)
   clause('clause 1r3 — it exits non-zero (E15-D205)', r.code !== 0, `exit ${r.code}`)
   clause('clause 1r4 — its output names the worktree by its absolute path (E15-D220)', (r.out + r.err).includes(f.wt('a')), said(r))
-  const calls = shimLog(f).length
   const again = create(f, 'a')
-  clause('clause 1r5 — a second create of the role, tab create answering, refuses: no herdr call, no lane.log line, worktrees unchanged (E15-D206)',
-    again.code !== 0 && shimLog(f).length === calls && laneLines(f).length === 0 && git(f.repo, 'worktree', 'list', '--porcelain').out === listed, `exit ${again.code} ${said(again)}`)
+  clause('clause 1r5 — the same create of the role, tab create answering, then succeeds and writes its create line (E15-D266)',
+    again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
+}
+// A failed create merge before RESUME_LINE removes its worktree and keeps the integration branch (E15-D266).
+{
+  const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
+  const tip = git(f.repo, 'rev-parse', 'main').out
+  const r = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')], { env: { HERDR_SHIM_MODE: 'no-restore', PATH: SHORT_PATH } })
+  clause('clause 1bx — a create merge whose /clear never takes closes its tab, removes its worktree and launch file, and keeps the branch main at its tip (E15-D266)',
+    r.code === 1 && /undid what it made/.test(r.err) && !exists(f.wt('merge')) && !exists(path.join(f.run, 'launch', 'merge.sh')) &&
+    git(f.repo, 'rev-parse', 'main').out === tip && JSON.stringify(tabCloses(f)) === JSON.stringify(madeTabs(f)) && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
+}
+// A tab close that fails, other than the tab being gone, removes nothing: the session in the tab may hold the worktree.
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_CLOSE: 'fail', PATH: SHORT_PATH } })
+  clause('clause 1by — when the undo\'s tab close fails, create exits 1 naming the tab, removes nothing and leaves the worktree, branch a and the launch file (E15-D266)',
+    r.code === 1 && r.err.includes('could not be closed') && r.err.includes('left in place') && exists(f.wt('a')) && branches(f.repo).some((b) => b.startsWith('a ')) &&
+    exists(path.join(f.run, 'launch', 'a.sh')) && tabCloses(f).length === 1 && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
+  const g = fixture()
+  const rg = create(g, 'a', { env: { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_CLOSE: 'gone', PATH: SHORT_PATH } })
+  clause('clause 1by2 — when the undo\'s tab close answers tab_not_found, create removes the worktree, branch a and the launch file (E15-D266)',
+    undone(g, 'a', rg, madeTabs(g)), `exit ${rg.code} ${said(rg)}`)
+  const n = fixture()
+  const rn = create(n, 'a', { env: { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_NOTAB: '1', PATH: SHORT_PATH } })
+  clause('clause 1by3 — when tab create answered a pane and no tab id, create closes nothing, removes nothing and names what it left (E15-D266)',
+    rn.code === 1 && rn.err.includes('no tab id') && rn.err.includes('left in place') && exists(n.wt('a')) && branches(n.repo).some((b) => b.startsWith('a ')) &&
+    exists(path.join(n.run, 'launch', 'a.sh')) && tabCloses(n).length === 0, `exit ${rn.code} ${said(rn)}`)
+  const noTab = spawnSync(path.join(bin, 'herdr'), ['tab', 'create'], { encoding: 'utf8', env: { ...process.env, HERDR_SHIM_DIR: fixture().shim, HERDR_SHIM_NOTAB: '1' } })
+  clause('clause 3by3 — without the command, the shim\'s tab create under HERDR_SHIM_NOTAB answers a root pane and no tab',
+    noTab.status === 0 && JSON.parse(noTab.stdout).result.root_pane?.pane_id && !JSON.parse(noTab.stdout).result.tab, noTab.stdout)
+  const shim = (close) => spawnSync(path.join(bin, 'herdr'), ['tab', 'close', 't1'], { encoding: 'utf8', env: { ...process.env, HERDR_SHIM_DIR: fixture().shim, HERDR_SHIM_CLOSE: close } })
+  const [cf, cg, cn] = ['fail', 'gone', ''].map(shim)
+  clause('clause 3by — without the command, the shim\'s tab close exits 1 with no not-found code under close=fail, exits 1 with tab_not_found under close=gone, and exits 0 otherwise',
+    cf.status === 1 && !cf.stderr.includes('not_found') && cg.status === 1 && cg.stderr.includes('"tab_not_found"') && cn.status === 0, JSON.stringify([cf.status, cf.stderr, cg.status, cg.stderr, cn.status]))
+}
+// A create that fails at or after the call typing RESUME_LINE leaves what it made (E15-D267): lane.log a directory.
+{
+  const f = fixture()
+  fs.mkdirSync(f.laneLog, { recursive: true })
+  const r = create(f, 'a', { env: { PATH: SHORT_PATH } })
+  const pane = shimLog(f).find((e) => e.made)?.made.pane, script = path.join(f.run, 'launch', 'a.sh')
+  const resumes = shimLog(f).filter((e) => e.args[1] === 'run' && e.args[3] === RESUME_LINE).length
+  clause('clause 1bz — a create whose lane.log append fails after RESUME_LINE exits 1 naming the pane, the worktree and the launch file as left in place, closes no tab, and keeps the worktree, branch a and the launch file (E15-D267)',
+    r.code === 1 && Boolean(pane) && [pane, f.wt('a'), script, 'left in place'].every((s) => r.err.includes(s)) && !r.err.includes('undid') &&
+    resumes === 1 && tabCloses(f).length === 0 && exists(f.wt('a')) && branches(f.repo).some((b) => b.startsWith('a ')) && exists(script), `exit ${r.code} ${said(r)}; RESUME_LINE typed ${resumes}`)
+  let code = null
+  try { fs.appendFileSync(f.laneLog, 'x\n') } catch (e) { code = e.code }
+  clause('clause 3bz — without the command, appending to a lane.log that is a directory fails (EISDIR)', code === 'EISDIR', String(code))
 }
 
 // Tabs (E15-D200): the merge session and a lane, each in a tab of its own, no pane split.
@@ -748,8 +805,8 @@ for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every
 {
   const f = fixture({ handoffs: { a: 'src.txt/a.md' } })
   const r = create(f)
-  clause('clause 1s — a create whose record cannot be written after the worktree is made calls herdr zero times, leaves the worktree, names it, and writes no lane.log line (L6, L8)',
-    r.code !== 0 && exists(f.wt('a')) && (r.out + r.err).includes(f.wt('a')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
+  clause('clause 1s — a create whose record cannot be written after the worktree is made calls herdr zero times, names the worktree, removes it and branch a, and writes no lane.log line (L6, L8, E15-D266)',
+    shimLog(f).length === 0 && undone(f, 'a', r, []), `exit ${r.code} ${said(r)}`)
 }
 
 // The dirty reset (E15-D165).
@@ -1016,8 +1073,8 @@ const mlinkBase = head(MLINK.repo)
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'gone' } })
   const gets = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'get').length
-  clause('clause 1al — when pane get answers pane_not_found, create fails at that first read, types nothing and writes no lane.log line (L7)',
-    r.code !== 0 && gets === 1 && exists(f.wt('a')) && laneLines(f).length === 0, `exit ${r.code} ${said(r)}; pane gets ${gets}`)
+  clause('clause 1al — when pane get answers pane_not_found, create fails at that first read, types nothing, undoes what it made and writes no lane.log line (L7, E15-D266)',
+    gets === 1 && undone(f, 'a', r, madeTabs(f)), `exit ${r.code} ${said(r)}; pane gets ${gets}`)
 }
 {
   const f = fixture()
