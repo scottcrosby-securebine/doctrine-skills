@@ -14,9 +14,9 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq } from './dctr-lib.mjs'
+import { laneOf, LANE_LINE, RESUME_LINE, kickoffHandoff, followKickoff, shq, launchFlags } from './dctr-lib.mjs'
 import { parseDoc } from './dctr-project.mjs'
-import { restoreFile } from './dctr-state.mjs'
+import { restoreFile, modeFile } from './dctr-state.mjs'
 
 let bad = 0
 const clause = (n, ok, detail) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) { bad++; console.log('        ' + detail) } }
@@ -25,6 +25,8 @@ const HERE = import.meta.dirname
 const LANE = path.join(HERE, 'dctr-lane.mjs')
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-lane-')))
 const childTmp = path.join(tmp, 't'); fs.mkdirSync(childTmp)
+// Every child that reaches the mode file, and this process's modeFile, resolve under a scratch config dir, never the real one.
+process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'config')
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
 // The restore file path of each pane id the shim makes, under the children's TMPDIR, where the restore hook writes it.
 const RESTORE = (() => {
@@ -290,6 +292,74 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp, shown)
   clause('clause 2j2 — the same line, run again after the model file changes, starts claude on the model the file names when the line runs: claude-opus-5-5 first, claude-sonnet-5 second (E15-D219)',
     r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']), shown)
+}
+
+// ---------------------------------------------------------------- clause 2: the permission mode, read when the launch file runs
+
+{
+  const FLAG = ['--permission-mode', 'bypassPermissions']
+  // The words the fragment adds to a command, evaluated by sh as a launch file is, for a mode file holding `text`.
+  const words = (text, name = 'mode') => {
+    const file = path.join(tmp, `lf-${crypto.randomUUID()}`, name)
+    if (text !== null) write(file, text)
+    const r = spawnSync('sh', ['-c', `printf '%s\\n' x${launchFlags(file)}`], { encoding: 'utf8', cwd: tmp })
+    return r.stdout.split('\n').filter(Boolean).slice(1)
+  }
+  const texts = ['bypassPermissions', 'bypassPermissions\n', 'default\n', 'acceptEdits\n', 'plan\n', '', ' bypassPermissions\n', 'bypassPermissions\nbypassPermissions\n',
+    'BypassPermissions\n', 'bypassPermissions; touch injected\n', '$(touch injected)\n', '--permission-mode bypassPermissions\n', null]
+  const got = texts.map((t) => words(t))
+  const quoted = words('bypassPermissions\n', "it's a mode")
+  clause('clause 1pm — launchFlags, evaluated by sh: the two words for a mode file reading bypassPermissions with or without its newline, none for every other mode, an empty, padded, doubled, differently cased or extended text, or no file; a path holding a quote still reads; nothing in the file runs; null gives the empty string',
+    JSON.stringify(got) === JSON.stringify([FLAG, FLAG, ...Array(11).fill([])]) && JSON.stringify(quoted) === JSON.stringify(FLAG) &&
+      !exists(path.join(tmp, 'injected')) && launchFlags(null) === '' && launchFlags('/m').startsWith(' '),
+    JSON.stringify([got, quoted]))
+  // A session's own cycle hook records its mode for its pane: a Stop carrying the mode, in the pane create runs from.
+  // The hook and create share one scratch config dir, where the mode file lives.
+  const pmCfg = path.join(tmp, 'pm-config')
+  const CYCLE = path.join(HERE, 'dctr-cycle.mjs')
+  const hookRun = (f, pane, mode) => spawnSync('node', [CYCLE], {
+    cwd: f.repo, encoding: 'utf8',
+    input: JSON.stringify({ hook_event_name: 'Stop', session_id: `pm-${path.basename(f.root)}`, transcript_path: path.join(f.root, 't.jsonl'), cwd: f.repo, permission_mode: mode, stop_hook_active: false, last_assistant_message: 'ok' }),
+    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
+  })
+  const launchRun = (f) => {
+    fs.rmSync(claudeLog, { force: true })
+    spawnSync('env', ['-i', 'sh', '-c', laneOf(read(f.laneLog), 'a')?.launch || 'false'], { encoding: 'utf8' })
+    return (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))[0]?.argv
+  }
+  // The pane's mode file under the scratch config dir, where the hook writes it and create reads it.
+  const modeAt = (pane, cfg = pmCfg) => {
+    const prev = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = cfg
+    try { return read(modeFile(pane)) } finally { process.env.CLAUDE_CONFIG_DIR = prev }
+  }
+  const f = fixture(), pane = 'orch-pm1'
+  const h1 = hookRun(f, pane, 'bypassPermissions'), m1 = modeAt(pane)
+  const r = create(f, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: pane, CLAUDE_CONFIG_DIR: pmCfg } })
+  const file = read(path.join(f.run, 'launch/a.sh'))
+  const a1 = launchRun(f)
+  const h2 = hookRun(f, pane, 'default'), m2 = modeAt(pane)
+  const a2 = launchRun(f), file2 = read(path.join(f.run, 'launch/a.sh'))
+  clause('clause 2pm — a Stop carrying permission_mode bypassPermissions in the pane create runs from writes that pane\'s mode file, and the launch file create then writes starts claude with --permission-mode bypassPermissions',
+    h1.status === 0 && m1 === 'bypassPermissions\n' && r.code === 0 && JSON.stringify(a1) === JSON.stringify(['--model', 'claude-opus-5-5', ...FLAG]),
+    `hook ${JSON.stringify([h1.status, h1.stderr.trim()])}; mode ${JSON.stringify(m1)}; create ${r.code} ${said(r)}; launch ${JSON.stringify(file)}; argv ${JSON.stringify(a1)}`)
+  clause('clause 2pm2 — after a later Stop in that session carrying default, the same launch file, run again unchanged, starts claude with no permission flag',
+    h2.status === 0 && m2 === 'default\n' && file2 === file && JSON.stringify(a2) === JSON.stringify(['--model', 'claude-opus-5-5']),
+    `mode ${JSON.stringify(m2)}; unchanged ${file2 === file}; argv ${JSON.stringify(a2)}`)
+  const g = fixture(), gPane = 'orch-pm3', gCfg = path.join(tmp, 'pm-config-none')
+  const rg = create(g, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_PANE_ID: gPane, CLAUDE_CONFIG_DIR: gCfg } })
+  const a3 = launchRun(g)
+  const u = fixture()
+  const ru = create(u, 'a', { env: { PATH: `${cbin}:${bin}:${process.env.PATH}` } })
+  const a4 = launchRun(u)
+  clause('clause 2pm3 — with no mode file for its pane, its config dir not there, and with no HERDR_PANE_ID, the launch file create writes starts claude with no permission flag, and create makes no config dir',
+    rg.code === 0 && !exists(gCfg) && JSON.stringify(a3) === JSON.stringify(['--model', 'claude-opus-5-5']) && ru.code === 0 && JSON.stringify(a4) === JSON.stringify(['--model', 'claude-opus-5-5']) &&
+      !(read(path.join(u.run, 'launch/a.sh')) || '').includes('permission'),
+    `${rg.code} ${said(rg)} ${JSON.stringify(a3)}; ${ru.code} ${said(ru)} ${JSON.stringify(a4)}`)
+  clause('clause 3pm — without the command: no mode file exists for the 2pm3 pane, and the launch line\'s claude shim logs the argv it is handed',
+    modeAt(gPane, gCfg) === null &&
+      (() => { fs.rmSync(claudeLog, { force: true }); spawnSync(path.join(cbin, 'claude'), ['--model', 'm', '--permission-mode', 'p']); return JSON.stringify(JSON.parse(read(claudeLog) || '{}').argv) === '["--model","m","--permission-mode","p"]' })(),
+    '')
 }
 
 // ---------------------------------------------------------------- clause 2: a PATH past herdr's line limit (E15-D251)

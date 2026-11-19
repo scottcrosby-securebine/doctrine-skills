@@ -19,7 +19,9 @@
 // branch `<base>` itself, refused while any worktree of the repo holds it), copies the first handoff into its
 // docs/handoffs/, writes the record the handoff's `record:` line names (relative, inside the worktree) with the phase
 // name and one `State: Open` line, points the memory file kickoff at the copy, sets skip-worktree on a tracked memory
-// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh`, types the launch line
+// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh` (ending in
+// launchFlags for the mode file of the pane create runs in, so the session starts in bypassPermissions exactly when
+// that file reads it as the launch file runs, and with no permission flag when create runs outside a pane), types the launch line
 // `sh <run>/launch/<role>.sh`, `/clear` and RESUME_LINE each once the pane reads ready, and only then appends
 // `create <role> <pane> <worktree> <launch line>`. The launch line carries no PATH value, so it stays within herdr's
 // 1,024-byte limit on a typed line whatever the PATH. Before the launch line, ready is a `pane get` that answered with
@@ -72,9 +74,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags,
 } from './dctr-lib.mjs'
-import { herdr, isPaneNotFound, sleepMs, restoreFile } from './dctr-state.mjs'
+import { herdr, isPaneNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 const MEMORY = 'SESSION_MEMORY.md'
@@ -265,7 +267,7 @@ function create() {
     made.push(`the herdr pane ${pane}`)
     const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
-      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"`
+      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null)}`
     const script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)

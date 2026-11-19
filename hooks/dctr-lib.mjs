@@ -791,9 +791,8 @@ export function resolveTier({ tierText, window, firstUsed, handoffCost }) {
 
 /** The capacity check `doctrine-orchestrate` starts a role on (E15-D51, Q5): accept only when the role's resume
  *  load plus the handoff cost is strictly below its tier, and the tier is at most its window. Pure: the caller
- *  takes the window from the statusline bridge, or from the model id where there is no bridge reading or the transcript
- *  is unreadable or names another model, reads the load from the transcript and refuses on any `resolveTier` error
- *  first (`hooks/dctr-orchestrate.mjs`). */
+ *  takes the window from the host's own reading for the session and refuses where there is none, reads the load
+ *  from the transcript and refuses on any `resolveTier` error first (`hooks/dctr-orchestrate.mjs`). */
 export function capacityDecision({ window, load, tier }) {
   const need = load + HANDOFF_COST_TOKENS
   const accept = need < tier && tier <= window
@@ -1217,6 +1216,14 @@ export function treeExcludes(recordPath, repo) {
 
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
+
+/** The shell fragment a launch command ends with, for the mode file at `file` (modeFile), or '' for null: evaluated
+ *  when the command runs, so a launch file written once follows the mode last recorded for that pane. It adds the two
+ *  words `--permission-mode bypassPermissions` while the file reads bypassPermissions and nothing otherwise, a missing
+ *  file included; the file's text is only compared, so none of it reaches the command line. The file is trusted, not
+ *  verified. */
+export const launchFlags = (file) => (file === null ? ''
+  : ` $([ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
 
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`

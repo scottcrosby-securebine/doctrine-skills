@@ -819,6 +819,10 @@ export function sessionStartLine(recordPath) {
   try { const n = JSON.parse(fs.readFileSync(sessionStartFile(recordPath), 'utf8')); return Number.isInteger(n) ? n : 0 } catch { return 0 }
 }
 export const restoreFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.restored`)
+/** Where the cycle hook records the permission mode of the main session in this pane, one line; launchFlags reads it.
+ *  It sits in the user's own config dir, whose settings.json can already set the permission mode, so whoever can
+ *  write it could already grant bypass; a shared temp directory would let another user plant it. Creates nothing. */
+export const modeFile = (paneId) => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'doctrine', 'modes', `pane-${paneToken(paneId)}.mode`)
 /** Where the prompt gate records that it blocked a line the auto-cycle typed in this pane: `{ session_id, at }`. The
  *  typer removes it before its /clear and reads it after the resume line (E10 S1). */
 export const gatedFile = (paneId) => path.join(autoCycleDir(), `pane-${paneToken(paneId)}.gated`)
