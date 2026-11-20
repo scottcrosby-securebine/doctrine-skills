@@ -654,19 +654,29 @@ clause('clause 2au — a stale bridge raised before a restart, fresh at the firs
 
 // WB30: a running watcher whose lock comes to name another holder ends at its next poll.
 {
-  const lost = fixture({}), llock = path.join(lost.run, 'lanewatch.lock')
-  const w = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_RUN: lost.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: lost.dir }, stdio: ['ignore', 'ignore', 'pipe'] })
-  let werr = ''; w.stderr.on('data', (d) => { werr += d })
+  // stdout and stderr share one file, as they share the pane, so it holds what the pane shows in the order it shows it.
+  const lost = fixture({ a: {} }), llock = path.join(lost.run, 'lanewatch.lock'), paneFile = path.join(lost.dir, 'pane.out')
+  const paneFd = fs.openSync(paneFile, 'w')
+  const w = spawn(process.execPath, [WATCH], { env: { ...SCRUBBED, DCTR_RUN: lost.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: lost.dir }, stdio: ['ignore', paneFd, paneFd] })
+  fs.closeSync(paneFd)
+  const paneText = () => { try { return fs.readFileSync(paneFile, 'utf8') } catch { return '' } }
   const ended = new Promise((r) => w.on('exit', (code) => r(code)))
-  for (let t = 0; t < 100 && !lockPid(llock); t++) sleep(50)
+  // The lock is taken away only once the watcher has written its first status row.
+  for (let t = 0; t < 200 && !/last poll /.test(paneText()); t++) sleep(50)
+  const statusFirst = /last poll /.test(paneText())
   const other = spawn('sleep', ['60'])
   write(llock, lockText(other.pid))
   const code = await Promise.race([ended, new Promise((r) => setTimeout(() => r('still running'), POLL_MS + 10000))])
   if (w.exitCode === null) w.kill('SIGKILL')
   const left = lockPid(llock)
   other.kill()
+  const werr = paneText()
   clause('clause 2ba — a watcher whose lock comes to name another live holder ends within one poll, says so, and leaves that holder\'s lock (WB30)',
     code === 0 && /no longer names this watcher/.test(werr) && left === String(other.pid), JSON.stringify([code, werr, left]))
+  // A row is what the pane shows between newlines: the text after its last carriage return.
+  const endRow = werr.split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1)).find((r) => /no longer names this watcher/.test(r))
+  clause('clause 2ba2 — the line that watcher ends with, after a status row, starts a row of its own in the pane and holds no status text (E15-D275)',
+    statusFirst && endRow !== undefined && endRow.startsWith('dctr-lanewatch: ') && !endRow.includes('last poll'), JSON.stringify([statusFirst, endRow, werr]))
 }
 
 // WB33: start succeeds only on the watcher its own pane ran. Here that one cannot start (no node on its PATH) while a
@@ -1082,6 +1092,21 @@ write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
     JSON.stringify([out, marks, report]))
 }
 
+/** The rows a terminal shows: each `\r` returns to column 0 and the text after it overwrites, leaving what it is shorter than. */
+const rendered = (out) => out.split('\n').map((seg) => seg.split('\r').reduce((row, piece) => piece + row.slice(piece.length), ''))
+{
+  const ten = Object.fromEntries('abcdefghij'.split('').map((r) => [r, {}]))
+  const sh = fixture(ten), ws = watcher(sh)
+  polls(sh, ws)
+  const lines = fs.readFileSync(path.join(sh.run, 'lane.log'), 'utf8').split('\n').filter((l) => l && !/ create j /.test(l))
+  fs.writeFileSync(path.join(sh.run, 'lane.log'), lines.join('\n') + '\n')
+  polls(sh, ws)
+  const shownRows = rendered(sh.out), tail = sh.out.split(/\r|\n/).at(-1)
+  clause('clause 2bn — a status row shorter than the one before it, 10 roles then 9, leaves no character of the longer row in the pane, and the row is still `last poll <ISO time> · 9 roles` with no newline (E15-D275)',
+    shownRows.some((r) => STATUS_ROW.test(r) && / · 10 roles$/.test(r)) && STATUS_ROW.test(shownRows.at(-1)) && / · 9 roles$/.test(shownRows.at(-1)) &&
+      !shownRows.some((r) => /roless$/.test(r)) && / · 9 roles$/.test(tail) && !sh.out.endsWith('\n'), JSON.stringify([shownRows, sh.out]))
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 {
@@ -1159,6 +1184,18 @@ clause('clause 3d — without the watcher: the reader fixture\'s lane.log names 
   const found = spawnSync('/bin/sh', ['-c', 'command -v node'], { env: { PATH: e }, encoding: 'utf8' })
   clause('clause 3f — without the watcher: the empty directory 2aq puts on the pane\'s PATH holds no node, on any host',
     fs.readdirSync(e).length === 0 && found.status !== 0, JSON.stringify([fs.readdirSync(e), found.status, found.stdout]))
+}
+
+{
+  // 2ba2's and 2bn's instruments, without the watcher: two writers on one file descriptor keep their order, so a line on
+  // stderr after a status row with no newline shares its row; and a shorter row written over a longer one leaves its tail.
+  const f = path.join(tmp, 'shared-fd.out'), fd = fs.openSync(f, 'w')
+  spawnSync('/bin/sh', ['-c', "printf '\\rlast poll x · 1 roles'; printf 'dctr-lanewatch: it ends\\n' >&2"], { stdio: ['ignore', fd, fd] })
+  fs.closeSync(fd)
+  const shared = fs.readFileSync(f, 'utf8').split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1))
+  clause('clause 3i — without the watcher: a line written to stderr after a status row with no newline, on the descriptor stdout shares, lands on the status row; and a 9-role row over a 10-role row renders "roless"',
+    shared[0] === 'last poll x · 1 rolesdctr-lanewatch: it ends' && rendered('\rlast poll A · 10 roles\rlast poll A · 9 roles')[0] === 'last poll A · 9 roless',
+    JSON.stringify([shared, rendered('\rlast poll A · 10 roles\rlast poll A · 9 roles')]))
 }
 
 process.exit(bad ? 1 : 0)
