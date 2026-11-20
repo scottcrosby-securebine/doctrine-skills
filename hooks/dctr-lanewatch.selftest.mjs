@@ -890,6 +890,9 @@ for (;;) {
   const turn = new Int32Array(sab, 0, 1), phase = new Int32Array(sab, 4, 1), go = new Int32Array(sab, 8, 2), steps = new Int32Array(sab, 16, 1)
   const w = new Worker(`const { workerData: sab } = require('node:worker_threads')
 const id = 0, turn = new Int32Array(sab, 0, 1), phase = new Int32Array(sab, 4, 1), go = new Int32Array(sab, 8, 2), steps = new Int32Array(sab, 16, 1)
+// Each wait on turn is counted as it is entered and as it returns, so the main thread sees when a notify has been handled.
+const A = globalThis.Atomics, waits = new Int32Array(sab, 20, 2)
+const Atomics = { load: A.load, store: A.store, notify: A.notify, exchange: A.exchange, wait: (a, ...r) => { if (a === turn) A.add(waits, 0, 1); const v = A.wait(a, ...r); if (a === turn) A.add(waits, 1, 1); return v } }
 ${stopLine}
 ${gateLine}
 Atomics.wait(go, 0, 0)
@@ -899,15 +902,17 @@ gate(); Atomics.store(steps, 0, 2)`, { eval: true, workerData: sab })
   Atomics.store(turn, 0, 1)
   Atomics.store(go, 0, 1); Atomics.notify(go, 0)
   const parked = until(() => Atomics.load(steps, 0) === 1 && Atomics.load(phase, 0) === 1, 5000)
+  const waits = new Int32Array(sab, 20, 2), returned = Atomics.load(waits, 1)
   const woke = until(() => Atomics.notify(turn, 0) > 0, 5000)
-  sleep(300)
+  // Judged once the worker has handled that notify: its wait returned, and it then stepped or waits again.
+  const handled = until(() => Atomics.load(waits, 1) > returned && (Atomics.load(steps, 0) === 2 || Atomics.load(waits, 0) > Atomics.load(waits, 1)), 5000)
   const afterLate = Atomics.load(steps, 0)
   Atomics.store(turn, 0, 1); Atomics.notify(turn, 0)
   until(() => Atomics.load(steps, 0) === 2, 2000)
   const afterGrant = Atomics.load(steps, 0)
   await w.terminate()
   clause('clause 2ap2 — a contender\'s gate, given a notify with no grant pending at its second gate, takes no step, and takes one on the real grant after it (E15-D278)',
-    Boolean(stopLine && gateLine) && parked && woke && afterLate === 1 && afterGrant === 2, JSON.stringify({ parked, woke, afterLate, afterGrant }))
+    Boolean(stopLine && gateLine) && parked && woke && handled && afterLate === 1 && afterGrant === 2, JSON.stringify({ parked, woke, handled, afterLate, afterGrant }))
 }
 
 // ---------------------------------------------------------------- clause 2: held messages and the launch file
