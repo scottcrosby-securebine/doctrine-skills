@@ -614,7 +614,7 @@ export function trackedRoot(root, model) {
 }
 
 /** Panes in `herdr api snapshot` whose cwd is inside the repo root. Null, printed unknown, outside
- *  herdr, in a contained session (which must reach nothing on the host), when the call fails, and when
+ *  a herdr TUI session (herdr-core included), in a contained session (which must reach nothing on the host), when the call fails, and when
  *  the reply carries no pane list: an empty or failed reply is "could not look", never zero seats. */
 function readSeats(root, env = process.env) {
   if (termHost(env) !== 'herdr' || env.DCTR_VIEW_REQUEST_DIR) return null

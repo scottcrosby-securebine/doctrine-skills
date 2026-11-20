@@ -7,6 +7,8 @@
 // with a tripwire `herdr` first on PATH: the hook must never exec one (SC1). Clause 3 proves the fixtures carry
 // what those clauses rest on without calling the gauge.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'

@@ -11,6 +11,8 @@
 // Each broken fixture is the good project with one or two lines changed, so a finding on it also
 // proves the branch under test was reached on a project that otherwise passes every earlier rule.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -930,6 +932,13 @@ clause('CLI status — the tripwire herdr on PATH was called ZERO times with HER
 const rContained = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1', DCTR_VIEW_REQUEST_DIR: tmp }, encoding: 'utf8' })
 clause('CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints unknown and still calls herdr ZERO times',
   rContained.stdout.split('\n').includes('live seats: unknown') && !fs.existsSync(trip('herdr')), rContained.stdout)
+// herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+const rCore = spawnSync('node', [script, 'status', good], { env: { ...env, ...CORE }, encoding: 'utf8' })
+clause('CLI status — in herdr-core with the leaked HERDR_* variables, live seats: unknown and the tripwire herdr was called ZERO times',
+  rCore.status === 0 && rCore.stdout.split('\n').includes('live seats: unknown') && !fs.existsSync(trip('herdr')), `status ${rCore.status}: ${rCore.stdout}${rCore.stderr}`)
+clause('CLI status — [3: the herdr-core env carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr, and the leaked HERDR_ENV=1, pane and workspace]',
+  Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && Boolean(CORE.HERDR_PANE_ID) && Boolean(CORE.HERDR_WORKSPACE_ID), JSON.stringify(CORE))
 const rEmptyReply = spawnSync('node', [script, 'status', good], { env: { ...env, HERDR_ENV: '1' }, encoding: 'utf8' })
 clause('CLI status — inside herdr, an EMPTY snapshot reply is "could not look": live seats: unknown, and herdr really was asked',
   rEmptyReply.stdout.split('\n').includes('live seats: unknown') && fs.existsSync(trip('herdr')), rEmptyReply.stdout)

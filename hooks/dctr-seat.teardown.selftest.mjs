@@ -12,6 +12,8 @@
 // quiet, and each fixture is proved to carry its defect WITHOUT the hook. A tripwire `herdr` first
 // on PATH records every call and can be told to fail a close, which is the case the repairs are for.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'

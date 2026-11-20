@@ -8,6 +8,8 @@
 // finds nothing. Clause 3 proves the fixtures carry what those clauses rest on without calling the
 // parser, so a parser that silently returns nothing cannot pass clause 1 by the fixture being empty.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import { deepStrictEqual } from 'node:assert'
 import { parseRecord, STATE_LINE } from './dctr-record.mjs'
 
