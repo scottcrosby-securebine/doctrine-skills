@@ -52,14 +52,15 @@
 // when it returns; a read that fails clears nothing.
 //
 // Its own pane (stdout) shows what is up and what waits on the owner. The watcher's first line is `dctr-lanewatch:
-// watching <run>, polling every 30 s`; everything after it but the line it ends with comes through createWatcher's
+// watching <run>, polling every 30 s`; everything after it but the stderr line it ends with on losing its lock comes through createWatcher's
 // `out`. Each role's latest create line gets one `<ISO time> up <role> <pane>` line, at the first poll for those
 // already there and at the poll that first reads a later one. Each line appended to events.log is printed as appended, the same text, so an event a
 // restart does not raise again prints nothing. A `>>> WAITING ON YOU: <text>` line follows each pause event but an idle
 // stop's (R8), each account limit event, and each notified stall, carrying the event's text or the stall line's own,
 // time aside. After each poll `\r` then `last poll <ISO time> · <n> roles`, with no newline, rewrites the status row in
-// place; a line printed after it first ends that row, so it sits on a row of its own. The watcher ends with a line on
-// stderr, after its object's endRow has ended an open status row through `out`.
+// place; a line printed after it first ends that row, so it sits on a row of its own. A watcher whose lock no longer
+// names it ends with a line on stderr, after its object's endRow has ended an open status row through `out`. One that
+// `stop` or another signal ends exits at once: it prints nothing more and leaves an open status row as it is.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
