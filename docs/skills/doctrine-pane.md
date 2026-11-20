@@ -86,7 +86,7 @@ You close the pane. The agent never does, and closing the pane kills the session
 
 The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, or when the file holds a transcript and nothing records which pane wrote it.
 
-There is no weaker version of the skill. When `open` refuses because the session is outside herdr or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
+There is no weaker version of the skill. When `open` refuses because the session is outside herdr or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed. In a Herdr.app terminal (herdr-core) `open` refuses as well, and the agent opens the session through herdr-core's own `hc` instead, as the skill's "In herdr-core" section says.
 
 ## An example
 
@@ -122,7 +122,7 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## Requirements
 
-- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`.
+- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app, `HC_TERMINAL_ID` set) counts as outside herdr even when it carries those variables.
 - A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one `open` refuses.
 - Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set, `open`, `type` and `enter` refuse, because a pane is a process on the host.
 - On Codex, the doctrine hooks, which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
