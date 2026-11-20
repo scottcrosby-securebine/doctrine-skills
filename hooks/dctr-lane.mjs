@@ -244,7 +244,8 @@ function create() {
   // exits non-zero with the worktree and branch made, and a failure on the path can leave the branch alone.
   const there = () => [...(fs.lstatSync(wt, { throwIfNoEntry: false }) ? [`the worktree ${wt}`] : []),
     ...(gitOk(repo, 'show-ref', '--verify', '--quiet', `refs/heads/${role}`) ? [`the branch ${role}`] : [])]
-  const before = there()
+  let before
+  try { before = there() } catch (e) { refuse(`${wt} could not be read (${why(e)})`) }
   const made = []
   let tabId = null, pane = null, script = null, resumeTyped = false
   const fail = (why) => {
