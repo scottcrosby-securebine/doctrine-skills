@@ -19,7 +19,8 @@
 // paused line follows it, and the session's transcript holds no turn start at or after the handoff's modification
 // time, a transcript it cannot read counting as holding one; otherwise it types the nudge alone, and `wake`, though
 // not wake-all, types nothing into a session a warned line names, read before its wait and again before the nudge,
-// leaving its pending markers. Before each line it
+// leaving its pending markers; on the clear-and-resume plan that re-read is of the session the /clear started, and a
+// warned line there leaves the nudge untyped. Before each line it
 // reads again: the pane must report the session the line is for (the one it decided on, and after /clear the new
 // one the pane reports in its place, which the pane's restore file must also name before RESUME_LINE), and before
 // /clear the record, latch, handoff and transcript must still clear
@@ -236,11 +237,12 @@ function deliver(pane, lane, claim, role) {
       const now = recordOf(lane.worktree)
       if (now.why || !handedOff(now, pane, session)) return say(`${session} is no longer cleared for a wake: /clear not typed`)
     }
-    // A warned line may land while the pane works, so wake's lone nudge reads the record again, as send reads it after the pane.
-    if (sub === 'wake' && lines.length === 1) {
-      const now = recordOf(lane.worktree)
-      if (now.why) return say(`the record cannot be read (${now.why}): nothing typed`)
-      if (sessionWarned(now.record.entries, session)) return say(`a warned line names ${session}: nothing typed`)
+    // A warned line may land while the pane works, the resumed session's turn included, so wake's nudge reads the
+    // record again, as send reads it after the pane.
+    if (sub === 'wake' && line === NUDGE) {
+      const now = recordOf(lane.worktree), held = i === 0 ? 'nothing typed' : `${line} not typed`
+      if (now.why) return say(`the record cannot be read (${now.why}): ${held}`)
+      if (sessionWarned(now.record.entries, session)) return say(`a warned line names ${session}: ${held}`)
     }
     if (left() <= 0) return say(`${pane} read ready past the give-up: ${line} not typed`)
     if (!type(pane, line)) return
