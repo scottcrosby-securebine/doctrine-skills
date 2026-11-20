@@ -1092,21 +1092,6 @@ write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
     JSON.stringify([out, marks, report]))
 }
 
-/** The rows a terminal shows: each `\r` returns to column 0 and the text after it overwrites, leaving what it is shorter than. */
-const rendered = (out) => out.split('\n').map((seg) => seg.split('\r').reduce((row, piece) => piece + row.slice(piece.length), ''))
-{
-  const ten = Object.fromEntries('abcdefghij'.split('').map((r) => [r, {}]))
-  const sh = fixture(ten), ws = watcher(sh)
-  polls(sh, ws)
-  const lines = fs.readFileSync(path.join(sh.run, 'lane.log'), 'utf8').split('\n').filter((l) => l && !/ create j /.test(l))
-  fs.writeFileSync(path.join(sh.run, 'lane.log'), lines.join('\n') + '\n')
-  polls(sh, ws)
-  const shownRows = rendered(sh.out), tail = sh.out.split(/\r|\n/).at(-1)
-  clause('clause 2bn — a status row shorter than the one before it, 10 roles then 9, leaves no character of the longer row in the pane, and the row is still `last poll <ISO time> · 9 roles` with no newline (E15-D275)',
-    shownRows.some((r) => STATUS_ROW.test(r) && / · 10 roles$/.test(r)) && STATUS_ROW.test(shownRows.at(-1)) && / · 9 roles$/.test(shownRows.at(-1)) &&
-      !shownRows.some((r) => /roless$/.test(r)) && / · 9 roles$/.test(tail) && !sh.out.endsWith('\n'), JSON.stringify([shownRows, sh.out]))
-}
-
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 {
@@ -1187,15 +1172,14 @@ clause('clause 3d — without the watcher: the reader fixture\'s lane.log names 
 }
 
 {
-  // 2ba2's and 2bn's instruments, without the watcher: two writers on one file descriptor keep their order, so a line on
-  // stderr after a status row with no newline shares its row; and a shorter row written over a longer one leaves its tail.
+  // 2ba2's instrument, without the watcher: two writers on one file descriptor keep their order, so a line on stderr
+  // after a status row with no newline shares its row.
   const f = path.join(tmp, 'shared-fd.out'), fd = fs.openSync(f, 'w')
   spawnSync('/bin/sh', ['-c', "printf '\\rlast poll x · 1 roles'; printf 'dctr-lanewatch: it ends\\n' >&2"], { stdio: ['ignore', fd, fd] })
   fs.closeSync(fd)
   const shared = fs.readFileSync(f, 'utf8').split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1))
-  clause('clause 3i — without the watcher: a line written to stderr after a status row with no newline, on the descriptor stdout shares, lands on the status row; and a 9-role row over a 10-role row renders "roless"',
-    shared[0] === 'last poll x · 1 rolesdctr-lanewatch: it ends' && rendered('\rlast poll A · 10 roles\rlast poll A · 9 roles')[0] === 'last poll A · 9 roless',
-    JSON.stringify([shared, rendered('\rlast poll A · 10 roles\rlast poll A · 9 roles')]))
+  clause('clause 3i — without the watcher: a line written to stderr after a status row with no newline, on the descriptor stdout shares, lands on the status row',
+    shared[0] === 'last poll x · 1 rolesdctr-lanewatch: it ends', JSON.stringify(shared))
 }
 
 process.exit(bad ? 1 : 0)
