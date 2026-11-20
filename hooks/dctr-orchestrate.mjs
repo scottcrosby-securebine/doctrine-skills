@@ -36,8 +36,10 @@
 // no PATH and so fits herdr's 1,024-byte limit on a typed line, and prints `dctr-orchestrate: started the orchestrator
 // in <pane>`, exit 0. It refuses, exit 1 with one line, making no tab and no file and typing nothing: with DCTR_ROLE set,
 // with DCTR_VIEW_REQUEST_DIR set, with no HERDR_WORKSPACE_ID, in a repo with no docs/PROJECT.md or no Records path, or
-// with a request file it cannot read. A failure once the tab is made exits 1 with one line naming the pane and the
-// launch file as left in place, and closes and removes nothing. DCTR_START_TIMES ({"poll","ready"}, ms) overrides the
+// with a request file it cannot read. A failure once the launch file is written exits 1 with one line naming the launch
+// file, and the pane where there is one, as left in place, and closes and removes nothing. A herdr call that fails
+// may still have acted, so a failed tab create says a tab may have been made and a failed send of the launch line says
+// the line may have been typed. DCTR_START_TIMES ({"poll","ready"}, ms) overrides the
 // poll interval and the wait for the fresh pane.
 
 import fs from 'node:fs'
@@ -113,7 +115,7 @@ function start(model, request) {
   if (!run) refuse(`${top} names no run: it carries no docs/PROJECT.md giving a Records path`)
   let text = null
   if (request) try { text = fs.readFileSync(request, 'utf8') } catch (e) { refuse(`the request file ${request} could not be read (${e.code || e.message})`) }
-  const tmp = env.TMPDIR || os.tmpdir()
+  const tmp = path.resolve(env.TMPDIR || os.tmpdir()) // the pane starts elsewhere, so the typed path is absolute
   const fail = (m) => { console.error(`dctr-orchestrate: start failed: ${m}`); process.exit(1) }
   let file
   try {
@@ -123,12 +125,12 @@ function start(model, request) {
   } catch (e) { fail(`the launch file could not be written (${e.code || e.message})${file ? `; ${file} may be left in place` : ''}`) }
   let pane
   // herdr-lint: any failure here ends start and closes nothing, so a failed reply is never read as an answer
-  try { pane = herdr(tabCreateArgs(env.HERDR_WORKSPACE_ID, `${PREFIX} · orchestrator`, top))?.result?.root_pane?.pane_id } catch (e) { fail(`herdr made no tab (${e.message.split('\n')[0]}); the launch file ${file} is left in place`) }
+  try { pane = herdr(tabCreateArgs(env.HERDR_WORKSPACE_ID, `${PREFIX} · orchestrator`, top))?.result?.root_pane?.pane_id } catch (e) { fail(`the tab create failed (${e.message.split('\n')[0]}), and a tab may have been made; the launch file ${file} is left in place`) }
   if (!pane) fail(`herdr's tab create named no pane; the launch file ${file} is left in place`)
   const left = `the pane ${pane} and the launch file ${file} are left in place`
   // herdr reporting the pane gone is the one failure that leaves no pane in place
   waitReady(pane, { fresh: true, times, fail: (m) => fail(`${m}; ${m.endsWith(' is gone') ? `the launch file ${file} is left in place` : left}`) })
-  try { herdr(['pane', 'run', pane, `sh ${shq(file)}`]) } catch (e) { fail(`the launch line was not typed (${e.message.split('\n')[0]}); ${left}`) }
+  try { herdr(['pane', 'run', pane, `sh ${shq(file)}`]) } catch (e) { fail(`the send of the launch line failed (${e.message.split('\n')[0]}), and the line may have been typed; ${left}`) }
   console.log(`dctr-orchestrate: started the orchestrator in ${pane}`)
 }
 
