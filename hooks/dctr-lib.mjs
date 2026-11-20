@@ -109,7 +109,7 @@ export const herdrPane = (env) => (termHost(env) === 'herdr' && env.HERDR_PANE_I
  * print the same thing otherwise, and the user waits for a tab that was never coming.
  */
 export function skipReason(env) {
-  if (termHost(env) === 'herdr-core') return 'running in herdr-core (HC_TERMINAL_ID set and TERM_PROGRAM not herdr), whose HERDR_* variables are leaked from the herdr pane that started it'
+  if (termHost(env) === 'herdr-core') return 'running in herdr-core (HC_TERMINAL_ID set and TERM_PROGRAM not herdr), where any HERDR_* variables came from the herdr pane that started its core'
   if (env.HERDR_ENV !== '1') return 'not running inside a herdr pane (HERDR_ENV is not 1)'
   if (!env.HERDR_WORKSPACE_ID) return 'no HERDR_WORKSPACE_ID in the environment'
   return null
