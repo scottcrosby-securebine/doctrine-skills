@@ -283,15 +283,18 @@ const UNHANDED = [
   ['no restore file for the session', { latch: ['S'], warnedAt: before, transcript: clean, session: 'OTHER' }, '- auto-cycle: warned S 20%\n', 'S'],
 ]
 const unhandedBad = [], unhandedFx = []
+/** A line the sender prints only when a wake typed every line it decided on. */
+const WOKE = /^dctr-send: woke /m
 for (const [label, h, lines, session] of UNHANDED) {
   const fx = fixture({ session, laneRecord: `- State: Open\n${lines}` })
   handed(fx, { handoffAt: H, ...h }); unhandedFx.push([label, fx, h, session])
   const r = await sender(fx, ['wake', 'a'])
   // Only the row whose warning names another session is nudged; every other row's session is warned, so nothing is typed (E15-D277).
   const want = label === 'warned S1, the pane on S2' ? nudged() : []
-  if (r.code !== 0 || JSON.stringify(typed(fx)) !== JSON.stringify(want)) unhandedBad.push(`${label}: ${show(fx, r)}`)
+  // A woke line only where the nudge was typed: the orchestrator reads it as the role woken.
+  if (r.code !== 0 || JSON.stringify(typed(fx)) !== JSON.stringify(want) || WOKE.test(r.out) !== (want.length > 0)) unhandedBad.push(`${label}: ${show(fx, r)}`)
 }
-clause('clause 2l — wake types no /clear when the handoff predates the warning, the warning names another session, an R16 line follows it, the session started a turn since the handoff, its transcript is damaged, or no restore file names it: the nudge alone where the warning names another session, nothing where it names the pane\'s (D103, E15-D277)',
+clause('clause 2l — wake types no /clear when the handoff predates the warning, the warning names another session, an R16 line follows it, the session started a turn since the handoff, its transcript is damaged, or no restore file names it: the nudge alone where the warning names another session, nothing where it names the pane\'s, and a woke line printed only where the nudge was typed (D103, E15-D277)',
   unhandedBad.length === 0, unhandedBad.join(' || '))
 
 const burst = fixture({ status: 'working' })
@@ -985,11 +988,12 @@ for (const [label, extra] of [['quick reads', {}], ['reads after /clear taking 6
 const neverBad = neverRows.filter(([, fx, r]) => {
   const clearAt = shimLog(fx).find((e) => e.typed?.text === '/clear')?.t
   // From the /clear's typing call the resume line's wait runs its own WAKE_GIVE_UP_MS and then ends; the sender kills at 30 s.
-  return !(r.code === 0 && JSON.stringify(typed(fx)) === JSON.stringify([`${PANE}|/clear`]) && !typed(fx).includes(`${PANE}|${RESUME_LINE}`) &&
+  // Either give-up line may end it; a woke line, which the orchestrator reads as the role woken, never may.
+  return !(r.code === 0 && !WOKE.test(r.out) && JSON.stringify(typed(fx)) === JSON.stringify([`${PANE}|/clear`]) && !typed(fx).includes(`${PANE}|${RESUME_LINE}`) &&
     same(held(fx).map((f) => path.basename(f)), [NEVER_HELD]) && fs.readFileSync(path.join(fx.run, 'held/a', NEVER_HELD), 'utf8') === 'held before' && same(pendingOf(fx), [NEVER_HELD]) &&
     clearAt !== undefined && r.end - clearAt >= 9500 && r.end - clearAt <= 13000)
 }).map(([label, fx, r]) => `${label}: ${r.end - (shimLog(fx).find((e) => e.typed?.text === '/clear')?.t ?? NaN)} ms after /clear; ${show(fx, r)}; pending ${JSON.stringify(pendingOf(fx))}`)
-clause('clause 2z2 — wake on a handed-off pane whose restore file never names the new session, its reads quick or cut off by the time left: exit 0, /clear the one line typed and never the resume line, the held message and its pending marker as they were, and the wake ending by itself 9.5 s to 13 s after /clear (E15-D276)',
+clause('clause 2z2 — wake on a handed-off pane whose restore file never names the new session, its reads quick or cut off by the time left: exit 0, no woke line printed, /clear the one line typed and never the resume line, the held message and its pending marker as they were, and the wake ending by itself 9.5 s to 13 s after /clear (E15-D276)',
   neverBad.length === 0, neverBad.join(' || '))
 
 // E15-D277: a warned session not handed off (its handoff predates the warning), with one held message and its marker;
@@ -1003,8 +1007,8 @@ const warnedFx = (warned) => {
 }
 const wWarned = warnedFx(true), wTwin = warnedFx(false)
 const rWarned = await sender(wWarned, ['wake', 'a']), rTwin = await sender(wTwin, ['wake', 'a'])
-clause('clause 2z3 — wake on a warned session that has not handed off types nothing, prints that a warned line names it, and leaves the held message and its pending marker; its twin with no warned line is nudged once (E15-D277)',
-  rWarned.code === 0 && typed(wWarned).length === 0 && /a warned line names S: nothing typed/.test(rWarned.out) &&
+clause('clause 2z3 — wake on a warned session that has not handed off types nothing, prints that a warned line names it and no woke line, and leaves the held message and its pending marker; its twin with no warned line is nudged once (E15-D277)',
+  rWarned.code === 0 && typed(wWarned).length === 0 && /a warned line names S: nothing typed/.test(rWarned.out) && !WOKE.test(rWarned.out) &&
   fs.readFileSync(path.join(wWarned.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(wWarned), [HELD]) &&
   rTwin.code === 0 && JSON.stringify(typed(wTwin)) === JSON.stringify(nudged()) && same(pendingOf(wTwin), []),
   show(wWarned, rWarned) + ' ' + show(wTwin, rTwin))
