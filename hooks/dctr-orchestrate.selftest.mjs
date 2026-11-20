@@ -278,7 +278,8 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
 // ---------------------------------------------------------------- clause 4: start (E15-D269, E15-D270, E15-D280)
 //
 // A herdr shim on PATH logs every call to shim.log: `tab create` answers a new pane, `pane get` of it reads busy with a
-// session until its BUSY-th read and from then fresh (agent_status unknown, no session), and `pane run` refuses a line
+// session until its BUSY-th read and from then with no session, reading agent_status unknown or the status resetShim
+// names, and `pane run` refuses a line
 // over 1,024 bytes and otherwise runs the line by /bin/sh -c in an empty environment, as a fresh pane's shell would. A
 // claude stub first on PATH logs its argv, cwd and the environment the launch gave it.
 
@@ -291,7 +292,7 @@ const out = (o, code = 0) => { fs.appendFileSync(path.join(dir, 'shim.log'), JSO
 if (a[0] === 'tab' && a[1] === 'create') { const id = 'w1:p' + (++s.n); s.reads[id] = 0; entry.made = id; out({ result: { tab: { tab_id: 't' + s.n }, root_pane: { pane_id: id } } }) }
 if (a[0] === 'pane' && a[1] === 'get') {
   const fresh = ++s.reads[a[2]] >= s.busy; entry.fresh = fresh
-  out({ result: { pane: { pane_id: a[2], agent_status: fresh ? 'unknown' : 'working', agent_session: fresh ? null : { value: 'booting' } } } })
+  out({ result: { pane: { pane_id: a[2], agent_status: fresh ? s.freshStatus : 'working', agent_session: fresh ? null : { value: 'booting' } } } })
 }
 if (a[0] === 'pane' && a[1] === 'run') {
   entry.bytes = Buffer.byteLength(a[3])
@@ -306,7 +307,7 @@ require('fs').appendFileSync(__dirname + '/../claude.log', JSON.stringify({ cwd:
 const sx = path.join(tmp, 'start'), sbin = path.join(sx, 'bin'), stmp = path.join(sx, 'tmp'), scfg = path.join(sx, 'cfg')
 fs.mkdirSync(sbin, { recursive: true }); fs.mkdirSync(stmp)
 fs.writeFileSync(path.join(sbin, 'herdr'), SHIM, { mode: 0o755 }); fs.writeFileSync(path.join(sbin, 'claude'), STUB, { mode: 0o755 })
-const resetShim = (busy = BUSY) => { fs.writeFileSync(path.join(sx, 'shim.json'), JSON.stringify({ n: 0, reads: {}, busy })); fs.rmSync(path.join(sx, 'shim.log'), { force: true }); fs.rmSync(path.join(sx, 'claude.log'), { force: true }) }
+const resetShim = (busy = BUSY, freshStatus = 'unknown') => { fs.writeFileSync(path.join(sx, 'shim.json'), JSON.stringify({ n: 0, reads: {}, busy, freshStatus })); fs.rmSync(path.join(sx, 'shim.log'), { force: true }); fs.rmSync(path.join(sx, 'claude.log'), { force: true }) }
 const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 const shimCalls = () => lines(path.join(sx, 'shim.log')), stubStarts = () => lines(path.join(sx, 'claude.log'))
 const gitc = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=s@s', '-c', 'user.name=s', ...a], { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } })
@@ -390,6 +391,14 @@ for (const [n, name, cwd, over] of [
       !calls.some((e) => e.argv[1] === 'run' || e.argv[1] === 'close') && stubStarts().length === 0, JSON.stringify({ r, calls }))
 }
 {
+  // Lane clause 1be's case: the new pane holds no agent session but reads idle, not unknown, so it is not yet fresh.
+  resetShim(BUSY, 'idle')
+  const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls(), pane = calls.find((e) => e.argv[1] === 'create')?.made
+  const sessionless = calls.filter((e) => e.argv[1] === 'get' && e.argv[2] === pane && e.fresh).length
+  clause('clause 4l — a new pane answering no agent session while it reads idle, not unknown: start types nothing and exits 1 with one line naming the pane',
+    r.code === 1 && r.err.split('\n').length === 1 && Boolean(pane) && r.err.includes(pane) && sessionless > 0 && !calls.some((e) => e.argv[1] === 'run') && stubStarts().length === 0, JSON.stringify({ r, calls }))
+}
+{
   // E15-D280: the calling pane's mode file, where modeFile puts it under the start call's config dir.
   const { modeFile } = await import('./dctr-state.mjs')
   const was = process.env.CLAUDE_CONFIG_DIR
@@ -431,6 +440,11 @@ for (const [n, name, cwd, over] of [
     reads.slice(0, BUSY - 1).every((s) => s?.value === 'booting') && reads[BUSY - 1] === null && long.status === 1 && short.status === 0 && fs.readFileSync(path.join(sx, 'ran'), 'utf8') === 'ok\n',
     JSON.stringify({ reads, long: long.status, short: short.status }))
   fs.rmSync(path.join(sx, 'ran'), { force: true })
+  resetShim(BUSY, 'idle')
+  const idlePane = JSON.parse(call('tab', 'create', '--workspace', 'w1').stdout).result.root_pane.pane_id
+  const idle = Array.from({ length: BUSY }, () => JSON.parse(call('pane', 'get', idlePane).stdout).result.pane).at(-1)
+  clause('clause 3p — clause 4l\'s shim answers no agent session reading idle from its third pane get',
+    idle.agent_session === null && idle.agent_status === 'idle', JSON.stringify(idle))
   clause('clause 3o — the request text opens with -; proj carries docs/PROJECT.md naming Records .doctrine/records, bare carries none, and each is a git top level',
     reqText.startsWith('-') && /^Records: \.doctrine\/records$/m.test(fs.readFileSync(path.join(proj, 'docs/PROJECT.md'), 'utf8')) && !fs.existsSync(path.join(bare, 'docs/PROJECT.md')) &&
       fs.existsSync(path.join(proj, '.git')) && fs.existsSync(path.join(bare, '.git')), 'fixture repos')

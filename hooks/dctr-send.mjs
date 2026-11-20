@@ -50,7 +50,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { herdr } from './dctr-state.mjs'
-import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, stateDir, handoffLanded, appendRecordLine, sleepMs, takeRunLock, releaseRunLock, ownsRunLock } from './dctr-state.mjs'
+import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, restored, stateDir, handoffLanded, appendRecordLine, sleepMs, takeRunLock, releaseRunLock, ownsRunLock } from './dctr-state.mjs'
 import { laneOf, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
 
 const WAKE_GIVE_UP_MS = 10000
@@ -126,11 +126,6 @@ function turnSince(pane, session, since) {
     if (Array.isArray(c) && c.some((x) => x?.type === 'tool_result')) return false
     return !(Date.parse(e.timestamp) < since)
   })
-}
-
-/** Whether the pane's restore file names `session`; a file that cannot be read or parsed does not. */
-function restored(pane, session) {
-  try { return JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === session } catch { return false }
 }
 
 /** Whether a wake may clear the session: warned in the record, handoff landed after, no R16 after, no turn since. */
@@ -229,10 +224,9 @@ function deliver(pane, lane, claim, role) {
       if (left() <= 0) return say(`${pane} never read ready: gave up before ${line}`)
       r = readPane(pane)
       if (!r) return
-      // The restore hook names only the session the /clear started, so the resume line waits for it, as create's does.
-      if (line === RESUME_LINE && r.session !== session && !restored(pane, r.session)) { sleepMs(Math.min(POLL_MS, Math.max(0, left()))); continue }
-      // After /clear the pane is ready for the resume line once it reports a session other than the cleared one.
-      if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || r.session !== session)) break
+      // After /clear the pane is ready for the resume line once it reports a session other than the cleared one, and
+      // its restore file names that session, which the restore hook writes only for the session a /clear started.
+      if (READY_STATUSES.includes(r.status) && (line !== RESUME_LINE || (r.session !== session && restored(pane, r.session)))) break
       sleepMs(Math.min(POLL_MS, Math.max(0, left())))
     }
     if (line === RESUME_LINE) session = r.session

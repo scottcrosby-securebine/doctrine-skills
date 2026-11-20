@@ -74,14 +74,13 @@
 // Contained (DCTR_VIEW_REQUEST_DIR set) create refuses before anything, and no subcommand calls herdr.
 
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, launchCommand,
 } from './dctr-lib.mjs'
-import { herdr, isPaneNotFound, isTabNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
+import { herdr, isTabNotFound, modeFile, waitReady } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
 
 const MEMORY = 'SESSION_MEMORY.md'
@@ -240,9 +239,8 @@ function create() {
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
   const made = [`the worktree ${wt}`]
-  let tabId = null, script = null, resumeTyped = false
+  let tabId = null, pane = null, script = null, resumeTyped = false
   const fail = (why) => {
-    // Before RESUME_LINE no session holds the lane's work, so what create made is undone and the role can be created again.
     const left = resumeTyped ? null : undo()
     if (left === '') process.stderr.write(`dctr-lane: create failed, ${why}; undid what it made (${undid.join(', ')}), and lane.log not written\n`)
     else process.stderr.write(`dctr-lane: create failed, ${why}; ${[left, made.length ? `made ${made.join(', ')}, left in place` : ''].filter(Boolean).join(', so ')}, and lane.log not written\n`)
@@ -254,7 +252,7 @@ function create() {
    *  integration branch) and the launch file. Returns '' when all is undone, else why it stopped, having removed nothing
    *  past that step; a tab close that fails other than the tab being gone removes nothing. */
   const undo = () => {
-    if (made.length > 1 && !tabId) return 'tab create returned no tab id to close'
+    if (pane && !tabId) return 'tab create returned no tab id to close'
     if (tabId) {
       try { herdr(['tab', 'close', tabId]) } catch (e) { if (!isTabNotFound(e)) return `the tab ${tabId} could not be closed (${why(e)})` }
       undid.push(`closed the tab ${tabId}`)
@@ -277,7 +275,6 @@ function create() {
   try {
     git(repo, 'worktree', 'add', '--quiet', ...(merge ? [wt, base] : ['-b', role, wt, base]))
   } catch (e) { refuse(`git worktree add failed (${why(e)})`) }
-  let pane = null
   try {
     const real = fs.realpathSync(wt)
     const escapes = [handoffRel, header.record, MEMORY].filter((p) => !inside(real, realish(path.resolve(wt, p))))
@@ -304,40 +301,20 @@ function create() {
     pane = tab?.result?.root_pane?.pane_id ?? null
     if (!pane) fail('herdr made no pane')
     made.push(`the herdr pane ${pane}`)
-    const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
-      `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
-      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null)}`
+    const command = launchCommand({ cwd: wt, role, run, model: `"$(cat ${shq(path.join(run, 'model', role))})"`,
+      flags: launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null) })
     script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)
     made.push(`the launch file ${script}`)
     const launch = `sh ${shq(script)}`
     for (const [k, line] of [launch, '/clear', RESUME_LINE].entries()) {
-      waitReady(pane, k === 0, fail, k === 2)
+      waitReady(pane, { fresh: k === 0, resume: k === 2, times, fail })
       if (k === 2) resumeTyped = true // from this call on the role's session may be working, so a failure undoes nothing
       herdr(['pane', 'run', pane, line]) // herdr-lint: a failed send fails the create, which undoes only before RESUME_LINE
     }
     append(`${role} ${pane} ${wt} ${launch}`)
   } catch (e) { fail(why(e)) }
-}
-
-/** Polls `pane get` until the pane reads ready (L7), or fails past the wait. `fresh`: before the launch line, ready is a
- *  pane with no agent session reading agent_status unknown; after it, a status in READY_STATUSES. `resume`: before
- *  RESUME_LINE, also the pane's restore file naming the session herdr reports. */
-function waitReady(pane, fresh, fail, resume) {
-  for (let waited = 0; ; waited += times.poll) {
-    let p = null
-    try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone`) }
-    if (resume && p && !restored(pane, p)) p = null // not ready for RESUME_LINE until the restore file names its session
-    if (p && (fresh ? !p.agent_session?.value && p.agent_status === 'unknown' : READY_STATUSES.includes(p.agent_status))) return
-    if (waited >= times.ready) fail(`the pane ${pane} did not read ready ${fresh ? 'for the launch line' : resume ? 'after /clear, its restore file naming the session herdr reports there,' : 'after the launch line'} within ${times.ready}ms`)
-    sleepMs(times.poll)
-  }
-}
-
-/** Whether the pane's restore file names the session herdr reports in `p`; a file that cannot be read or parsed does not. */
-function restored(pane, p) {
-  try { return Boolean(p.agent_session?.value) && JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id === p.agent_session.value } catch { return false }
 }
 
 // ---------------------------------------------------------------- reset

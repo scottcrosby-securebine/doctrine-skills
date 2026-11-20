@@ -31,7 +31,8 @@
 // `<Records>/orchestrate`, the caller's config dir, PATH and TMPDIR, `--model <model id>`, launchFlags for the mode file
 // of the calling pane (HERDR_PANE_ID), read as the file runs, and, with a request file, `--` and its text as the first
 // prompt, so a request opening with `-` is never read as an option. It then makes one tab in HERDR_WORKSPACE_ID, polls
-// `pane get` of the new pane until a reply answers with no agent session, types the one line `sh '<file>'`, which carries
+// `pane get` of the new pane until a reply answers with no agent session and agent_status unknown (dctr-state.mjs's
+// waitReady, the wait create makes before its launch line), types the one line `sh '<file>'`, which carries
 // no PATH and so fits herdr's 1,024-byte limit on a typed line, and prints `dctr-orchestrate: started the orchestrator
 // in <pane>`, exit 0. It refuses, exit 1 with one line, making no tab and no file and typing nothing: with DCTR_ROLE set,
 // with DCTR_VIEW_REQUEST_DIR set, with no HERDR_WORKSPACE_ID, in a repo with no docs/PROJECT.md or no Records path, or
@@ -42,8 +43,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
-import { modeFile, herdr, isPaneNotFound, sleepMs } from './dctr-state.mjs'
+import { capacityDecision, firstUsage, hostOf, launchFlags, launchCommand, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
+import { modeFile, herdr, waitReady } from './dctr-state.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
 
@@ -117,9 +118,7 @@ function start(model, request) {
   let file
   try {
     file = path.join(fs.mkdtempSync(path.join(tmp, `${PREFIX}-orchestrator-`)), 'launch.sh')
-    fs.writeFileSync(file, `cd ${shq(top)} && exec env DCTR_ROLE=orchestrator DCTR_CALLER=orchestrator DCTR_RUN=${shq(run)} ` +
-      `CLAUDE_CONFIG_DIR=${shq(env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(env.PATH ?? '')} ` +
-      `TMPDIR=${shq(tmp)} claude --model ${shq(model)}${launchFlags(env.HERDR_PANE_ID ? modeFile(env.HERDR_PANE_ID) : null)}` +
+    fs.writeFileSync(file, `${launchCommand({ cwd: top, role: 'orchestrator', run, model: shq(model), flags: launchFlags(env.HERDR_PANE_ID ? modeFile(env.HERDR_PANE_ID) : null) })}` +
       `${text === null ? '' : ` -- ${shq(text)}`}\n`)
   } catch (e) { fail(`the launch file could not be written (${e.code || e.message})${file ? `; ${file} may be left in place` : ''}`) }
   let pane
@@ -127,13 +126,8 @@ function start(model, request) {
   try { pane = herdr(tabCreateArgs(env.HERDR_WORKSPACE_ID, `${PREFIX} · orchestrator`, top))?.result?.root_pane?.pane_id } catch (e) { fail(`herdr made no tab (${e.message.split('\n')[0]}); the launch file ${file} is left in place`) }
   if (!pane) fail(`herdr's tab create named no pane; the launch file ${file} is left in place`)
   const left = `the pane ${pane} and the launch file ${file} are left in place`
-  for (let waited = 0; ; waited += times.poll) {
-    let p = null
-    try { p = herdr(['pane', 'get', pane])?.result?.pane ?? null } catch (e) { if (isPaneNotFound(e)) fail(`the pane ${pane} is gone; the launch file ${file} is left in place`) }
-    if (p && !p.agent_session?.value) break
-    if (waited >= times.ready) fail(`the pane ${pane} did not answer with no agent session within ${times.ready}ms; ${left}`)
-    sleepMs(times.poll)
-  }
+  // herdr reporting the pane gone is the one failure that leaves no pane in place
+  waitReady(pane, { fresh: true, times, fail: (m) => fail(`${m}; ${m.endsWith(' is gone') ? `the launch file ${file} is left in place` : left}`) })
   try { herdr(['pane', 'run', pane, `sh ${shq(file)}`]) } catch (e) { fail(`the launch line was not typed (${e.message.split('\n')[0]}); ${left}`) }
   console.log(`dctr-orchestrate: started the orchestrator in ${pane}`)
 }
