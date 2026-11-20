@@ -240,7 +240,12 @@ function create() {
   if (kickoffHandoff(kickoff.join('\n')) !== handoffRel) refuse(`the kickoff line cannot carry the handoff name ${JSON.stringify(path.basename(handoff))}`)
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
-  const made = [`the worktree ${wt}`, ...(merge ? [] : [`the branch ${role}`])]
+  // What the add made is what is there after it and was not before, whatever it exits: a failing post-checkout hook
+  // exits non-zero with the worktree and branch made, and a failure on the path can leave the branch alone.
+  const there = () => [...(fs.lstatSync(wt, { throwIfNoEntry: false }) ? [`the worktree ${wt}`] : []),
+    ...(gitOk(repo, 'show-ref', '--verify', '--quiet', `refs/heads/${role}`) ? [`the branch ${role}`] : [])]
+  const before = there()
+  const made = []
   let tabId = null, pane = null, script = null, resumeTyped = false
   const fail = (why) => {
     const left = resumeTyped ? null : undo()
@@ -250,8 +255,8 @@ function create() {
   }
   const undid = []
   const drop = (thing) => { const i = made.findIndex((m) => m.startsWith(thing)); if (i >= 0) made.splice(i, 1) }
-  /** Closes the tab by the id its own tab create returned, removes the worktree, a lane's branch (never merge's, the
-   *  integration branch) and the launch file, in that order, dropping each from `made` as it goes. Returns '' when all
+  /** Closes the tab by the id its own tab create returned, removes the worktree and the branch where `made` names them
+   *  and the launch file, in that order, dropping each from `made` as it goes. Returns '' when all
    *  is undone, else why it stopped, having removed nothing past that step; a tab close that fails other than the tab
    *  being gone, or a pane with no tab id, removes nothing. */
   const undo = () => {
@@ -261,11 +266,13 @@ function create() {
       undid.push(`closed the tab ${tabId}`)
       drop('the herdr pane')
     }
-    try { git(repo, 'worktree', 'remove', '--force', wt) } catch (e) { return `${undid.join(', ')}${undid.length ? ', but ' : ''}the worktree could not be removed (${why(e)})` }
-    undid.push(`removed the worktree ${wt}`)
-    drop('the worktree')
-    if (!merge) {
-      try { git(repo, 'branch', '-D', role) } catch (e) { return `${undid.join(', ')}, but the branch ${role} could not be deleted (${why(e)})` }
+    if (made.includes(`the worktree ${wt}`)) {
+      try { git(repo, 'worktree', 'remove', '--force', wt) } catch (e) { return `${undid.join(', ')}${undid.length ? ', but ' : ''}the worktree could not be removed (${why(e)})` }
+      undid.push(`removed the worktree ${wt}`)
+      drop('the worktree')
+    }
+    if (made.includes(`the branch ${role}`)) {
+      try { git(repo, 'branch', '-D', role) } catch (e) { return `${undid.join(', ')}${undid.length ? ', but ' : ''}the branch ${role} could not be deleted (${why(e)})` }
       undid.push(`deleted the branch ${role}`)
       drop('the branch')
     }
@@ -276,9 +283,13 @@ function create() {
     }
     return ''
   }
+  let added = null
   try {
     git(repo, 'worktree', 'add', '--quiet', ...(merge ? [wt, base] : ['-b', role, wt, base]))
-  } catch (e) { refuse(`git worktree add failed (${why(e)})`) }
+  } catch (e) { added = e }
+  made.push(...there().filter((m) => !before.includes(m)))
+  if (added && !made.length) refuse(`git worktree add failed (${why(added)})`)
+  if (added) fail(`git worktree add failed (${why(added)})`)
   try {
     const real = fs.realpathSync(wt)
     const escapes = [handoffRel, header.record, MEMORY].filter((p) => !inside(real, realish(path.resolve(wt, p))))
