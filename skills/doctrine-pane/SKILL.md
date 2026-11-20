@@ -6,7 +6,8 @@ description: Use when the user asks you to pop a pane, ssh into a box, log into 
 # doctrine-pane
 
 An interactive terminal session in a herdr pane, so the user sees exactly what you see and can take
-the keyboard whenever they want it.
+the keyboard whenever they want it. In herdr-core the session lives in an hc terminal instead, as
+"In herdr-core" below says.
 
 **On Codex CLI it needs the doctrine hooks installed**, which the user does, not you: ask them to run
 `node <plugin-root>/hooks/dctr-codex.mjs install` (`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
@@ -74,6 +75,23 @@ interactive session nobody can watch has no purpose. In a doctrine run that refu
 a step that **did not run**, never as one that passed, and the run continues by its non-interactive
 path (doctrine step 3).
 
+## In herdr-core
+
+herdr-core is the terminal core behind Herdr.app, driven by `hc` and `herdr-app`. Your session is in
+it when `HC_TERMINAL_ID` is set, unless `TERM_PROGRAM` is `herdr` and `HERDR_ENV` is `1`, which is a
+herdr TUI running inside a herdr-core terminal. `HERDR_*` variables alone do not make it the TUI: a
+herdr-core started from a herdr pane hands them to every terminal it runs. In herdr-core the launcher
+refuses, and everything else in this skill about panes, tabs, the cap and the launcher's commands
+belongs to the herdr TUI.
+
+That refusal does not end the request. herdr-core has its own way to give the user a session they can
+watch and take over: start it in an hc terminal the person can attach to, as `hc --skill` says, and
+show it in the Herdr.app window when they ask, as `herdr-app --skill` says. Read those manuals for the
+commands; this skill does not repeat them. Never reach for `herdr` there, even when it is on PATH and
+its server answers: what it opens appears in the herdr TUI, which the person in Herdr.app does not
+see. The loop and Ownership below still bind you, with no launcher enforcing them. Where `hc` is not
+installed, tell the user so and open nothing.
+
 **The connect command is not yours to invent.** This plugin carries no device-vendor knowledge and
 must work in any repo. Take the connect command from the project you are working in — its docs, its
 tooling, its inventory — and let it read its own credentials from its own paths. You handle a path,
@@ -120,7 +138,8 @@ What it refuses, and none of it is advisory:
 Any refusal from any launcher command, these and the ones this skill names elsewhere, goes to the
 user quoted verbatim, the line exactly as the launcher printed it, never paraphrased. Never work
 around a refusal: when `read` refuses, do not read the session's tee file yourself, and when `open`
-refuses, do not start the session some other way.
+refuses, do not start the session some other way. The one exception is herdr-core's refusal, whose
+other way "In herdr-core" names.
 
 ## Ownership
 
