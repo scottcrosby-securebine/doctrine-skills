@@ -52,14 +52,14 @@
 // when it returns; a read that fails clears nothing.
 //
 // Its own pane (stdout) shows what is up and what waits on the owner. The watcher's first line is `dctr-lanewatch:
-// watching <run>, polling every 30 s`; everything after it comes through createWatcher's `out`. Each role's latest
-// create line gets one `<ISO time> up <role> <pane>` line, at the first poll for those already there and at the poll
-// that first reads a later one. Each line appended to events.log is printed as appended, the same text, so an event a
+// watching <run>, polling every 30 s`; everything after it but the line it ends with comes through createWatcher's
+// `out`. Each role's latest create line gets one `<ISO time> up <role> <pane>` line, at the first poll for those
+// already there and at the poll that first reads a later one. Each line appended to events.log is printed as appended, the same text, so an event a
 // restart does not raise again prints nothing. A `>>> WAITING ON YOU: <text>` line follows each pause event but an idle
 // stop's (R8), each account limit event, and each notified stall, carrying the event's text or the stall line's own,
 // time aside. After each poll `\r` then `last poll <ISO time> · <n> roles`, with no newline, rewrites the status row in
-// place; a line printed after it first ends that row, so it sits on a row of its own, the line the watcher ends with
-// included.
+// place; a line printed after it first ends that row, so it sits on a row of its own. The watcher ends with a line on
+// stderr, after its object's endRow has ended an open status row through `out`.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -285,6 +285,8 @@ export function createWatcher(run, { plugin = path.dirname(path.dirname(SELF)), 
       // Rewritten in place: a poll with no event adds no row to the pane.
       out(`\rlast poll ${at} · ${watched} roles`); statusRow = true
     },
+    /** End the open status row through `out`, so a line written after it starts a row of its own; none open, nothing. */
+    endRow() { if (statusRow) { out('\n'); statusRow = false } },
   }
 }
 
@@ -393,9 +395,9 @@ if (isMain) {
     process.stdout.write(`dctr-lanewatch: watching ${run}, polling every ${POLL_MS / 1000} s\n`)
     // A timer, never a blocking sleep, so stop's SIGTERM reaches the handler that releases the lock.
     // Each poll first re-reads the lock and renews it; one that no longer names this watcher ends it.
-    await watch(createWatcher(run), undefined, () => ownsRunLock(lock))
-    // The last poll left a status row with no newline: end it, so this line starts a row of its own.
-    process.stdout.write('\n')
+    const w = createWatcher(run)
+    await watch(w, undefined, () => ownsRunLock(lock))
+    w.endRow()
     process.stderr.write(`dctr-lanewatch: ${lock} no longer names this watcher; it ends\n`)
   }
 }

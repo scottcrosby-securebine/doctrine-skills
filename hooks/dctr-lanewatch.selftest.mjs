@@ -1092,6 +1092,21 @@ write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
     JSON.stringify([out, marks, report]))
 }
 
+{
+  // Through the exports: a watcher whose lock check ends its loop after one poll, then its endRow, as the watcher process
+  // calls it before its ending line; and one whose loop ends before any poll, so no status row is open.
+  const er = fixture({ a: {} }), we = watcher(er)
+  let asks = 0
+  await lanewatch.watch(we, async () => {}, () => ++asks <= 1)
+  const afterWatch = er.out
+  we.endRow?.()
+  const none = fixture({ a: {} }), wn = watcher(none)
+  await lanewatch.watch(wn, async () => {}, () => false)
+  wn.endRow?.()
+  clause('clause 2ba3 — through createWatcher\'s out, a watcher whose lock check ended its loop after a poll ends its open status row with one newline when endRow is called, and one that never polled writes nothing (E15-D275)',
+    /\rlast poll \S+ · 1 roles$/.test(afterWatch) && er.out === `${afterWatch}\n` && none.out === '', JSON.stringify([afterWatch, er.out, none.out]))
+}
+
 // ---------------------------------------------------------------- clause 3: the fixtures carry it
 
 {
