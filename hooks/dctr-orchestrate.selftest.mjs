@@ -289,6 +289,10 @@ const fs = require('fs'), path = require('path'), { spawnSync } = require('child
 const dir = path.dirname(__dirname), st = path.join(dir, 'shim.json'), a = process.argv.slice(2)
 const s = JSON.parse(fs.readFileSync(st, 'utf8')), entry = { argv: a }
 const out = (o, code = 0) => { fs.appendFileSync(path.join(dir, 'shim.log'), JSON.stringify(entry) + '\n'); fs.writeFileSync(st, JSON.stringify(s)); if (code) process.stderr.write(o + '\n'); else process.stdout.write(JSON.stringify(o) + '\n'); process.exit(code) }
+// fail 'tab': a tab create fails as a reply that never came; fail 'after': a pane run runs the line and then fails the
+// same way; fail 'before': it fails so without running it. herdr cannot tell start which of the last two happened.
+const TIMEOUT = 'herdr: no reply from the server within 10000ms'
+if (a[0] === 'tab' && a[1] === 'create' && s.fail === 'tab') { entry.failed = true; out(TIMEOUT, 1) }
 if (a[0] === 'tab' && a[1] === 'create') { const id = 'w1:p' + (++s.n); s.reads[id] = 0; entry.made = id; out({ result: { tab: { tab_id: 't' + s.n }, root_pane: { pane_id: id } } }) }
 if (a[0] === 'pane' && a[1] === 'get') {
   const fresh = ++s.reads[a[2]] >= s.busy; entry.fresh = fresh
@@ -297,7 +301,9 @@ if (a[0] === 'pane' && a[1] === 'get') {
 if (a[0] === 'pane' && a[1] === 'run') {
   entry.bytes = Buffer.byteLength(a[3])
   if (entry.bytes > 1024) { entry.failed = true; out('herdr: the line is over the 1024-byte limit', 1) }
+  if (s.fail === 'before') { entry.failed = true; out(TIMEOUT, 1) }
   entry.status = spawnSync('/bin/sh', ['-c', a[3]], { env: {}, encoding: 'utf8' }).status
+  if (s.fail === 'after') { entry.failed = true; out(TIMEOUT, 1) }
 }
 out({ result: {} })
 `
@@ -307,7 +313,7 @@ require('fs').appendFileSync(__dirname + '/../claude.log', JSON.stringify({ cwd:
 const sx = path.join(tmp, 'start'), sbin = path.join(sx, 'bin'), stmp = path.join(sx, 'tmp'), scfg = path.join(sx, 'cfg')
 fs.mkdirSync(sbin, { recursive: true }); fs.mkdirSync(stmp)
 fs.writeFileSync(path.join(sbin, 'herdr'), SHIM, { mode: 0o755 }); fs.writeFileSync(path.join(sbin, 'claude'), STUB, { mode: 0o755 })
-const resetShim = (busy = BUSY, freshStatus = 'unknown') => { fs.writeFileSync(path.join(sx, 'shim.json'), JSON.stringify({ n: 0, reads: {}, busy, freshStatus })); fs.rmSync(path.join(sx, 'shim.log'), { force: true }); fs.rmSync(path.join(sx, 'claude.log'), { force: true }) }
+const resetShim = (busy = BUSY, freshStatus = 'unknown', fail = null) => { fs.writeFileSync(path.join(sx, 'shim.json'), JSON.stringify({ n: 0, reads: {}, busy, freshStatus, fail })); fs.rmSync(path.join(sx, 'shim.log'), { force: true }); fs.rmSync(path.join(sx, 'claude.log'), { force: true }) }
 const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 const shimCalls = () => lines(path.join(sx, 'shim.log')), stubStarts = () => lines(path.join(sx, 'claude.log'))
 const gitc = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=s@s', '-c', 'user.name=s', ...a], { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } })
@@ -424,6 +430,53 @@ for (const [n, name, cwd, over] of [
     JSON.stringify(flags) === JSON.stringify(['--permission-mode bypassPermissions', 'none', 'none']), JSON.stringify(flags))
   set(null)
 }
+{
+  // A send that reached the pane and then failed, and one that failed without reaching it: start cannot tell them apart.
+  const send = (fail) => {
+    resetShim(BUSY, 'unknown', fail)
+    const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls(), pane = calls.find((e) => e.argv[1] === 'create')?.made
+    const file = typedFile(calls.find((e) => e.argv[1] === 'run')?.argv[3])
+    return { r, pane, file, starts: stubStarts().length, closes: calls.filter((e) => e.argv[1] === 'close').length, kept: Boolean(file) && fs.existsSync(file) }
+  }
+  const after = send('after'), before = send('before')
+  const said = (x) => x.r.code === 1 && x.r.out === '' && x.r.err.split('\n').length === 1 && !/not typed/.test(x.r.err) && /send of the launch line failed/.test(x.r.err) &&
+    /may have been typed/.test(x.r.err) && x.r.err.includes(x.pane) && x.r.err.includes(x.file) && /left in place/.test(x.r.err) && x.closes === 0 && x.kept
+  clause('clause 4m — a launch line that reached the pane before its send failed: exit 1 with one line saying the send failed and the line may have been typed, never that it was not, naming the pane and the launch file as left in place, nothing closed or removed',
+    said(after) && after.starts === 1, JSON.stringify(after))
+  clause('clause 4n — a launch line whose send failed without reaching the pane: the same line as 4m but for the pane and file names, since start cannot tell the two apart',
+    said(before) && before.starts === 0 && before.r.err.replaceAll(before.pane, 'P').replaceAll(before.file, 'F') === after.r.err.replaceAll(after.pane, 'P').replaceAll(after.file, 'F'),
+    JSON.stringify({ before, after }))
+}
+{
+  // A tab create whose reply never came may still have made the tab.
+  resetShim(BUSY, 'unknown', 'tab')
+  const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls()
+  clause('clause 4o — a tab create that fails: exit 1 with one line saying the tab create failed and a tab may have been made, never that none was, the launch file left in place, and no other herdr call',
+    r.code === 1 && r.err.split('\n').length === 1 && !/made no tab/.test(r.err) && /tab create failed/.test(r.err) && /may have been made/.test(r.err) && /\/launch\.sh is left in place/.test(r.err) &&
+      calls.length === 1 && stubStarts().length === 0, JSON.stringify({ r, calls }))
+}
+{
+  // Two starts in one fixture, the second with another model, so a shared path would change the first file's bytes.
+  resetShim()
+  startIn(proj, ['claude-opus-5-5', req])
+  const first = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3]), bytes = first && fs.readFileSync(first, 'utf8')
+  resetShim()
+  startIn(proj, ['claude-other-model', req])
+  const second = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3])
+  const outside = (f) => Boolean(f) && path.isAbsolute(f) && !f.startsWith(runDir + path.sep) && !f.startsWith(proj + path.sep)
+  clause('clause 4p — two starts write two different launch files, each outside the run and the checkout, and the second leaves the first\'s bytes as they were',
+    outside(first) && outside(second) && first !== second && fs.readFileSync(first, 'utf8') === bytes && bytes.includes('claude-opus-5-5') && fs.readFileSync(second, 'utf8').includes('claude-other-model'),
+    JSON.stringify({ first, second, same: first && fs.readFileSync(first, 'utf8') === bytes }))
+}
+{
+  // A relative TMPDIR: the pane starts elsewhere, so the typed path and the session's TMPDIR must not depend on start's cwd.
+  resetShim()
+  fs.mkdirSync(path.join(sub, 'reltmp'), { recursive: true })
+  const r = startIn(sub, ['claude-opus-5-5', req], { TMPDIR: 'reltmp' }), file = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3])
+  clause('clause 4q — with a relative TMPDIR, start types the launch file\'s absolute path, so the pane resolves it wherever it starts',
+    r.code === 0 && Boolean(file) && path.isAbsolute(file) && fs.existsSync(file), JSON.stringify({ r, file }))
+  fs.rmSync(path.join(sub, 'reltmp'), { recursive: true, force: true })
+}
 
 // clause 4's fixtures, proved without start
 {
@@ -445,6 +498,17 @@ for (const [n, name, cwd, over] of [
   const idle = Array.from({ length: BUSY }, () => JSON.parse(call('pane', 'get', idlePane).stdout).result.pane).at(-1)
   clause('clause 3p — clause 4l\'s shim answers no agent session reading idle from its third pane get',
     idle.agent_session === null && idle.agent_status === 'idle', JSON.stringify(idle))
+  for (const fail of ['after', 'before']) {
+    resetShim(BUSY, 'unknown', fail)
+    const p = JSON.parse(call('tab', 'create', '--workspace', 'w1').stdout).result.root_pane.pane_id
+    const r = call('pane', 'run', p, `echo ok > ${shq(path.join(sx, 'ran'))}`), ran = fs.existsSync(path.join(sx, 'ran'))
+    clause(`clause 3q-${fail} — the shim's ${fail} mode fails the pane run with no reply${fail === 'after' ? ' after it ran the line' : ' without running the line'}`,
+      r.status === 1 && r.stdout === '' && /no reply/.test(r.stderr) && ran === (fail === 'after'), JSON.stringify({ status: r.status, stderr: r.stderr, ran }))
+    fs.rmSync(path.join(sx, 'ran'), { force: true })
+  }
+  resetShim(BUSY, 'unknown', 'tab')
+  const t = call('tab', 'create', '--workspace', 'w1')
+  clause('clause 3r — the shim\'s tab mode fails a tab create with no reply', t.status === 1 && t.stdout === '' && /no reply/.test(t.stderr), JSON.stringify(t.status))
   clause('clause 3o — the request text opens with -; proj carries docs/PROJECT.md naming Records .doctrine/records, bare carries none, and each is a git top level',
     reqText.startsWith('-') && /^Records: \.doctrine\/records$/m.test(fs.readFileSync(path.join(proj, 'docs/PROJECT.md'), 'utf8')) && !fs.existsSync(path.join(bare, 'docs/PROJECT.md')) &&
       fs.existsSync(path.join(proj, '.git')) && fs.existsSync(path.join(bare, '.git')), 'fixture repos')
