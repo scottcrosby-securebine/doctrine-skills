@@ -74,7 +74,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, herdrPane,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, herdrPane, termHost,
 } from './dctr-lib.mjs'
 import { herdr, isPaneNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -208,6 +208,7 @@ function laneFiles(wt) {
 function create() {
   const [, repoArg, base, handoff] = args
   if (process.env.DCTR_VIEW_REQUEST_DIR) refuse('a contained session makes no herdr pane')
+  if (termHost(process.env) === 'herdr-core') refuse('this session is in herdr-core, and a lane needs a herdr TUI pane')
   const workspace = process.env.HERDR_WORKSPACE_ID
   if (!workspace) refuse('no HERDR_WORKSPACE_ID, so there is no herdr workspace to make the pane in')
   let repo

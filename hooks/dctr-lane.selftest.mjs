@@ -613,6 +613,15 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   const r = create(f, 'a', { env: { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } })
   clause('clause 1d — contained (DCTR_VIEW_REQUEST_DIR set), create refuses, making nothing and calling herdr zero times (L5)', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
 }
+{
+  // The measured herdr-core terminal: HC_TERMINAL_ID and TERM_PROGRAM=ghostty beside leaked HERDR_* (issue #108).
+  const f = fixture()
+  const env = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty' }
+  const r = create(f, 'a', { env })
+  clause('clause 1d3 — in herdr-core with leaked HERDR_* variables, create refuses, making nothing and calling herdr zero times (#108)', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 3d3 — without the command, the 1d3 environment carries HC_TERMINAL_ID, TERM_PROGRAM=ghostty and the leaked HERDR_ENV and HERDR_WORKSPACE_ID',
+    r.env.HC_TERMINAL_ID === 't17' && r.env.TERM_PROGRAM === 'ghostty' && r.env.HERDR_ENV === '1' && r.env.HERDR_WORKSPACE_ID === 'w1', JSON.stringify({ HC: r.env.HC_TERMINAL_ID, TP: r.env.TERM_PROGRAM, HE: r.env.HERDR_ENV, WS: r.env.HERDR_WORKSPACE_ID }))
+}
 
 // The caller's role (E15-D201) and the lane.log grammar (E15-D186), on one lane: after a real create, each of reset,
 // archive and remove is run as role a and with no role, which must refuse, and then as the orchestrator, which must
