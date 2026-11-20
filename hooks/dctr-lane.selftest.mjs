@@ -47,7 +47,8 @@ const SHORT_PATH = [cbin, bin, ...SYS_PATH].join(':')
 // file (its path from HERDR_SHIM_RESTORE) naming s2 and the pane then holds s2; in mode late-restore the pane reads
 // idle under s1 for three reads first, and in mode no-restore it never writes the file and keeps s1. A typed line over
 // 1,024 bytes is refused, as herdr refuses it. HERDR_SHIM_MODE changes one answer per fixture, and HERDR_SHIM_CLOSE
-// makes tab close fail (`fail`) or answer tab_not_found (`gone`); HERDR_SHIM_NOTAB answers tab create with no tab id. Every call is logged
+// makes tab close fail (`fail`) or answer tab_not_found (`gone`); HERDR_SHIM_NOTAB answers tab create with no tab id;
+// HERDR_SHIM_FAILRUN names a line whose pane run types it into the pane and then exits 1. Every call is logged
 // with what it answered, a typed line with the pane's session and its restore file's session when it was typed, and
 // whether lane.log and the watched files existed at that moment.
 fs.writeFileSync(path.join(bin, 'herdr'), `#!/usr/bin/env node
@@ -89,13 +90,14 @@ if (args[0] === 'tab' && args[1] === 'create') {
       if (args[3] === '/clear') { if (mode === 'late-restore') { p.busy = 0; p.late = 4 } else if (mode !== 'no-restore') clearTo(args[2], p) }
       at = { session: p.session, restore: restored(args[2]) }
     }
-    out = JSON.stringify({ result: {} })
+    if (process.env.HERDR_SHIM_FAILRUN === args[3]) { code = 1; err = 'herdr: timed out waiting for the reply' } // the line reached the pane first
+    else out = JSON.stringify({ result: {} })
   }
 } else if (args[0] === 'tab' && args[1] === 'close' && process.env.HERDR_SHIM_CLOSE === 'fail') { code = 1; err = 'transport down' }
 else if (args[0] === 'tab' && args[1] === 'close' && process.env.HERDR_SHIM_CLOSE === 'gone') { code = 1; err = JSON.stringify({ error: { code: 'tab_not_found' } }) }
 else out = JSON.stringify({ result: {} })
 fs.writeFileSync(stFile, JSON.stringify(st))
-fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, at, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
+fs.appendFileSync(path.join(dir, 'log.jsonl'), JSON.stringify({ args, read, session, made, at, failed: code !== 0, laneLog: fs.existsSync(process.env.HERDR_SHIM_LANELOG || '/nonexistent'), watch }) + '\\n')
 if (err) process.stderr.write(err + '\\n')
 process.stdout.write(out)
 process.exit(code)
@@ -200,14 +202,14 @@ function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctri
   return { root, repo, base, run, shim, wt: (role) => path.join(repo, '.claude/worktrees', role), laneLog: path.join(run, 'lane.log') }
 }
 
-const lane = (f, args, { cwd = f.repo, env = {}, unset = [] } = {}) => {
+const lane = (f, args, { cwd = f.repo, env = {}, unset = [], timeout } = {}) => {
   const e = {
     ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_RUN: f.run,
     HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
     HERDR_SHIM_RESTORE: RESTORE, DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
-  const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8', maxBuffer: Infinity })
+  const r = spawnSync('node', [LANE, ...args], { cwd, env: e, encoding: 'utf8', maxBuffer: Infinity, timeout })
   SAID.push(r.stderr || '')
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', env: e }
 }
@@ -713,19 +715,23 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
 // line, and the same create then succeeds.
 const tabCloses = (f) => shimLog(f).filter((e) => e.args[0] === 'tab' && e.args[1] === 'close').map((e) => e.args[2])
 const madeTabs = (f) => shimLog(f).filter((e) => e.made).map((e) => e.made.tab)
-const undone = (f, role, r, tabs) => r.code === 1 && /create failed, .*; undid what it made/.test(r.err) && (r.out + r.err).includes(f.wt(role)) &&
+/** `r` failed with one stderr line naming its cause (`cause` in it, else any text) and that it undid what it made, and
+ *  the tab closes, worktree, branch, launch file and lane.log show the undo. */
+const undone = (f, role, r, tabs, cause = '') => r.code === 1 && r.err.trim().split('\n').length === 1 &&
+  new RegExp(`create failed, .*${cause.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}.*; undid what it made`).test(r.err) && /create failed, [^;]+; undid/.test(r.err) && (r.out + r.err).includes(f.wt(role)) &&
   !exists(f.wt(role)) && !branches(f.repo).some((b) => b.startsWith(`${role} `)) && !exists(path.join(f.run, 'launch', `${role}.sh`)) &&
   JSON.stringify(tabCloses(f)) === JSON.stringify(tabs) && laneLines(f).length === 0
-for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every read'], ['1o', 'get-empty', 0, 'pane get answers nothing'],
-  ['1p', 'agent-before', 0, 'the new pane already reads an agent session'], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line'],
-  ['1bd', 'session-before', 0, 'the new pane reads agent_status unknown and already holds an agent session'],
-  ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown'],
-  ['1bw', 'no-restore', 2, 'the pane never writes its restore file or holds a new session after /clear (E15-D252, E15-D266)']]) {
+const FOR_LAUNCH = 'did not read ready for the launch line'
+for (const [n, mode, typed, why, cause] of [['1n', 'get-fail', 0, 'pane get fails every read', FOR_LAUNCH], ['1o', 'get-empty', 0, 'pane get answers nothing', FOR_LAUNCH],
+  ['1p', 'agent-before', 0, 'the new pane already reads an agent session', FOR_LAUNCH], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line', 'did not read ready after the launch line'],
+  ['1bd', 'session-before', 0, 'the new pane reads agent_status unknown and already holds an agent session', FOR_LAUNCH],
+  ['1be', 'idle-before', 0, 'the new pane holds no agent session and reads idle, not unknown', FOR_LAUNCH],
+  ['1bw', 'no-restore', 2, 'the pane never writes its restore file or holds a new session after /clear (E15-D252, E15-D266)', 'did not read ready after /clear']]) {
   const f = fixture()
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: mode, PATH: SHORT_PATH } })
   const t = shimLog(f).filter((e) => e.args[0] === 'pane' && e.args[1] === 'run').length
-  clause(`clause ${n} — when ${why}, create exits 1 naming the worktree, types ${typed} line${typed === 1 ? '' : 's'}, closes the tab it made, removes the worktree, branch a and the launch file, and writes no lane.log line (L6, L7, E15-D266)`,
-    t === typed && undone(f, 'a', r, madeTabs(f)) && madeTabs(f).length === 1, `exit ${r.code} ${said(r)}; typed ${t}; closed ${JSON.stringify(tabCloses(f))} of ${JSON.stringify(madeTabs(f))}`)
+  clause(`clause ${n} — when ${why}, create exits 1 with one line naming that cause and the worktree, types ${typed} line${typed === 1 ? '' : 's'}, closes the tab it made, removes the worktree, branch a and the launch file, and writes no lane.log line (L6, L7, E15-D266)`,
+    t === typed && undone(f, 'a', r, madeTabs(f), cause) && madeTabs(f).length === 1, `exit ${r.code} ${said(r)}; typed ${t}; closed ${JSON.stringify(tabCloses(f))} of ${JSON.stringify(madeTabs(f))}`)
   const again = create(f, 'a', { env: { PATH: SHORT_PATH } })
   clause(`clause ${n}2 — the same create of that role then succeeds and writes its create line (E15-D266)`, again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
 }
@@ -736,7 +742,7 @@ for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every
   const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'tab-fail' } })
   const listed = git(f.repo, 'worktree', 'list', '--porcelain').out
   clause('clause 1r — a create whose tab create fails after the worktree is made appends no line to lane.log (E15-D203)', laneLines(f).length === 0 && !exists(f.laneLog), JSON.stringify(read(f.laneLog)))
-  clause('clause 1r2 — it removes the worktree, which git worktree list no longer lists, and branch a, closing no tab (E15-D266)', undone(f, 'a', r, []) && !listed.includes(`worktree ${f.wt('a')}\n`), `${said(r)} ${listed}`)
+  clause('clause 1r2 — it removes the worktree, which git worktree list no longer lists, and branch a, closing no tab, in one line naming tab create\'s error (E15-D266)', undone(f, 'a', r, [], 'transport down') && !listed.includes(`worktree ${f.wt('a')}\n`), `${said(r)} ${listed}`)
   clause('clause 1r3 — it exits non-zero (E15-D205)', r.code !== 0, `exit ${r.code}`)
   clause('clause 1r4 — its output names the worktree by its absolute path (E15-D220)', (r.out + r.err).includes(f.wt('a')), said(r))
   const again = create(f, 'a')
@@ -789,6 +795,40 @@ for (const [n, mode, typed, why] of [['1n', 'get-fail', 0, 'pane get fails every
   let code = null
   try { fs.appendFileSync(f.laneLog, 'x\n') } catch (e) { code = e.code }
   clause('clause 3bz — without the command, appending to a lane.log that is a directory fails (EISDIR)', code === 'EISDIR', String(code))
+}
+// A failed send of RESUME_LINE, the line having reached the pane, leaves what create made (E15-D267).
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { HERDR_SHIM_FAILRUN: RESUME_LINE, PATH: SHORT_PATH } })
+  const pane = shimLog(f).find((e) => e.made)?.made.pane, script = path.join(f.run, 'launch', 'a.sh')
+  const sends = shimLog(f).filter((e) => e.args[1] === 'run')
+  clause('clause 1ca — a create whose send of RESUME_LINE reaches the pane and then fails exits 1 naming the pane, the worktree and the launch file as left in place, closes no tab, keeps the worktree, branch a and the launch file, and writes no lane.log line (E15-D267)',
+    r.code === 1 && Boolean(pane) && [pane, f.wt('a'), script, 'left in place'].every((s) => r.err.includes(s)) && !r.err.includes('undid') &&
+    sends.length === 3 && sends[2].args[3] === RESUME_LINE && sends[2].failed && tabCloses(f).length === 0 &&
+    exists(f.wt('a')) && branches(f.repo).some((b) => b.startsWith('a ')) && exists(script) && laneLines(f).length === 0 && !exists(f.laneLog),
+    `exit ${r.code} ${said(r)}; sends ${JSON.stringify(sends.map((e) => [e.args[3]?.slice(0, 20), e.failed]))}`)
+  // Without the command: under the same variable the shim types the launch line and /clear with exit 0, and types RESUME_LINE into the pane (its count rises) and then exits 1.
+  const g = fixture(), env = { ...process.env, HERDR_SHIM_DIR: g.shim, HERDR_SHIM_FAILRUN: RESUME_LINE }
+  const call = (...a) => spawnSync(path.join(bin, 'herdr'), a, { encoding: 'utf8', env })
+  const id = JSON.parse(call('tab', 'create').stdout).result.root_pane.pane_id
+  const codes = ['sh x', '/clear', RESUME_LINE].map((l) => call('pane', 'run', id, l).status)
+  const typedN = JSON.parse(read(path.join(g.shim, 'state.json'))).panes[id].typed
+  clause('clause 3ca — without the command, the HERDR_SHIM_FAILRUN shim answers the launch line and /clear with exit 0 and RESUME_LINE with exit 1, after typing all three into the pane',
+    JSON.stringify(codes) === '[0,0,1]' && typedN === 3, JSON.stringify({ codes, typedN }))
+}
+// DCTR_LANE_TIMES overrides poll and ready (E15-D266): a pane that never reads ready after /clear is read once per
+// poll from the first read until ready ms have passed, ready/poll + 1 reads, and each setting gives its own count.
+{
+  const reads = (times) => {
+    const f = fixture()
+    // the timeout ends a run whose wait ignores ready, which would otherwise poll for the five-minute default
+    const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'no-restore', PATH: SHORT_PATH, DCTR_LANE_TIMES: JSON.stringify(times) }, timeout: 60000 })
+    const log = shimLog(f), at = log.findIndex((e) => e.args[1] === 'run' && e.args[3] === '/clear')
+    return { code: r.code, gets: log.slice(at + 1).filter((e) => e.args[1] === 'get').length, said: r.err.trim().slice(0, 200) }
+  }
+  const a = reads({ poll: 40, ready: 400 }), b = reads({ poll: 150, ready: 600 })
+  clause('clause 1cb — DCTR_LANE_TIMES sets poll and ready: after /clear create reads the pane 11 times at poll 40 ready 400 and 5 times at poll 150 ready 600, then fails naming that ready (E15-D266)',
+    a.code === 1 && a.gets === 11 && a.said.includes('within 400ms') && b.code === 1 && b.gets === 5 && b.said.includes('within 600ms'), JSON.stringify({ a, b }))
 }
 
 // Tabs (E15-D200): the merge session and a lane, each in a tab of its own, no pane split.
