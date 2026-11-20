@@ -58,9 +58,11 @@
 // restart does not raise again prints nothing. A `>>> WAITING ON YOU: <text>` line follows each pause event but an idle
 // stop's (R8), each account limit event, and each notified stall, carrying the event's text or the stall line's own,
 // time aside. After each poll `\r` then `last poll <ISO time> · <n> roles`, with no newline, rewrites the status row in
-// place; a line printed after it first ends that row, so it sits on a row of its own. A watcher whose lock no longer
-// names it ends with a line on stderr, after its object's endRow has ended an open status row through `out`. One that
-// `stop` or another signal ends exits at once: it prints nothing more and leaves an open status row as it is.
+// place; a line printed after it first ends that row, so it sits on a row of its own. A watcher that reads, before a
+// poll, that its lock no longer names it polls no more and ends with a line on stderr, after its object's endRow has
+// ended an open status row through `out`. A SIGTERM (what `stop` sends), SIGINT or SIGHUP ends it with exit 0 and no
+// line of its own, leaving an open status row as it is: one that lands in the wait between polls ends it at once, and
+// one that lands during a poll ends it only once that poll has finished and printed its lines and its status row.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
