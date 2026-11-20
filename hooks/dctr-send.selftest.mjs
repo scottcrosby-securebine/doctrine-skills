@@ -1020,19 +1020,26 @@ const rWaWarned = await wakeAll(waWarned)
 clause('clause 2z4 — wake-all on a warned session that has not handed off still nudges it once and reports it woken (E15-D277)',
   rWaWarned.code === 0 && JSON.stringify(typedTo(waWarned, 'a').map((e) => e.typed.text)) === JSON.stringify([NUDGE]) && JSON.stringify(rWaWarned.words) === '["a woken"]', wshow(waWarned, rWaWarned))
 
-// E15-D277, a warning that lands during the wait: the pane reads working on wake's first read and its second, the
-// record gains a warned line on the second read, and the third reads idle. The line names the pane's session, or, in
-// the twin, another session.
+// E15-D277, a warning that lands during the wait: the pane reads working on wake's first read and its second, and the
+// shim appends a warned line while it handles the third read, before it replies idle. So the line exists only once the
+// ready reading has run, and only a record read after that reading can see it. The line names the pane's session, or,
+// in the twin, another session.
+const LW_READ = 3
 const lateWarnFx = (named) => {
   const fx = fixture({ laneRecord: '- State: Open\n' })
   handed(fx, { latch: ['S'], warnedAt: H + 60000, handoffAt: H, session: 'S', transcript: clean })
   write(path.join(fx.run, 'held/a', HELD), 'probe message'); write(path.join(fx.run, 'pending/a', HELD), '')
-  setShim(fx, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 2 } }, events: [{ n: 2, file: fx.record, line: `- auto-cycle: warned ${named} 20%` }] })
+  setShim(fx, { panes: { [PANE]: { status: 'idle', session: 'S', busy: 2 } }, events: [{ n: LW_READ, file: fx.record, line: `- auto-cycle: warned ${named} 20%` }] })
   return fx
 }
+// In the sender's own run: the read carrying the warned line reads ready, no pane read follows it, and a nudge, where
+// one is typed, is typed after it.
+const landedReady = (fx, n) => { const log = shimLog(fx), ev = log.findIndex((e) => e.event === n), nu = log.findIndex((e) => e.typed?.text === NUDGE)
+  return ev >= 0 && log[ev].status === 'idle' && !log.slice(ev + 1).some((e) => e.argv[0] === 'pane' && e.argv[1] === 'get') && (nu < 0 || nu > ev) }
 const lwS = lateWarnFx('S'), lwOther = lateWarnFx('S9')
 const rLwS = await sender(lwS, ['wake', 'a']), rLwOther = await sender(lwOther, ['wake', 'a'])
-clause('clause 2z5 — a warned line naming the pane\'s session written while wake waits for a ready reading: nothing typed, the warned line printed and no woke line, the held message and its pending marker kept; the twin whose late line names another session is nudged once (E15-D277)',
+clause('clause 2z5 — a warned line naming the pane\'s session written while wake waits for a ready reading, on the pane read that returns ready: nothing typed, the warned line printed and no woke line, the held message and its pending marker kept; the twin whose late line names another session is nudged once (E15-D277)',
+  landedReady(lwS, LW_READ) && landedReady(lwOther, LW_READ) &&
   rLwS.code === 0 && typed(lwS).length === 0 && /^dctr-send: a warned line names S: nothing typed$/m.test(rLwS.out) && !WOKE.test(rLwS.out) &&
   fs.readFileSync(path.join(lwS.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(lwS), [HELD]) &&
   rLwOther.code === 0 && JSON.stringify(typed(lwOther)) === JSON.stringify(nudged()) && WOKE.test(rLwOther.out) && same(pendingOf(lwOther), []),
@@ -1049,10 +1056,11 @@ clause('clause 2z6 — wake on a warned session that has not handed off, its pan
   fs.readFileSync(path.join(wBusy.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(wBusy), [HELD]), `${busyGets} pane reads; ${show(wBusy, rWBusy)}`)
 
 // E15-D277 on the three-line plan: the session the /clear started is warned in its resumed turn, while wake waits for
-// the nudge's ready reading. Each typing call leaves the pane working for two reads. The sixth pane read is the first
-// after the resume line's typing call (reads one and two precede /clear, three to five follow it), and the shim appends
-// the warned line on it while the pane reads working. The line names that new session, or, in the twin, another one.
-const RW_READ = 6
+// the nudge's ready reading. Each typing call leaves the pane working for two reads: reads one and two precede /clear,
+// three to five follow it, and six to eight follow the resume line's typing call. The shim appends the warned line
+// while it handles read eight, before it replies idle, so only a record read after the nudge's ready reading sees it.
+// The line names that new session, or, in the twin, another one.
+const RW_READ = 8
 const resumedWarnFx = (named) => {
   const fx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { busyAfterType: 2, clearSession: 'S-next' } })
   handed(fx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
@@ -1060,11 +1068,12 @@ const resumedWarnFx = (named) => {
   setShim(fx, { events: [{ n: RW_READ, file: fx.record, line: `- auto-cycle: warned ${named} 20%` }] })
   return fx
 }
-// In the sender's own run: the read carrying the warned line comes after the resume line's typing call and reads working.
-const rwLanded = (fx) => { const log = shimLog(fx), ev = log.findIndex((e) => e.event === RW_READ), rs = log.findIndex((e) => e.typed?.text === RESUME_LINE); return rs >= 0 && ev > rs && log[ev].status === 'working' }
+// In the sender's own run: the read carrying the warned line comes after the resume line's typing call, reads ready,
+// and is the last pane read, with the nudge, where one is typed, after it.
+const rwLanded = (fx) => { const log = shimLog(fx), ev = log.findIndex((e) => e.event === RW_READ), rs = log.findIndex((e) => e.typed?.text === RESUME_LINE); return rs >= 0 && ev > rs && landedReady(fx, RW_READ) }
 const rwNew = resumedWarnFx('S-next'), rwOther = resumedWarnFx('S-other')
 const rRwNew = await sender(rwNew, ['wake', 'a']), rRwOther = await sender(rwOther, ['wake', 'a'])
-clause('clause 2z7 — a handed-off wake whose new session is warned while wake waits for the nudge\'s ready reading, on a pane read after the resume line is typed that reads working: /clear and the resume line typed once each, a line naming the warned session and the nudge not typed, no woke line, the held message and its pending marker kept; the twin whose late line names another session types all three and prints woke (E15-D277)',
+clause('clause 2z7 — a handed-off wake whose new session is warned while wake waits for the nudge\'s ready reading, on the pane read after the resume line is typed that returns ready: /clear and the resume line typed once each, a line naming the warned session and the nudge not typed, no woke line, the held message and its pending marker kept; the twin whose late line names another session types all three and prints woke (E15-D277)',
   rwLanded(rwNew) && rwLanded(rwOther) &&
   rRwNew.code === 0 && JSON.stringify(typed(rwNew)) === JSON.stringify([`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`]) && !WOKE.test(rRwNew.out) &&
   rRwNew.out.split('\n').includes(`dctr-send: a warned line names S-next: ${NUDGE} not typed`) &&
@@ -1427,26 +1436,26 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   clause('clause 3z3 — without the sender: the warned fixture names S in a warned line and its handoff predates the warning, its twin names no session, and each holds the held message and its marker',
     sessionWarned(entries(w), 'S') !== null && !handoffLanded({ handoffPath: w.handoff, memoryPath: memory(w), warnedAt: latchOf(w, 'S') }) && sessionWarned(entries(t), 'S') === null &&
     [w, t].every((x) => fs.readFileSync(path.join(x.run, 'held/a', HELD), 'utf8') === 'probe message' && same(pendingOf(x), [HELD])), 'warned fixtures wrong')
-  // 2z5's fixtures: no warned line before the second pane read, the line naming S (or S9) after it, and the pane
-  // working on the first two reads and idle on the third.
+  // 2z5's fixtures: the pane working on the first two reads and idle on the third, no warned line until the third has
+  // run, and the line naming S (or S9) once it has.
   const proof = []
   for (const [fx, named] of [[lateWarnFx('S'), 'S'], [lateWarnFx('S9'), 'S9']]) {
     const get = () => JSON.parse(spawnSync(path.join(fx.bin, 'herdr'), ['pane', 'get', PANE], { encoding: 'utf8' }).stdout).result.pane.agent_status
     const warnedNow = () => sessionWarned(parseRecord(fs.readFileSync(fx.record, 'utf8')).entries, named) !== null
-    const s1 = get(), w1 = warnedNow(), s2 = get(), w2 = warnedNow(), s3 = get()
-    proof.push([named, s1, w1, s2, w2, s3, sessionWarned(parseRecord(fs.readFileSync(fx.record, 'utf8')).entries, named === 'S' ? 'S9' : 'S') === null])
+    const w0 = warnedNow(), s1 = get(), w1 = warnedNow(), s2 = get(), w2 = warnedNow(), s3 = get(), w3 = warnedNow()
+    proof.push([named, w0, s1, w1, s2, w2, s3, w3, sessionWarned(parseRecord(fs.readFileSync(fx.record, 'utf8')).entries, named === 'S' ? 'S9' : 'S') === null])
   }
-  clause('clause 3z4 — without the sender: 2z5\'s shim reads working twice then idle, the record naming no warned session after the first read and naming S (or, in the twin, S9 and not S) after the second',
-    same(proof, [['S', 'working', false, 'working', true, 'idle', true], ['S9', 'working', false, 'working', true, 'idle', true]]), JSON.stringify(proof))
+  clause('clause 3z4 — without the sender: 2z5\'s shim reads working twice then idle, the record naming no warned session until the read that returns idle has run and naming S (or, in the twin, S9 and not S) once it has',
+    same(proof, [['S', false, 'working', false, 'working', false, 'idle', true, true], ['S9', false, 'working', false, 'working', false, 'idle', true, true]]), JSON.stringify(proof))
   const wb = warnedFx(true)
   setShim(wb, { panes: { [PANE]: { status: 'working', session: 'S', busy: 0 } } })
   const wbStatus = [1, 2, 3].map(() => JSON.parse(spawnSync(path.join(wb.bin, 'herdr'), ['pane', 'get', PANE], { encoding: 'utf8' }).stdout).result.pane.agent_status)
   clause('clause 3z5 — without the sender: 2z6\'s pane reads working on every read, and its record names S in a warned line from the start',
     same(wbStatus, ['working', 'working', 'working']) && sessionWarned(parseRecord(fs.readFileSync(wb.record, 'utf8')).entries, 'S') !== null, JSON.stringify(wbStatus))
   // 2z7's fixtures, read in the order the three-line plan reads them: two pane reads, /clear, three reads (the last ready
-  // on S-next with its restore file naming it), the resume line, then read RW_READ. The record names no warned S-next
-  // (nor S-other) through the resume line's typing call, and names it once read RW_READ, which reads working, has run.
-  // The old session S is handed off.
+  // on S-next with its restore file naming it), the resume line, then three reads, working twice then idle, the last
+  // being read RW_READ. The record names no warned S-next (nor S-other) until read RW_READ has run, and names it once it
+  // has. The old session S is handed off.
   const rwProof = []
   for (const named of ['S-next', 'S-other']) {
     const fx = resumedWarnFx(named), herdr = (...a) => spawnSync(path.join(fx.bin, 'herdr'), a, { encoding: 'utf8' })
@@ -1456,11 +1465,12 @@ clause('clause 3l — without the sender: each class row carries its one defect 
     const after = [get(), get(), get()], reads = after.map((p) => p.agent_status), ready = after[2].agent_session.value
     const rf = JSON.parse(fs.readFileSync(at(fx, () => restoreFile(PANE)), 'utf8')).session_id
     herdr('pane', 'run', PANE, RESUME_LINE); const afterResume = warnedNow()
-    const late = get(), afterRead = warnedNow()
-    rwProof.push([named, before, afterClear, reads, ready, rf, afterResume, late.agent_status, afterRead, handoffLanded({ handoffPath: fx.handoff, memoryPath: memory(fx), warnedAt: latchOf(fx, 'S') })])
+    const late = [], seen = []
+    for (let k = 0; k < 3; k++) { late.push(get().agent_status); seen.push(warnedNow()) }
+    rwProof.push([named, before, afterClear, reads, ready, rf, afterResume, late, seen, handoffLanded({ handoffPath: fx.handoff, memoryPath: memory(fx), warnedAt: latchOf(fx, 'S') })])
   }
-  const rwWant = (named) => [named, false, false, ['working', 'working', 'idle'], 'S-next', 'S-next', false, 'working', true, true]
-  clause('clause 3z6 — without the sender: 2z7\'s record names the late session in a warned line only once the pane read after the resume line\'s typing call has run, that read reading working, after a /clear that made the pane report S-next with its restore file naming it, on a session S whose handoff landed',
+  const rwWant = (named) => [named, false, false, ['working', 'working', 'idle'], 'S-next', 'S-next', false, ['working', 'working', 'idle'], [false, false, true], true]
+  clause('clause 3z6 — without the sender: 2z7\'s record names the late session in a warned line only once the third pane read after the resume line\'s typing call has run, that read reading idle after two that read working, after a /clear that made the pane report S-next with its restore file naming it, on a session S whose handoff landed',
     same(rwProof, [rwWant('S-next'), rwWant('S-other')]), JSON.stringify(rwProof))
 }
 
