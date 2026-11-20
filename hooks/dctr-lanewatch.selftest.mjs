@@ -1092,6 +1092,21 @@ write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
     JSON.stringify([out, marks, report]))
 }
 
+// Each stall word wake-all writes, naming the orchestrator and naming a: one mark for each orchestrator line it notifies.
+const STALLS = ['unwoken', 'unfinished', 'skip'].flatMap((word, i) => ['orchestrator', 'a'].map((r, j) =>
+  `2026-11-09T10:0${i}:0${j}.000Z ${word} ${r} 2026-11-09T09:30:00Z${word === 'skip' ? ' no-agent' : ''}`))
+const stallFx = fixture({ a: {} })
+write(path.join(stallFx.run, 'events.log'), STALLS.join('\n') + '\n')
+{
+  const ws = watcher(stallFx)
+  polls(stallFx, ws)
+  const marks = stallFx.out.split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1)).filter((l) => l.startsWith(LOUD)).map((l) => l.slice(LOUD.length))
+  const text = (l) => l.split(' ').slice(1).join(' ')
+  const want = STALLS.filter((l) => l.split(' ')[2] === 'orchestrator').map(text)
+  clause('clause 2bl2 — an unwoken, an unfinished and a skip line naming the orchestrator each get one `>>> WAITING ON YOU: ` line carrying that line\'s own text, and the same three naming a none (E15-D274)',
+    want.length === 3 && JSON.stringify(marks) === JSON.stringify(want), JSON.stringify([want, marks]))
+}
+
 {
   // Through the exports: a watcher whose lock check ends its loop after one poll, then its endRow, as the watcher process
   // calls it before its ending line; and one whose loop ends before any poll, so no status row is open.
@@ -1195,6 +1210,15 @@ clause('clause 3d — without the watcher: the reader fixture\'s lane.log names 
   const shared = fs.readFileSync(f, 'utf8').split('\n').map((p) => p.slice(p.lastIndexOf('\r') + 1))
   clause('clause 3i — without the watcher: a line written to stderr after a status row with no newline, on the descriptor stdout shares, lands on the status row',
     shared[0] === 'last poll x · 1 rolesdctr-lanewatch: it ends', JSON.stringify(shared))
+}
+
+{
+  // 2bl2's fixture, without the watcher: its six lines are wake-all stall lines, each of the three words once naming the
+  // orchestrator and once naming a.
+  const parsed = parseWakeLines(fs.readFileSync(path.join(stallFx.run, 'events.log'), 'utf8'))
+  clause('clause 3j — without the watcher: the 2bl2 events.log reads as an unwoken, an unfinished and a skip line naming the orchestrator and the same three naming a',
+    JSON.stringify(parsed.map((w) => `${w.word} ${w.role}`)) === JSON.stringify(['unwoken orchestrator', 'unwoken a', 'unfinished orchestrator', 'unfinished a', 'skip orchestrator', 'skip a']),
+    JSON.stringify(parsed))
 }
 
 process.exit(bad ? 1 : 0)
