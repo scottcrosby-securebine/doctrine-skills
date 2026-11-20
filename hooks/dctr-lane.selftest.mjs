@@ -741,6 +741,7 @@ const leftExactly = (f, role, r, keys) => {
     JSON.stringify(leftNamed(r).sort()) === JSON.stringify(keys.map((k) => things[k][0]).sort()) &&
     Object.entries(things).every(([k, [, there]]) => there === keys.includes(k))
 }
+const oneLine = (r) => r.code === 1 && r.err.trim().split('\n').length === 1
 const FOR_LAUNCH = 'did not read ready for the launch line'
 for (const [n, mode, typed, why, cause] of [['1n', 'get-fail', 0, 'pane get fails every read', FOR_LAUNCH], ['1o', 'get-empty', 0, 'pane get answers nothing', FOR_LAUNCH],
   ['1p', 'agent-before', 0, 'the new pane already reads an agent session', FOR_LAUNCH], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line', 'did not read ready after the launch line'],
@@ -864,14 +865,36 @@ for (const [n, role, onclose, cause, keys, what] of [
   if (exists(path.join(f.run, 'launch'))) fs.chmodSync(path.join(f.run, 'launch'), 0o755)
 }
 // The other paths that leave something, for create merge: no branch is ever named.
-for (const [n, env, keys, what] of [
-  ['1cf3', { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_CLOSE: 'fail' }, ['wt', 'pane', 'launch'], 'the undo\'s tab close fails'],
-  ['1cf4', { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_NOTAB: '1' }, ['wt', 'pane', 'launch'], 'tab create answered a pane and no tab id'],
-  ['1cf5', { HERDR_SHIM_FAILRUN: RESUME_LINE }, ['wt', 'pane', 'launch'], 'the send of RESUME_LINE fails']]) {
+const resumeFailed = (f) => shimLog(f).some((e) => e.args[1] === 'run' && e.args[3] === RESUME_LINE && e.failed)
+for (const [n, env, keys, what, cause] of [
+  ['1cf3', { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_CLOSE: 'fail' }, ['wt', 'pane', 'launch'], 'the undo\'s tab close fails', (f, r) => r.err.includes('could not be closed')],
+  ['1cf4', { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_NOTAB: '1' }, ['wt', 'pane', 'launch'], 'tab create answered a pane and no tab id', (f, r) => r.err.includes('no tab id')],
+  ['1cf5', { HERDR_SHIM_FAILRUN: RESUME_LINE }, ['wt', 'pane', 'launch'], 'the send of RESUME_LINE fails', (f, r) => resumeFailed(f) && !r.err.includes('undid')]]) {
   const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
   const r = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')], { env: { ...env, PATH: SHORT_PATH } })
-  clause(`clause ${n} — when ${what}, create merge names the worktree, the pane and the launch file as left in place, and no branch`,
-    leftExactly(f, 'merge', r, keys), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
+  clause(`clause ${n} — when ${what}, create merge names that cause and the worktree, the pane and the launch file as left in place, and no branch`,
+    cause(f, r) && leftExactly(f, 'merge', r, keys), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
+}
+// A wait that fails before the launch line or before /clear, with an undo that removes nothing: the launch file, written
+// before the first wait, is named as left in place.
+for (const [n, env, what] of [
+  ['1ck', { HERDR_SHIM_MODE: 'get-fail', HERDR_SHIM_CLOSE: 'fail' }, 'the pane never reads ready for the launch line and the undo\'s tab close fails'],
+  ['1ck2', { HERDR_SHIM_MODE: 'stuck-after', HERDR_SHIM_NOTAB: '1' }, 'the pane never reads ready after the launch line and tab create answered no tab id']]) {
+  const f = fixture()
+  const r = create(f, 'a', { env: { ...env, PATH: SHORT_PATH } })
+  clause(`clause ${n} — when ${what}, create names the worktree, branch a, the pane and the launch file as left in place`,
+    leftExactly(f, 'a', r, ['wt', 'branch', 'pane', 'launch']), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
+}
+// The tab already gone (tab_not_found) and the worktree then not removable: the pane is gone, so the line never names it.
+{
+  const f = fixture()
+  const r = create(f, 'a', { env: { HERDR_SHIM_MODE: 'no-restore', HERDR_SHIM_CLOSE: 'gone', HERDR_SHIM_ONCLOSE: JSON.stringify(lockWt(f, 'a')), PATH: SHORT_PATH } })
+  const pane = shimLog(f).find((e) => e.made)?.made.pane, script = path.join(f.run, 'launch', 'a.sh')
+  const want = [`the worktree ${f.wt('a')}`, 'the branch a', `the launch file ${script}`]
+  clause('clause 1cl — when the undo\'s tab close answers tab_not_found and the worktree then cannot be removed, create names the worktree, branch a and the launch file as left in place and not the pane',
+    oneLine(r) && r.err.includes('the worktree could not be removed') && Boolean(pane) && !r.err.includes(`the herdr pane ${pane}`) && JSON.stringify(leftNamed(r).sort()) === JSON.stringify(want.sort()) &&
+    exists(f.wt('a')) && branches(f.repo).some((b) => b.startsWith('a ')) && exists(script) && tabCloses(f).length === 1 && laneLines(f).length === 0,
+    `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
 }
 // Without the command: each injection, run by the shim's tab close, makes the step it targets fail, and the step
 // succeeds once the injection is taken away.
@@ -897,6 +920,91 @@ for (const [n, env, keys, what] of [
   let e2 = null; try { fs.rmSync(script, { force: true }) } catch (e) { e2 = e.code }
   clause('clause 3ce — without the command, a launch file whose directory the shim\'s tab close made read-only survives fs.rmSync with force, which removes it once the directory is writable',
     c3 === 0 && Boolean(e1) && kept3 && e2 === null && !exists(script), JSON.stringify({ c3, e1, kept3, e2 }))
+}
+// A git worktree add that exits non-zero after making the worktree and the branch, as with a post-checkout hook that
+// fails (git-lfs's, with git-lfs not on PATH), or after making the branch alone, as on a dangling link at the worktree
+// path: create undoes what the add made, and only that, and the same create runs once the cause is gone.
+const failHook = (f, body = 'echo post-checkout failed') => { const h = path.join(f.repo, '.git/hooks/post-checkout'); write(h, `#!/bin/sh\n${body}\nexit 1\n`); fs.chmodSync(h, 0o755); return h }
+const LOCK_HOOK = 'git worktree lock "$PWD"'
+const listed = (f, role) => git(f.repo, 'worktree', 'list', '--porcelain').out.includes(`worktree ${f.wt(role)}\n`)
+{
+  const f = fixture(), h = failHook(f)
+  const r = create(f)
+  clause('clause 1cg — a create whose git worktree add exits 1 after making the worktree and branch a exits 1 with one create failed line naming the add, removes the worktree and branch a, calls herdr zero times and writes no lane.log line',
+    undone(f, 'a', r, [], 'git worktree add failed') && !r.err.includes('refused') && shimLog(f).length === 0 && !listed(f, 'a'), `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+  fs.rmSync(h)
+  const again = create(f)
+  clause('clause 1cg2 — with the hook gone, the same create succeeds and writes its create line', again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
+}
+{
+  const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } }), h = failHook(f)
+  const tip = git(f.repo, 'rev-parse', 'refs/heads/main').out
+  const r = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')])
+  clause('clause 1ch — a create merge whose git worktree add exits 1 after making the worktree exits 1 with one create failed line, removes the worktree, names no branch, keeps main a branch at its tip, calls herdr zero times and writes no lane.log line',
+    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(removed the worktree [^,]*\)/.test(r.err) && !r.err.includes('the branch') &&
+    !exists(f.wt('merge')) && !listed(f, 'merge') && git(f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/main').out === tip && shimLog(f).length === 0 && laneLines(f).length === 0,
+    `exit ${r.code} ${said(r)}`)
+  fs.rmSync(h)
+  const again = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')])
+  clause('clause 1ch2 — with the hook gone, the same create merge succeeds and writes its create line', again.code === 0 && Boolean(laneOf(read(f.laneLog), 'merge')), `exit ${again.code} ${said(again)}`)
+}
+for (const [n, role, keys, what] of [['1ci', 'a', ['wt', 'branch'], 'the worktree and branch a'], ['1ci2', 'merge', ['wt'], 'the worktree and no branch']]) {
+  const f = fixture({ branch: role === 'merge' ? 'orch' : 'main', handoffs: { [role]: `.doctrine/records/${role}.md` } })
+  failHook(f, LOCK_HOOK)
+  const tip = git(f.repo, 'rev-parse', 'refs/heads/main').out
+  const r = lane(f, ['create', role, f.repo, role === 'merge' ? 'main' : f.base, handoffOf(f, role)])
+  clause(`clause ${n} — when git worktree add exits 1 after making a worktree its hook locked, create${role === 'merge' ? ' merge' : ''} cannot remove it and names ${what} as left in place, calling herdr zero times`,
+    r.err.includes('git worktree add failed') && r.err.includes('the worktree could not be removed') && shimLog(f).length === 0 &&
+    git(f.repo, 'rev-parse', 'refs/heads/main').out === tip && leftExactly(f, role, r, keys), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
+}
+{
+  const f = fixture(), gone = path.join(f.root, 'gone')
+  fs.mkdirSync(path.dirname(f.wt('a')), { recursive: true }); fs.symlinkSync(gone, f.wt('a'))
+  const r = create(f)
+  clause('clause 1cj — a create whose worktree path is a dangling link, where git worktree add makes branch a and then fails on the path, exits 1 with one create failed line, deletes branch a, leaves the link as it was and names no worktree',
+    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(deleted the branch a\)/.test(r.err) && !r.err.includes('the worktree') &&
+    fs.lstatSync(f.wt('a')).isSymbolicLink() && fs.readlinkSync(f.wt('a')) === gone && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0,
+    `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+}
+{
+  const f = fixture(), dot = path.join(f.repo, '.claude')
+  fs.mkdirSync(dot); fs.chmodSync(dot, 0o555)
+  const r = create(f)
+  fs.chmodSync(dot, 0o755)
+  clause('clause 1cj2 — a create whose .claude directory is read-only, where git worktree add makes branch a and no worktree, exits 1 with one create failed line, deletes branch a and names no worktree',
+    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(deleted the branch a\)/.test(r.err) && !r.err.includes('the worktree') &&
+    !exists(f.wt('a')) && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0,
+    `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+  const again = create(f)
+  clause('clause 1cj3 — with the directory writable again, the same create succeeds and writes its create line', again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
+}
+// Without the command: each fixture's git worktree add alone exits non-zero and leaves what the clauses above say it made.
+{
+  const has = (f, b) => branches(f.repo).some((x) => x.startsWith(`${b} `))
+  const f = fixture(); failHook(f)
+  const add = git(f.repo, 'worktree', 'add', '--quiet', '-b', 'a', f.wt('a'), f.base)
+  clause('clause 3cg — without the command, git worktree add -b a in a repo whose post-checkout hook exits 1 exits non-zero and leaves the worktree, listed, and branch a',
+    add.code !== 0 && exists(f.wt('a')) && listed(f, 'a') && has(f, 'a'), JSON.stringify(add))
+  const g = fixture({ branch: 'orch' }); failHook(g)
+  const tip = git(g.repo, 'rev-parse', 'refs/heads/main').out
+  const addM = git(g.repo, 'worktree', 'add', '--quiet', g.wt('merge'), 'main')
+  clause('clause 3ch — without the command, git worktree add of main in that fixture exits non-zero and leaves the worktree, listed, and main at its tip',
+    addM.code !== 0 && exists(g.wt('merge')) && listed(g, 'merge') && git(g.repo, 'rev-parse', 'refs/heads/main').out === tip, JSON.stringify(addM))
+  const l = fixture(); failHook(l, LOCK_HOOK)
+  const addL = git(l.repo, 'worktree', 'add', '--quiet', '-b', 'a', l.wt('a'), l.base), rmL = git(l.repo, 'worktree', 'remove', '--force', l.wt('a'))
+  clause('clause 3ci — without the command, under the locking hook git worktree add exits non-zero and git worktree remove --force then fails, the worktree and branch a still there',
+    addL.code !== 0 && rmL.code !== 0 && exists(l.wt('a')) && has(l, 'a'), JSON.stringify({ addL, rmL }))
+  const d = fixture(), gone = path.join(d.root, 'gone')
+  fs.mkdirSync(path.dirname(d.wt('a')), { recursive: true }); fs.symlinkSync(gone, d.wt('a'))
+  const addD = git(d.repo, 'worktree', 'add', '--quiet', '-b', 'a', d.wt('a'), d.base)
+  clause('clause 3cj — without the command, git worktree add -b a onto a dangling link exits non-zero, makes branch a and leaves the link as it was',
+    addD.code !== 0 && has(d, 'a') && fs.lstatSync(d.wt('a')).isSymbolicLink() && fs.readlinkSync(d.wt('a')) === gone && !exists(d.wt('a')), JSON.stringify(addD))
+  const o = fixture(), dot = path.join(o.repo, '.claude')
+  fs.mkdirSync(dot); fs.chmodSync(dot, 0o555)
+  const addO = git(o.repo, 'worktree', 'add', '--quiet', '-b', 'a', o.wt('a'), o.base)
+  fs.chmodSync(dot, 0o755)
+  clause('clause 3cj2 — without the command, git worktree add -b a under a read-only .claude directory exits non-zero, makes branch a and no worktree',
+    addO.code !== 0 && has(o, 'a') && !fs.lstatSync(o.wt('a'), { throwIfNoEntry: false }) && !listed(o, 'a'), JSON.stringify(addO))
 }
 // DCTR_LANE_TIMES overrides poll and ready (E15-D266): a pane that never reads ready after /clear is read once per
 // poll from the first read until ready ms have passed, ready/poll + 1 reads, and each setting gives its own count.
@@ -1854,9 +1962,11 @@ for (const name of ['a b.md', 'a|b.md']) {
   const rn = lane(f, ['create', 'a', f.root, f.base, handoffOf(f)])
   clause('clause 1az1 — create refuses a repo argument that is no git repo, making nothing', madeNothing(f, 'a', rn) && /is not a git repo/.test(rn.err), `exit ${rn.code} ${said(rn)}`)
   git(f.repo, 'branch', 'a', f.base)
+  const tipA = git(f.repo, 'rev-parse', 'refs/heads/a').out
   const rb = create(f)
-  clause('clause 1az2 — create refuses when git worktree add fails, here on a branch a that already exists: no worktree, no herdr call, no lane.log line',
-    rb.code !== 0 && /git worktree add failed/.test(rb.err) && !exists(f.wt('a')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${rb.code} ${said(rb)}`)
+  clause('clause 1az2 — create refuses when git worktree add fails, here on a branch a that already exists: no worktree, no herdr call, no lane.log line, and branch a, which it did not make, kept at its commit and never named',
+    rb.code !== 0 && /dctr-lane: refused, git worktree add failed/.test(rb.err) && !rb.err.includes('the branch a') && !exists(f.wt('a')) && shimLog(f).length === 0 && laneLines(f).length === 0 &&
+    git(f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/a').out === tipA, `exit ${rb.code} ${said(rb)}; branches ${JSON.stringify(branches(f.repo))}`)
 }
 {
   const s = seeded()
