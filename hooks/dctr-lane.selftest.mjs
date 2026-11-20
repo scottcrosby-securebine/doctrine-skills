@@ -993,6 +993,44 @@ for (const [n, what, block, unblock] of [
   const again = create(f)
   clause(`clause ${n}2 — with that undone, the same create succeeds and writes its create line`, again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
 }
+// A repo that already holds a branch named merge, at a commit of its own: create merge never makes that branch, so no
+// path of it deletes or names it, whether its add fails or a later step does.
+const withMergeBranch = () => {
+  const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
+  git(f.repo, 'checkout', '-q', '-b', 'merge')
+  const at = commitIn(f.repo, 'merge-only.txt', 'on merge\n', 'merge only')
+  git(f.repo, 'checkout', '-q', 'orch')
+  return { f, at, tip: git(f.repo, 'rev-parse', 'refs/heads/main').out }
+}
+const mergeKept = (m) => git(m.f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/merge').out === m.at && git(m.f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/main').out === m.tip
+const createMerge = (f, env = {}) => lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')], { env: { ...env, PATH: SHORT_PATH } })
+{
+  const m = withMergeBranch(), h = failHook(m.f)
+  const r = createMerge(m.f)
+  clause('clause 1co — in a repo already holding a branch merge, a create merge whose git worktree add exits 1 after making the worktree names only the worktree as undone, never the branch merge, which stays at its commit, main at its tip',
+    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(removed the worktree [^,)]+\)/.test(r.err) && !r.err.includes('the branch merge') &&
+    !exists(m.f.wt('merge')) && mergeKept(m) && shimLog(m.f).length === 0 && laneLines(m.f).length === 0, `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(m.f.repo))}`)
+  fs.rmSync(h)
+  const again = createMerge(m.f)
+  clause('clause 1co2 — with the hook gone, create merge in that repo succeeds and the branch merge stays at its commit',
+    again.code === 0 && Boolean(laneOf(read(m.f.laneLog), 'merge')) && mergeKept(m), `exit ${again.code} ${said(again)}; branches ${JSON.stringify(branches(m.f.repo))}`)
+}
+{
+  const m = withMergeBranch()
+  const r = createMerge(m.f, { HERDR_SHIM_MODE: 'no-restore' })
+  const script = path.join(m.f.run, 'launch', 'merge.sh')
+  clause('clause 1cp — in a repo already holding a branch merge, a create merge whose /clear never takes undoes the tab, the worktree and the launch file and nothing else, never naming the branch merge, which stays at its commit, main at its tip',
+    oneLine(r) && /; undid what it made \(closed the tab [^,]+, removed the worktree [^,]+, removed the launch file [^,)]+\)/.test(r.err) && !r.err.includes('the branch merge') &&
+    !exists(m.f.wt('merge')) && !exists(script) && JSON.stringify(tabCloses(m.f)) === JSON.stringify(madeTabs(m.f)) && mergeKept(m) && laneLines(m.f).length === 0,
+    `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(m.f.repo))}`)
+  const again = createMerge(m.f)
+  clause('clause 1cp2 — with /clear taking, create merge in that repo succeeds and the branch merge stays at its commit',
+    again.code === 0 && Boolean(laneOf(read(m.f.laneLog), 'merge')) && mergeKept(m), `exit ${again.code} ${said(again)}; branches ${JSON.stringify(branches(m.f.repo))}`)
+  const p = withMergeBranch()
+  clause('clause 3co — without the command, that fixture holds a branch merge at its recorded commit, other than main\'s, and main is the separate ref refs/heads/main',
+    git(p.f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/merge').out === p.at && p.at !== p.tip && git(p.f.repo, 'rev-parse', '--symbolic-full-name', 'main').out === 'refs/heads/main' &&
+    branches(p.f.repo).some((b) => b.startsWith('merge ')) && !exists(p.f.wt('merge')), JSON.stringify({ at: p.at, tip: p.tip, branches: branches(p.f.repo) }))
+}
 // Without the command: each fixture's git worktree add alone exits non-zero and leaves what the clauses above say it made.
 {
   const has = (f, b) => branches(f.repo).some((x) => x.startsWith(`${b} `))
