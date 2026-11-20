@@ -7,12 +7,14 @@
 //
 // Four subcommands and no others. Each runs only where runRole() is `orchestrator`, reads the run from runRoot(),
 // and refuses, exiting 1 and making nothing, on anything it checks before it writes. A failure after it writes exits 1
-// and writes no lane.log line. A create that fails before the call typing RESUME_LINE undoes what it made and says
-// so: it closes the tab by the id its own tab create returned, then removes the worktree, a lane's branch (never
-// merge's, the integration branch) and the launch file, so the same create can run again; where that tab close fails
-// other than the tab being gone, or tab create returned a pane and no tab id, it removes nothing and names what it
-// left. Any other failure leaves what it made: a create failing at or after that call, a failed send of RESUME_LINE
-// included, its pane, worktree and launch file, which it names, since the role's session may already be working; a reset, its side
+// and writes no lane.log line. A create that fails before the call typing RESUME_LINE undoes what it made, in order:
+// it closes the tab by the id its own tab create returned, then removes the worktree, a lane's branch (never merge's,
+// the integration branch) and the launch file. It stops at the first step that fails, a tab close failing other than
+// the tab being gone among them, and removes nothing past it; where tab create returned a pane and no tab id it
+// removes nothing. Its line names what it undid and each thing still in place, and with everything undone the same
+// create can run again. Any other failure leaves what it made: a create failing at or after that call, a
+// failed send of RESUME_LINE included, its pane, worktree, a lane's branch and launch file, which it names, since the
+// role's session may already be working; a reset, its side
 // branch, which it names, with HEAD already at the revision when only the memory file's restore or the lane.log append
 // failed; an archive, the copies it made and any epic it repointed before an epic write failed, naming the copies'
 // directory and the epics when only the lane.log append failed; a remove whose lane.log append fails, naming the
@@ -238,7 +240,7 @@ function create() {
   if (kickoffHandoff(kickoff.join('\n')) !== handoffRel) refuse(`the kickoff line cannot carry the handoff name ${JSON.stringify(path.basename(handoff))}`)
   if (gitOk(repo, 'cat-file', '-e', `${base}:${handoffRel}`)) refuse(`${base} already tracks ${handoffRel}`)
 
-  const made = [`the worktree ${wt}`]
+  const made = [`the worktree ${wt}`, ...(merge ? [] : [`the branch ${role}`])]
   let tabId = null, pane = null, script = null, resumeTyped = false
   const fail = (why) => {
     const left = resumeTyped ? null : undo()
@@ -249,8 +251,9 @@ function create() {
   const undid = []
   const drop = (thing) => { const i = made.findIndex((m) => m.startsWith(thing)); if (i >= 0) made.splice(i, 1) }
   /** Closes the tab by the id its own tab create returned, removes the worktree, a lane's branch (never merge's, the
-   *  integration branch) and the launch file. Returns '' when all is undone, else why it stopped, having removed nothing
-   *  past that step; a tab close that fails other than the tab being gone removes nothing. */
+   *  integration branch) and the launch file, in that order, dropping each from `made` as it goes. Returns '' when all
+   *  is undone, else why it stopped, having removed nothing past that step; a tab close that fails other than the tab
+   *  being gone, or a pane with no tab id, removes nothing. */
   const undo = () => {
     if (pane && !tabId) return 'tab create returned no tab id to close'
     if (tabId) {
@@ -264,6 +267,7 @@ function create() {
     if (!merge) {
       try { git(repo, 'branch', '-D', role) } catch (e) { return `${undid.join(', ')}, but the branch ${role} could not be deleted (${why(e)})` }
       undid.push(`deleted the branch ${role}`)
+      drop('the branch')
     }
     if (script) {
       try { fs.rmSync(script, { force: true }) } catch (e) { return `${undid.join(', ')}, but the launch file could not be removed (${why(e)})` }
