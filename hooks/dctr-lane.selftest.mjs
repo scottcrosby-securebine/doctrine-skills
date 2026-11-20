@@ -877,13 +877,13 @@ for (const [n, env, keys, what, cause] of [
 }
 // A wait that fails before the launch line or before /clear, with an undo that removes nothing: the launch file, written
 // before the first wait, is named as left in place.
-for (const [n, env, what] of [
-  ['1ck', { HERDR_SHIM_MODE: 'get-fail', HERDR_SHIM_CLOSE: 'fail' }, 'the pane never reads ready for the launch line and the undo\'s tab close fails'],
-  ['1ck2', { HERDR_SHIM_MODE: 'stuck-after', HERDR_SHIM_NOTAB: '1' }, 'the pane never reads ready after the launch line and tab create answered no tab id']]) {
+for (const [n, env, what, cause] of [
+  ['1ck', { HERDR_SHIM_MODE: 'get-fail', HERDR_SHIM_CLOSE: 'fail' }, 'the pane never reads ready for the launch line and the undo\'s tab close fails', FOR_LAUNCH],
+  ['1ck2', { HERDR_SHIM_MODE: 'stuck-after', HERDR_SHIM_NOTAB: '1' }, 'the pane never reads ready after the launch line and tab create answered no tab id', 'did not read ready after the launch line']]) {
   const f = fixture()
   const r = create(f, 'a', { env: { ...env, PATH: SHORT_PATH } })
-  clause(`clause ${n} — when ${what}, create names the worktree, branch a, the pane and the launch file as left in place`,
-    leftExactly(f, 'a', r, ['wt', 'branch', 'pane', 'launch']), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
+  clause(`clause ${n} — when ${what}, create names that cause and the worktree, branch a, the pane and the launch file as left in place`,
+    r.err.includes(cause) && leftExactly(f, 'a', r, ['wt', 'branch', 'pane', 'launch']), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}`)
 }
 // The tab already gone (tab_not_found) and the worktree then not removable: the pane is gone, so the line never names it.
 {
@@ -978,6 +978,21 @@ for (const [n, role, keys, what] of [['1ci', 'a', ['wt', 'branch'], 'the worktre
   const again = create(f)
   clause('clause 1cj3 — with the directory writable again, the same create succeeds and writes its create line', again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
 }
+// A worktree path create cannot read before the add (a .claude it cannot search, a worktrees that is a file): fs.existsSync
+// reads both as absent, so only the read before the add meets them, and create refuses there, making nothing.
+for (const [n, what, block, unblock] of [
+  ['1cm', 'its .claude directory has no search permission', (f) => { fs.mkdirSync(path.join(f.repo, '.claude')); fs.chmodSync(path.join(f.repo, '.claude'), 0o000) }, (f) => fs.chmodSync(path.join(f.repo, '.claude'), 0o755)],
+  ['1cn', 'its .claude/worktrees is a regular file', (f) => write(path.join(f.repo, '.claude/worktrees'), 'a file\n'), (f) => fs.rmSync(path.join(f.repo, '.claude/worktrees'))]]) {
+  const f = fixture()
+  block(f)
+  const r = create(f)
+  unblock(f)
+  clause(`clause ${n} — a create where ${what} exits 1 with one line that starts dctr-lane: refused and names the worktree path, makes no branch a, calls herdr zero times and writes no lane.log line`,
+    oneLine(r) && r.err.startsWith('dctr-lane: refused, ') && r.err.includes(f.wt('a')) && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0,
+    `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+  const again = create(f)
+  clause(`clause ${n}2 — with that undone, the same create succeeds and writes its create line`, again.code === 0 && Boolean(laneOf(read(f.laneLog), 'a')), `exit ${again.code} ${said(again)}`)
+}
 // Without the command: each fixture's git worktree add alone exits non-zero and leaves what the clauses above say it made.
 {
   const has = (f, b) => branches(f.repo).some((x) => x.startsWith(`${b} `))
@@ -1003,6 +1018,15 @@ for (const [n, role, keys, what] of [['1ci', 'a', ['wt', 'branch'], 'the worktre
   fs.mkdirSync(dot); fs.chmodSync(dot, 0o555)
   const addO = git(o.repo, 'worktree', 'add', '--quiet', '-b', 'a', o.wt('a'), o.base)
   fs.chmodSync(dot, 0o755)
+  for (const [n, code, block] of [['3cm', 'EACCES', (f) => { fs.mkdirSync(path.join(f.repo, '.claude')); fs.chmodSync(path.join(f.repo, '.claude'), 0o000) }],
+    ['3cn', 'ENOTDIR', (f) => write(path.join(f.repo, '.claude/worktrees'), 'a file\n')]]) {
+    const q = fixture()
+    block(q)
+    let thrown = null; try { fs.lstatSync(q.wt('a'), { throwIfNoEntry: false }) } catch (e) { thrown = e.code }
+    const seen = fs.existsSync(q.wt('a'))
+    fs.chmodSync(path.join(q.repo, '.claude'), 0o755)
+    clause(`clause ${n} — without the command, fs.lstatSync of the worktree path in that fixture throws ${code} while fs.existsSync reads it as absent`, thrown === code && seen === false, JSON.stringify({ thrown, seen }))
+  }
   clause('clause 3cj2 — without the command, git worktree add -b a under a read-only .claude directory exits non-zero, makes branch a and no worktree',
     addO.code !== 0 && has(o, 'a') && !fs.lstatSync(o.wt('a'), { throwIfNoEntry: false }) && !listed(o, 'a'), JSON.stringify(addO))
 }
