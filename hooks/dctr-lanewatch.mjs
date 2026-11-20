@@ -60,9 +60,7 @@
 // time aside. After each poll `\r` then `last poll <ISO time> · <n> roles`, with no newline, rewrites the status row in
 // place; a line printed after it first ends that row, so it sits on a row of its own. A watcher that reads, before a
 // poll, that its lock no longer names it polls no more and ends with a line on stderr, after its object's endRow has
-// ended an open status row through `out`. A SIGTERM (what `stop` sends), SIGINT or SIGHUP ends it with exit 0 and no
-// line of its own, leaving an open status row as it is: one that lands in the wait between polls ends it at once, and
-// one that lands during a poll ends it only once that poll has finished and printed its lines and its status row.
+// ended an open status row through `out`. No other ending calls endRow or prints that line.
 
 import fs from 'node:fs'
 import crypto from 'node:crypto'
