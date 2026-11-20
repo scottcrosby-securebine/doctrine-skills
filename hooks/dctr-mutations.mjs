@@ -21,6 +21,8 @@
 // A mutation whose `from` text is absent is a FAILURE, not a skip. Otherwise renaming a line
 // silently retires the mutation that guarded it, which is the same defect one level up.
 
+// The baseline and mutated suites inherit this environment, and a herdr-core terminal's HC_TERMINAL_ID would turn their herdr TUI clauses into herdr-core ones.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -844,6 +846,8 @@ const MUTATIONS = [
     from: 'codex: () => readCodex(trackedRoot(root, model)),', to: 'codex: () => readCodex(root),' },
   { name: 'project status: herdr is asked with HERDR_ENV unset', file: 'dctr-project.mjs', clause: 'CLI status — the tripwire herdr on PATH was called ZERO times with HERDR_ENV unset',
     from: "if (termHost(env) !== 'herdr' || env.DCTR_VIEW_REQUEST_DIR) return null", to: 'if (env.DCTR_VIEW_REQUEST_DIR) return null' },
+  { name: 'project status: herdr is asked in herdr-core on the leaked HERDR_ENV', file: 'dctr-project.mjs', clause: 'CLI status — in herdr-core with the leaked HERDR_* variables, live seats: unknown and the tripwire herdr was called ZERO times',
+    from: "if (termHost(env) !== 'herdr' || env.DCTR_VIEW_REQUEST_DIR) return null", to: "if (env.HERDR_ENV !== '1' || env.DCTR_VIEW_REQUEST_DIR) return null" },
   { name: 'project status: a contained session asks herdr', file: 'dctr-project.mjs', clause: 'CLI status — a contained session (DCTR_VIEW_REQUEST_DIR set) prints unknown and still calls herdr ZERO times',
     from: "if (termHost(env) !== 'herdr' || env.DCTR_VIEW_REQUEST_DIR) return null", to: "if (termHost(env) !== 'herdr') return null" },
   { name: 'project status: an empty snapshot reply reads as zero seats', file: 'dctr-project.mjs', clause: 'CLI status — inside herdr, an EMPTY snapshot reply is "could not look"',
@@ -5252,6 +5256,20 @@ const MUTATIONS = [
   { name: "only the orchestrator records its permission mode, not every main session", file: "dctr-cycle.mjs",
     clause: "clause 2pm \u2014 in a main session with no role and no run, each of\u2026 writes its pane's mode file",
     from: "if (host === 'claude' && herdrPane(process.env) && typeof payload.permission_mode === 'string') {", to: "if (host === 'claude' && herdrPane(process.env) && runRole() === 'orchestrator' && typeof payload.permission_mode === 'string') {" },
+  { name: "the prompt gate in herdr-core reads the restore file of the pane id it inherited", file: "dctr-promptgate.mjs",
+    clause: "clause 2w \u2014 marked in herdr-core blocks and writes no gated marker, though the leaked pane's restore file names the session",
+    from: "    const pane = herdrPane(env)", to: "    const pane = env.HERDR_PANE_ID || null" },
+  { name: "the watcher's start in herdr-core takes the pane id it inherited as the orchestrator's", file: "dctr-lanewatch.mjs",
+    clause: "clause 2u2 \u2014 in herdr-core with the leaked HERDR_*, start exits non-zero naming the missing herdr pane",
+    from: "  const pane = herdrPane(process.env), workspace = process.env.HERDR_WORKSPACE_ID", to: "  const pane = process.env.HERDR_PANE_ID, workspace = process.env.HERDR_WORKSPACE_ID" },
+  { name: "a herdr-core session writes the mode file of the pane id it inherited", file: "dctr-cycle.mjs",
+    clause: "clause 2pm10 \u2014 in herdr-core with the leaked HERDR_*, an event carrying bypassPermissions writes no mode file",
+    from: "if (host === 'claude' && herdrPane(process.env) && typeof payload.permission_mode === 'string') {\n    try {\n      const file = modeFile(herdrPane(process.env))",
+    to: "if (host === 'claude' && process.env.HERDR_PANE_ID && typeof payload.permission_mode === 'string') {\n    try {\n      const file = modeFile(process.env.HERDR_PANE_ID)" },
+  { name: "the auto-cycle hook in herdr-core types into the pane id it inherited", file: "dctr-cycle.mjs",
+    clause: "clause 2a4 \u2014 all preconditions true in herdr-core with the leaked HERDR_*",
+    from: "  const paneId = contained ? null : herdrPane(process.env)",
+    to: "  const paneId = contained ? null : process.env.HERDR_PANE_ID || null" },
   { name: "a session outside a herdr pane writes a mode file for no pane", file: "dctr-cycle.mjs",
     clause: "clause 2pm5 \u2014 a main session with no HERDR_PANE_ID carrying bypassPermissions writes no mode file",
     from: "if (host === 'claude' && herdrPane(process.env) && typeof payload.permission_mode === 'string') {", to: "if (host === 'claude' && typeof payload.permission_mode === 'string') {" },
@@ -5289,6 +5307,9 @@ const MUTATIONS = [
   { name: "the capacity command refuses a Codex rollout's unknown window with the Claude Code fix", file: "dctr-orchestrate.mjs",
     clause: "clause 2u \u2014 a refused unknown window names its fix\u2026",
     from: "hostWindow(transcript, text), host)", to: "hostWindow(transcript, text))" },
+  { name: "launch-flags in herdr-core names the mode file of the pane id it inherited", file: "dctr-orchestrate.mjs",
+    clause: "clause 2v2 \u2014 in herdr-core with the leaked HERDR_*, launch-flags prints an empty line",
+    from: "    console.log(launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null))", to: "    console.log(launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null))" },
   { name: "launch-flags prints an empty line whatever the calling pane's mode file", file: "dctr-orchestrate.mjs",
     clause: "clause 2v \u2014 launch-flags prints launchFlags of the calling pane's mode file\u2026",
     from: "    console.log(launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null))", to: "    console.log('')" },

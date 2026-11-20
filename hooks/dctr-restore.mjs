@@ -10,8 +10,8 @@
 // case prints nothing to stdout, so the session starts exactly as it would without the plugin.
 //
 // When it injected it records the session start, `<autocycle dir>/start-<hash of record path>` holding the record's
-// line count, which the auto-cycle pause model anchors on (RB3-2). When it injected and HERDR_PANE_ID is set, it
-// also writes the restore file `<autocycle dir>/pane-<token>.restored`
+// line count, which the auto-cycle pause model anchors on (RB3-2). When it injected in a herdr TUI pane (herdrPane: never
+// in herdr-core, whose HERDR_PANE_ID names another session's pane), it also writes the restore file `<autocycle dir>/pane-<token>.restored`
 // carrying the new session id and transcript path, which the auto-cycle typer waits for before it types the resume
 // line (B5, E8-D15). It always exits 0 and calls no herdr and nothing on the network. Every reason it stood down is printed
 // to stderr and logged, so a skip and a silent success are never the same signal. The decisions are pure,

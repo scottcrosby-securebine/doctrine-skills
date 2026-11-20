@@ -12,8 +12,8 @@
 // the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time).
 //
 // The order of the first steps: it stands down on an unreadable payload, on a Codex session under Claude Code, on an
-// event that is not one of the four, and on a subagent's event; then, for a Claude Code session in a herdr pane
-// (HERDR_PANE_ID) whose payload carries permission_mode, it writes that mode as the one line of the pane's mode file
+// event that is not one of the four, and on a subagent's event; then, for a Claude Code session in a herdr TUI pane
+// (herdrPane: never in herdr-core) whose payload carries permission_mode, it writes that mode as the one line of the pane's mode file
 // (modeFile, in the user's config dir), whatever the role, the run or the record; then the StopFailure limits.log
 // line; then every other stand-down. Any process of the owner's can write the mode file, so the mode a launch file
 // reads from it is trusted, not verified. Every paused line goes through appendPaused, whose dedup is pauseStands.

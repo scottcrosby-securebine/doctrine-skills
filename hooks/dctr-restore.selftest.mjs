@@ -8,6 +8,8 @@
 // clause 3 proves the fixtures carry what those clauses rest on without running the hook. The pure
 // helpers the hook routes through are pinned here too, since the hook is their only caller.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import os from 'node:os'

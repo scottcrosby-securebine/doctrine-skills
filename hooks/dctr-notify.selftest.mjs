@@ -9,6 +9,8 @@
 // --body; clause 3 proves the shim logs what it is given and that each stand-down fixture lacks what the send needs,
 // without running the command.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'

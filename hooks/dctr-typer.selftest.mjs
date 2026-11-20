@@ -8,6 +8,8 @@
 // line. Each E8-D15 Check case asserts its sends (/clear, resume). The shim never reaches a herdr server. Clause 3
 // proves the fixtures carry what the clauses rest on without running the typer.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -498,7 +500,7 @@ clause('clause 2t — no pause changed the record\'s last state line (E8-D16)',
 // is stdout {"decision":"block","reason":...} and exit 0, the form both hosts honour (probe-ups U1, U4).
 const gateScript = path.join(import.meta.dirname, 'dctr-promptgate.mjs')
 const { gatedFile } = await import('./dctr-state.mjs')
-function gateRun(name, payload, { restored, pane = `w9:p-${name}`, tmpdir, script = gateScript, raw } = {}) {
+function gateRun(name, payload, { restored, pane = `w9:p-${name}`, tmpdir, script = gateScript, raw, core = false } = {}) {
   const dir = tmpdir ?? path.join(tmp, 'gate', name)
   fs.mkdirSync(path.join(tmp, 'gate'), { recursive: true })
   if (!tmpdir) fs.mkdirSync(dir, { recursive: true })
@@ -508,12 +510,15 @@ function gateRun(name, payload, { restored, pane = `w9:p-${name}`, tmpdir, scrip
   delete e.HERDR_PANE_ID; delete e.HC_TERMINAL_ID
   // A pane is a herdr TUI pane's, so the gate reads it (herdrPane), whatever terminal runs the suite.
   if (pane) Object.assign(e, { HERDR_PANE_ID: pane, HERDR_ENV: '1', TERM_PROGRAM: 'herdr' })
+  if (core) Object.assign(e, CORE)
   const r = spawnSync(process.execPath, [script], { input: raw ?? JSON.stringify(payload), env: e, encoding: 'utf8', timeout: 20000 })
   let out = null
   try { out = r.stdout === '' ? '' : JSON.parse(r.stdout) } catch { out = { unparsed: r.stdout } }
   const gated = pane && fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory() ? at(() => { try { return JSON.parse(fs.readFileSync(gatedFile(pane), 'utf8')) } catch { return null } }) : null
   return { code: r.status, out, gated, err: r.stderr }
 }
+// herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
 const blocked = (g) => g.code === 0 && g.out?.decision === 'block' && /auto-cycle/.test(g.out.reason) && Object.keys(g.out).length === 2
 const passed = (g) => g.code === 0 && g.out === '' && g.gated === null
 const e2eBad = []
@@ -525,13 +530,16 @@ for (const [host, plain, resume] of HOSTS) {
     ['marked, no restore file', gateRun(`${host}-norestore`, resume), (g) => blocked(g) && g.gated?.session_id === newId],
     ['marked, another session\'s restore file', gateRun(`${host}-other`, resume, { restored: oldId }), (g) => blocked(g) && g.gated?.session_id === newId],
     ['marked, no pane', gateRun(`${host}-nopane`, resume, { restored: newId, pane: null }), blocked],
+    ['marked, herdr-core with the leaked pane id, whose restore file names this session', gateRun(`${host}-core`, resume, { restored: newId, pane: CORE.HERDR_PANE_ID, core: true }), (g) => blocked(g) && g.gated === null],
     ['unmarked', gateRun(`${host}-plain`, plain), passed],
     ['unmarked, the restore file naming another session', gateRun(`${host}-plain-other`, plain, { restored: newId }), passed],
   ]
   for (const [what, g, ok] of cases) if (!ok(g)) e2eBad.push(`${host} ${what}: ${JSON.stringify(g)}`)
 }
-clause('clause 2w — the gate script on both hosts\' captured payloads: marked and fresh passes printing nothing; marked in the old session, with no restore file or another session\'s blocks with the block JSON and writes the gated marker naming the payload\'s session; marked with no pane blocks; unmarked passes, printing nothing and writing no marker (S1a)',
+clause('clause 2w — the gate script on both hosts\' captured payloads: marked and fresh passes printing nothing; marked in the old session, with no restore file or another session\'s blocks with the block JSON and writes the gated marker naming the payload\'s session; marked with no pane blocks; marked in herdr-core blocks and writes no gated marker, though the leaked pane\'s restore file names the session; unmarked passes, printing nothing and writing no marker (S1a)',
   e2eBad.length === 0, e2eBad.join(' || '))
+clause('clause 3w6 — without the gate: the herdr-core env carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr, and the leaked HERDR_ENV=1 and pane id',
+  Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && Boolean(CORE.HERDR_PANE_ID), JSON.stringify(CORE))
 // A thrown error blocks: TMPDIR a regular file (no directory can be made under it), the gate copied away from the
 // modules it imports, and stdin that is not JSON. An unmarked prompt passes untouched under each of the first two.
 const notDir = path.join(tmp, 'gate', 'not-a-dir'); write(notDir, 'x')

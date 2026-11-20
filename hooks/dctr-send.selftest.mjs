@@ -11,6 +11,8 @@
 // own directory, so the claims and restore files live there. Clause 3 proves the fixtures carry what the clauses rest
 // on without running the sender.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
