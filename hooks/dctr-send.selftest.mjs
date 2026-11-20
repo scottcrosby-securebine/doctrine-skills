@@ -69,6 +69,7 @@ if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send
   if (p && p.typeFail) fail('{"error":{"code":"server_error"}}')
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) {
     p.session = s.clearSession
+    if (s.delayAfterClearMs) s.delayMs = s.delayAfterClearMs
     // The new session's restore hook names it in the pane's restore file, at once or after restoreAfterGets pane reads.
     if (rf && s.restoreAfterGets) s.restoreDue = { file: rf, session: s.clearSession, gets: s.restoreAfterGets }
     else if (rf) { fs.mkdirSync(path.dirname(rf), { recursive: true }); fs.writeFileSync(rf, JSON.stringify({ session_id: s.clearSession })) }
@@ -126,7 +127,7 @@ function sender(fx, args, { env = {}, cwd = fx.own } = {}) {
     let err = '', out = ''
     c.stdout.on('data', (d) => { out += d }); c.stderr.on('data', (d) => { err += d })
     const kill = setTimeout(() => c.kill('SIGKILL'), 30000)
-    c.on('close', (code) => { clearTimeout(kill); resolve({ code, out: out.trim(), err: err.trim(), pid: c.pid, took: Date.now() - t0 }) })
+    c.on('close', (code) => { clearTimeout(kill); resolve({ code, out: out.trim(), err: err.trim(), pid: c.pid, took: Date.now() - t0, end: Date.now() }) })
   })
 }
 const show = (fx, r) => JSON.stringify({ code: r?.code, out: r?.out, err: r?.err, typed: typed(fx), held: held(fx).map((f) => path.basename(f)), calls: shimLog(fx).map((e) => e.argv.slice(0, 3).join(' ')) })
@@ -969,12 +970,27 @@ clause('clause 2z — wake on a handed-off pane whose restore file names the new
   rLateRestore.code === 0 && JSON.stringify(typed(lateFx)) === JSON.stringify([`${PANE}|/clear`, `${PANE}|${RESUME_LINE}`, `${PANE}|${NUDGE}`]) &&
   resumeAt.length === 1 && resumeAt[0].paneSession === 'S-next' && resumeAt[0].restored === 'S-next', show(lateFx, rLateRestore) + ` at the resume line ${JSON.stringify(resumeAt.map((e) => [e.paneSession, e.restored]))}`)
 
-// The same pane whose restore file never names the new session: the wake gives up before the resume line.
-const neverFx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { clearSession: 'S-next', restoreAfterGets: 1e9 } })
-handed(neverFx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
-const rNever = await sender(neverFx, ['wake', 'a'])
-clause('clause 2z2 — wake on a handed-off pane whose restore file never names the new session: /clear typed, then nothing more, the wake giving up by itself (E15-D276)',
-  rNever.code === 0 && JSON.stringify(typed(neverFx)) === JSON.stringify([`${PANE}|/clear`]) && /gave up before/.test(rNever.out) && rNever.took <= 21000, `${rNever.took} ms; ${show(neverFx, rNever)}`)
+// The same pane whose restore file never names the new session, its reads quick, and its twin whose reads after
+// /clear take 6 s, so the last read of the resume line's wait is cut off by the time left. Each wake gives up by
+// itself before the resume line, ending on whichever give-up line its last read reached; the clause judges what it
+// did, never which line it printed.
+const NEVER_HELD = '20261118T000000000Z.2.md'
+const neverRows = []
+for (const [label, extra] of [['quick reads', {}], ['reads after /clear taking 6 s', { delayAfterClearMs: 6000 }]]) {
+  const fx = fixture({ laneRecord: '- State: Open\n- auto-cycle: warned S 20%\n', shim: { clearSession: 'S-next', restoreAfterGets: 1e9, ...extra } })
+  handed(fx, { latch: ['S'], warnedAt: H - 60000, handoffAt: H, session: 'S', transcript: clean })
+  write(path.join(fx.run, 'held/a', NEVER_HELD), 'held before'); write(path.join(fx.run, 'pending/a', NEVER_HELD), '')
+  neverRows.push([label, fx, await sender(fx, ['wake', 'a'])])
+}
+const neverBad = neverRows.filter(([, fx, r]) => {
+  const clearAt = shimLog(fx).find((e) => e.typed?.text === '/clear')?.t
+  // From the /clear's typing call the resume line's wait runs its own WAKE_GIVE_UP_MS and then ends; the sender kills at 30 s.
+  return !(r.code === 0 && JSON.stringify(typed(fx)) === JSON.stringify([`${PANE}|/clear`]) && !typed(fx).includes(`${PANE}|${RESUME_LINE}`) &&
+    same(held(fx).map((f) => path.basename(f)), [NEVER_HELD]) && fs.readFileSync(path.join(fx.run, 'held/a', NEVER_HELD), 'utf8') === 'held before' && same(pendingOf(fx), [NEVER_HELD]) &&
+    clearAt !== undefined && r.end - clearAt >= 9500 && r.end - clearAt <= 13000)
+}).map(([label, fx, r]) => `${label}: ${r.end - (shimLog(fx).find((e) => e.typed?.text === '/clear')?.t ?? NaN)} ms after /clear; ${show(fx, r)}; pending ${JSON.stringify(pendingOf(fx))}`)
+clause('clause 2z2 — wake on a handed-off pane whose restore file never names the new session, its reads quick or cut off by the time left: exit 0, /clear the one line typed and never the resume line, the held message and its pending marker as they were, and the wake ending by itself 9.5 s to 13 s after /clear (E15-D276)',
+  neverBad.length === 0, neverBad.join(' || '))
 
 // E15-D277: a warned session not handed off (its handoff predates the warning), with one held message and its marker;
 // its twin carries no warned line. wake types nothing into the first and nudges the second; wake-all nudges the first.
@@ -1347,6 +1363,10 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   spawnSync(path.join(n.bin, 'herdr'), ['pane', 'run', PANE, '/clear']); for (let i = 0; i < 5; i++) spawnSync(path.join(n.bin, 'herdr'), ['pane', 'get', PANE])
   clause('clause 3z2 — without the sender: the never shim, after /clear and five pane reads, has written no restore file',
     !fs.existsSync(nrf), nrf)
+  const d = fixture({ shim: { clearSession: 'S-next', restoreAfterGets: 1e9, delayAfterClearMs: 6000 } }), dget = () => { const t = Date.now(); spawnSync(path.join(d.bin, 'herdr'), ['pane', 'get', PANE]); return Date.now() - t }
+  const quick = dget(); spawnSync(path.join(d.bin, 'herdr'), ['pane', 'run', PANE, '/clear']); const slowRead = dget()
+  clause('clause 3z2b — without the sender: 2z2\'s slow twin reads the pane in under 6 s before /clear and takes 6 s or more over a read after it',
+    quick < 6000 && slowRead >= 6000, JSON.stringify({ quick, slowRead }))
   const w = warnedFx(true), t = warnedFx(false), entries = (x) => parseRecord(fs.readFileSync(x.record, 'utf8')).entries
   clause('clause 3z3 — without the sender: the warned fixture names S in a warned line and its handoff predates the warning, its twin names no session, and each holds the held message and its marker',
     sessionWarned(entries(w), 'S') !== null && !handoffLanded({ handoffPath: w.handoff, memoryPath: memory(w), warnedAt: latchOf(w, 'S') }) && sessionWarned(entries(t), 'S') === null &&
