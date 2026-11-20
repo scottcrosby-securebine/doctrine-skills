@@ -48,8 +48,12 @@ function fixture(name, { state = 'Open', where = 'in-repo', memory = true, hando
 }
 
 const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp }
-delete env.CLAUDE_PROJECT_DIR
-delete env.HERDR_PANE_ID
+// The suite's own terminal host must not decide a clause: each run names the host it stands in.
+for (const k of ['CLAUDE_PROJECT_DIR', 'HERDR_PANE_ID', 'HERDR_ENV', 'HC_TERMINAL_ID', 'TERM_PROGRAM']) delete env[k]
+const TUI = { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' }
+// herdr-core, measured 2026-11-21 (hc 0.1.21, herdr 0.9.5): a core first started from a herdr TUI pane hands that pane's
+// HERDR_* variables to every terminal it runs.
+const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_TAB_ID: 'w2Z:t1', HERDR_WORKSPACE_ID: 'w2Z', HERDR_SOCKET_PATH: '/u/.config/herdr/herdr.sock' }
 const run = (payload, extraEnv = {}) => {
   const r = spawnSync('node', [hook], { input: JSON.stringify(payload), env: { ...env, ...extraEnv }, encoding: 'utf8' })
   return { code: r.status, out: r.stdout, err: r.stderr }
@@ -92,14 +96,18 @@ clause('clause 2e — a 5,000-character state line is cut, and the other facts s
 const restored = (pane) => path.join(tmp, 'dctr-autocycle', `pane-${pane}.restored`)
 const rNoPane = run(clear(openIn.proj))
 const noPaneFiles = fs.existsSync(path.join(tmp, 'dctr-autocycle')) ? fs.readdirSync(path.join(tmp, 'dctr-autocycle')).filter((f) => f.endsWith('.restored')) : []
-const rPane = run(clear(openIn.proj, { session_id: 'sess-new', transcript_path: '/new.jsonl' }), { HERDR_PANE_ID: 'w7:p3' })
+const rPane = run(clear(openIn.proj, { session_id: 'sess-new', transcript_path: '/new.jsonl' }), { ...TUI, HERDR_PANE_ID: 'w7:p3' })
 let rf = null
 try { rf = JSON.parse(fs.readFileSync(restored('w7_p3'), 'utf8')) } catch { /* the clause reports it */ }
-const rSkip = run(clear(exited.proj, { session_id: 'sess-skip' }), { HERDR_PANE_ID: 'w7:p4' })
+const rSkip = run(clear(exited.proj, { session_id: 'sess-skip' }), { ...TUI, HERDR_PANE_ID: 'w7:p4' })
 clause('clause 2f — with HERDR_PANE_ID set and the facts injected, the restore file carries the new session id and transcript path; without the pane id, or on a stand-down, none is written (B5)',
   facts(rNoPane, openIn, 'Open') && noPaneFiles.length === 0 && rPane.out.includes('additionalContext') &&
   rf?.session_id === 'sess-new' && rf?.transcript_path === '/new.jsonl' && rSkip.out === '' && !fs.existsSync(restored('w7_p4')),
   `noPane ${JSON.stringify(noPaneFiles)} file ${JSON.stringify(rf)} skip ${rSkip.out}`)
+
+const rCore = run(clear(openIn.proj, { session_id: 'sess-core' }), CORE)
+clause('clause 2h — in herdr-core with the leaked HERDR_* (the measured case) the facts are injected and no restore file is written for the leaked pane id',
+  facts(rCore, openIn, 'Open') && !fs.existsSync(restored('w2Z_p1')), `out ${rCore.out} file ${fs.existsSync(restored('w2Z_p1'))}`)
 
 // RB3-2: the session start the auto-cycle pause model anchors on, written on every injection, pane or no pane.
 const startFile = (recordAbs) => path.join(tmp, 'dctr-autocycle', `start-${crypto.createHash('sha1').update(path.resolve(recordAbs)).digest('hex').slice(0, 16)}`)
@@ -203,6 +211,10 @@ clause('clause 3a — without the hook: the Open and Blocked records end on thos
   [blkIn, blkSib].every((f) => lastState(f.recordAbs).startsWith('- State: Blocked')) &&
   lastState(exited.recordAbs) === '- State: Exited.' && fs.readFileSync(exited.recordAbs, 'utf8').includes('- State: Open'),
   'a fixture record does not carry the state its clause relies on')
+
+clause('clause 3e — without the hook: the herdr-core fixture carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr, and the leaked pane id',
+  Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && CORE.HERDR_PANE_ID === 'w2Z:p1' && TUI.TERM_PROGRAM === 'herdr',
+  JSON.stringify(CORE))
 
 clause('clause 3b — without the hook: a sibling record does not resolve against the project dir, only against its parent',
   [openSib, blkSib].every((f) => !fs.existsSync(path.join(f.proj, f.ref)) && fs.existsSync(path.join(path.dirname(f.proj), f.ref))),

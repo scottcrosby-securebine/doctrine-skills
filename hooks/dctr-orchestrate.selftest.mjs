@@ -192,7 +192,8 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
   process.env.CLAUDE_CONFIG_DIR = modeCfg
   const want = launchFlags(modeFile(pane))
   if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was
-  const on = flags({ HERDR_PANE_ID: pane }), off = flags({ HERDR_PANE_ID: '' })
+  const TUI = { HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '' }
+  const on = flags({ ...TUI, HERDR_PANE_ID: pane }), off = flags({ ...TUI, HERDR_PANE_ID: '' })
   clause('clause 2v — launch-flags prints launchFlags of the calling pane\'s mode file, <config dir>/doctrine/modes/pane-<pane>.mode, and exits 0, and with no HERDR_PANE_ID an empty line and exits 0; neither run, nor computing the path, creates the config dir',
     on.code === 0 && on.out === `${want}\n` && want.includes(shq(path.join(modeCfg, 'doctrine', 'modes', 'pane-w1_p7.mode'))) && off.code === 0 && off.out === '\n' && !fs.existsSync(modeCfg), JSON.stringify([want, on, off, fs.existsSync(modeCfg)]))
 }

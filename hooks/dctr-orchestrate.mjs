@@ -26,7 +26,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS } from './dctr-lib.mjs'
+import { capacityDecision, firstUsage, hostOf, launchFlags, readUsage, resolveTier, HANDOFF_COST_TOKENS, herdrPane } from './dctr-lib.mjs'
 import { modeFile } from './dctr-state.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
@@ -83,7 +83,7 @@ const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fs.rea
 if (isMain) {
   const [cmd, tierText, transcript, ...extra] = process.argv.slice(2)
   if (cmd === 'launch-flags' && !tierText) {
-    console.log(launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null))
+    console.log(launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null))
     process.exit(0)
   }
   if (cmd !== 'capacity' || !tierText || !transcript || extra.length) {

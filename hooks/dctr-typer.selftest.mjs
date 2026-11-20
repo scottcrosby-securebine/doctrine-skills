@@ -505,8 +505,9 @@ function gateRun(name, payload, { restored, pane = `w9:p-${name}`, tmpdir, scrip
   const at = (fn) => { const was = process.env.TMPDIR; process.env.TMPDIR = dir; try { return fn() } finally { process.env.TMPDIR = was } }
   if (restored !== undefined && pane) at(() => write(restoreFile(pane), JSON.stringify({ session_id: restored, transcript_path: '/x.jsonl' })))
   const e = { ...env, TMPDIR: dir }
-  delete e.HERDR_PANE_ID
-  if (pane) e.HERDR_PANE_ID = pane
+  delete e.HERDR_PANE_ID; delete e.HC_TERMINAL_ID
+  // A pane is a herdr TUI pane's, so the gate reads it (herdrPane), whatever terminal runs the suite.
+  if (pane) Object.assign(e, { HERDR_PANE_ID: pane, HERDR_ENV: '1', TERM_PROGRAM: 'herdr' })
   const r = spawnSync(process.execPath, [script], { input: raw ?? JSON.stringify(payload), env: e, encoding: 'utf8', timeout: 20000 })
   let out = null
   try { out = r.stdout === '' ? '' : JSON.parse(r.stdout) } catch { out = { unparsed: r.stdout } }

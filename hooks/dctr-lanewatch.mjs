@@ -60,7 +60,7 @@ import { herdr } from './dctr-state.mjs'
 import { restoreFile, modeFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier,
-  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags,
+  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags, herdrPane,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -269,8 +269,8 @@ const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
 function start(run) {
   const checkout = repoOf(path.join(process.cwd(), '.git'), fs.existsSync)
   if (laneLogPathRefusal(checkout)) fail(laneLogPathRefusal(checkout))
-  const pane = process.env.HERDR_PANE_ID, workspace = process.env.HERDR_WORKSPACE_ID
-  if (!pane || !workspace) fail('no HERDR_PANE_ID or HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
+  const pane = herdrPane(process.env), workspace = process.env.HERDR_WORKSPACE_ID
+  if (!pane || !workspace) fail('no herdr pane (HERDR_PANE_ID in a herdr TUI session) or no HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
   fs.mkdirSync(run, { recursive: true })
   const lock = path.join(run, 'lanewatch.lock'), startLock = path.join(run, 'lanewatch.start.lock')
   if (!takeRunLock(startLock)) fail(`another start holds ${startLock}`)

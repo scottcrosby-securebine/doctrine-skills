@@ -87,11 +87,29 @@ export const notSeatReason = (p) => {
 }
 
 /**
+ * The session's innermost terminal host: 'herdr' (the TUI), 'herdr-core' (hc, behind Herdr.app) or null, from the
+ * environment alone. A core first started from a herdr pane hands that pane's HERDR_* variables to every terminal it
+ * runs while the TUI server still answers, so HERDR_ENV alone would send a herdr-core session's panes into the TUI.
+ * TERM_PROGRAM is written by whichever host started the session last, which is why herdr's own value outranks
+ * HC_TERMINAL_ID, and why HERDR_ENV still counts without it (tmux and the like rewrite it).
+ */
+export function termHost(env) {
+  if (env.TERM_PROGRAM === 'herdr' && env.HERDR_ENV === '1') return 'herdr'
+  if (env.HC_TERMINAL_ID) return 'herdr-core'
+  if (env.HERDR_ENV === '1') return 'herdr'
+  return null
+}
+
+/** The herdr pane id this session may act on, or null: never the stale one a herdr-core terminal inherited. */
+export const herdrPane = (env) => (termHost(env) === 'herdr' && env.HERDR_PANE_ID) || null
+
+/**
  * Guard for every hook. Returns a reason string when doctrine must stand down, else null.
  * A skip is always a reason, never silence: a watcher that failed and a run that dispatched nothing
  * print the same thing otherwise, and the user waits for a tab that was never coming.
  */
 export function skipReason(env) {
+  if (termHost(env) === 'herdr-core') return 'running in herdr-core (HC_TERMINAL_ID set and TERM_PROGRAM not herdr), whose HERDR_* variables are leaked from the herdr pane that started it'
   if (env.HERDR_ENV !== '1') return 'not running inside a herdr pane (HERDR_ENV is not 1)'
   if (!env.HERDR_WORKSPACE_ID) return 'no HERDR_WORKSPACE_ID in the environment'
   return null

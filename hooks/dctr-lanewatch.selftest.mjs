@@ -329,10 +329,12 @@ clause('clause 2p — with the reader returning w7:p7 for a while lane.log names
 
 // ---------------------------------------------------------------- clause 2: start, stop, single instance, containment
 
-const SCRUBBED = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DCTR_|HERDR_|SHIM_)/.test(k)))
+const SCRUBBED = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DCTR_|HERDR_|SHIM_|HC_|TERM_PROGRAM)/.test(k)))
+// A call naming a pane runs in a herdr TUI pane, so start reads it (herdrPane), whatever terminal runs the suite.
+const TUI = { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' }
 function proc(args, env, cwd = tmp) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [WATCH, ...args], { cwd, env: { ...SCRUBBED, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const c = spawn(process.execPath, [WATCH, ...args], { cwd, env: { ...SCRUBBED, ...(env.HERDR_PANE_ID ? TUI : {}), ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
     let o = '', e = ''
     c.stdout.on('data', (d) => { o += d }); c.stderr.on('data', (d) => { e += d })
     const kill = setTimeout(() => c.kill('SIGKILL'), 20000)

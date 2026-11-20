@@ -25,7 +25,7 @@ import {
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
-  suiteOutcome, progressLine, GATE_ROLE, sweepAction, movedGateName, movedGateVerdict,
+  suiteOutcome, progressLine, GATE_ROLE, sweepAction, movedGateName, movedGateVerdict, termHost, herdrPane,
 } from './dctr-lib.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -76,6 +76,40 @@ clause('clause 1c — no HERDR_ENV stands the hook down',
 
 clause('clause 1d: no workspace id stands the hook down',
   typeof skipReason({ HERDR_ENV: '1' }) === 'string', String(skipReason({ HERDR_ENV: '1' })))
+
+// herdr-core (hc 0.1.21, the runtime behind Herdr.app) beside the herdr TUI, measured 2026-11-21 on herdr 0.9.5: a core
+// first started from a TUI pane hands that pane's HERDR_* variables to every terminal it runs, while the TUI server
+// still answers, so the variables alone would send every herdr-core session's panes into the TUI.
+const LEAKED = { HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_TAB_ID: 'w2Z:t1', HERDR_WORKSPACE_ID: 'w2Z', HERDR_SOCKET_PATH: '/u/.config/herdr/herdr.sock' }
+const HOSTS = {
+  tui: { TERM_PROGRAM: 'herdr', ...LEAKED },
+  coreLeaked: { TERM_PROGRAM: 'ghostty', HC_TERMINAL_ID: 't17', ...LEAKED },
+  coreBare: { TERM_PROGRAM: 'ghostty', HC_TERMINAL_ID: 't17' },
+  nested: { TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: 't17', ...LEAKED, HERDR_PANE_ID: 'w3A:p2', HERDR_WORKSPACE_ID: 'w3A' },
+  tmux: { TERM_PROGRAM: 'tmux', ...LEAKED },
+  neither: { TERM_PROGRAM: 'ghostty' },
+}
+const hostRow = (e) => ({ host: termHost(e), pane: herdrPane(e), skip: skipReason(e) })
+const coreSkip = (r) => r.host === 'herdr-core' && r.pane === null && /herdr-core/.test(r.skip) && /HC_TERMINAL_ID/.test(r.skip)
+clause('clause 1hc1 — herdr nested inside herdr-core is herdr: TERM_PROGRAM=herdr outranks HC_TERMINAL_ID, and the pane is its own',
+  JSON.stringify(hostRow(HOSTS.nested)) === JSON.stringify({ host: 'herdr', pane: 'w3A:p2', skip: null }), JSON.stringify(hostRow(HOSTS.nested)))
+clause('clause 1hc2 — herdr-core, with the leaked HERDR_* (the measured case) and without: termHost is herdr-core, herdrPane is null, skipReason names herdr-core',
+  coreSkip(hostRow(HOSTS.coreLeaked)) && coreSkip(hostRow(HOSTS.coreBare)), JSON.stringify([hostRow(HOSTS.coreLeaked), hostRow(HOSTS.coreBare)]))
+clause('clause 1hc3 — tmux in a herdr pane (TERM_PROGRAM rewritten, no HC_TERMINAL_ID) is still herdr, with its pane',
+  JSON.stringify(hostRow(HOSTS.tmux)) === JSON.stringify({ host: 'herdr', pane: 'w2Z:p1', skip: null }), JSON.stringify(hostRow(HOSTS.tmux)))
+clause('clause 2hc — a herdr TUI pane, tmux in one, and neither host keep the fixed point\'s skipReason, and the TUI pane reads its pane id',
+  JSON.stringify(hostRow(HOSTS.tui)) === JSON.stringify({ host: 'herdr', pane: 'w2Z:p1', skip: null }) && skipReason(HOSTS.tmux) === null &&
+  JSON.stringify(hostRow(HOSTS.neither)) === JSON.stringify({ host: null, pane: null, skip: 'not running inside a herdr pane (HERDR_ENV is not 1)' }),
+  JSON.stringify([hostRow(HOSTS.tui), hostRow(HOSTS.tmux), hostRow(HOSTS.neither)]))
+const leaks = (e) => Object.keys(LEAKED).every((k) => e[k]) && e.HERDR_ENV === '1'
+clause('clause 3hc — without the functions: each host fixture carries the variables its row is named for',
+  HOSTS.tui.TERM_PROGRAM === 'herdr' && !('HC_TERMINAL_ID' in HOSTS.tui) && leaks(HOSTS.tui) &&
+  HOSTS.coreLeaked.HC_TERMINAL_ID && HOSTS.coreLeaked.TERM_PROGRAM !== 'herdr' && leaks(HOSTS.coreLeaked) &&
+  HOSTS.coreBare.HC_TERMINAL_ID && HOSTS.coreBare.TERM_PROGRAM !== 'herdr' && !Object.keys(HOSTS.coreBare).some((k) => k.startsWith('HERDR_')) &&
+  HOSTS.nested.TERM_PROGRAM === 'herdr' && HOSTS.nested.HC_TERMINAL_ID && leaks(HOSTS.nested) &&
+  HOSTS.tmux.TERM_PROGRAM === 'tmux' && !('HC_TERMINAL_ID' in HOSTS.tmux) && leaks(HOSTS.tmux) &&
+  !('HERDR_ENV' in HOSTS.neither) && !('HC_TERMINAL_ID' in HOSTS.neither),
+  JSON.stringify(HOSTS))
 
 clause('clause 1e: generated names satisfy herdr\'s own constraint',
   ['Explore', 'general-purpose', 'Red Team!!', '', LONG_ROLE].every((r) => AGENT_NAME_RE.test(agentName(r, 7))),
@@ -410,7 +444,7 @@ const runToken = (args, env = {}) => {
   fs.rmSync(herdrLog, { force: true })
   const r = spawnSync('node', [TOKEN_SCRIPT, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${tokenBin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', DCTR_VIEW_REQUEST_DIR: '', DCTR_FAKE_HERDR_EXIT: '', ...env },
+    env: { ...process.env, PATH: `${tokenBin}:${process.env.PATH}`, HERDR_ENV: '', HERDR_WORKSPACE_ID: '', HERDR_PANE_ID: '', HC_TERMINAL_ID: '', TERM_PROGRAM: '', DCTR_VIEW_REQUEST_DIR: '', DCTR_FAKE_HERDR_EXIT: '', ...env },
   })
   const calls = fs.existsSync(herdrLog)
     ? fs.readFileSync(herdrLog, 'utf8').split('--END--\n').filter(Boolean).map((c) => c.slice(0, -1).split('\n'))
@@ -462,6 +496,9 @@ clause('clause 1bf — T-token: contained (DCTR_VIEW_REQUEST_DIR set, inside her
   JSON.stringify({ contained, containedBad }))
 clause('clause 3y — T-token: the contained fixture really is inside herdr with a workspace and pane, and names a request directory',
   CONTAINED.HERDR_ENV === '1' && Boolean(CONTAINED.HERDR_WORKSPACE_ID) && Boolean(CONTAINED.HERDR_PANE_ID) && Boolean(CONTAINED.DCTR_VIEW_REQUEST_DIR), JSON.stringify(CONTAINED))
+const coreToken = runToken(['3', '1', '4', '--epic', 'E7'], HOSTS.coreLeaked)
+clause('clause 1hc4 — T-token: in herdr-core with the leaked HERDR_* (the measured case) it stands down naming herdr-core and calls herdr ZERO times',
+  coreToken.code === 0 && /standing down — .*herdr-core/.test(coreToken.out) && coreToken.calls.length === 0, JSON.stringify(coreToken))
 fs.rmSync(tokenTmp, { recursive: true, force: true })
 
 // Third clause, without the script or the builder: the malformed fixtures really are malformed. The

@@ -49,7 +49,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { herdr, codexStateDir } from './dctr-state.mjs'
-import { codexTerminal, ID_RE } from './dctr-lib.mjs'
+import { codexTerminal, ID_RE, termHost } from './dctr-lib.mjs'
 import { parseRecord, restoreState, docHeader, SECTION_LINE } from './dctr-record.mjs'
 
 export const PROJECT_PATH = 'docs/PROJECT.md'
@@ -617,7 +617,7 @@ export function trackedRoot(root, model) {
  *  herdr, in a contained session (which must reach nothing on the host), when the call fails, and when
  *  the reply carries no pane list: an empty or failed reply is "could not look", never zero seats. */
 function readSeats(root, env = process.env) {
-  if (env.HERDR_ENV !== '1' || env.DCTR_VIEW_REQUEST_DIR) return null
+  if (termHost(env) !== 'herdr' || env.DCTR_VIEW_REQUEST_DIR) return null
   let reply
   try { reply = herdr(['api', 'snapshot']) } catch { return null }   // could not look; there is no not-found answer to separate here
   const panes = reply?.result?.snapshot?.panes

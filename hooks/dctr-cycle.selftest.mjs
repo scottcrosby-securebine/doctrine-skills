@@ -378,7 +378,9 @@ fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
 `)
 
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_TYPER_SCRIPT: stub, HERDR_PANE_ID: 'w9:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS', 'HC_TERMINAL_ID']) delete baseEnv[k]
+// A herdr TUI pane, so the hook reads HERDR_PANE_ID as its pane (herdrPane), whatever terminal runs the suite.
+Object.assign(baseEnv, { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' })
 const T0 = Date.parse('2026-09-24T01:00:00Z')
 
 /**

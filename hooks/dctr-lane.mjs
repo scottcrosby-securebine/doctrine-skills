@@ -74,7 +74,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, READY_STATUSES, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, herdrPane,
 } from './dctr-lib.mjs'
 import { herdr, isPaneNotFound, sleepMs, restoreFile, modeFile } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -267,7 +267,7 @@ function create() {
     made.push(`the herdr pane ${pane}`)
     const command = `cd ${shq(wt)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
       `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
-      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null)}`
+      `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model "$(cat ${shq(path.join(run, 'model', role))})"${launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null)}`
     const script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)

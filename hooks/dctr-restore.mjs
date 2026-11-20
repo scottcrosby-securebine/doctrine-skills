@@ -18,7 +18,7 @@
 // in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads around them.
 
 import fs from 'node:fs'
-import { restoreSkip, followKickoff, restoreContext, hostOf, codexUnderClaude, UNDER_CLAUDE_WHY } from './dctr-lib.mjs'
+import { restoreSkip, followKickoff, restoreContext, hostOf, codexUnderClaude, UNDER_CLAUDE_WHY, herdrPane } from './dctr-lib.mjs'
 import { hookLog, standDown, restoreFile, writeMarker, writeSessionStart } from './dctr-state.mjs'
 
 let sessionId = null
@@ -48,9 +48,9 @@ try {
   // The session start the pause model anchors on (RB3-2), written whenever this hook injects, pane or no pane: a
   // /clear and a typed resume in a contained session also starts a session that must not inherit old pauses.
   try { writeSessionStart(recordPath) } catch (e) { hookLog(sessionId, `SessionStart session start not recorded (${e.code || e.message})`) }
-  if (process.env.HERDR_PANE_ID) {
+  if (herdrPane(process.env)) {
     try {
-      writeMarker(restoreFile(process.env.HERDR_PANE_ID), { session_id: sessionId, transcript_path: payload.transcript_path || null })
+      writeMarker(restoreFile(herdrPane(process.env)), { session_id: sessionId, transcript_path: payload.transcript_path || null })
     } catch (e) { hookLog(sessionId, `SessionStart restore file not written (${e.code || e.message})`) }
   }
   hookLog(sessionId, `SessionStart restore injected — ${header.phase || 'unnamed phase'} ${state}, record ${recordPath}`)

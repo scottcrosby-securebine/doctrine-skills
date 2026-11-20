@@ -199,7 +199,7 @@ function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctri
 const lane = (f, args, { cwd = f.repo, env = {}, unset = [] } = {}) => {
   const e = {
     ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_RUN: f.run,
-    HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
+    HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
     HERDR_SHIM_RESTORE: RESTORE, DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
@@ -320,7 +320,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   const hookRun = (f, pane, mode) => spawnSync('node', [CYCLE], {
     cwd: f.repo, encoding: 'utf8',
     input: JSON.stringify({ hook_event_name: 'Stop', session_id: `pm-${path.basename(f.root)}`, transcript_path: path.join(f.root, 't.jsonl'), cwd: f.repo, permission_mode: mode, stop_hook_active: false, last_assistant_message: 'ok' }),
-    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
+    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
   })
   const launchRun = (f) => {
     fs.rmSync(claudeLog, { force: true })
@@ -454,7 +454,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   const R = fixture({ orchRecord: true })
   const r = create(R)
   const pane = laneOf(read(R.laneLog), 'a')?.pane
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, HERDR_PANE_ID: pane || 'none', HERDR_SHIM_DIR: R.shim }
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_PANE_ID: pane || 'none', HERDR_SHIM_DIR: R.shim }
   delete env.CLAUDE_PROJECT_DIR
   const before = shimLog(R).length
   const S = 'sess-first-resume'

@@ -102,7 +102,7 @@ if (args[0] === 'pane' && args[1] === 'get') {
     // judges the payload, and a blocked prompt runs no turn and writes no prompt (probe-ups U1, U2).
     if (st.cleared && !st.resumed) { st.resumed = true; if (st.onResume !== 'none') restore() }
     const session = st.cleared ? st.newSession : st.session
-    const g = require('child_process').spawnSync(process.execPath, [st.gateScript], { input: JSON.stringify({ ...st.ups, session_id: session, prompt: args[3] }), env: { ...process.env, HERDR_PANE_ID: args[2] }, encoding: 'utf8' })
+    const g = require('child_process').spawnSync(process.execPath, [st.gateScript], { input: JSON.stringify({ ...st.ups, session_id: session, prompt: args[3] }), env: { ...process.env, HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_PANE_ID: args[2] }, encoding: 'utf8' })
     let verdict = 'pass'
     try { if (g.stdout) verdict = JSON.parse(g.stdout).decision } catch { verdict = 'unparsed' }
     st.gate = [...(st.gate || []), { session, verdict, code: g.status }]
@@ -119,7 +119,9 @@ process.exit(0)
 `)
 fs.chmodSync(path.join(bin, 'herdr'), 0o755)
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, HERDR_PANE_ID: 'wX:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'DCTR_TYPER_SCRIPT', 'DCTR_WATCH_SCRIPT', 'DCTR_CYCLE_SCRIPT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_SESSION_ID']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'DCTR_TYPER_SCRIPT', 'DCTR_WATCH_SCRIPT', 'DCTR_CYCLE_SCRIPT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_SESSION_ID', 'HC_TERMINAL_ID']) delete baseEnv[k]
+// A herdr TUI pane, so the hooks read HERDR_PANE_ID as their pane (herdrPane), whatever terminal runs the suite.
+Object.assign(baseEnv, { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' })
 // A CLAUDE_PROJECT_DIR naming another directory: a Codex session inherits whatever launched it, and must read its own cwd.
 const decoy = path.join(tmp, 'decoy'); fs.mkdirSync(decoy)
 baseEnv.CLAUDE_PROJECT_DIR = decoy
