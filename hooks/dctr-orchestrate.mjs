@@ -26,8 +26,8 @@
 // bridge file, and calls nothing else.
 //
 // start (E15-SK10) starts the run's orchestrator session from a session with no DCTR_ROLE, inside herdr, in a repo
-// carrying docs/PROJECT.md. It writes the launch command to `launch.sh` in a new directory under TMPDIR, never under the
-// run: `claude` started in the checkout's top level with DCTR_ROLE and DCTR_CALLER `orchestrator`, DCTR_RUN the absolute
+// carrying docs/PROJECT.md. It writes the launch command to `launch.sh` in a new directory under TMPDIR:
+// `claude` started in the checkout's top level with DCTR_ROLE and DCTR_CALLER `orchestrator`, DCTR_RUN the absolute
 // `<Records>/orchestrate`, the caller's config dir, PATH and TMPDIR, `--model <model id>`, launchFlags for the mode file
 // of the calling pane (HERDR_PANE_ID), read as the file runs, and, with a request file, `--` and its text as the first
 // prompt, so a request opening with `-` is never read as an option. It then makes one tab in HERDR_WORKSPACE_ID, polls
