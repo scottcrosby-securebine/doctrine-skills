@@ -1005,7 +1005,7 @@ const STATUS_ROW = /^last poll (\S+) · (\d+) roles$/
 const upRows = (out) => paneRows(out).filter((l) => / up /.test(l) && !Number.isNaN(Date.parse(l.split(' ')[0]))).map((l) => l.split(' ').slice(1).join(' '))
 const fullEvents = (fx) => { try { return fs.readFileSync(path.join(fx.run, 'events.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
 const LOUD = '>>> WAITING ON YOU: '
-const { pausedLine, pauseReason, parseWakeLines, parseLimits, pauseCode, standingPauses } = await import('./dctr-lib.mjs')
+const { pausedLine, pauseReason, parseWakeLines, parseLimits, pauseCode, standingPauses, pausingStates } = await import('./dctr-lib.mjs')
 const { parseRecord } = await import('./dctr-record.mjs')
 /** The watcher run as start's pane runs it, its stdout read until its first status line, then ended by SIGTERM. */
 function liveWatcher(fx) {
@@ -1054,12 +1054,14 @@ function liveWatcher(fx) {
     JSON.stringify([raised, shown, ev.out]))
 }
 
-// The loud fixture: lane a Blocked with an open question, p paused on a permission prompt, m paused idle (R8), an
-// account and a model limit, a report, and wake-all's unwoken lines for the orchestrator and for a.
+// The loud fixture: lane a Blocked with an open question, p paused on a permission prompt, al on an alarm with no
+// ruling, m paused idle (R8), an account and a model limit, a report, and wake-all's unwoken lines for the orchestrator
+// and for a.
 const loudFx = fixture({
   a: { record: '- State: Blocked. waits on Q1\n- question: Q1 opened 2026-11-09T09:00:00Z which way?\n' },
   p: { record: `- State: Open\n${pausedLine(pauseReason('R7'), 'S-p')}\n` },
   m: { record: `- State: Open\n${pausedLine(pauseReason('R8'), 'S-m')}\n` },
+  al: { record: '- State: Open\n- alarm: round fired 2026-11-09T09:00:00Z count 4\n' },
 })
 const UNWOKEN_O = '2026-11-09T10:00:00.000Z unwoken orchestrator 2026-11-09T09:30:00Z', UNWOKEN_A = '2026-11-09T10:00:00.001Z unwoken a 2026-11-09T09:30:00Z'
 write(path.join(loudFx.run, 'events.log'), `${UNWOKEN_O}\n${UNWOKEN_A}\n`)
@@ -1070,12 +1072,12 @@ write(path.join(loudFx.run, 'inbox/r1.md'), 'done')
   polls(loudFx, wl)
   const rows = paneRows(loudFx.out), raised = fullEvents(loudFx).slice(2), text = (l) => l.split(' ').slice(1).join(' ')
   const loud = rows.filter((l) => l.startsWith(LOUD)).map((l) => l.slice(LOUD.length))
-  const want = [...raised.filter((l) => / pause [ap] /.test(l) || / limit a account /.test(l)).map(text), text(UNWOKEN_O)]
+  const want = [...raised.filter((l) => / pause (a|p|al) /.test(l) || / limit a account /.test(l)).map(text), text(UNWOKEN_O)]
   // Each mark sits on the row after the line it marks: the event's own line, or the stall's notified line.
   const beside = rows.every((l, i) => !l.startsWith(LOUD) || (rows[i - 1] && (rows[i - 1].endsWith(l.slice(LOUD.length)) || / notified 0 unwoken$/.test(rows[i - 1]))))
   const re = watcher(loudFx); polls(loudFx, re)
-  clause('clause 2bl — the pane marks with one `>>> WAITING ON YOU: ` line, beside its own, each pause but an R8 idle stop\'s, each account limit and each unwoken line naming the orchestrator it notifies, carrying that line\'s text; the idle pause, the model limit, the report, the notified line and a\'s unwoken line get none, and a watcher started anew marks nothing again (E15-D274)',
-    want.length === 5 && JSON.stringify([...loud].sort()) === JSON.stringify([...want].sort()) && beside &&
+  clause('clause 2bl — the pane marks with one `>>> WAITING ON YOU: ` line, beside its own, each pause but an R8 idle stop\'s (a Blocked state, a question, a permission prompt and an alarm), each account limit and each unwoken line naming the orchestrator it notifies, carrying that line\'s text; the idle pause, the model limit, the report, the notified line and a\'s unwoken line get none, and a watcher started anew marks nothing again (E15-D274)',
+    want.length === 6 && raised.some((l) => / pause al .*alarm with no ruling$/.test(l)) && JSON.stringify([...loud].sort()) === JSON.stringify([...want].sort()) && beside &&
       raised.some((l) => / pause m /.test(l)) && raised.some((l) => / report r1\.md$/.test(l)) && raised.some((l) => / limit b model /.test(l)) && !loudFx.out.includes(LOUD),
     JSON.stringify([want, loud, rows]))
 }
@@ -1134,8 +1136,8 @@ write(path.join(stallFx.run, 'events.log'), STALLS.join('\n') + '\n')
   // are wake-all stall lines for the orchestrator and for a, and limits.log holds one account and one model line.
   const reason = (r) => standingPauses(parseRecord(fs.readFileSync(loudFx.record[r], 'utf8')).entries).map((x) => pauseCode(x.reason))
   const wake = parseWakeLines(`${UNWOKEN_O}\n${UNWOKEN_A}\n`), lim = parseLimits(fs.readFileSync(path.join(loudFx.run, 'limits.log'), 'utf8'))
-  clause('clause 3h — without the watcher: the loud fixture\'s m record stands paused on R8 and p\'s on R7, its two seeded lines are unwoken lines naming the orchestrator and a, and its limits.log reads one account and one model line',
-    JSON.stringify(reason('m')) === '["R8"]' && JSON.stringify(reason('p')) === '["R7"]' &&
+  clause('clause 3h — without the watcher: the loud fixture\'s m record stands paused on R8 and p\'s on R7, al\'s shows a round alarm with no ruling, its two seeded lines are unwoken lines naming the orchestrator and a, and its limits.log reads one account and one model line',
+    JSON.stringify(reason('m')) === '["R8"]' && JSON.stringify(reason('p')) === '["R7"]' && pausingStates(parseRecord(fs.readFileSync(loudFx.record.al, 'utf8')).entries).alarm === 'round' &&
       JSON.stringify(wake.map((w) => [w.word, w.role, w.index])) === '[["unwoken","orchestrator",0],["unwoken","a",1]]' && JSON.stringify(lim.map((l) => l.kind)) === '["account","model"]',
     JSON.stringify([reason('m'), reason('p'), wake, lim]))
 }
