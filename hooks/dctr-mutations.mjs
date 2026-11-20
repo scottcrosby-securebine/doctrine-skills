@@ -3174,7 +3174,7 @@ const MUTATIONS = [
   { name: 'the pause notification calls herdr with no pane', file: 'dctr-notify.mjs',
     clause: 'clause 1 — no HERDR_PANE_ID: calls herdr ZERO times',
     from: "(process.env.HERDR_PANE_ID ? null : 'no HERDR_PANE_ID in the environment')", to: 'null' },
-  // The terminal host (termHost, herdrPane, skipReason's herdr-core reason), pinned by dctr-seat.selftest.mjs and dctr-restore.selftest.mjs.
+  // The terminal host (termHost, herdrPane, skipReason's herdr-core reason) and its callers, each pinned by the suite its clause names.
   { name: 'lane create in herdr-core makes a herdr TUI tab (#108)', file: 'dctr-lane.mjs', clause: 'clause 1d3 — in herdr-core with leaked HERDR_* variables, create refuses, making nothing and calling herdr zero times (#108)',
     from: "  if (termHost(process.env) === 'herdr-core') refuse('this session is in herdr-core, and a lane needs a herdr TUI pane')\n", to: '' },
   { name: 'herdr nested inside herdr-core is read as herdr-core', file: 'dctr-lib.mjs',

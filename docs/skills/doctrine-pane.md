@@ -122,10 +122,10 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## Requirements
 
-- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app, `HC_TERMINAL_ID` set) counts as outside herdr even when it carries those variables.
+- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app: `HC_TERMINAL_ID` set, and not a herdr TUI running inside it, which sets `TERM_PROGRAM=herdr`) counts as outside herdr even when it carries those variables.
 - A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one `open` refuses.
 - Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set, `open`, `type` and `enter` refuse, because a pane is a process on the host.
-- On Codex, the doctrine hooks, which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
+- On Codex in a herdr TUI pane, the doctrine hooks (the herdr-core route needs none), which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
 
 [docs/requirements.md](../requirements.md) and [docs/watching-a-run.md](../watching-a-run.md) cover the herdr setup.
 
