@@ -222,7 +222,7 @@ const create = (f, role = 'a', opts = {}) => lane(f, ['create', role, f.repo, op
 const head = (dir) => git(dir, 'rev-parse', 'HEAD').out
 const branches = (repo) => git(repo, 'branch', '--format=%(refname:short) %(objectname)').out.split('\n').filter(Boolean)
 const commitIn = (dir, file, text, msg) => { write(path.join(dir, file), text); git(dir, 'add', file); git(dir, 'commit', '-qm', msg); return head(dir) }
-const madeNothing = (f, role, r) => r.code !== 0 && !exists(f.wt(role)) && shimLog(f).length === 0 && laneLines(f).length === 0 &&
+const madeNothing = (f, role, r) => r.code !== 0 && r.err.trim().split('\n').length === 1 && r.err.startsWith('dctr-lane: refused, ') && !exists(f.wt(role)) && shimLog(f).length === 0 && laneLines(f).length === 0 &&
   !branches(f.repo).some((b) => b.startsWith(`${role} `))
 const said = (r) => JSON.stringify((r.out + r.err).trim().slice(0, 300))
 
@@ -614,12 +614,12 @@ clause('clause 2t — archive and remove each append their own line to lane.log'
 for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], ['1b', { DCTR_ROLE: 'a' }, [], 'role a'], ['1c', { DCTR_ROLE: 'merge' }, [], 'role merge']]) {
   const f = fixture()
   const r = create(f, 'a', { env, unset })
-  clause(`clause ${n} — create refuses unless runRole() is orchestrator (${why}), making nothing and calling herdr zero times (L5)`, madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause(`clause ${n} — create refuses unless runRole() is orchestrator (${why}), making nothing and calling herdr zero times (L5)`, madeNothing(f, 'a', r) && r.err.includes('only the orchestrator runs this'), `exit ${r.code} ${said(r)}`)
 }
 {
   const f = fixture()
   const r = create(f, 'a', { env: { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } })
-  clause('clause 1d — contained (DCTR_VIEW_REQUEST_DIR set), create refuses, making nothing and calling herdr zero times (L5)', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 1d — contained (DCTR_VIEW_REQUEST_DIR set), create refuses, making nothing and calling herdr zero times (L5)', madeNothing(f, 'a', r) && r.err.includes('a contained session makes no herdr pane'), `exit ${r.code} ${said(r)}`)
 }
 
 // The caller's role (E15-D201) and the lane.log grammar (E15-D186), on one lane: after a real create, each of reset,
@@ -667,23 +667,23 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   clause('clause 1d2 — contained, create, reset, archive and remove call herdr zero times (E15-D202)',
     calls > 0 && shimLog(f).length === calls, `codes ${rs.map((r) => r.code)}; calls ${calls} -> ${shimLog(f).length}`)
 }
-for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE', 'names it by an absolute path, one inside the worktree'], ['1h', '../outside/a.md', 'names a path outside the worktree']]) {
+for (const [n, rec, why, says] of [['1f', null, 'names no record', 'names no record'], ['1g', 'ABSOLUTE', 'names it by an absolute path, one inside the worktree', 'names its record by an absolute path'], ['1h', '../outside/a.md', 'names a path outside the worktree', 'names a record outside the worktree']]) {
   const f = fixture({ handoffs: { a: rec } })
   if (rec === 'ABSOLUTE') write(handoffOf(f), handoffText(path.join(f.wt('a'), '.doctrine/records/a.md')))
   const r = create(f)
-  clause(`clause ${n} — create refuses a handoff that ${why}, making nothing`, madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause(`clause ${n} — create refuses a handoff that ${why}, making nothing`, madeNothing(f, 'a', r) && r.err.includes(says), `exit ${r.code} ${said(r)}`)
 }
 {
   const f = fixture()
-  const bads = [['an unknown subcommand', ['move', 'a']], ['create with three arguments', ['create', 'a', f.repo, f.base]], ['a base that is no commit', ['create', 'a', f.repo, 'no-such-rev', handoffOf(f)]],
-    ['a handoff that does not exist', ['create', 'a', f.repo, f.base, path.join(f.repo, 'docs/handoffs/none.md')]], ['a role that is not a name', ['create', 'A b', f.repo, f.base, handoffOf(f)]],
-    ['the role orchestrator', ['create', 'orchestrator', f.repo, f.base, handoffOf(f)]], ['a role that climbs out of .claude/worktrees', ['create', '../up', f.repo, f.base, handoffOf(f)]]]
-  for (const [why, args] of bads) {
+  const bads = [['an unknown subcommand', ['move', 'a'], 'usage: create'], ['create with three arguments', ['create', 'a', f.repo, f.base], 'usage: create'], ['a base that is no commit', ['create', 'a', f.repo, 'no-such-rev', handoffOf(f)], 'no-such-rev is not a commit in'],
+    ['a handoff that does not exist', ['create', 'a', f.repo, f.base, path.join(f.repo, 'docs/handoffs/none.md')], 'could not be read'], ['a role that is not a name', ['create', 'A b', f.repo, f.base, handoffOf(f)], 'is not a role name'],
+    ['the role orchestrator', ['create', 'orchestrator', f.repo, f.base, handoffOf(f)], 'is not a role name'], ['a role that climbs out of .claude/worktrees', ['create', '../up', f.repo, f.base, handoffOf(f)], 'is not a role name']]
+  for (const [why, args, says] of bads) {
     const r = lane(f, args)
-    clause(`clause 1i — dctr-lane.mjs refuses ${why}, making nothing`, r.code !== 0 && !exists(path.join(f.repo, '.claude')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
+    clause(`clause 1i — dctr-lane.mjs refuses ${why}, making nothing`, r.code !== 0 && r.err.trim().split('\n').length === 1 && r.err.startsWith('dctr-lane: refused, ') && r.err.includes(says) && !exists(path.join(f.repo, '.claude')) && shimLog(f).length === 0 && laneLines(f).length === 0, `exit ${r.code} ${said(r)}`)
   }
   const r = create(f, 'a', { unset: ['HERDR_WORKSPACE_ID'] })
-  clause('clause 1j — create refuses with no herdr workspace, making nothing', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 1j — create refuses with no herdr workspace, making nothing', madeNothing(f, 'a', r) && r.err.includes('no HERDR_WORKSPACE_ID'), `exit ${r.code} ${said(r)}`)
 }
 {
   const f = fixture()
@@ -699,17 +699,16 @@ for (const [n, rec, why] of [['1f', null, 'names no record'], ['1g', 'ABSOLUTE',
   const one = fixture({ handoffs: { merge: '.doctrine/records/merge.md' } })
   const before = git(one.repo, 'worktree', 'list', '--porcelain').out
   const r = lane(one, ['create', 'merge', one.repo, 'main', handoffOf(one, 'merge')])
-  // No single-anchor mutation pins the held-branch check in dctr-lane.mjs: git worktree add refuses a held branch
-  // itself, making nothing, in every held case a fixture can build, a worktree whose directory is gone among them.
+  // git worktree add refuses a held branch itself, making nothing, so only the refusal's text tells this check from git's.
   clause('clause 1l — create merge refuses while the repo\'s own checkout holds the integration branch: worktrees unchanged, no herdr call, no lane.log line (E15-D167)',
-    r.code !== 0 && git(one.repo, 'worktree', 'list', '--porcelain').out === before && shimLog(one).length === 0 && laneLines(one).length === 0, `exit ${r.code} ${said(r)}`)
+    r.code !== 0 && r.err.includes(`a worktree of ${one.repo} holds main`) && git(one.repo, 'worktree', 'list', '--porcelain').out === before && shimLog(one).length === 0 && laneLines(one).length === 0, `exit ${r.code} ${said(r)}`)
   const comp = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
   const code = path.join(comp.root, 'code')
   git(comp.root, 'init', '-q', '-b', 'main', code); commitIn(code, 'x.txt', 'x\n', 'code base')
   const before2 = git(code, 'worktree', 'list', '--porcelain').out
   const r2 = lane(comp, ['create', 'merge', code, 'main', handoffOf(comp, 'merge')], { cwd: comp.repo })
   clause('clause 1m — create merge from a companion repo refuses while the code repo\'s primary checkout holds the integration branch (E15-D167)',
-    r2.code !== 0 && git(code, 'worktree', 'list', '--porcelain').out === before2 && shimLog(comp).length === 0 && laneLines(comp).length === 0, `exit ${r2.code} ${said(r2)}`)
+    r2.code !== 0 && r2.err.includes(`a worktree of ${code} holds main`) && git(code, 'worktree', 'list', '--porcelain').out === before2 && shimLog(comp).length === 0 && laneLines(comp).length === 0, `exit ${r2.code} ${said(r2)}`)
 }
 
 // The failed create before RESUME_LINE (L6, L7, E15-D266): it closes the tab its own tab create returned, removes the
@@ -1226,8 +1225,8 @@ let MISSING
   const f = fixture()
   write(path.join(f.wt('a'), 'stray.txt'), 'stray\n')
   const r = create(f)
-  clause('clause 1ac — create refuses when the worktree path already exists, making no branch, no herdr call and no lane.log line',
-    r.code !== 0 && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0 && !exists(path.join(f.wt('a'), '.git')), `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
+  clause('clause 1ac — create refuses when the worktree path already exists, in one dctr-lane: refused line saying so, making no branch, no herdr call and no lane.log line',
+    r.code !== 0 && r.err.trim().split('\n').length === 1 && /^dctr-lane: refused, .* already exists$/.test(r.err.trim()) && !branches(f.repo).some((b) => b.startsWith('a ')) && shimLog(f).length === 0 && laneLines(f).length === 0 && !exists(path.join(f.wt('a'), '.git')), `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(f.repo))}`)
 }
 
 // A base that already tracks the handoff's copy path.
@@ -1236,17 +1235,17 @@ git(TRACKS.repo, 'add', 'docs/handoffs/a.md'); git(TRACKS.repo, 'commit', '-qm',
 const tracksBase = head(TRACKS.repo)
 {
   const r = create(TRACKS, 'a', { base: tracksBase })
-  clause('clause 1ad — create refuses a base that already tracks docs/handoffs/<the handoff>, making nothing', madeNothing(TRACKS, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 1ad — create refuses a base that already tracks docs/handoffs/<the handoff>, making nothing', madeNothing(TRACKS, 'a', r) && r.err.includes('already tracks docs/handoffs/a.md'), `exit ${r.code} ${said(r)}`)
 }
 
 // A worktree path holding whitespace, a merge base that is a commit and no branch, and a run not named orchestrate.
 const SPACED = fixture({ rootName: ' spaced' })
 {
   const r = create(SPACED)
-  clause('clause 1ae — create refuses a worktree path holding whitespace, making nothing', madeNothing(SPACED, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 1ae — create refuses a worktree path holding whitespace, making nothing', madeNothing(SPACED, 'a', r) && r.err.includes('holds whitespace'), `exit ${r.code} ${said(r)}`)
   const f = fixture({ branch: 'orch', handoffs: { merge: '.doctrine/records/merge.md' } })
   const rm = lane(f, ['create', 'merge', f.repo, f.base, handoffOf(f, 'merge')])
-  clause('clause 1af — create merge refuses a base that is a commit and not a branch, making nothing', madeNothing(f, 'merge', rm), `exit ${rm.code} ${said(rm)}`)
+  clause('clause 1af — create merge refuses a base that is a commit and not a branch, making nothing', madeNothing(f, 'merge', rm) && rm.err.includes('is not a branch of'), `exit ${rm.code} ${said(rm)}`)
 }
 const RUN2 = fixture({ runName: 'run2' })
 {
@@ -1331,7 +1330,7 @@ for (const name of ['a b.md', 'a|b.md']) {
   const h = path.join(f.repo, 'docs/handoffs', name)
   write(h, handoffText('.doctrine/records/a.md'))
   const r = create(f, 'a', { handoff: h })
-  clause(`clause 1aj — create refuses a handoff named ${JSON.stringify(name)}, which the kickoff line cannot carry, making nothing (LR5)`, madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause(`clause 1aj — create refuses a handoff named ${JSON.stringify(name)}, which the kickoff line cannot carry, making nothing (LR5)`, madeNothing(f, 'a', r) && r.err.includes('the kickoff line cannot carry the handoff name'), `exit ${r.code} ${said(r)}`)
 }
 
 // A record whose real path leaves the worktree through a link the base tracks (LR6).
