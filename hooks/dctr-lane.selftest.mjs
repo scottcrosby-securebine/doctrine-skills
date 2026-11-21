@@ -741,6 +741,8 @@ const leftExactly = (f, role, r, keys) => {
     Object.entries(things).every(([k, [, there]]) => there === keys.includes(k))
 }
 const oneLine = (r) => r.code === 1 && r.err.trim().split('\n').length === 1
+/** Whether `s` holds `a` and, after it, `b`: literal text, so a path in either is matched whatever characters it holds. */
+const inOrder = (s, a, b) => s.includes(a) && s.indexOf(b, s.indexOf(a) + a.length) >= 0
 const FOR_LAUNCH = 'did not read ready for the launch line'
 for (const [n, mode, typed, why, cause] of [['1n', 'get-fail', 0, 'pane get fails every read', FOR_LAUNCH], ['1o', 'get-empty', 0, 'pane get answers nothing', FOR_LAUNCH],
   ['1p', 'agent-before', 0, 'the new pane already reads an agent session', FOR_LAUNCH], ['1q', 'stuck-after', 1, 'the pane never reads ready after the launch line', 'did not read ready after the launch line'],
@@ -940,7 +942,7 @@ const listed = (f, role) => git(f.repo, 'worktree', 'list', '--porcelain').out.i
   const tip = git(f.repo, 'rev-parse', 'refs/heads/main').out
   const r = lane(f, ['create', 'merge', f.repo, 'main', handoffOf(f, 'merge')])
   clause('clause 1ch — a create merge whose git worktree add exits 1 after making the worktree exits 1 with one create failed line, removes the worktree, names no branch, keeps main a branch at its tip, calls herdr zero times and writes no lane.log line',
-    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(removed the worktree [^,]*\)/.test(r.err) && !r.err.includes('the branch') &&
+    oneLine(r) && inOrder(r.err, 'create failed, git worktree add failed ', `; undid what it made (removed the worktree ${f.wt('merge')})`) && !r.err.includes('the branch') &&
     !exists(f.wt('merge')) && !listed(f, 'merge') && git(f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/main').out === tip && shimLog(f).length === 0 && laneLines(f).length === 0,
     `exit ${r.code} ${said(r)}`)
   fs.rmSync(h)
@@ -1007,7 +1009,7 @@ const createMerge = (f, env = {}) => lane(f, ['create', 'merge', f.repo, 'main',
   const m = withMergeBranch(), h = failHook(m.f)
   const r = createMerge(m.f)
   clause('clause 1co — in a repo already holding a branch merge, a create merge whose git worktree add exits 1 after making the worktree names only the worktree as undone, never the branch merge, which stays at its commit, main at its tip',
-    oneLine(r) && /create failed, git worktree add failed .*; undid what it made \(removed the worktree [^,)]+\)/.test(r.err) && !r.err.includes('the branch merge') &&
+    oneLine(r) && inOrder(r.err, 'create failed, git worktree add failed ', `; undid what it made (removed the worktree ${m.f.wt('merge')})`) && !r.err.includes('the branch merge') &&
     !exists(m.f.wt('merge')) && mergeKept(m) && shimLog(m.f).length === 0 && laneLines(m.f).length === 0, `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(m.f.repo))}`)
   fs.rmSync(h)
   const again = createMerge(m.f)
@@ -1019,7 +1021,7 @@ const createMerge = (f, env = {}) => lane(f, ['create', 'merge', f.repo, 'main',
   const r = createMerge(m.f, { HERDR_SHIM_MODE: 'no-restore' })
   const script = path.join(m.f.run, 'launch', 'merge.sh')
   clause('clause 1cp — in a repo already holding a branch merge, a create merge whose /clear never takes undoes the tab, the worktree and the launch file and nothing else, never naming the branch merge, which stays at its commit, main at its tip',
-    oneLine(r) && /; undid what it made \(closed the tab [^,]+, removed the worktree [^,]+, removed the launch file [^,)]+\)/.test(r.err) && !r.err.includes('the branch merge') &&
+    oneLine(r) && r.err.includes(`; undid what it made (closed the tab ${madeTabs(m.f)[0]}, removed the worktree ${m.f.wt('merge')}, removed the launch file ${script})`) && !r.err.includes('the branch merge') &&
     !exists(m.f.wt('merge')) && !exists(script) && JSON.stringify(tabCloses(m.f)) === JSON.stringify(madeTabs(m.f)) && mergeKept(m) && laneLines(m.f).length === 0,
     `exit ${r.code} ${said(r)}; branches ${JSON.stringify(branches(m.f.repo))}`)
   const again = createMerge(m.f)
@@ -1029,6 +1031,22 @@ const createMerge = (f, env = {}) => lane(f, ['create', 'merge', f.repo, 'main',
   clause('clause 3co — without the command, that fixture holds a branch merge at its recorded commit, other than main\'s, and main is the separate ref refs/heads/main',
     git(p.f.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/merge').out === p.at && p.at !== p.tip && git(p.f.repo, 'rev-parse', '--symbolic-full-name', 'main').out === 'refs/heads/main' &&
     branches(p.f.repo).some((b) => b.startsWith('merge ')) && !exists(p.f.wt('merge')), JSON.stringify({ at: p.at, tip: p.tip, branches: branches(p.f.repo) }))
+}
+// The same repo, create merge failing at or after RESUME_LINE: its left-in-place list is what it made, never that
+// branch. leftExactly reads any branch merge as one create made, so the list and the disk are checked here directly.
+for (const [n, what, setup, env] of [
+  ['1cq', 'send of RESUME_LINE reaches the pane and then fails', () => {}, { HERDR_SHIM_FAILRUN: RESUME_LINE }],
+  ['1cr', 'lane.log append fails after RESUME_LINE', (f) => fs.mkdirSync(f.laneLog, { recursive: true }), {}]]) {
+  const m = withMergeBranch()
+  setup(m.f)
+  const r = createMerge(m.f, env)
+  const pane = shimLog(m.f).find((e) => e.made)?.made.pane, script = path.join(m.f.run, 'launch', 'merge.sh')
+  const resumes = shimLog(m.f).filter((e) => e.args[1] === 'run' && e.args[3] === RESUME_LINE).length
+  const want = [`the worktree ${m.f.wt('merge')}`, `the herdr pane ${pane}`, `the launch file ${script}`]
+  clause(`clause ${n} — in a repo already holding a branch merge, a create merge whose ${what} names exactly the worktree, the pane and the launch file as left in place, never the branch merge, closes no tab, keeps all three, and the branch merge stays at its commit, main at its tip`,
+    oneLine(r) && Boolean(pane) && resumes === 1 && !r.err.includes('the branch merge') && !r.err.includes('undid') &&
+    JSON.stringify(leftNamed(r).sort()) === JSON.stringify(want.sort()) && exists(m.f.wt('merge')) && exists(script) && tabCloses(m.f).length === 0 &&
+    laneLines(m.f).length === 0 && mergeKept(m), `exit ${r.code} ${said(r)}; named ${JSON.stringify(leftNamed(r))}; branches ${JSON.stringify(branches(m.f.repo))}`)
 }
 // Without the command: each fixture's git worktree add alone exits non-zero and leaves what the clauses above say it made.
 {
