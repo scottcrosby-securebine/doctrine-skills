@@ -4043,7 +4043,7 @@ const MUTATIONS = [
     clause: 'clause 1aa — archive refuses a lane whose record does not exist: nothing copied, the epic unchanged',
     from: '  if (!fs.existsSync(path.resolve(wt, rec))) refuse(', to: '  if (false) refuse(' },
   { name: 'create goes on when the worktree path already exists', file: 'dctr-lane.mjs',
-    clause: 'clause 1ac — create refuses when the worktree path already exists, making no branch',
+    clause: 'clause 1ac — create refuses when the worktree path already exists, in one dctr-lane: refused line saying so ...',
     from: '  if (fs.existsSync(wt)) refuse(', to: '  if (false) refuse(' },
   { name: 'create accepts a base that already tracks the handoff', file: 'dctr-lane.mjs',
     clause: 'clause 1ad — create refuses a base that already tracks docs/handoffs/<the handoff>, making nothing',
