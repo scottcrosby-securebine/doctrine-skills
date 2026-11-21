@@ -1606,7 +1606,7 @@ clause('clause 2r2 — hooks.json names the four events, says each stands down u
   hjd.includes('Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit run dctr-cycle.mjs') &&
   hjd.includes('unless that record is Open or Blocked and its last auto-cycle on/off line is on') && hjd.includes('cycleDecision in hooks/dctr-lib.mjs') &&
   hjd.includes('notifyDecision') && hjd.includes('Past that, UserPromptSubmit only records where the session\'s turn ended.') &&
-  hjd.includes('a Claude Code main session\'s event in a herdr pane that carries permission_mode writes that mode as the one line of the pane\'s mode file in the user\'s Claude config dir, whatever the record says') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
+  hjd.includes('a Claude Code main session\'s event in a herdr TUI pane (herdrPane, never in herdr-core) that carries permission_mode writes that mode as the one line of the pane\'s mode file in the user\'s Claude config dir, whatever the record says') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
   !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0 && D2_REASONS.length >= 18 && guardMisses.length === 0,
   `restated ${JSON.stringify(restated)} guard misses ${JSON.stringify(guardMisses)} | ${hjd.slice(-1400)}`)
 
