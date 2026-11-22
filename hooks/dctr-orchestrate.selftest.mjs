@@ -396,6 +396,18 @@ for (const [n, name, cwd, over] of [
     r.code === 1 && said.length === 1 && /^dctr-orchestrate: start refused/.test(said[0]) && shimCalls().length === 0 && tree() === t0 && stubStarts().length === 0, JSON.stringify({ r, calls: shimCalls(), changed: tree() !== t0 }))
 }
 {
+  // herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+  const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+  resetShim()
+  const t0 = tree(), r = startIn(proj, ['claude-opus-5-5', req], CORE)
+  const said = `${r.out}\n${r.err}`.trim().split('\n').filter(Boolean)
+  clause('clause 4s — start in herdr-core with the leaked HERDR_*: exit 1 with one line naming herdr-core, no herdr call, no new file, nothing typed (#108)',
+    r.code === 1 && said.length === 1 && /^dctr-orchestrate: start refused: .*herdr-core/.test(said[0]) && shimCalls().length === 0 && tree() === t0 && stubStarts().length === 0, JSON.stringify({ r, calls: shimCalls(), changed: tree() !== t0 }))
+  const e = sEnv(CORE)
+  clause('clause 3s — without start: clause 4s\'s environment carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr and the leaked HERDR_ENV=1, pane and workspace',
+    e.HC_TERMINAL_ID === 't17' && e.TERM_PROGRAM === 'ghostty' && e.HERDR_ENV === '1' && e.HERDR_PANE_ID === 'w2Z:p1' && e.HERDR_WORKSPACE_ID === 'w2Z', JSON.stringify({ HC: e.HC_TERMINAL_ID, TP: e.TERM_PROGRAM, HE: e.HERDR_ENV, P: e.HERDR_PANE_ID, WS: e.HERDR_WORKSPACE_ID }))
+}
+{
   resetShim()
   const t0 = tree(), none = startIn(proj, []), extra = startIn(proj, ['claude-opus-5-5', req, 'more'])
   clause('clause 4g — start with no model id, or with an argument past the request file: exit 2 with the usage line naming start, no herdr call, no new file',
