@@ -1243,6 +1243,14 @@ export const runRole = (env = process.env) => env.DCTR_ROLE || null
 export const launchFlags = (file) => (file === null ? ''
   : ` $([ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
 
+/** The command a launch file holds: `claude` started in `cwd` with DCTR_ROLE and DCTR_CALLER `role`, DCTR_RUN `run`, and
+ *  this process's config dir, PATH and TMPDIR, then `--model` and `model`, which is shell text, and `flags`, launchFlags's
+ *  fragment. exec, so the shell reading the file reads nothing past it. */
+export const launchCommand = ({ cwd, role, run, model, flags }) =>
+  `cd ${shq(cwd)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
+  `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
+  `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model ${model}${flags}`
+
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`
  * under the directory holding `.git` at or above `cwd` (repoOf; a worktree's `.git` file counts), Records being that

@@ -1,4 +1,4 @@
-// Tamper test for `dctr-orchestrate.mjs capacity` (KS-1), per CLAUDE.md's three clauses.
+// Tamper test for `dctr-orchestrate.mjs capacity` (KS-1) and `start` (E15-SK10), per CLAUDE.md's three clauses.
 //
 //   node hooks/dctr-orchestrate.selftest.mjs      exit 0 all clauses passed, 1 otherwise
 //
@@ -7,7 +7,8 @@
 // Claude Code session's bridge file or a Codex rollout's model_context_window, refused as unknown where there is none,
 // the load from the first usage reading (E15-D209), and the refusals that are not arithmetic. Clause 3 proves the
 // fixture transcripts, rollouts and bridge files carry the readings the clauses rest on, by parsing them without the
-// command or the library.
+// command or the library, and clause 4's herdr shim, claude stub, PATH and fixture repos are what clause 4 says. Clause
+// 4 runs start under that shim: the launch, its refusals and the permission flag (E15-D269, E15-D270, E15-D280).
 
 // A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
 delete process.env.HC_TERMINAL_ID
@@ -293,5 +294,256 @@ clause('clause 3d — no-usage.jsonl carries no usage reading', readings(noUsage
   clause('clause 3l — the grown rollout reads 17,401 at window 258,400, then 17,503 at window 1,000,000, and is named rollout-',
     JSON.stringify(counts(codexGrown)) === '[[17401,258400],[17503,1000000]]' && path.basename(codexGrown).startsWith('rollout-'), JSON.stringify(counts(codexGrown)))
 }
+// ---------------------------------------------------------------- clause 4: start (E15-D269, E15-D270, E15-D280)
+//
+// A herdr shim on PATH logs every call to shim.log: `tab create` answers a new pane, `pane get` of it reads busy with a
+// session until its BUSY-th read and from then with no session, reading agent_status unknown or the status resetShim
+// names, and `pane run` refuses a line
+// over 1,024 bytes and otherwise runs the line by /bin/sh -c in an empty environment, as a fresh pane's shell would. A
+// claude stub first on PATH logs its argv, cwd and the environment the launch gave it.
+
+const BUSY = 3
+const SHIM = String.raw`#!/usr/bin/env node
+const fs = require('fs'), path = require('path'), { spawnSync } = require('child_process')
+const dir = path.dirname(__dirname), st = path.join(dir, 'shim.json'), a = process.argv.slice(2)
+const s = JSON.parse(fs.readFileSync(st, 'utf8')), entry = { argv: a }
+const out = (o, code = 0) => { fs.appendFileSync(path.join(dir, 'shim.log'), JSON.stringify(entry) + '\n'); fs.writeFileSync(st, JSON.stringify(s)); if (code) process.stderr.write(o + '\n'); else process.stdout.write(JSON.stringify(o) + '\n'); process.exit(code) }
+// fail 'tab': a tab create fails as a reply that never came; fail 'after': a pane run runs the line and then fails the
+// same way; fail 'before': it fails so without running it. herdr cannot tell start which of the last two happened.
+const TIMEOUT = 'herdr: no reply from the server within 10000ms'
+if (a[0] === 'tab' && a[1] === 'create' && s.fail === 'tab') { entry.failed = true; out(TIMEOUT, 1) }
+if (a[0] === 'tab' && a[1] === 'create') { const id = 'w1:p' + (++s.n); s.reads[id] = 0; entry.made = id; out({ result: { tab: { tab_id: 't' + s.n }, root_pane: { pane_id: id } } }) }
+if (a[0] === 'pane' && a[1] === 'get') {
+  const fresh = ++s.reads[a[2]] >= s.busy; entry.fresh = fresh
+  out({ result: { pane: { pane_id: a[2], agent_status: fresh ? s.freshStatus : 'working', agent_session: fresh ? null : { value: 'booting' } } } })
+}
+if (a[0] === 'pane' && a[1] === 'run') {
+  entry.bytes = Buffer.byteLength(a[3])
+  if (entry.bytes > 1024) { entry.failed = true; out('herdr: the line is over the 1024-byte limit', 1) }
+  if (s.fail === 'before') { entry.failed = true; out(TIMEOUT, 1) }
+  entry.status = spawnSync('/bin/sh', ['-c', a[3]], { env: {}, encoding: 'utf8' }).status
+  if (s.fail === 'after') { entry.failed = true; out(TIMEOUT, 1) }
+}
+out({ result: {} })
+`
+const STUB = String.raw`#!/usr/bin/env node
+require('fs').appendFileSync(__dirname + '/../claude.log', JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2), role: process.env.DCTR_ROLE ?? null, caller: process.env.DCTR_CALLER ?? null, run: process.env.DCTR_RUN ?? null, path: process.env.PATH ?? null, cfg: process.env.CLAUDE_CONFIG_DIR ?? null, tmp: process.env.TMPDIR ?? null }) + '\n')
+`
+const sx = path.join(tmp, 'start'), sbin = path.join(sx, 'bin'), stmp = path.join(sx, 'tmp'), scfg = path.join(sx, 'cfg')
+fs.mkdirSync(sbin, { recursive: true }); fs.mkdirSync(stmp)
+fs.writeFileSync(path.join(sbin, 'herdr'), SHIM, { mode: 0o755 }); fs.writeFileSync(path.join(sbin, 'claude'), STUB, { mode: 0o755 })
+const resetShim = (busy = BUSY, freshStatus = 'unknown', fail = null) => { fs.writeFileSync(path.join(sx, 'shim.json'), JSON.stringify({ n: 0, reads: {}, busy, freshStatus, fail })); fs.rmSync(path.join(sx, 'shim.log'), { force: true }); fs.rmSync(path.join(sx, 'claude.log'), { force: true }) }
+const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
+const shimCalls = () => lines(path.join(sx, 'shim.log')), stubStarts = () => lines(path.join(sx, 'claude.log'))
+const gitc = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=s@s', '-c', 'user.name=s', ...a], { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } })
+const repo = (name, files) => {
+  const d = path.join(sx, name)
+  for (const [f, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), body) }
+  gitc(d, 'init', '-q'); gitc(d, 'add', '-A'); gitc(d, 'commit', '-q', '-m', 'base')
+  return fs.realpathSync(d)
+}
+const proj = repo('proj', { 'README.md': 'x\n', 'docs/PROJECT.md': '# Selftest project\n\nRecords: .doctrine/records\n' })
+const bare = repo('bare', { 'README.md': 'x\n' })
+const sub = path.join(proj, 'docs')
+const reqText = "--help is not wanted: run lanes a and b; the owner said 'go' and $HOME stays literal.\n"
+const req = path.join(sx, 'request.md'); fs.writeFileSync(req, reqText)
+// Long enough that a launch line carrying it would pass herdr's limit; the shim's bin first, so it names herdr and claude.
+const SPATH = [sbin, path.dirname(process.execPath), ...Array.from({ length: 40 }, (_, i) => `/nonexistent/selftest/padding/dir-${String(i).padStart(2, '0')}`), '/usr/bin', '/bin'].join(':')
+const sEnv = (over = {}) => {
+  const e = { ...process.env, HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', TMPDIR: stmp, CLAUDE_CONFIG_DIR: scfg, PATH: SPATH, DCTR_START_TIMES: '{"poll":20,"ready":2000}', ...over }
+  for (const k of ['DCTR_ROLE', 'DCTR_CALLER', 'DCTR_RUN', 'DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID']) if (!(k in over)) delete e[k]
+  for (const [k, v] of Object.entries(e)) if (v === undefined) delete e[k]
+  return e
+}
+const startIn = (cwd, args, over) => { const r = spawnSync(process.execPath, [cli, 'start', ...args], { cwd, env: sEnv(over), encoding: 'utf8' }); return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() } }
+const tree = () => [sx, stmp].map((d) => fs.readdirSync(d, { recursive: true }).map(String).filter((f) => !/^(shim\.(json|log)|claude\.log)$/.test(f)).sort().join('\n')).join('\n--\n')
+const runDir = path.join(proj, '.doctrine', 'records', 'orchestrate')
+const startedLine = (r, pane) => r.out === `dctr-orchestrate: started the orchestrator in ${pane}`
+const typedFile = (line) => (/^sh '([^']+)'$/.exec(line ?? '') ?? [])[1]
+const flagOf = (argv) => { const own = argv.includes('--') ? argv.slice(0, argv.indexOf('--')) : argv, i = own.indexOf('--permission-mode'); return i >= 0 ? `--permission-mode ${own[i + 1]}` : 'none' }
+
+{
+  resetShim()
+  const r = startIn(proj, ['claude-opus-5-5', req])
+  const calls = shimCalls(), creates = calls.filter((e) => e.argv[1] === 'create'), runs = calls.filter((e) => e.argv[1] === 'run')
+  const pane = creates[0]?.made, firstFresh = calls.findIndex((e) => e.argv[1] === 'get' && e.argv[2] === pane && e.fresh)
+  const typedAt = calls.findIndex((e) => e.argv[1] === 'run'), file = typedFile(runs[0]?.argv[3]), st = stubStarts()[0], at = st ? st.argv.indexOf('--model') : -1
+  const tabOk = creates.length === 1 && creates[0].argv.includes('--workspace') && creates[0].argv[creates[0].argv.indexOf('--workspace') + 1] === 'w1'
+  const lineOk = runs.length === 1 && runs[0].argv[2] === pane && Boolean(file) && runs[0].bytes <= 1024 && !runs[0].failed && firstFresh >= 0 && typedAt > firstFresh
+  const fileOk = Boolean(file) && fs.existsSync(file) && !file.startsWith(runDir + path.sep) && !file.startsWith(proj + path.sep)
+  const stubOk = stubStarts().length === 1 && fs.realpathSync(st.cwd) === proj && st.role === 'orchestrator' && st.caller === 'orchestrator' && st.run === runDir &&
+    st.path === SPATH && st.cfg === scfg && st.tmp === stmp && at >= 0 && st.argv[at + 1] === 'claude-opus-5-5' && st.argv.at(-2) === '--' && st.argv.at(-1) === reqText
+  clause('clause 4a — start under a PATH past 1,024 bytes: exit 0 printing the pane, one tab in the caller\'s workspace, one typed line sh \'<file>\' within the limit after the first fresh pane get, the file its own and outside the run, and claude started once in the checkout as the orchestrator with DCTR_RUN <Records>/orchestrate, the caller\'s config dir, PATH and TMPDIR, the model, and -- then the request text last',
+    r.code === 0 && startedLine(r, pane) && tabOk && lineOk && fileOk && stubOk, JSON.stringify({ r, calls, st, fileOk, PATH: Buffer.byteLength(SPATH) }))
+}
+{
+  resetShim()
+  const r = startIn(sub, ['claude-opus-5-5'])
+  const st = stubStarts()[0]
+  clause('clause 4b — start from a subdirectory with no request file: claude starts in the checkout\'s top level, DCTR_RUN still <Records>/orchestrate, with no -- and no prompt',
+    r.code === 0 && stubStarts().length === 1 && fs.realpathSync(st.cwd) === proj && st.run === runDir && !st.argv.includes('--') && st.argv.at(-1) === 'claude-opus-5-5', JSON.stringify({ r, st }))
+}
+for (const [n, name, cwd, over] of [
+  ['4c', 'DCTR_ROLE set', proj, { DCTR_ROLE: 'a' }],
+  ['4d', 'DCTR_VIEW_REQUEST_DIR set', proj, { DCTR_VIEW_REQUEST_DIR: path.join(sx, 'views') }],
+  ['4e', 'no HERDR_WORKSPACE_ID', proj, { HERDR_WORKSPACE_ID: undefined }],
+  ['4f', 'no docs/PROJECT.md', bare, {}],
+]) {
+  resetShim()
+  const t0 = tree(), r = startIn(cwd, ['claude-opus-5-5', req], over)
+  const said = `${r.out}\n${r.err}`.trim().split('\n').filter(Boolean)
+  clause(`clause ${n} — start with ${name}: exit 1 with one line saying why, no herdr call, no new file, nothing typed`,
+    r.code === 1 && said.length === 1 && /^dctr-orchestrate: start refused/.test(said[0]) && shimCalls().length === 0 && tree() === t0 && stubStarts().length === 0, JSON.stringify({ r, calls: shimCalls(), changed: tree() !== t0 }))
+}
+{
+  const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+  resetShim()
+  const t0 = tree(), r = startIn(proj, ['claude-opus-5-5', req], CORE)
+  const said = `${r.out}\n${r.err}`.trim().split('\n').filter(Boolean)
+  clause('clause 4s — start in herdr-core with the leaked HERDR_*: exit 1 with one line naming herdr-core, no herdr call, no new file, nothing typed (#108)',
+    r.code === 1 && said.length === 1 && /^dctr-orchestrate: start refused: .*herdr-core/.test(said[0]) && shimCalls().length === 0 && tree() === t0 && stubStarts().length === 0, JSON.stringify({ r, calls: shimCalls(), changed: tree() !== t0 }))
+  const e = sEnv(CORE)
+  clause('clause 3s — without start: clause 4s\'s environment carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr and the leaked HERDR_ENV=1, pane and workspace',
+    e.HC_TERMINAL_ID === 't17' && e.TERM_PROGRAM === 'ghostty' && e.HERDR_ENV === '1' && e.HERDR_PANE_ID === 'w2Z:p1' && e.HERDR_WORKSPACE_ID === 'w2Z', JSON.stringify({ HC: e.HC_TERMINAL_ID, TP: e.TERM_PROGRAM, HE: e.HERDR_ENV, P: e.HERDR_PANE_ID, WS: e.HERDR_WORKSPACE_ID }))
+}
+{
+  resetShim()
+  const t0 = tree(), none = startIn(proj, []), extra = startIn(proj, ['claude-opus-5-5', req, 'more'])
+  clause('clause 4g — start with no model id, or with an argument past the request file: exit 2 with the usage line naming start, no herdr call, no new file',
+    [none, extra].every((r) => r.code === 2 && r.out === '' && /^usage: .*dctr-orchestrate\.mjs start <model id> \[<request file>\]/.test(r.err)) && shimCalls().length === 0 && tree() === t0, JSON.stringify([none, extra]))
+}
+{
+  resetShim()
+  const t0 = tree(), r = startIn(proj, ['claude-opus-5-5', path.join(sx, 'absent.md')])
+  clause('clause 4h — a request file that cannot be read: exit 1 with one line, no herdr call, no new file',
+    r.code === 1 && r.out === '' && r.err.split('\n').length === 1 && shimCalls().length === 0 && tree() === t0, JSON.stringify(r))
+}
+{
+  // The pane never reads fresh within the wait: nothing is typed, the line names the pane and the launch file left.
+  resetShim(1e9)
+  const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls(), pane = calls.find((e) => e.argv[1] === 'create')?.made
+  clause('clause 4i — a pane that never reads fresh: exit 1 with one line naming the pane and the launch file as left in place, nothing typed, nothing closed',
+    r.code === 1 && r.err.split('\n').length === 1 && Boolean(pane) && r.err.includes(pane) && /left in place/.test(r.err) && /\/launch\.sh/.test(r.err) &&
+      !calls.some((e) => e.argv[1] === 'run' || e.argv[1] === 'close') && stubStarts().length === 0, JSON.stringify({ r, calls }))
+}
+{
+  // Lane clause 1be's case: the new pane holds no agent session but reads idle, not unknown, so it is not yet fresh.
+  resetShim(BUSY, 'idle')
+  const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls(), pane = calls.find((e) => e.argv[1] === 'create')?.made
+  const sessionless = calls.filter((e) => e.argv[1] === 'get' && e.argv[2] === pane && e.fresh).length
+  clause('clause 4l — a new pane answering no agent session while it reads idle, not unknown: start types nothing and exits 1 with one line naming the pane',
+    r.code === 1 && r.err.split('\n').length === 1 && Boolean(pane) && r.err.includes(pane) && sessionless > 0 && !calls.some((e) => e.argv[1] === 'run') && stubStarts().length === 0, JSON.stringify({ r, calls }))
+}
+{
+  // E15-D280: the calling pane's mode file, where modeFile puts it under the start call's config dir.
+  const { modeFile } = await import('./dctr-state.mjs')
+  const was = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = scfg
+  const mf = modeFile('w1:p9')
+  if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was
+  const set = (v) => { if (v === null) fs.rmSync(mf, { force: true }); else { fs.mkdirSync(path.dirname(mf), { recursive: true }); fs.writeFileSync(mf, `${v}\n`) } }
+  const got = [['bypassPermissions', '--permission-mode bypassPermissions'], ['default', 'none'], [null, 'none']].map(([v, want]) => {
+    resetShim(); set(v)
+    const r = startIn(proj, ['claude-opus-5-5', req], { HERDR_PANE_ID: 'w1:p9' }), st = stubStarts()
+    return { v, want, code: r.code, got: st.length === 1 ? flagOf(st[0].argv) : null }
+  })
+  clause('clause 4j — the calling pane\'s mode file reading bypassPermissions starts claude with --permission-mode bypassPermissions; default or no mode file, with none (E15-D280)',
+    got.every((g) => g.code === 0 && g.got === g.want), JSON.stringify(got))
+  // The same launch file run again after the mode changes: the flag follows the mode as the file runs (E15-D265).
+  resetShim(); set('bypassPermissions')
+  startIn(proj, ['claude-opus-5-5', req], { HERDR_PANE_ID: 'w1:p9' })
+  const file = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3])
+  set('default'); spawnSync('/bin/sh', [file], { env: {} })
+  set(null); spawnSync('/bin/sh', [file], { env: {} })
+  const flags = stubStarts().map((s) => flagOf(s.argv))
+  clause('clause 4k — the launch file start wrote, run again unchanged after the mode file reads default and then after it is removed, starts claude with no permission flag each time (E15-D265)',
+    JSON.stringify(flags) === JSON.stringify(['--permission-mode bypassPermissions', 'none', 'none']), JSON.stringify(flags))
+  set(null)
+}
+{
+  // A send that reached the pane and then failed, and one that failed without reaching it: start cannot tell them apart.
+  const send = (fail) => {
+    resetShim(BUSY, 'unknown', fail)
+    const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls(), pane = calls.find((e) => e.argv[1] === 'create')?.made
+    const file = typedFile(calls.find((e) => e.argv[1] === 'run')?.argv[3])
+    return { r, pane, file, starts: stubStarts().length, closes: calls.filter((e) => e.argv[1] === 'close').length, kept: Boolean(file) && fs.existsSync(file) }
+  }
+  const after = send('after'), before = send('before')
+  const said = (x) => x.r.code === 1 && x.r.out === '' && x.r.err.split('\n').length === 1 && !/not typed/.test(x.r.err) && /send of the launch line failed/.test(x.r.err) &&
+    /may have been typed/.test(x.r.err) && x.r.err.includes(x.pane) && x.r.err.includes(x.file) && /left in place/.test(x.r.err) && x.closes === 0 && x.kept
+  clause('clause 4m — a launch line that reached the pane before its send failed: exit 1 with one line saying the send failed and the line may have been typed, never that it was not, naming the pane and the launch file as left in place, nothing closed or removed',
+    said(after) && after.starts === 1, JSON.stringify(after))
+  clause('clause 4n — a launch line whose send failed without reaching the pane: the same line as 4m but for the pane and file names, since start cannot tell the two apart',
+    said(before) && before.starts === 0 && before.r.err.replaceAll(before.pane, 'P').replaceAll(before.file, 'F') === after.r.err.replaceAll(after.pane, 'P').replaceAll(after.file, 'F'),
+    JSON.stringify({ before, after }))
+}
+{
+  // A tab create whose reply never came may still have made the tab.
+  resetShim(BUSY, 'unknown', 'tab')
+  const r = startIn(proj, ['claude-opus-5-5', req]), calls = shimCalls()
+  clause('clause 4o — a tab create that fails: exit 1 with one line saying the tab create failed and a tab may have been made, never that none was, the launch file left in place, and no other herdr call',
+    r.code === 1 && r.err.split('\n').length === 1 && !/made no tab/.test(r.err) && /tab create failed/.test(r.err) && /may have been made/.test(r.err) && /\/launch\.sh is left in place/.test(r.err) &&
+      calls.length === 1 && stubStarts().length === 0, JSON.stringify({ r, calls }))
+}
+{
+  // Two starts in one fixture, the second with another model, so a shared path would change the first file's bytes.
+  resetShim()
+  startIn(proj, ['claude-opus-5-5', req])
+  const first = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3]), bytes = first && fs.readFileSync(first, 'utf8')
+  resetShim()
+  startIn(proj, ['claude-other-model', req])
+  const second = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3])
+  const outside = (f) => Boolean(f) && path.isAbsolute(f) && !f.startsWith(runDir + path.sep) && !f.startsWith(proj + path.sep)
+  clause('clause 4p — two starts write two different launch files, each outside the run and the checkout, and the second leaves the first\'s bytes as they were',
+    outside(first) && outside(second) && first !== second && fs.readFileSync(first, 'utf8') === bytes && bytes.includes('claude-opus-5-5') && fs.readFileSync(second, 'utf8').includes('claude-other-model'),
+    JSON.stringify({ first, second, same: first && fs.readFileSync(first, 'utf8') === bytes }))
+}
+{
+  // A relative TMPDIR: the pane starts elsewhere, so the typed path and the session's TMPDIR must not depend on start's cwd.
+  resetShim()
+  fs.mkdirSync(path.join(sub, 'reltmp'), { recursive: true })
+  const r = startIn(sub, ['claude-opus-5-5', req], { TMPDIR: 'reltmp' }), file = typedFile(shimCalls().find((e) => e.argv[1] === 'run')?.argv[3])
+  clause('clause 4q — with a relative TMPDIR, start types the launch file\'s absolute path, so the pane resolves it wherever it starts',
+    r.code === 0 && Boolean(file) && path.isAbsolute(file) && fs.existsSync(file), JSON.stringify({ r, file }))
+  fs.rmSync(path.join(sub, 'reltmp'), { recursive: true, force: true })
+}
+
+// clause 4's fixtures, proved without start
+{
+  resetShim()
+  const sh = spawnSync('/bin/sh', ['-c', 'command -v herdr; command -v claude'], { env: { PATH: SPATH }, encoding: 'utf8' }).stdout.trim().split('\n')
+  clause('clause 3m — under clause 4\'s PATH, over 1,024 bytes, herdr and claude resolve to the shim and the stub',
+    Buffer.byteLength(SPATH) > 1024 && sh[0] === path.join(sbin, 'herdr') && sh[1] === path.join(sbin, 'claude'), JSON.stringify(sh))
+  const env = { ...process.env, PATH: SPATH }, call = (...a) => spawnSync(path.join(sbin, 'herdr'), a, { env, encoding: 'utf8' })
+  const pane = JSON.parse(call('tab', 'create', '--workspace', 'w1').stdout).result.root_pane.pane_id
+  const reads = Array.from({ length: BUSY }, () => JSON.parse(call('pane', 'get', pane).stdout).result.pane.agent_session)
+  const { shq } = await import('./dctr-lib.mjs')
+  const long = call('pane', 'run', pane, 'x'.repeat(1025)), short = call('pane', 'run', pane, `echo ok > ${shq(path.join(sx, 'ran'))}`)
+  clause('clause 3n — the shim answers a busy session until its third pane get and none from it, refuses a typed line over 1,024 bytes and runs one within it',
+    reads.slice(0, BUSY - 1).every((s) => s?.value === 'booting') && reads[BUSY - 1] === null && long.status === 1 && short.status === 0 && fs.readFileSync(path.join(sx, 'ran'), 'utf8') === 'ok\n',
+    JSON.stringify({ reads, long: long.status, short: short.status }))
+  fs.rmSync(path.join(sx, 'ran'), { force: true })
+  resetShim(BUSY, 'idle')
+  const idlePane = JSON.parse(call('tab', 'create', '--workspace', 'w1').stdout).result.root_pane.pane_id
+  const idle = Array.from({ length: BUSY }, () => JSON.parse(call('pane', 'get', idlePane).stdout).result.pane).at(-1)
+  clause('clause 3p — clause 4l\'s shim answers no agent session reading idle from its third pane get',
+    idle.agent_session === null && idle.agent_status === 'idle', JSON.stringify(idle))
+  for (const fail of ['after', 'before']) {
+    resetShim(BUSY, 'unknown', fail)
+    const p = JSON.parse(call('tab', 'create', '--workspace', 'w1').stdout).result.root_pane.pane_id
+    const r = call('pane', 'run', p, `echo ok > ${shq(path.join(sx, 'ran'))}`), ran = fs.existsSync(path.join(sx, 'ran'))
+    clause(`clause 3q-${fail} — the shim's ${fail} mode fails the pane run with no reply${fail === 'after' ? ' after it ran the line' : ' without running the line'}`,
+      r.status === 1 && r.stdout === '' && /no reply/.test(r.stderr) && ran === (fail === 'after'), JSON.stringify({ status: r.status, stderr: r.stderr, ran }))
+    fs.rmSync(path.join(sx, 'ran'), { force: true })
+  }
+  resetShim(BUSY, 'unknown', 'tab')
+  const t = call('tab', 'create', '--workspace', 'w1')
+  clause('clause 3r — the shim\'s tab mode fails a tab create with no reply', t.status === 1 && t.stdout === '' && /no reply/.test(t.stderr), JSON.stringify(t.status))
+  clause('clause 3o — the request text opens with -; proj carries docs/PROJECT.md naming Records .doctrine/records, bare carries none, and each is a git top level',
+    reqText.startsWith('-') && /^Records: \.doctrine\/records$/m.test(fs.readFileSync(path.join(proj, 'docs/PROJECT.md'), 'utf8')) && !fs.existsSync(path.join(bare, 'docs/PROJECT.md')) &&
+      fs.existsSync(path.join(proj, '.git')) && fs.existsSync(path.join(bare, '.git')), 'fixture repos')
+  resetShim()
+}
+
 console.log(bad ? `\n${bad} FAILED` : '\nall clauses passed')
 process.exit(bad ? 1 : 0)
