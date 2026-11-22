@@ -8,6 +8,8 @@
 // file; it never reaches a herdr server. Each defect case sits beside its known-good twin. Clause 3 proves the fixtures
 // carry what the clauses rest on without running the watcher.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -329,10 +331,12 @@ clause('clause 2p — with the reader returning w7:p7 for a while lane.log names
 
 // ---------------------------------------------------------------- clause 2: start, stop, single instance, containment
 
-const SCRUBBED = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DCTR_|HERDR_|SHIM_)/.test(k)))
+const SCRUBBED = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DCTR_|HERDR_|SHIM_|HC_|TERM_PROGRAM)/.test(k)))
+// A call naming a pane runs in a herdr TUI pane, so start reads it (herdrPane), whatever terminal runs the suite.
+const TUI = { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' }
 function proc(args, env, cwd = tmp) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [WATCH, ...args], { cwd, env: { ...SCRUBBED, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const c = spawn(process.execPath, [WATCH, ...args], { cwd, env: { ...SCRUBBED, ...(env.HERDR_PANE_ID ? TUI : {}), ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
     let o = '', e = ''
     c.stdout.on('data', (d) => { o += d }); c.stderr.on('data', (d) => { e += d })
     const kill = setTimeout(() => c.kill('SIGKILL'), 20000)
@@ -385,6 +389,17 @@ const contEnv = { DCTR_RUN: cont.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR
 const rc1 = await proc(['start'], contEnv, cont.repo), rc2 = await proc([], contEnv)
 clause('clause 2u — contained, start and the watcher each exit non-zero and the shim logs no call (E15-D112)',
   rc1.code !== 0 && rc2.code !== 0 && shimLog(cont).length === 0 && !fs.existsSync(path.join(cont.run, 'tmpdir')), JSON.stringify([rc1, rc2, shimLog(cont)]))
+
+// herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+const core = fixture({ a: {} })
+const rCore = await proc(['start'], { DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: core.run, PATH: `${bin}:${process.env.PATH}`, TMPDIR: T, SHIM_DIR: core.dir, ...CORE }, core.repo)
+clause('clause 2u2 — in herdr-core with the leaked HERDR_*, start exits non-zero naming the missing herdr pane, the shim logs no call, and no tmpdir or orchestrator create line is written',
+  rCore.code !== 0 && /no herdr pane/.test(rCore.err) && shimLog(core).length === 0 && !fs.existsSync(path.join(core.run, 'tmpdir')) &&
+    !laneOf((() => { try { return fs.readFileSync(path.join(core.run, 'lane.log'), 'utf8') } catch { return '' } })(), 'orchestrator'), JSON.stringify([rCore, shimLog(core)]))
+clause('clause 3u2 — without start: the herdr-core env carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr and the leaked HERDR_ENV=1, pane and workspace, and overrides the TUI the call harness adds for a pane',
+  Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && Boolean(CORE.HERDR_PANE_ID) && Boolean(CORE.HERDR_WORKSPACE_ID) &&
+    ({ ...TUI, ...CORE }).TERM_PROGRAM === 'ghostty', JSON.stringify(CORE))
 
 clause('clause 2v — the header names a 30 s poll interval, a 10 minute ready limit and a 5 minute bridge expiry (WS-1)',
   POLL_MS === 30000 && READY_LIMIT_MS === 600000 && BRIDGE_EXPIRY_MS === 300000, JSON.stringify([POLL_MS, READY_LIMIT_MS, BRIDGE_EXPIRY_MS]))

@@ -57,7 +57,7 @@ On Claude Code these two paths are this skill's own invocation, which the hub's 
 reference puts ahead of the `codex:codex-rescue` subagent; its own command is `codex`, so
 the seat is absent when `command -v codex` finds nothing, and a `codex` that is there and
 fails is handled as that reference says.
-Two invocation paths, chosen by one test: **is `HERDR_ENV` set to `1`?**
+Two invocation paths, chosen by one test: **is this session in a herdr TUI pane**, as the hub's host reference ("herdr TUI and herdr-core") decides it? A herdr-core terminal takes the path without herdr, even when it carries `HERDR_ENV=1`.
 
 ### With herdr — a visible seat (issue #18)
 

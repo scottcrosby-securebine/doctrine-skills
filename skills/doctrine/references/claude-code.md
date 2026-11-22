@@ -31,7 +31,7 @@ A dead pid, or a terminal status with no result, is a failed seat. A wrapper tha
 
 **Dispatch it read-only.** Say so in the dispatch's own words. It picks its sandbox from how the request reads, before Codex sees the task, and it defaults to write-capable.
 
-**Display.** Inside herdr (`HERDR_ENV` is `1`), the seat hook keeps the codex seat's pane open and follows the job's log there until the record leaves running, so open no second pane. Where the hook is not running, skip the display: display never blocks a seat or a pass.
+**Display.** In the herdr TUI, as "herdr TUI and herdr-core" below decides it, the seat hook keeps the codex seat's pane open and follows the job's log there until the record leaves running, so open no second pane. Where the hook is not running, skip the display: display never blocks a seat or a pass.
 
 ## Research engines
 
@@ -44,6 +44,19 @@ A dead pid, or a terminal status with no result, is a failed seat. A wrapper tha
 
 ## Auto-cycle and the hooks
 
-On Claude Code the plugin loads the hooks, auto-cycle and the herdr seat panes itself. On Codex they run once the user installs them, as the Codex reference says.
+On Claude Code the plugin loads the hooks, auto-cycle and the herdr seat panes itself, and the panes and auto-cycle's typing run in the herdr TUI only. On Codex they run once the user installs them, as the Codex reference says.
 
-When you pause auto-cycle yourself, send a PushNotification whose text is exactly the pause text the hub gives. Where the PushNotification tool is not in your tool list, say in your turn that you rely on the herdr alert alone.
+When you pause auto-cycle yourself, send a PushNotification whose text is exactly the pause text the hub gives. Where the PushNotification tool is not in your tool list, say in your turn that you rely on the herdr alert alone, or, in herdr-core, where no herdr alert is raised, that nothing alerts the user beyond your turn.
+
+## herdr TUI and herdr-core
+
+Doctrine supports two terminal hosts: the herdr TUI, which ordinary terminals run, and herdr-core, the terminal core behind Herdr.app, driven by `hc` and `herdr-app`. The hooks decide which one the session is in from its environment, in this order, and you read it the same way:
+
+1. `TERM_PROGRAM` is `herdr` and `HERDR_ENV` is `1`: the herdr TUI, including one nested inside a herdr-core terminal.
+2. Otherwise, `HC_TERMINAL_ID` is set: herdr-core, even when `HERDR_*` variables are set too, because a herdr-core started from a herdr pane passes them to every terminal it runs.
+3. Otherwise, `HERDR_ENV` is `1`: the herdr TUI.
+4. Otherwise neither.
+
+In herdr-core every doctrine hook stands down from herdr, so these do not run there in this release: seat panes, gate panes, `doctrine-pane`'s launcher, auto-cycle's typer, orchestrated lanes, which need the herdr TUI, and sidebar tokens. Seats still run, without a pane, and the gate launcher runs the check detached and writes `<out-file>.result` as it does outside herdr.
+
+When the user asks you there to start an agent or a program they will watch, do not use `herdr`, even when it is on PATH and its server answers: anything it starts lands in the herdr TUI, out of sight of the person in Herdr.app. For starting, reading, messaging and waiting on agents and programs, follow `hc --skill`. For what the person sees in the window, follow `herdr-app --skill`. Where either command is missing, tell the user which, and do not fall back to `herdr`.

@@ -39,9 +39,9 @@ const block = (reason) => JSON.stringify({ decision: 'block', reason })
 export async function gate(raw, env) {
   try {
     const payload = JSON.parse(raw)
-    const { promptGate } = await import('./dctr-lib.mjs')
+    const { promptGate, herdrPane } = await import('./dctr-lib.mjs')
     const { restoreFile, gatedFile, writeMarker } = await import('./dctr-state.mjs')
-    const pane = env.HERDR_PANE_ID || null
+    const pane = herdrPane(env)
     let restored = null
     // A restore file that is missing, half-written or unreadable names no session, and the line is blocked.
     if (pane) try { restored = JSON.parse(fs.readFileSync(restoreFile(pane), 'utf8')).session_id ?? null } catch { /* none */ }

@@ -9,6 +9,8 @@
 // fixture transcripts, rollouts and bridge files carry the readings the clauses rest on, by parsing them without the
 // command or the library.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -192,9 +194,26 @@ for (const [n, b, what] of [['2m', stale, 'older than the expiry'], ['2n', garbl
   process.env.CLAUDE_CONFIG_DIR = modeCfg
   const want = launchFlags(modeFile(pane))
   if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was
-  const on = flags({ HERDR_PANE_ID: pane }), off = flags({ HERDR_PANE_ID: '' })
+  const TUI = { HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '' }
+  const on = flags({ ...TUI, HERDR_PANE_ID: pane }), off = flags({ ...TUI, HERDR_PANE_ID: '' })
   clause('clause 2v — launch-flags prints launchFlags of the calling pane\'s mode file, <config dir>/doctrine/modes/pane-<pane>.mode, and exits 0, and with no HERDR_PANE_ID an empty line and exits 0; neither run, nor computing the path, creates the config dir',
     on.code === 0 && on.out === `${want}\n` && want.includes(shq(path.join(modeCfg, 'doctrine', 'modes', 'pane-w1_p7.mode'))) && off.code === 0 && off.out === '\n' && !fs.existsSync(modeCfg), JSON.stringify([want, on, off, fs.existsSync(modeCfg)]))
+}
+{
+  // herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+  const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+  const coreCfg = path.join(tmp, 'config-core')
+  const { modeFile } = await import('./dctr-state.mjs')
+  const was = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = coreCfg
+  const leaked = modeFile(CORE.HERDR_PANE_ID)
+  if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was
+  fs.mkdirSync(path.dirname(leaked), { recursive: true }); fs.writeFileSync(leaked, 'bypassPermissions\n')
+  const r = spawnSync(process.execPath, [cli, 'launch-flags'], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: coreCfg, ...CORE } })
+  clause('clause 2v2 — in herdr-core with the leaked HERDR_*, launch-flags prints an empty line and exits 0, though the leaked pane\'s mode file reads bypassPermissions',
+    r.status === 0 && r.stdout === '\n', JSON.stringify([r.status, r.stdout, r.stderr]))
+  clause('clause 3v2 — without the command: the herdr-core env carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr and the leaked HERDR_ENV=1 and pane id, and that pane\'s mode file reads bypassPermissions',
+    Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && fs.readFileSync(leaked, 'utf8') === 'bypassPermissions\n', JSON.stringify(CORE))
 }
 {
   const { capacity, hostWindow } = await import('./dctr-orchestrate.mjs')

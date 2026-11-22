@@ -179,8 +179,9 @@ try { run('git', ['init', '-q', proj]) } catch { /* the hooks do not need a repo
 const hooklog = path.join(root, 'hooklog.jsonl'), logger = path.join(root, 'logger.mjs')
 write(logger, `import fs from 'node:fs'
 import { restoreFile } from ${JSON.stringify(path.join(HOOKS, 'dctr-state.mjs'))}
+import { herdrPane } from ${JSON.stringify(path.join(HOOKS, 'dctr-lib.mjs'))}
 let p = {}; try { p = JSON.parse(fs.readFileSync(0, 'utf8')) } catch {}
-let restored = null; try { restored = JSON.parse(fs.readFileSync(restoreFile(process.env.HERDR_PANE_ID), 'utf8')).session_id ?? null } catch {}
+let restored = null; try { restored = JSON.parse(fs.readFileSync(restoreFile(herdrPane(process.env)), 'utf8')).session_id ?? null } catch {}
 const line = { t: Date.now(), event: p.hook_event_name, keys: Object.keys(p), restored }
 for (const k of ['session_id', 'transcript_path', 'source', 'prompt', 'stop_hook_active', 'cwd', 'reason', 'last_assistant_message', 'turn_id']) if (k in p) line[k] = p[k]
 fs.appendFileSync(${JSON.stringify(hooklog)}, JSON.stringify(line) + '\\n')

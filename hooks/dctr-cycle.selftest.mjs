@@ -12,6 +12,8 @@
 // StopFailure events, the alerts and the contained case. The shim never reaches a herdr server. Clause 3 proves
 // the fixtures carry what those clauses rest on without running the hook.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -378,7 +380,9 @@ fs.appendFileSync(process.env.STUB_LOG, process.argv[2] + '\\n')
 `)
 
 const baseEnv = { ...genv, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_TYPER_SCRIPT: stub, HERDR_PANE_ID: 'w9:p1' }
-for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS']) delete baseEnv[k]
+for (const k of ['HERDR_ENV', 'HERDR_WORKSPACE_ID', 'DCTR_VIEW_REQUEST_DIR', 'CLAUDE_PROJECT_DIR', 'DCTR_ROLE', 'DCTR_RUN', 'DCTR_CALLER', 'DCTR_NOW_MS', 'HC_TERMINAL_ID']) delete baseEnv[k]
+// A herdr TUI pane, so the hook reads HERDR_PANE_ID as its pane (herdrPane), whatever terminal runs the suite.
+Object.assign(baseEnv, { HERDR_ENV: '1', TERM_PROGRAM: 'herdr' })
 const T0 = Date.parse('2026-09-24T01:00:00Z')
 
 /**
@@ -437,6 +441,13 @@ clause('clause 2a3 — all true, the message ending in the ready line wrapped in
   launched(codeReadyR) && paused(codeReady).length === 0, show(codeReady, codeReadyR))
 clause('clause 2b — all true with the handoff and memory file tracked and committed, and with the record in a second repo: launched (E8-D7)',
   launched(goodTR) && launched(goodSR), `${show(goodT, goodTR)} | ${show(goodS, goodSR)}`)
+// herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
+const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
+const core = fixture('all-true-core'), coreR = run(core, {}, CORE)
+clause('clause 2a4 — all preconditions true in herdr-core with the leaked HERDR_*: no typer, the not-in-a-herdr-pane pause, and herdr called zero times',
+  !launched(coreR) && coreR.code === 0 && JSON.stringify(paused(core)) === JSON.stringify([`- auto-cycle paused: could not type into the pane: this session is not in a herdr pane`]) && calls(core).length === 0, show(core, coreR))
+clause('clause 3a4 — without the hook: the herdr-core env carries HC_TERMINAL_ID, a TERM_PROGRAM other than herdr, and the leaked HERDR_ENV=1 and pane id, over a base env that is a herdr TUI pane',
+  Boolean(CORE.HC_TERMINAL_ID) && CORE.TERM_PROGRAM !== 'herdr' && CORE.HERDR_ENV === '1' && Boolean(CORE.HERDR_PANE_ID) && baseEnv.TERM_PROGRAM === 'herdr' && baseEnv.HERDR_ENV === '1', JSON.stringify(CORE))
 // A second session in the same repo follows the same kickoff to the same record. Its idle prompt, permission prompt
 // and API error are written tagged with its session, and none of them holds this session's cycle, names itself in
 // this session's pane token or shows in this session's pane message; this session's own permission prompt, written
@@ -1250,6 +1261,10 @@ clause('clause 2y6 — a StopFailure in a session with no DCTR_ROLE and no DCTR_
   run(pmNone, {}, { HERDR_PANE_ID: nonep })
   clause('clause 2pm6 — an event carrying no permission_mode writes no mode file',
     modeOf(nonep) === null, JSON.stringify(modeOf(nonep)))
+  const pmCore = fixture('pm-core'), coreBefore = modes()
+  const pc = run(pmCore, { permission_mode: 'bypassPermissions' }, CORE)
+  clause('clause 2pm10 — in herdr-core with the leaked HERDR_*, an event carrying bypassPermissions writes no mode file, none for the leaked pane id',
+    pc.code === 0 && JSON.stringify(modes()) === JSON.stringify(coreBefore) && modeOf(CORE.HERDR_PANE_ID) === null, JSON.stringify([coreBefore, modes(), pc.err.trim()]))
   // A symlink at the pane's mode file path, pointing at a file of its own.
   const pmLink = fixture('pm-link'), lnp = pane(), linkTarget = path.join(pmLink.dir, 'link-target')
   write(linkTarget, 'keep me\n')
@@ -1591,7 +1606,7 @@ clause('clause 2r2 — hooks.json names the four events, says each stands down u
   hjd.includes('Stop, Notification (matcher permission_prompt|idle_prompt), StopFailure and UserPromptSubmit run dctr-cycle.mjs') &&
   hjd.includes('unless that record is Open or Blocked and its last auto-cycle on/off line is on') && hjd.includes('cycleDecision in hooks/dctr-lib.mjs') &&
   hjd.includes('notifyDecision') && hjd.includes('Past that, UserPromptSubmit only records where the session\'s turn ended.') &&
-  hjd.includes('a Claude Code main session\'s event in a herdr pane that carries permission_mode writes that mode as the one line of the pane\'s mode file in the user\'s Claude config dir, whatever the record says') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
+  hjd.includes('a Claude Code main session\'s event in a herdr TUI pane (herdrPane, never in herdr-core) that carries permission_mode writes that mode as the one line of the pane\'s mode file in the user\'s Claude config dir, whatever the record says') && hjd.includes('With DCTR_VIEW_REQUEST_DIR set they call no herdr.') &&
   !/stands down unless auto-cycle is active/.test(hjd) && restated.length === 0 && D2_REASONS.length >= 18 && guardMisses.length === 0,
   `restated ${JSON.stringify(restated)} guard misses ${JSON.stringify(guardMisses)} | ${hjd.slice(-1400)}`)
 

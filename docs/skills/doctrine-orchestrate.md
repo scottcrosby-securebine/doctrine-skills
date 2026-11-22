@@ -15,7 +15,7 @@ The trigger is a request to run several doctrine phases at once as an orchestrat
 Before anything else the skill runs four checks, in this order, and stops at the first that fails, saying which:
 
 1. **Claude Code only.** On Codex it refuses: Codex is not supported for an orchestrated run yet.
-2. **herdr.** Without herdr (no `HERDR_ENV=1`), or in a contained session (`DCTR_VIEW_REQUEST_DIR` set), it refuses, since every session, the sender and the watcher need herdr panes.
+2. **herdr.** Outside a herdr TUI pane, a Herdr.app (herdr-core) terminal included even when it carries `HERDR_*` variables, or in a contained session (`DCTR_VIEW_REQUEST_DIR` set), it refuses, since every session, the sender and the watcher need herdr panes.
 3. **A project file.** It refuses in a repo with no `docs/PROJECT.md`, judged by the file itself. Start tracking first with [doctrine-project](doctrine-project.md), since a run's lanes are the epic's member phases.
 4. **The orchestrator role.** In a session whose `DCTR_ROLE` is not `orchestrator` it refuses, writes the command that starts an orchestrator session to a new file, and prints the line that runs it, `sh '<that file>'`. That command sets the role, the run directory, your config dir, PATH and TMPDIR, and starts `claude --model` on the model id the current session runs on.
 

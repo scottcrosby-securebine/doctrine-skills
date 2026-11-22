@@ -10,15 +10,15 @@
 // case prints nothing to stdout, so the session starts exactly as it would without the plugin.
 //
 // When it injected it records the session start, `<autocycle dir>/start-<hash of record path>` holding the record's
-// line count, which the auto-cycle pause model anchors on (RB3-2). When it injected and HERDR_PANE_ID is set, it
-// also writes the restore file `<autocycle dir>/pane-<token>.restored`
+// line count, which the auto-cycle pause model anchors on (RB3-2). When it injected in a herdr TUI pane (herdrPane: never
+// in herdr-core, whose HERDR_PANE_ID names another session's pane), it also writes the restore file `<autocycle dir>/pane-<token>.restored`
 // carrying the new session id and transcript path, which the auto-cycle typer waits for before it types the resume
 // line (B5, E8-D15). It always exits 0 and calls no herdr and nothing on the network. Every reason it stood down is printed
 // to stderr and logged, so a skip and a silent success are never the same signal. The decisions are pure,
 // in dctr-lib.mjs and dctr-record.mjs; this file holds only the reads around them.
 
 import fs from 'node:fs'
-import { restoreSkip, followKickoff, restoreContext, hostOf, codexUnderClaude, UNDER_CLAUDE_WHY } from './dctr-lib.mjs'
+import { restoreSkip, followKickoff, restoreContext, hostOf, codexUnderClaude, UNDER_CLAUDE_WHY, herdrPane } from './dctr-lib.mjs'
 import { hookLog, standDown, restoreFile, writeMarker, writeSessionStart } from './dctr-state.mjs'
 
 let sessionId = null
@@ -48,9 +48,9 @@ try {
   // The session start the pause model anchors on (RB3-2), written whenever this hook injects, pane or no pane: a
   // /clear and a typed resume in a contained session also starts a session that must not inherit old pauses.
   try { writeSessionStart(recordPath) } catch (e) { hookLog(sessionId, `SessionStart session start not recorded (${e.code || e.message})`) }
-  if (process.env.HERDR_PANE_ID) {
+  if (herdrPane(process.env)) {
     try {
-      writeMarker(restoreFile(process.env.HERDR_PANE_ID), { session_id: sessionId, transcript_path: payload.transcript_path || null })
+      writeMarker(restoreFile(herdrPane(process.env)), { session_id: sessionId, transcript_path: payload.transcript_path || null })
     } catch (e) { hookLog(sessionId, `SessionStart restore file not written (${e.code || e.message})`) }
   }
   hookLog(sessionId, `SessionStart restore injected — ${header.phase || 'unnamed phase'} ${state}, record ${recordPath}`)
