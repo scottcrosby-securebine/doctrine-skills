@@ -396,7 +396,6 @@ for (const [n, name, cwd, over] of [
     r.code === 1 && said.length === 1 && /^dctr-orchestrate: start refused/.test(said[0]) && shimCalls().length === 0 && tree() === t0 && stubStarts().length === 0, JSON.stringify({ r, calls: shimCalls(), changed: tree() !== t0 }))
 }
 {
-  // herdr-core, measured 2026-11-21: a core first started from a herdr TUI pane hands that pane's HERDR_* to every terminal it runs.
   const CORE = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty', HERDR_ENV: '1', HERDR_PANE_ID: 'w2Z:p1', HERDR_WORKSPACE_ID: 'w2Z' }
   resetShim()
   const t0 = tree(), r = startIn(proj, ['claude-opus-5-5', req], CORE)
