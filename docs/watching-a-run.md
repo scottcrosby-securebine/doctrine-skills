@@ -49,7 +49,7 @@ The separator is U+00B7, the character the token carries, and `{ contains = "·v
 
 **The band, without herdr.** On Claude Code the plugin also draws one line above the prompt, the doctrine band, while a phase reachable from `SESSION_MEMORY.md` is Open or Blocked. It needs no herdr. Turn it off with the `band` option in `/config`.
 
-**An orchestrated run.** A `doctrine-orchestrate` run opens a herdr tab for each lane session and for the merge session, and runs its lane watcher in a pane of its own. The watcher shows a herdr notification when the run hits an account-wide usage limit, and when a `wake-all` after that limit fails to wake the orchestrator. `node hooks/dctr-project.mjs board` writes the current epic's phases as one table, `board.md`, in the project's records folder.
+**An orchestrated run.** A `doctrine-orchestrate` run opens a herdr tab for the orchestrator, for each lane session and for the merge session, and runs its lane watcher in a pane of its own. That pane prints each line the watcher writes to the run's `events.log` as it writes it, an `up` line as each session is created, and a `>>> WAITING ON YOU:` line after each event that needs you, with one status row rewritten in place after each poll. The watcher also shows a herdr notification when the run hits an account-wide usage limit, and when a `wake-all` after that limit fails to wake the orchestrator. `node hooks/dctr-project.mjs board` writes the current epic's phases as one table, `board.md`, in the project's records folder.
 
 **When the rows do not show.** Four conditions decide it, and a check that the rows render should name the view and the width it used:
 
