@@ -80,7 +80,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, launchCommand,
+  runRole, runRoot, laneOf, LANE_LINE, laneLogPathRefusal, kickoffHandoff, handoffHeader, RESUME_LINE, AGENT_NAME_RE, PREFIX, tabCreateArgs, shq, launchFlags, launchCommand, herdrPane, termHost,
 } from './dctr-lib.mjs'
 import { herdr, isTabNotFound, modeFile, waitReady } from './dctr-state.mjs'
 import { parseDoc } from './dctr-project.mjs'
@@ -214,6 +214,7 @@ function laneFiles(wt) {
 function create() {
   const [, repoArg, base, handoff] = args
   if (process.env.DCTR_VIEW_REQUEST_DIR) refuse('a contained session makes no herdr pane')
+  if (termHost(process.env) === 'herdr-core') refuse('this session is in herdr-core, and a lane needs a herdr TUI pane')
   const workspace = process.env.HERDR_WORKSPACE_ID
   if (!workspace) refuse('no HERDR_WORKSPACE_ID, so there is no herdr workspace to make the pane in')
   let repo
@@ -318,7 +319,7 @@ function create() {
     if (!pane) fail('herdr made no pane')
     made.push(`the herdr pane ${pane}`)
     const command = launchCommand({ cwd: wt, role, run, model: `"$(cat ${shq(path.join(run, 'model', role))})"`,
-      flags: launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null) })
+      flags: launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null) })
     script = path.join(run, 'launch', `${role}.sh`)
     fs.mkdirSync(path.dirname(script), { recursive: true })
     fs.writeFileSync(script, `${command}\n`)

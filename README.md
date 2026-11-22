@@ -316,7 +316,7 @@ Claude Code's own `/code-review`. This plugin does not bundle it.
 
 **Twelve of the fifteen skills need nothing installed** beyond `node` on your `PATH`, which the plugin's hooks run under. `doctrine-gauntlet` judges rendered pages, so it
 needs a browser, and without one its harness refuses to run rather than report a pass.
-`doctrine-pane` needs [herdr](https://herdr.dev) 0.8.2 or later, and outside herdr it refuses.
+`doctrine-pane` needs [herdr](https://herdr.dev) 0.8.2 or later, and outside a herdr pane its launcher refuses. In a Herdr.app terminal (herdr-core) it refuses too and sends the agent to herdr-core's own `hc` for the session instead.
 `doctrine-orchestrate` needs herdr too, with every session of the run in a herdr pane, and runs on Claude Code only in a repo carrying `docs/PROJECT.md`: without herdr it refuses to start a run and says why.
 None of the three degrades into a weaker version of itself.
 

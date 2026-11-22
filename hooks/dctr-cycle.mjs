@@ -12,8 +12,8 @@
 // the hook clock's time, the role, the kind and its field; no reset.txt, and nothing holds on the reset time).
 //
 // The order of the first steps: it stands down on an unreadable payload, on a Codex session under Claude Code, on an
-// event that is not one of the four, and on a subagent's event; then, for a Claude Code session in a herdr pane
-// (HERDR_PANE_ID) whose payload carries permission_mode, it writes that mode as the one line of the pane's mode file
+// event that is not one of the four, and on a subagent's event; then, for a Claude Code session in a herdr TUI pane
+// (herdrPane: never in herdr-core) whose payload carries permission_mode, it writes that mode as the one line of the pane's mode file
 // (modeFile, in the user's config dir), whatever the role, the run or the record; then the StopFailure limits.log
 // line; then every other stand-down. Any process of the owner's can write the mode file, so the mode a launch file
 // reads from it is trusted, not verified. Every paused line goes through appendPaused, whose dedup is pauseStands.
@@ -35,7 +35,7 @@ import {
   followKickoff, lastOnOffEntry, repoOf, stopFileRepo, autoCycleActive, pausingStates, endsReady, nonEmpty, backgroundLive, inFlightIds, treeExcludes,
   cycleDecision, cycleProgress, notifyDecision, sessionWarned, pausedAfterWarned, autocycleToken, claimKey, pauseReason, R17_WHY, LAUNCH_MESSAGE,
   runRole, runRoot, limitLine,
-  hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY,
+  hostOf, codexAncestor, codexBackground, codexUnderClaude, UNDER_CLAUDE_WHY, herdrPane,
 } from './dctr-lib.mjs'
 import { parseRecord } from './dctr-record.mjs'
 import {
@@ -77,9 +77,9 @@ try {
   // so a session it starts runs in this one's mode; whatever auto-cycle or the record says. Only on Claude Code: an
   // orchestrated run is Claude Code only, and a Codex-only machine gains no .claude directory from this. Renamed into
   // place, so a reader never sees a partial file and a symlink at the path is replaced, never followed.
-  if (host === 'claude' && process.env.HERDR_PANE_ID && typeof payload.permission_mode === 'string') {
+  if (host === 'claude' && herdrPane(process.env) && typeof payload.permission_mode === 'string') {
     try {
-      const file = modeFile(process.env.HERDR_PANE_ID), tmp = `${file}.tmp.${process.pid}`
+      const file = modeFile(herdrPane(process.env)), tmp = `${file}.tmp.${process.pid}`
       fs.mkdirSync(path.dirname(file), { recursive: true })
       fs.writeFileSync(tmp, `${payload.permission_mode}\n`)
       fs.renameSync(tmp, file)
@@ -121,7 +121,7 @@ try {
   const log = (msg) => hookLog(sessionId, `${event} auto-cycle ${msg}`)
   const contained = Boolean(process.env.DCTR_VIEW_REQUEST_DIR)
   // No herdr call is ever made without a pane, and a contained session has none it may reach.
-  const paneId = contained ? null : process.env.HERDR_PANE_ID || null
+  const paneId = contained ? null : herdrPane(process.env)
   const repos = [projectDir, repoOf(recordPath, fs.existsSync)]
   const stopRepo = stopFileRepo(repos, fs.existsSync)
   const active = autoCycleActive(record.entries, Boolean(stopRepo))

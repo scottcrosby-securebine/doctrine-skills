@@ -13,7 +13,7 @@
 // takes <run>/lanewatch.lock itself as its first act (takeRunLock, its token written beside its pid), and refuses while
 // another holds it. start waits up to WAIT_MS for a live holder carrying its own token, and only then writes its TMPDIR
 // to <run>/tmpdir, which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag
-// `orchestrator`, naming the orchestrator's pane (HERDR_PANE_ID), its checkout and the launch line
+// `orchestrator`, naming the orchestrator's herdr TUI pane (herdrPane: start refuses without one, in herdr-core too), its checkout and the launch line
 // `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment (ending in
 // launchFlags for the mode file of the pane start runs in, read when the file runs), so the line
 // stays short whatever the length of its PATH. A start whose tab, pane or wait fails closes the tab it made, releases
@@ -71,7 +71,7 @@ import { herdr } from './dctr-state.mjs'
 import { restoreFile, modeFile, stateDir, takeRunLock, releaseRunLock, ownsRunLock, runLockHolder, runLockDead, holderAlive, ownPidNs, sameHolder, sleepMs } from './dctr-state.mjs'
 import {
   laneOf, laneRoles, parseLimits, parseWakeLines, runRoot, followKickoff, repoOf, standingPauses, ownPauses, pausingStates, resolveTier, pauseCode,
-  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags, launchCommand,
+  lastOnOffEntry, sessionWarned, endsReady, READY_STATUSES, transcriptEntries, entryText, firstUsage, HANDOFF_COST_TOKENS, tabCreateArgs, shq, PREFIX, laneLogPathRefusal, launchFlags, launchCommand, herdrPane,
 } from './dctr-lib.mjs'
 import { bridgeFile } from './dctr-bridge.mjs'
 
@@ -306,8 +306,8 @@ const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0]
 function start(run) {
   const checkout = repoOf(path.join(process.cwd(), '.git'), fs.existsSync)
   if (laneLogPathRefusal(checkout)) fail(laneLogPathRefusal(checkout))
-  const pane = process.env.HERDR_PANE_ID, workspace = process.env.HERDR_WORKSPACE_ID
-  if (!pane || !workspace) fail('no HERDR_PANE_ID or HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
+  const pane = herdrPane(process.env), workspace = process.env.HERDR_WORKSPACE_ID
+  if (!pane || !workspace) fail('no herdr pane (HERDR_PANE_ID in a herdr TUI session) or no HERDR_WORKSPACE_ID: start runs in the orchestrator\'s pane')
   fs.mkdirSync(run, { recursive: true })
   const lock = path.join(run, 'lanewatch.lock'), startLock = path.join(run, 'lanewatch.start.lock')
   if (!takeRunLock(startLock)) fail(`another start holds ${startLock}`)

@@ -10,6 +10,8 @@
 // prompt-gate chain a create sets up included; clause 3 proves the fixtures carry what those clauses rest on without
 // running dctr-lane.mjs. laneOf, the pure lane.log reader in dctr-lib.mjs, is pinned here too.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -207,7 +209,7 @@ function fixture({ memory = 'tracked', branch = 'main', handoffs = { a: '.doctri
 const lane = (f, args, { cwd = f.repo, env = {}, unset = [], timeout } = {}) => {
   const e = {
     ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_RUN: f.run,
-    HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
+    HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_WORKSPACE_ID: 'w1', HERDR_SHIM_DIR: f.shim, HERDR_SHIM_LANELOG: f.laneLog, CLAUDE_CONFIG_DIR: '/x',
     HERDR_SHIM_RESTORE: RESTORE, DCTR_LANE_TIMES: JSON.stringify({ poll: 5, ready: 1500 }), ...env,
   }
   for (const k of ['DCTR_VIEW_REQUEST_DIR', 'HERDR_PANE_ID', 'CLAUDE_PROJECT_DIR', 'DCTR_CALLER', ...unset]) if (!(k in env) || unset.includes(k)) delete e[k]
@@ -328,7 +330,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   const hookRun = (f, pane, mode) => spawnSync('node', [CYCLE], {
     cwd: f.repo, encoding: 'utf8',
     input: JSON.stringify({ hook_event_name: 'Stop', session_id: `pm-${path.basename(f.root)}`, transcript_path: path.join(f.root, 't.jsonl'), cwd: f.repo, permission_mode: mode, stop_hook_active: false, last_assistant_message: 'ok' }),
-    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
+    env: { ...process.env, ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, DCTR_ROLE: 'orchestrator', DCTR_CALLER: 'orchestrator', DCTR_RUN: f.run, HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_PANE_ID: pane, DCTR_VIEW_REQUEST_DIR: '', CLAUDE_PROJECT_DIR: '', CLAUDE_CODE_SESSION_ID: '', CLAUDE_CONFIG_DIR: pmCfg },
   })
   const launchRun = (f) => {
     fs.rmSync(claudeLog, { force: true })
@@ -462,7 +464,7 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
   const R = fixture({ orchRecord: true })
   const r = create(R)
   const pane = laneOf(read(R.laneLog), 'a')?.pane
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, HERDR_PANE_ID: pane || 'none', HERDR_SHIM_DIR: R.shim }
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: childTmp, HERDR_ENV: '1', TERM_PROGRAM: 'herdr', HC_TERMINAL_ID: '', HERDR_PANE_ID: pane || 'none', HERDR_SHIM_DIR: R.shim }
   delete env.CLAUDE_PROJECT_DIR
   const before = shimLog(R).length
   const S = 'sess-first-resume'
@@ -620,6 +622,15 @@ for (const [n, env, unset, why] of [['1a', {}, ['DCTR_ROLE'], 'no DCTR_ROLE'], [
   const f = fixture()
   const r = create(f, 'a', { env: { DCTR_VIEW_REQUEST_DIR: path.join(tmp, 'views') } })
   clause('clause 1d — contained (DCTR_VIEW_REQUEST_DIR set), create refuses, making nothing and calling herdr zero times (L5)', madeNothing(f, 'a', r) && r.err.includes('a contained session makes no herdr pane'), `exit ${r.code} ${said(r)}`)
+}
+{
+  // The measured herdr-core terminal: HC_TERMINAL_ID and TERM_PROGRAM=ghostty beside leaked HERDR_* (issue #108).
+  const f = fixture()
+  const env = { HC_TERMINAL_ID: 't17', TERM_PROGRAM: 'ghostty' }
+  const r = create(f, 'a', { env })
+  clause('clause 1d3 — in herdr-core with leaked HERDR_* variables, create refuses, making nothing and calling herdr zero times (#108)', madeNothing(f, 'a', r), `exit ${r.code} ${said(r)}`)
+  clause('clause 3d3 — without the command, the 1d3 environment carries HC_TERMINAL_ID, TERM_PROGRAM=ghostty and the leaked HERDR_ENV and HERDR_WORKSPACE_ID',
+    r.env.HC_TERMINAL_ID === 't17' && r.env.TERM_PROGRAM === 'ghostty' && r.env.HERDR_ENV === '1' && r.env.HERDR_WORKSPACE_ID === 'w1', JSON.stringify({ HC: r.env.HC_TERMINAL_ID, TP: r.env.TERM_PROGRAM, HE: r.env.HERDR_ENV, WS: r.env.HERDR_WORKSPACE_ID }))
 }
 
 // The caller's role (E15-D201) and the lane.log grammar (E15-D186), on one lane: after a real create, each of reset,

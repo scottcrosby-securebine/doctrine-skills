@@ -10,6 +10,8 @@
 // listed key reached a clause-3 proof, not that the proof is strong; a fixture written inline in a clause, or a table
 // left out of TABLES, is not checked. Clause 3m runs fixtures under real bash, so the suite needs bash.
 
+// A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
+delete process.env.HC_TERMINAL_ID
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'

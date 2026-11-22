@@ -8,9 +8,9 @@
 // the window and its source where the host recorded one and every reason. Exit 0 accept, 1 refuse, 2 malformed
 // arguments.
 //
-// launch-flags prints launchFlags for the mode file of the calling session's pane (HERDR_PANE_ID), the fragment a
+// launch-flags prints launchFlags for the mode file of the calling session's herdr TUI pane (herdrPane), the fragment a
 // command for starting an orchestrator ends with so it starts in the calling session's mode as the command runs, or an
-// empty line with no HERDR_PANE_ID, and exits 0.
+// empty line where it has no such pane, herdr-core included whatever HERDR_PANE_ID it inherited, and exits 0.
 //
 // The window is only what the session's own host recorded for it, so the command names no model and accepts any. A
 // Codex rollout (`rollout-` file name, as hostOf tells them apart) gives its latest token_count with input's model_context_window,
@@ -45,7 +45,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { capacityDecision, firstUsage, hostOf, launchFlags, launchCommand, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX } from './dctr-lib.mjs'
+import { capacityDecision, firstUsage, hostOf, launchFlags, launchCommand, readUsage, resolveTier, HANDOFF_COST_TOKENS, runRoot, repoOf, tabCreateArgs, shq, PREFIX, herdrPane } from './dctr-lib.mjs'
 import { modeFile, herdr, waitReady } from './dctr-state.mjs'
 import { bridgeFile, readBridge } from './dctr-bridge.mjs'
 import { BRIDGE_EXPIRY_MS } from './dctr-lanewatch.mjs'
@@ -145,7 +145,7 @@ if (isMain) {
     process.exit(0)
   }
   if (cmd === 'launch-flags' && !tierText) {
-    console.log(launchFlags(process.env.HERDR_PANE_ID ? modeFile(process.env.HERDR_PANE_ID) : null))
+    console.log(launchFlags(herdrPane(process.env) ? modeFile(herdrPane(process.env)) : null))
     process.exit(0)
   }
   if (cmd !== 'capacity' || !tierText || !transcript || extra.length) {
