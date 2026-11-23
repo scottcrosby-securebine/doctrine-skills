@@ -182,7 +182,8 @@ export const hcHost = (env = process.env) => ({
     let me
     // herdr-lint: no destruction follows. A null self stands the seat down and sends the gate to its detached path.
     try { me = appPanes().find((x) => x.terminal && x.terminal === env.HC_TERMINAL_ID) } catch { return null }
-    return me?.pane ? { pane: me.pane, tab: me.tab, space: me.space } : null
+    // All three named, or none: a self with no space or tab id cannot place a tab, and the seat and gate act on null.
+    return me?.pane && me.tab && me.space ? { pane: me.pane, tab: me.tab, space: me.space } : null
   },
   noSelf: `herdr-app ls could not place this terminal (HC_TERMINAL_ID ${env.HC_TERMINAL_ID || 'unset'}) in a pane`,
   /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. A partial listing is
@@ -199,7 +200,7 @@ export const hcHost = (env = process.env) => ({
   splitDown: (pane, cwd, command) => appSplit(pane, 'down', cwd, command),
   newTab(me, cwd, command, label) {
     const r = herdrApp(['do', 'tab.new', '--space', me.space, '--name', label, '--folder', cwd, '--argv', JSON.stringify(hcArgv(cwd, command)), '--focus', 'false'])
-    if (typeof r?.tab !== 'string') throw new Error(`tab.new answered with no tab (${JSON.stringify(r)})`)
+    if (typeof r?.tab !== 'string' || !r.tab) throw new Error(`tab.new answered with no tab (${JSON.stringify(r)})`)
     // The reply names the terminal, not its pane. A pane this listing cannot find stays null: the tab id closes it.
     let paneId = null
     // herdr-lint: creation. The pane id is display and the tab id is what any close uses.
@@ -263,7 +264,7 @@ function appSplit(pane, direction, cwd, command) {
   // herdr-lint: display only. An unreadable focus skips the focus restore and decides nothing else.
   try { before = appFocus().pane } catch { /* no restore */ }
   const r = herdrApp(['do', 'pane.split', '--pane', pane, '--direction', direction, '--argv', JSON.stringify(hcArgv(cwd, command))])
-  if (typeof r?.pane !== 'string') throw new Error(`pane.split answered with no pane (${JSON.stringify(r)})`)
+  if (typeof r?.pane !== 'string' || !r.pane) throw new Error(`pane.split answered with no pane (${JSON.stringify(r)})`)
   if (before && before !== r.pane) {
     // herdr-lint: display only. A failed restore leaves focus where the split put it.
     try { if (appFocus().pane === r.pane) herdrApp(['do', 'pane.focus', '--pane', before]) } catch { /* focus stays */ }

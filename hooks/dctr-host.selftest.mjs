@@ -262,6 +262,16 @@ const ranOnce = (out, count) => {
   sleep(1500)
   return { done, runs: fs.existsSync(count) ? fs.readFileSync(count, 'utf8').split('\n').filter(Boolean).length : 0 }
 }
+/** A gate whose check appends to a count file, launched with `extra` in its environment: what it printed, and ranOnce. */
+const countedGate = (h, tag, extra = {}) => {
+  const out = path.join(tmp, `${tag}-${h}.out`), count = path.join(tmp, `${tag}-${h}.count`)
+  const said = execFileSync('node', [GATE, 'g', out, '--', `echo run >> ${count}`], { env: hookEnv(h, extra), encoding: 'utf8', cwd: tmp })
+  return { said, out, ...ranOnce(out, count) }
+}
+/** Sets `lsJunk` on the model. */
+const junk = (j) => { const m = model(); m.lsJunk = j; fs.writeFileSync(STATE, JSON.stringify(m)) }
+/** herdr-core's create answering an empty id (`kind` split or tab); the TUI half runs the same row with no fault. */
+const noid = (h, kind) => ({ DCTR_FAKE_FAIL: JSON.stringify(h === 'hc' ? { [CREATE.hc[kind]]: 'noid' } : {}) })
 /** A gate launched with `extra` in its environment, its check waiting on a go file; returns once its result is written.
  *  The gate runs in a split (the column has room) and nobody is looking at it. */
 const gateWith = (h, extra) => {
@@ -491,6 +501,31 @@ const TABLE = [
       return { side, tab }
     },
     ok: ({ side, tab }) => hasPane(model(), side) && allTabs(model()).some((t) => t.id === tab) && Boolean(markerOf(1)) && Boolean(markerOf(SIDE_CAP + 1)) },
+  // P1-3: an empty id names no pane or tab. A herdr-core split answering one already runs its program, so reading it as
+  // no pane took the tab path and ran a second copy. And a self whose space or tab has no id cannot place anything.
+  { row: 'a gate whose herdr-core split answers an empty pane id runs its check exactly once',
+    run(h) { setExec(); return countedGate(h, 'gatenoidsplit', noid(h, 'split')) },
+    ok: (r, h) => r.done && r.runs === 1 && (h !== 'hc' || (createCalls(h, 'tab') === 0 && !markers().some((x) => x.role === 'gate') && loggedCreate())) },
+  { row: 'a gate whose herdr-core tab answers an empty tab id keeps no record naming an empty tab',
+    run(h) { for (let i = 1; i <= SIDE_CAP; i++) start(h, i); setExec(); return countedGate(h, 'gatenoidtab', noid(h, 'tab')) },
+    ok: (r, h) => r.done && r.runs === 1 && (h !== 'hc' || (!markers().some((x) => x.role === 'gate') && loggedCreate())) },
+  { row: 'a seat whose herdr-core split answers an empty pane id makes no second renderer pane',
+    run(h) { setExec(); start(h, 1, noid(h, 'split')); sleep(500); return { renderers: renderers() } },
+    ok: ({ renderers }, h) => renderers === 1 && (h !== 'hc' || (createCalls(h, 'tab') === 0 && !markers().length && loggedCreate())) },
+  { row: 'a seat whose herdr-core tab answers an empty tab id keeps no record naming an empty tab',
+    run(h) { for (let i = 1; i <= SIDE_CAP; i++) start(h, i); setExec(); start(h, SIDE_CAP + 1, noid(h, 'tab')); sleep(500); return {} },
+    ok: (r, h) => createCalls(h, 'tab') === 1 && (h !== 'hc' || (!markerOf(SIDE_CAP + 1) && loggedCreate())) },
+  { row: 'a gate whose own listing names its space or its tab with no id runs detached exactly once',
+    run(h) {
+      setExec()
+      junk([{ noid: 'S1' }]); const space = countedGate(h, 'gatenoidspace')
+      junk([{ noid: 'T1' }]); const tab = countedGate(h, 'gatenoidself')
+      return { space, tab }
+    },
+    ok: ({ space, tab }, h) => [space, tab].every((r) => r.done && r.runs === 1 && (h !== 'hc' || r.said.includes('running detached'))) },
+  { row: 'a seat whose own listing names its tab with no id stands down and makes no pane',
+    run(h) { junk([{ noid: 'T1' }]); start(h, 1); return {} },
+    ok: (r, h) => h !== 'hc' || (!markers().length && createCalls(h, 'split') + createCalls(h, 'tab') === 0 && allTabs(model()).length === 2 && panesOf(model(), 'T1').length === 1) },
   // B1: on herdr-core a create call can fail after its pane exists and its program started (a timeout, a reply with no
   // pane), so a retry or a fallback would run a second copy. The TUI starts nothing at creation and keeps its retries.
   { row: 'a gate whose split call fails after its pane exists runs its check exactly once; the TUI retries the split and then takes a tab',
@@ -642,6 +677,25 @@ direct('herdr-app', ['do', 'pane.close', '--pane', hcKept])
   clause('clause 3l2 hc — that listing really files P2 under a tab with no id and not under T2, and lists P1\'s terminal with no pane, proved without the seam',
     ls.find((t) => t.id === 'T2').terminals.length === 0 && ls.find((t) => !('id' in t))?.terminals.some((x) => x.pane === 'P2') &&
     ls.find((t) => t.id === 'T1').terminals.some((x) => x.terminal === 't1' && !('pane' in x)) && pg.focused === '', JSON.stringify({ ls, pg }))
+}
+
+// P1-3's fixtures, proved with the fake alone: a create under `noid` exits 0 with an empty id while its pane is in the
+// model and its program runs, and a listing can name a space or a tab with no id.
+{
+  fresh({ exec: true })
+  const ran = (n) => path.join(tmp, `noid-${n}`)
+  const fail = { 'herdr-app do pane.split': 'noid', 'herdr-app do tab.new': 'noid' }
+  const sp = direct('herdr-app', ['do', 'pane.split', '--pane', 'P1', '--direction', 'down', '--argv', JSON.stringify(['sh', '-c', `touch ${ran('split')}; sleep 30`])], fail)
+  const tb = direct('herdr-app', ['do', 'tab.new', '--space', 'S1', '--name', 'x', '--folder', tmp, '--argv', JSON.stringify(['sh', '-c', `touch ${ran('tab')}; sleep 30`]), '--focus', 'false'], fail)
+  const started = waitFor(() => fs.existsSync(ran('split')) && fs.existsSync(ran('tab')))
+  const m = model()
+  junk([{ noid: 'S1' }, { noid: 'T1' }])
+  const ls = JSON.parse(direct('herdr-app', ['ls']).stdout).spaces
+  clause('clause 3n — the fake\'s `noid` fault answers a split and a tab.new on exit 0 with an empty id while the pane and tab are in the model and their programs run, and its listing names a space and a tab with no id, proved without the hooks',
+    sp.status === 0 && JSON.parse(sp.stdout).pane === '' && tb.status === 0 && JSON.parse(tb.stdout).tab === '' && started &&
+    panesOf(m, 'T1').length === 2 && allTabs(m).length === 3 && !('id' in ls[0]) && !('id' in ls[0].tabs[0]) && ls[0].tabs[1].id === 'T2',
+    JSON.stringify({ sp: sp.stdout, tb: tb.stdout, started, ls }))
+  for (const x of allTabs(m).flatMap((t) => t.panes)) if (x.pid) try { process.kill(-x.pid, 'SIGKILL') } catch { /* gone */ }
 }
 
 // B1's fault, proved with the fake alone: a create under `after` exits non-zero with no reply, yet its pane or tab is in

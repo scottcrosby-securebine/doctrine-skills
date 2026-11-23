@@ -11,7 +11,8 @@
 //                    "after", on a call that creates a pane or tab, fails it as a transport error only once the pane or
 //                    tab is in the model and its program started: a create that timed out or answered with no pane.
 //                    "blank", on a focus read (`herdr pane get`, `herdr tab list`, `herdr-app status`), names the focus as
-//                    empty strings
+//                    empty strings. "noid", on a herdr-app pane.split or tab.new, creates the pane and starts its
+//                    program as usual, then answers with an empty pane or tab id
 //
 // The model: { spaces: [{ id, name, tabs: [{ id, name, panes: [{ pane, terminal, name? }] }] }], focus: { tab, pane },
 // n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' } }. A herdr-core terminal is live from its
@@ -190,12 +191,14 @@ if (bin === 'herdr') {
 if (bin === 'herdr-app') {
   if (fail === 'notfound') notFound(args[1]?.split('.')[0] ?? 'pane', flag('pane') ?? flag('id'))
   // `lsJunk` puts an incomplete entry in the listing: a terminal with no pane in tab `tab`, or (tab: null) a tab with no id
-  // listing the panes `panes` names in place of their own tab, or ({ nopane: P }) pane P's terminal listed with no pane.
+  // listing the panes `panes` names in place of their own tab, ({ nopane: P }) pane P's terminal listed with no pane, or
+  // ({ noid: X }) space or tab X listed with no id.
   if (verb === 'ls') {
     const junk = state.lsJunk ?? []
+    const noid = new Set(junk.map((j) => j.noid).filter(Boolean)), idOf = (x) => (noid.has(x) ? undefined : x)
     const moved = new Set(junk.flatMap((j) => j.panes ?? [])), hidden = new Set(junk.map((j) => j.nopane).filter(Boolean))
     const row = (x) => (hidden.has(x.pane) ? { terminal: x.terminal } : { terminal: x.terminal, pane: x.pane })
-    out({ spaces: state.spaces.map((s, i) => ({ id: s.id, name: s.name, tabs: [...s.tabs.map((t) => ({ id: t.id, name: t.name,
+    out({ spaces: state.spaces.map((s, i) => ({ id: idOf(s.id), name: s.name, tabs: [...s.tabs.map((t) => ({ id: idOf(t.id), name: t.name,
       terminals: [...t.panes.filter((x) => !moved.has(x.pane)).map(row), ...junk.filter((j) => j.tab === t.id).map(() => ({ terminal: 't999' }))] })),
     ...(i === 0 ? junk.filter((j) => j.tab === null).map((j) => ({ name: 'no id', terminals: (j.panes ?? []).map((p) => row(findPane(p).x)) })) : [])] })) })
   }
@@ -208,7 +211,7 @@ if (bin === 'herdr-app') {
     const x = { pane, terminal, split: flag('direction'), argv }
     at.t.panes.splice(at.t.panes.indexOf(at.x) + 1, 0, x)
     if (state.splitFocuses) state.focus = { tab: at.t.id, pane }
-    launch(x, terminal, argv); created({ pane, terminal })
+    launch(x, terminal, argv); created({ pane: fail === 'noid' ? '' : pane, terminal })
   }
   if (verb === 'do tab.new') {
     const s = state.spaces.find((x) => x.id === flag('space'))
@@ -216,7 +219,7 @@ if (bin === 'herdr-app') {
     const tab = next('T'), pane = next('P'), terminal = terminalOf(), argv = JSON.parse(flag('argv'))
     const x = { pane, terminal, argv, cwd: flag('folder') }
     s.tabs.push({ id: tab, name: flag('name'), panes: [x], focusArg: flag('focus') })
-    launch(x, terminal, argv); created({ space: s.id, tab, terminal })
+    launch(x, terminal, argv); created({ space: s.id, tab: fail === 'noid' ? '' : tab, terminal })
   }
   if (verb === 'do pane.close') {
     const at = findPane(flag('pane'))
