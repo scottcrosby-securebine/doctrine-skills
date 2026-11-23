@@ -97,7 +97,7 @@ Nothing beyond the plugin has to be installed. Each of these has a fallback:
 - The codex plugin on Claude Code, or the Claude Code CLI on Codex CLI, for the red team from the other model family. Without it, a same-model subagent takes the seat and is named as such.
 - superpowers and ponytail, which the doctrine uses for parallel dispatch and the simplification review. Without them, the run dispatches plain parallel seats, has each paste its check output before a wave counts as done, and simplifies with `/simplify` or a manual pass.
 
-The full list is in [`docs/requirements.md`](../requirements.md). Watching seats run in panes needs herdr: see [Watching a run](../watching-a-run.md).
+The full list is in [`docs/requirements.md`](../requirements.md). Watching seats run in panes needs herdr or Herdr.app: see [Watching a run](../watching-a-run.md).
 
 ## Red flags
 
