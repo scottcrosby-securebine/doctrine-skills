@@ -34,6 +34,8 @@
 //   - A seam call reached by any other name than `host.<method>(`: a destructured method, a host stored under
 //     another variable, or the split helpers the seat and gate build from `host.splitRight`. Creation and display
 //     methods (split, newTab, rename, relabel, run, handOff) are not judged at all, since none decides a close.
+//   - A seam read or close method added to dctr-host.mjs under a name `SEAM` below does not list: that regex names
+//     each method, so a new one is never judged until it is added there.
 //   - E2 over seam answers, by design (see THE SEAM below).
 
 //   - Whether the separation a catch DOES make is the right one. `isPaneNotFound` where
