@@ -43,6 +43,12 @@
 //     a real instance of the same family and this lint cannot see it: there is no herdr call there
 //     at all. Round 2 found that one by reading. Do not read a clean run as covering it.
 //
+// BOTH HOSTS (issue #111). herdr-core's implementation in hooks/dctr-host.mjs reaches its host through `herdrApp(...)`,
+// and reads it through `appPanes()` (herdr-app ls) and `appFocus()` (herdr-app status). Those are judged as herdr calls
+// are: a try calling one of them is a herdr call, a try calling `appPanes(` or `appFocus(` is a READ (they return the
+// listing, never a command's acknowledgement), and `isAppNotFound` is a separator. E2 judges a herdr-core read
+// navigated into a ternary or negated, by the same narrow one-line forms.
+//
 // SUPPRESSION. Not every herdr call decides something. A rename is display, and display failing is
 // not a decision. Put `herdr-lint: <reason>` in a comment on the call's line or the line above it.
 // The reason is required and is the point: it makes "this one is display only" a written claim a
@@ -65,7 +71,11 @@ export const isShipping = (name) =>
 
 /** The predicates that turn an error into an ANSWER. A catch naming none of these has not separated
  *  anything, whatever its comment claims. */
-const SEPARATORS = /isPaneNotFound|isTabNotFound|alreadyGone|NOT_FOUND|notFound/
+const SEPARATORS = /isPaneNotFound|isTabNotFound|isAppNotFound|alreadyGone|NOT_FOUND|notFound/
+/** A call that reaches a host: herdr, or herdr-core through the seam's transport and its two readers. */
+const CALL = /\b(herdr|herdrApp|appPanes|appFocus)\s*\(/
+/** A call whose answer is a READ: a herdr reply's `.result`, or either herdr-core reader. */
+const READ = /herdr\s*\([^)]*\)[^\n]*\.result|\b(appPanes|appFocus)\s*\(/
 
 export const isSuppressed = (line, prev) => /herdr-lint:\s*\S/.test(line) || /herdr-lint:\s*\S/.test(prev || '')
 
@@ -77,15 +87,16 @@ export const isSuppressed = (line, prev) => /herdr-lint:\s*\S/.test(line) || /he
  */
 export const emptinessFinding = (line) => {
   const stripped = line.replace(/\/\/.*$/, '')
-  if (!/herdr\s*\(/.test(stripped)) return null
+  if (!CALL.test(stripped)) return null
   // `?.` does NOT match, and calling it "the separated form" was wrong: `result?.pane ? 'live' :
   // 'gone'` still maps a missing field to a definite answer. Optional chaining guards a missing
   // INTERMEDIATE; it separates nothing about the field itself. It is excluded because every `?.`
   // read in this repo is followed by an `Array.isArray` or a `typeof === 'boolean'` that does the
   // separating, so matching it here would have cried wolf on all of them — a corpus fact, not a
   // property of the syntax, and it stops being true the moment someone writes one without the guard.
-  const ternary = /herdr\s*\([^)]*\)[^?\n]*\.result[^?\n]*\?[^.]/.test(stripped)
-  const negated = /!\s*herdr\s*\(/.test(stripped)
+  const ternary = /herdr\s*\([^)]*\)[^?\n]*\.result[^?\n]*\?[^.]/.test(stripped) ||
+    /\b(appPanes|appFocus)\s*\(\)[^?\n]*\.\w[^?\n]*\?[^.]/.test(stripped)
+  const negated = /!\s*(herdr|herdrApp|appPanes|appFocus)\s*\(/.test(stripped)
   if (!ternary && !negated) return null
   return ternary
     ? 'a herdr reply is navigated straight into a ternary: a reply carrying `result` but not the field reads as a definite answer'
@@ -120,8 +131,8 @@ export const failureFindings = (src) => {
       const code = lines[j].replace(/\/\/.*$/, '')
       const opensNested = j > i && /\btry\s*\{/.test(code)
       if (!nested.length && !opensNested) {
-        if (/herdr\s*\(/.test(code)) sawHerdr = true
-        if (/herdr\s*\([^)]*\)[^\n]*\.result/.test(code)) sawRead = true
+        if (CALL.test(code)) sawHerdr = true
+        if (READ.test(code)) sawRead = true
       }
       if (opensNested) nested.push(depth)
       let closed = false

@@ -63,6 +63,43 @@ function sweepAgain(id) {
   if (!rec) destroy(id)
 }
 `
+// THE SAME CLASS IN herdr-core (issue #111): a herdr-app listing that FAILED read as "that pane is gone", and a status
+// whose focus came back unknown (null) read as "nobody is looking".
+const BROKEN_HC_E1 = `
+import { appPanes } from './dctr-host.mjs'
+function sweepCore(id) {
+  let present
+  try {
+    present = appPanes().some((x) => x.pane === id)
+  } catch {
+    present = false
+  }
+  if (!present) destroy(id)
+}
+`
+const BROKEN_HC_E2 = `
+import { appFocus } from './dctr-host.mjs'
+function watcher() { return appFocus().pane ? 'someone' : 'nobody' }
+`
+const FIXED_HC = `
+import { appPanes } from './dctr-host.mjs'
+function sweepCoreFixed(id) {
+  let present
+  try {
+    present = appPanes().some((x) => x.pane === id)
+  } catch (e) {
+    if (isAppNotFound(e, 'pane')) present = false
+    else throw e
+  }
+  if (present === false) destroy(id)
+}
+`
+fs.writeFileSync(path.join(tmp, 'dctr-brokenhc1.mjs'), BROKEN_HC_E1)
+fs.writeFileSync(path.join(tmp, 'dctr-brokenhc2.mjs'), BROKEN_HC_E2)
+// The real seam with its written reasons taken out: the rule must reach the herdr-core sites in shipping code, not only
+// a fixture shaped for it.
+const SEAM = fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', 'dctr-host.mjs'), 'utf8')
+fs.writeFileSync(path.join(tmp, 'dctr-hostbare.mjs'), SEAM.replace(/herdr-lint:/g, 'was-lint:'))
 fs.writeFileSync(path.join(tmp, 'dctr-broken2.mjs'), BROKEN_E2)
 fs.writeFileSync(path.join(tmp, 'dctr-broken1.mjs'), BROKEN_E1)
 fs.writeFileSync(path.join(tmp, 'dctr-broken3.mjs'), BROKEN_E1_MULTILINE)
@@ -76,6 +113,15 @@ clause('clause 1b: an unseparated FAILURE half (a catch naming no predicate) is 
 clause('clause 1c: and the same defect with the catch spread over several lines is reported too, which is how it is normally written',
   tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-broken3.mjs'),
   JSON.stringify(tripped))
+
+clause('clause 1d: a herdr-core listing whose FAILURE is read as an absence is reported (E1)',
+  tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-brokenhc1.mjs'), JSON.stringify(tripped))
+clause('clause 1e: a herdr-core read navigated into a ternary is reported (E2)',
+  tripped.some((f) => f.rule === 'E2' && f.file === 'dctr-brokenhc2.mjs'), JSON.stringify(tripped))
+const bare = tripped.filter((f) => f.file === 'dctr-hostbare.mjs').map((f) => SEAM.split('\n')[f.line - 1].trim())
+clause('clause 1f: the real seam with its reasons removed is reported at its herdr-core reads (self and layout), so the rule reaches shipping code',
+  bare.some((l) => /appPanes\(\)\.find\(\(x\) => x\.terminal/.test(l)) && bare.some((l) => /appPanes\(\)\.filter\(\(x\) => !x\.isTab && x\.tab === me\.tab/.test(l)),
+  JSON.stringify(bare))
 
 // ---------------------------------------------------------------- clause 2: it stays quiet
 const FIXED = `
@@ -101,6 +147,7 @@ function place() {
 const quiet = fs.mkdtempSync(path.join(os.tmpdir(), 'herdr-lint-quiet-'))
 fs.writeFileSync(path.join(quiet, 'dctr-fixed.mjs'), FIXED)
 fs.writeFileSync(path.join(quiet, 'dctr-suppressed.mjs'), SUPPRESSED)
+fs.writeFileSync(path.join(quiet, 'dctr-fixedhc.mjs'), FIXED_HC)
 const stayed = scan(quiet)
 clause('clause 2a: the repaired form is NOT reported', stayed.length === 0, JSON.stringify(stayed))
 
@@ -168,6 +215,20 @@ clause('clause 3i: both still agree on a reply that DOES carry a pane, so 3g is 
 clause('clause 3j: the two E1 fixtures really differ ONLY in line breaks, so clause 1c isolates the multi-line catch',
   BROKEN_E1.replace(/\s+/g, ' ').replace('sweep(', 'X(') === BROKEN_E1_MULTILINE.replace(/\s+/g, ' ').replace('sweepAgain(', 'X(').replace('catch (e)', 'catch'),
   'if they differed in substance, 1c would be measuring something other than the line breaks')
+
+// herdr-core's two fixtures run against stub readers, no linter called: a listing that THREW is read as absent and
+// the pane destroyed, and a focus herdr-app could not report (null) reads as "nobody".
+const coreSweep = (reader) => {
+  let destroyed = false
+  load(BROKEN_HC_E1, 'sweepCore', 'appPanes', 'destroy')(reader, () => { destroyed = true })('p1')
+  return destroyed
+}
+clause('clause 3k: the herdr-core E1 fixture really destroys a listed pane when the listing merely FAILED, and keeps it when the listing carries it — proved without the checker',
+  coreSweep(throwsTransport) === true && coreSweep(() => [{ pane: 'p1' }]) === false, '')
+clause('clause 3l: the herdr-core E2 fixture really answers "nobody" for a focus herdr-app could not report — proved without the checker',
+  load(BROKEN_HC_E2, 'watcher', 'appFocus')(() => ({ pane: null }))() === 'nobody' && load(BROKEN_HC_E2, 'watcher', 'appFocus')(() => ({ pane: 'p1' }))() === 'someone', '')
+clause('clause 3m: the bare seam copy really differs from the shipping seam only in its suppression markers',
+  SEAM.includes('herdr-lint:') && SEAM.replace(/herdr-lint:/g, 'was-lint:') === fs.readFileSync(path.join(tmp, 'dctr-hostbare.mjs'), 'utf8'), '')
 
 // The two pure helpers, so a rule change that stops matching anything is visible.
 clause('clause 3d: emptinessFinding really discriminates, on strings alone',

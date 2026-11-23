@@ -22,9 +22,12 @@ const bridge = path.join(tmp, 'bridge'); fs.mkdirSync(bridge)
 const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
 const tripwire = path.join(tmp, 'herdr-was-called')
 
-// A `herdr` earlier on PATH than the real one. If the hook execs it, the tripwire appears.
-fs.writeFileSync(path.join(bin, 'herdr'), `#!/bin/sh\ntouch ${JSON.stringify(tripwire)}\nexit 0\n`)
-fs.chmodSync(path.join(bin, 'herdr'), 0o755)
+// A `herdr` earlier on PATH than the real one, and herdr-core's `hc` and `herdr-app` beside it (issue #111): if the
+// hook execs any of the three, the tripwire appears.
+for (const name of ['herdr', 'hc', 'herdr-app']) {
+  fs.writeFileSync(path.join(bin, name), `#!/bin/sh\ntouch ${JSON.stringify(tripwire)}\nexit 0\n`)
+  fs.chmodSync(path.join(bin, name), 0o755)
+}
 
 const AGENT_ID = 'ad1a7dbb0d453a08d'
 const run = (event) => execFileSync('node', [hook], {
@@ -72,6 +75,26 @@ try {
 clause('clause E — a parent event in contained mode writes nothing and calls nothing',
   fs.readdirSync(bridge).length === 0 && !fs.existsSync(tripwire),
   fs.readdirSync(bridge).join(','))
+
+// The same guarantee from a herdr-core terminal, where the seat hook and the gate launcher now place panes: contained,
+// they still reach no host of either kind. The gate's check still runs, detached.
+const CORE = { HC_TERMINAL_ID: 't7', TERM_PROGRAM: 'ghostty' }
+execFileSync('node', [hook], {
+  input: JSON.stringify({ hook_event_name: 'SubagentStart', session_id: 's2', agent_id: AGENT_ID, agent_type: 'Explore', transcript_path: '/home/u/.claude/projects/-p/sess.jsonl' }),
+  env: { ...process.env, ...CORE, PATH: `${bin}:${process.env.PATH}`, DCTR_VIEW_REQUEST_DIR: bridge, HERDR_ENV: '' }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+})
+const out = path.join(tmp, 'gate.out')
+execFileSync('node', [path.join(import.meta.dirname, 'dctr-gate.mjs'), 'g', out, '--', 'true'], {
+  env: { ...process.env, ...CORE, PATH: `${bin}:${process.env.PATH}`, DCTR_VIEW_REQUEST_DIR: bridge, HERDR_ENV: '', CLAUDE_CODE_SESSION_ID: 's2', TMPDIR: tmp }, encoding: 'utf8',
+})
+const until = Date.now() + 8000
+while (!fs.existsSync(`${out}.result`) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+clause('clause F — in herdr-core, contained, the seat hook writes its request and the gate runs detached, and neither calls herdr, hc or herdr-app',
+  fs.existsSync(reqFile) && fs.existsSync(`${out}.result`) && !fs.existsSync(tripwire),
+  `req: ${fs.existsSync(reqFile)}, result: ${fs.existsSync(`${out}.result`)}, tripwire: ${fs.existsSync(tripwire)}`)
+fs.rmSync(reqFile, { force: true })
+const fired = (name) => { fs.rmSync(tripwire, { force: true }); execFileSync(path.join(bin, name)); const was = fs.existsSync(tripwire); fs.rmSync(tripwire, { force: true }); return was }
+clause('clause 3F — each of the three tripwires really fires when run, proved without the hook', ['herdr', 'hc', 'herdr-app'].every(fired), '')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 process.exit(bad ? 1 : 0)
