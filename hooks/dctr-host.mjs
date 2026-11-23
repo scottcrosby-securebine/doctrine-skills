@@ -16,6 +16,10 @@
 //                 window's shown space, tab and focused pane. Neither carries geometry
 //               - no pane rename exists, so a herdr-core pane prints its label as its first line instead, and a
 //                 command is passed at creation rather than typed in afterwards (`run` is a no-op there)
+//               - a pane's PROGRAM is the pane: Herdr.app closes the pane when it exits, and leaves its terminal in hc
+//                 as `finished` (measured live, 2026-11-23: a focused gate pane vanished at completion). A TUI pane is
+//                 a shell the command was typed into and outlives it, so herdr-core's command ends in the user's shell
+//                 (hcArgv): a pane spared because someone is looking at it stays, with its result line on screen
 //
 // THE RULE EVERY READ HERE KEEPS, and tools/herdr-lint.mjs checks it over both hosts: a reply that failed or carried
 // nothing is "I could not look", never "it is gone". Only a not-found answer (herdr's pane_not_found and
@@ -45,8 +49,10 @@ export const isAppNotFound = (e, kind) => (appError(e) ?? '').startsWith(`no ${k
 /** One herdr-app call, its JSON reply parsed. A reply that is not JSON throws. */
 export const herdrApp = (args) => JSON.parse(hostExec('herdr-app', args))
 
-/** The sh argv a herdr-core terminal runs: the command, in `cwd` when one is given (the TUI's `--cwd`). */
-export const hcArgv = (cwd, command) => ['sh', '-c', cwd ? `cd ${shq(cwd)} && ${command}` : command]
+/** The sh argv a herdr-core terminal runs: the command, in `cwd` when one is given (the TUI's `--cwd`), then the user's
+ *  shell in its place, as a TUI pane's shell outlives the line typed into it. Whatever ends the command, the pane stays
+ *  until it is closed or its shell exits; a pane gone that way reads not-found, and its marker goes on the next read. */
+export const hcArgv = (cwd, command) => ['sh', '-c', `${cwd ? `cd ${shq(cwd)} && ` : ''}${command}; exec "\${SHELL:-/bin/sh}" -l`]
 
 /** Every terminal herdr-app lists with a pane, as `{ space, tab, tabName, terminal, pane }`. Throws when the
  *  listing is not one, so an empty or malformed reply is never read as "no panes". */
@@ -125,6 +131,10 @@ export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } 
   },
   renamePane: (paneId, label) => { herdr(['pane', 'rename', paneId, label]) },
   renameTab: (tabId, label) => { herdr(['tab', 'rename', tabId, label]) },
+  /** A finished gate's result on its own pane, called from inside that pane: the TUI renames it. */
+  relabelOwn: (paneId, label) => { herdr(['pane', 'rename', paneId, label]) },
+  /** A stopped seat's result on its pane, called from the hook: the TUI renames it. */
+  relabelSeat: (paneId, label) => { herdr(['pane', 'rename', paneId, label]) },
   run: (paneId, command) => { herdr(['pane', 'run', paneId, command]) },
   /** The sidebar's agent row, herdr only. `message` is omitted on the idle report, as it always was. */
   reportAgent: (paneId, name, state, message) => {
@@ -179,18 +189,23 @@ export const hcHost = (env = process.env) => ({
     return tabs.map((x) => ({ tab_id: x.tab, focused: tab === null ? undefined : tab === x.tab, label: x.tabName }))
   },
   tabInfo: (tabId) => ({ exists: appPanes().some((x) => x.isTab && x.tab === tabId) }),
-  closePane(paneId) {
-    removeWhenFinished(appPanes().filter((x) => x.pane === paneId).map((x) => x.terminal))
+  /** `terminal`, the one its marker recorded, is removed too: a pane the user already closed is in no listing. */
+  closePane(paneId, terminal) {
+    removeWhenFinished([...new Set([terminal, ...appPanes().filter((x) => x.pane === paneId).map((x) => x.terminal)])])
     try { herdrApp(['do', 'pane.close', '--pane', paneId]); return 'closed' }
     catch (e) { if (isAppNotFound(e, 'pane')) return 'gone'; throw e }
   },
-  closeTab(tabId) {
-    removeWhenFinished(appPanes().filter((x) => !x.isTab && x.tab === tabId).map((x) => x.terminal))
+  closeTab(tabId, terminal) {
+    removeWhenFinished([...new Set([terminal, ...appPanes().filter((x) => !x.isTab && x.tab === tabId).map((x) => x.terminal)])])
     try { herdrApp(['do', 'tab.close', '--id', tabId]); return 'closed' }
     catch (e) { if (isAppNotFound(e, 'tab')) return 'gone'; throw e }
   },
   renamePane: () => {},   // measured: herdr-core has no pane rename; the pane printed its label as its first line
   renameTab: (tabId, label) => { herdrApp(['do', 'tab.rename', '--id', tabId, '--name', label]) },
+  /** No rename, so the gate prints its result as its pane's last line, and the shell hcArgv ends in keeps it there. */
+  relabelOwn: (paneId, label) => { process.stdout.write(`${label}\n`) },
+  /** The seat's renderer is handed a line that prints the result in its place; the shell after it keeps the pane. */
+  relabelSeat(paneId, label, log, handoff) { this.handOff(paneId, `printf '%s\\n' ${shq(label)}`, log, handoff) },
   run: () => {},          // the command was passed at creation
   reportAgent: () => {},  // herdr-core has no agent-row report
   /** The codex watcher on herdr-core: the renderer was started with `handoff` as its hand-off file and runs whatever
@@ -202,8 +217,11 @@ export const hcHost = (env = process.env) => ({
   },
 })
 
-/** A split on herdr-core. pane.split has no focus argument, so when the new pane took the window's focus, focus goes
- *  back to the pane that held it: a seat must never steal the user's cursor, and a focused seat is never closed. */
+/** A split on herdr-core. pane.split has no focus argument and takes focus inside its space (measured), so when the new
+ *  pane took the window's focus, focus goes back to the pane that held it: a seat must never steal the user's cursor,
+ *  and a focused seat is never closed. When the session's space is not the one shown, the split moves that space's
+ *  remembered focus, which `status` (window-level) cannot see, so nothing is restored: a pane.focus there would switch
+ *  the space the user is looking at. */
 function appSplit(pane, direction, cwd, command) {
   let before = null
   // herdr-lint: display only. An unreadable focus skips the focus restore and decides nothing else.
