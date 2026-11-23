@@ -10,9 +10,9 @@
 // `pipefail` is not cosmetic: without it a piped check reports only its last stage's status.
 //
 // Run by the doctrine orchestrator at step 3 for every gate, however short; a check that would outrun
-// the Bash tool's own ceiling (a full mutation gate) is why it exists. Inside herdr the check runs in a pane placed
+// the Bash tool's own ceiling (a full mutation gate) is why it exists. Inside herdr or herdr-core the check runs in a pane placed
 // beside the session under the same rules, cap and lock as a seat, so a wave arriving mid-gate
-// stacks next to it. Outside herdr the check runs detached from the harness with the same two
+// stacks next to it. Outside both the check runs detached from the harness with the same two
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
 // on malformed arguments, when a previous run's `<out>.result` or `.result.partial` cannot be
 // removed, or when `<out>.cmd` cannot be written — a display failure

@@ -30,14 +30,14 @@ The red team here is Claude, run through the Claude Code CLI in headless mode. A
 **Run it.** Write the assembled brief to a file. Start the seat through the doctrine's gate launcher, which detaches it: a plain `&` job can die when Codex's shell call returns. Limit the seat's tool set to read-only tools and allow those tools, so it has no tool that writes, runs commands or dispatches:
 
 ```
-env -u HERDR_ENV -u HERDR_PANE_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
+env -u HERDR_ENV -u HERDR_PANE_ID -u HC_TERMINAL_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
 ```
 
 Then wait on `<out-file>.result` as the table says, which the launcher writes with `exit=N` when the seat ends.
 
 **The brief.** The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
 
-**The `env -u` prefix.** It sits on the launcher on purpose, not after `--`: it clears the variables the launcher itself reads, so it runs the seat detached instead of trying to place a herdr pane from inside Codex.
+**The `env -u` prefix.** It sits on the launcher on purpose, not after `--`: it clears the variables the launcher itself reads, so it runs the seat detached instead of trying to place a herdr or Herdr.app pane from inside Codex.
 
 **Where it survives.** On Linux, Codex's sandbox runs each shell call in its own process namespace, which ends when the call returns, and the detached seat ends with it. No result file appears, and the seat fails at its deadline.
 
