@@ -33,16 +33,17 @@ import { spawn } from 'node:child_process'
 /** One writer at a time: every call that may change the model reads and rewrites it whole under this lock, so a
  *  supervisor or an `hc rm` finishing beside a hook's call loses neither write. A holder dead for 5s is stolen. */
 const LOCK = `${process.env.DCTR_FAKE_STATE}.lock`
+let held = false   // so a second unlock (hangUp, then exit) never removes a lock another process has since taken
 const lock = () => {
   const until = Date.now() + 15000
   for (;;) {
-    try { fs.mkdirSync(LOCK); return } catch { /* held */ }
+    try { fs.mkdirSync(LOCK); held = true; return } catch { /* held */ }
     try { if (Date.now() - fs.statSync(LOCK).mtimeMs > 5000) fs.rmSync(LOCK, { recursive: true, force: true }) } catch { /* gone */ }
     if (Date.now() > until) throw new Error('fake host lock held too long')
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
   }
 }
-const unlock = () => { try { fs.rmdirSync(LOCK) } catch { /* not ours any more */ } }
+const unlock = () => { if (!held) return; held = false; try { fs.rmdirSync(LOCK) } catch { /* not ours any more */ } }
 
 if (process.argv[2] === '__supervise') {
   const [, , , statePath, pane, argvJson, closes] = process.argv
