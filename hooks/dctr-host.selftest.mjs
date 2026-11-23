@@ -157,13 +157,15 @@ for (const [h, host] of Object.entries(HOSTS)) {
 
   // Close: closed, gone, or a throw for anything else; on herdr-core the finished terminal is removed.
   fresh()
-  const closed = host.closePane('P2')
-  const again = host.closePane('P2')
+  // Each close is a value even when it throws, so a mutation that breaks one fails this clause instead of the suite.
+  const tryClose = (f) => { try { return f() } catch { return 'threw' } }
+  const closed = tryClose(() => host.closePane('P2'))
+  const again = tryClose(() => host.closePane('P2'))
   const failedClose = withFail({ [CLOSE[h].pane]: 'transport' }, () => { try { return host.closePane('P1') } catch { return 'threw' } })
   clause(`clause 2g/1g ${h} — closePane: 'closed', then 'gone' for the same pane, and a failed close THROWS`,
     closed === 'closed' && again === 'gone' && failedClose === 'threw' && hasPane(model(), 'P1') && !hasPane(model(), 'P2'), JSON.stringify({ closed, again, failedClose }))
   fresh()
-  const tclosed = host.closeTab('T2'), tagain = host.closeTab('T2')
+  const tclosed = tryClose(() => host.closeTab('T2')), tagain = tryClose(() => host.closeTab('T2'))
   const tfailed = withFail({ [CLOSE[h].tab]: 'transport' }, () => { try { return host.closeTab('T1') } catch { return 'threw' } })
   clause(`clause 2h/1h ${h} — closeTab: 'closed', then 'gone', and a failed close THROWS`, tclosed === 'closed' && tagain === 'gone' && tfailed === 'threw', JSON.stringify({ tclosed, tagain, tfailed }))
   if (h === 'hc') {
