@@ -448,6 +448,7 @@ if (argv[0] === '--run') {
       // `launched` is whether the check may be running: herdr-core runs it from the moment its pane exists, the TUI
       // from `run`. A started check is never rolled back and never launched a second time (RT4).
       let terminal = null, launched = false
+      const recordOf = () => ({ agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) })
       // Moved gates from ended sessions: dropped only on a server-wide not-found (B3), then counted
       // by sideOccupants below when this layout carries their pane (B2).
       dropGoneGates((msg) => hookLog(sessionId, `gate "${label}": ${msg}`), (g) => gateAnswer(host, g))
@@ -474,13 +475,13 @@ if (argv[0] === '--run') {
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
         // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.
         if (!tabId) try { host.renamePane(paneId, label) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
-        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) })
+        writeMarker(marker, recordOf())
         host.run(paneId, runLine(paneId, tabId))
         launched = true
         // A Codex session's gate is indexed for the /clear sweep, which finds a pane's sessions by it (E10-D22).
         if (codexShell(process.env)) indexPaneSession(me.pane, sessionId)
       } catch (e) {
-        const record = { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) }
+        const record = recordOf()
         if (launched) {
           // The check is RUNNING in its pane, so what failed came after it started. Closing the pane would kill it and
           // the detached fallback would run it a second time against the same transcript and result. It runs on where
