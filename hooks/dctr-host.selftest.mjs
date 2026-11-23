@@ -76,9 +76,13 @@ for (const [h, host] of Object.entries(HOSTS)) {
   clause(`clause 2a ${h} — self names the session's pane, tab and space`, me?.pane === 'P1' && me?.tab === 'T1' && me?.space === 'S1', JSON.stringify(me))
   if (h === 'hc') {
     // The leaked TUI variables must not be read: the pane comes from herdr-app ls, by HC_TERMINAL_ID.
-    const lost = hcHost({ ...HOST_ENV.hc, HC_TERMINAL_ID: 't99' }).self()
+    // The leaked HERDR_PANE_ID names a pane ls DOES list, so a self that read it would find one.
+    const lost = hcHost({ ...HOST_ENV.hc, HC_TERMINAL_ID: 't99', HERDR_PANE_ID: 'P2' }).self()
     const failed = withFail({ 'herdr-app ls': 'transport' }, () => host.self())
     clause('clause 1a hc — a terminal ls does not list, and a failed ls, are a null self, never the leaked HERDR_PANE_ID', lost === null && failed === null, JSON.stringify({ lost, failed }))
+    const listed = JSON.parse(direct('herdr-app', ['ls']).stdout).spaces.flatMap((sp) => sp.tabs).flatMap((t) => t.terminals)
+    clause('clause 3a1 hc — that fixture really lists P2 and really lists no terminal t99, proved without the seam',
+      listed.some((x) => x.pane === 'P2') && !listed.some((x) => x.terminal === 't99'), JSON.stringify(listed))
   }
   const layout = host.layout(me)
   clause(`clause 2b ${h} — layout lists the session tab's panes, by pane_id`, JSON.stringify(layout?.map((p) => p.pane_id)) === '["P1"]', JSON.stringify(layout))

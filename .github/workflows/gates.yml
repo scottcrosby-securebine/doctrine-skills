@@ -93,6 +93,11 @@ jobs:
         # removes everything. Drives the hook with a tripwire herdr; needs only node and bash.
         run: node hooks/dctr-seat.teardown.selftest.mjs
 
+      - name: host seam tamper test, herdr TUI and herdr-core
+        # The seam's methods in both hosts, and the seat hook and gate launcher run from one table in both, against a
+        # fake that answers as herdr, herdr-app and hc. Needs only node and sh.
+        run: node hooks/dctr-host.selftest.mjs
+
       - name: orchestrator capacity command tamper test
         # The capacity arithmetic in dctr-lib.mjs on the cases E15-D51 names, and the command on fixture
         # transcripts for the window it derives and the first usage reading it loads. Pure node.
