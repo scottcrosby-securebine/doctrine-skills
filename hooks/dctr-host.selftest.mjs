@@ -30,6 +30,8 @@ for (const name of ['herdr', 'herdr-app', 'hc']) {
 const STATE = path.join(tmp, 'state.json')
 process.env.PATH = `${bin}:${process.env.PATH}`
 process.env.DCTR_FAKE_STATE = STATE
+// Every program the fake runs in a pane dies once this pid is gone, however this suite ends (dctr-host.fake.mjs).
+process.env.DCTR_FAKE_OWNER = String(process.pid)
 // A new calls file for every fresh model: a detached `hc rm` from one run logs into that run's file, never the next.
 let runs = 0
 
@@ -38,13 +40,16 @@ const clause = (n, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  $
 
 /** A fresh model: one space S1 whose tab T1 holds the session pane P1 (terminal t1), and a second tab T2 holding P2. */
 const fresh = (extra = {}) => {
-  fs.writeFileSync(STATE, JSON.stringify({ n: 100, exec: false, splitFocuses: false, focus: { tab: 'T1', pane: 'P1' },
-    spaces: [{ id: 'S1', name: 'proj', tabs: [{ id: 'T1', name: '1', panes: [{ pane: 'P1', terminal: 't1' }] }, { id: 'T2', name: 'two', panes: [{ pane: 'P2', terminal: 't2' }] }] }], ...extra }))
+  // Ids never repeat across fresh models: a remover still waiting from an earlier run must not find this run's terminal.
+  fs.writeFileSync(STATE, JSON.stringify({ n: 1000 * (runs + 1), exec: false, splitFocuses: false, focus: { tab: 'T1', pane: 'P1' },
+    spaces: [{ id: 'S1', name: 'proj', tabs: [{ id: 'T1', name: '1', panes: [{ pane: 'P1', terminal: 't1' }] }, { id: 'T2', name: 'two', panes: [{ pane: 'P2', terminal: 't2' }] }] }],
+    terminals: { t1: 'live', t2: 'live' }, ...extra }))
   process.env.DCTR_FAKE_CALLS = path.join(tmp, `calls-${++runs}`)
   fs.writeFileSync(process.env.DCTR_FAKE_CALLS, '')
 }
 const model = () => JSON.parse(fs.readFileSync(STATE, 'utf8'))
 const calls = () => fs.readFileSync(process.env.DCTR_FAKE_CALLS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+const waitFor = (fn, ms = 8000) => { const until = Date.now() + ms; while (Date.now() < until) { if (fn()) return true; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50) } return fn() }
 const panesOf = (m, tab) => m.spaces.flatMap((s) => s.tabs).find((t) => t.id === tab)?.panes ?? []
 const allTabs = (m) => m.spaces.flatMap((s) => s.tabs)
 const hasPane = (m, p) => allTabs(m).some((t) => t.panes.some((x) => x.pane === p))
@@ -53,7 +58,7 @@ const throws = (fn) => { try { fn(); return false } catch { return true } }
 /** The fake called directly, no seam: clause 3's witness. */
 const direct = (name, args, fail = {}) => spawnSync(path.join(bin, name), args, { encoding: 'utf8', env: { ...process.env, DCTR_FAKE_FAIL: JSON.stringify(fail) } })
 
-const { herdrHost, hcHost, hostFor, gateAnswer, isAppNotFound, hcArgv } = await import('./dctr-host.mjs')
+const { herdrHost, hcHost, hostFor, gateAnswer, isAppNotFound, hcArgv, handoffPath } = await import('./dctr-host.mjs')
 const HOST_ENV = {
   herdr: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'S1', HERDR_PANE_ID: 'P1', HERDR_TAB_ID: 'T1' },
   // The measured herdr-core case: a core first started from a TUI pane leaks that pane's HERDR_* into every terminal.
@@ -152,10 +157,40 @@ for (const [h, host] of Object.entries(HOSTS)) {
   const tfailed = withFail({ [CLOSE[h].tab]: 'transport' }, () => { try { return host.closeTab('T1') } catch { return 'threw' } })
   clause(`clause 2h/1h ${h} — closeTab: 'closed', then 'gone', and a failed close THROWS`, tclosed === 'closed' && tagain === 'gone' && tfailed === 'threw', JSON.stringify({ tclosed, tagain, tfailed }))
   if (h === 'hc') {
-    const until = Date.now() + 5000
-    let rm = []
-    while (Date.now() < until && rm.length < 2) { rm = calls().filter((c) => c.bin === 'hc' && c.args[0] === 'rm').map((c) => c.args[1]); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50) }
-    clause('clause 2i hc — a close removes the closed pane\'s terminal from hc, from a detached child that outlives the caller', rm.includes('t2'), JSON.stringify(calls().filter((c) => c.bin === 'hc')))
+    const removed = waitFor(() => model().terminals?.t2 === 'removed')
+    clause('clause 2i hc — a close leaves the closed pane\'s terminal REMOVED in hc, by a detached child that outlives the caller', removed, JSON.stringify(model().terminals))
+    // RT3: only the measured {"ok":true} is a close. An empty reply closed nothing anyone saw, and must not drop a record.
+    fresh()
+    const emptyPane = withFail({ 'herdr-app do pane.close': 'empty' }, () => { try { return host.closePane('P2') } catch { return 'threw' } })
+    const emptyTab = withFail({ 'herdr-app do tab.close': 'empty' }, () => { try { return host.closeTab('T2') } catch { return 'threw' } })
+    clause('clause 1g2 hc — a close answered with an empty reply THROWS, for a pane and a tab, never \'closed\'', emptyPane === 'threw' && emptyTab === 'threw', JSON.stringify({ emptyPane, emptyTab }))
+    const ek = direct('herdr-app', ['do', 'pane.close', '--pane', 'P2'], { 'herdr-app do pane.close': 'empty' })
+    clause('clause 3g2 hc — that fixture really answers {} on exit 0 and really closes nothing, proved without the seam', ek.status === 0 && ek.stdout.trim() === '{}' && hasPane(model(), 'P2'), ek.stdout)
+    // RT2: a listing with an incomplete entry is partial, and an id absent from it is unknown, never gone.
+    fresh({ lsJunk: [{ tab: 'T1' }] })
+    const pl = host.layout({ pane: 'P1', tab: 'T1' })
+    const pAbsent = (() => { try { return host.paneInfo('P404') } catch { return 'threw' } })()
+    const pPresent = host.paneInfo('P2')
+    fresh({ lsJunk: [{ tab: null }] })
+    const pAbsentTab = (() => { try { return host.paneInfo('P404') } catch { return 'threw' } })()
+    const tAbsent = (() => { try { return host.tabInfo('T404') } catch { return 'threw' } })()
+    const tList = (() => { try { return host.tabs() } catch { return 'threw' } })()
+    clause('clause 1l hc — a listing carrying a terminal with no pane, or a tab with no id, is partial: layout keeps the entry (pane_id null), and an absent pane or tab, and the tab list, THROW rather than answer gone',
+      pl?.some((x) => x.pane_id === null) && pAbsent === 'threw' && pAbsentTab === 'threw' && pPresent.exists === true && tAbsent === 'threw' && tList === 'threw', JSON.stringify({ pl, pAbsent, pAbsentTab, tAbsent, tList }))
+    fresh({ lsJunk: [{ tab: 'T1' }, { tab: null }] })
+    const junkLs = JSON.parse(direct('herdr-app', ['ls']).stdout)
+    clause('clause 3l hc — that listing really carries a terminal with no pane and a tab with no id, proved without the seam',
+      junkLs.spaces[0].tabs[0].terminals.some((x) => !('pane' in x)) && junkLs.spaces[0].tabs.some((t) => !('id' in t)), JSON.stringify(junkLs))
+    // RT5: the fake holds the terminal lifecycle the clauses read. rm refuses a live terminal and takes a finished one.
+    // A terminal of its own: a remover still waiting from an earlier clause may name t2, and would race this one.
+    fresh()
+    const own = JSON.parse(direct('herdr-app', ['do', 'pane.split', '--pane', 'P1', '--direction', 'down', '--argv', '["true"]']).stdout)
+    const rmLive = direct('hc', ['rm', own.terminal]).status
+    direct('herdr-app', ['do', 'pane.close', '--pane', own.pane])
+    const afterClose = model().terminals[own.terminal]
+    const rmDone = direct('hc', ['rm', own.terminal]).status
+    clause('clause 3i hc — the fake\'s terminals really live, finish on close and are removed by rm, which refuses a live one, proved without the seam',
+      rmLive !== 0 && afterClose === 'finished' && rmDone === 0 && model().terminals[own.terminal] === 'removed', JSON.stringify({ rmLive, afterClose, rmDone, t: model().terminals }))
   }
 
   // gateAnswer: found, not_found, failed, and another host's gate is never judged.
@@ -177,6 +212,9 @@ clause('clause 3a — the fixtures really answer as measured: herdr-app `no pane
   nfPane.status === 1 && JSON.parse(nfPane.stdout).error === 'no pane "P404"' && nfTab.status === 1 && JSON.parse(nfTab.stdout).error === 'no tab "T404"' &&
   tr.status === 1 && !/no (pane|tab)/.test(tr.stdout + tr.stderr) && hnf.status === 1 && /pane_not_found/.test(hnf.stderr) && htr.status === 1 && !/not_found/.test(htr.stderr),
   JSON.stringify({ nfPane: nfPane.stdout, nfTab: nfTab.stdout, tr: tr.stderr, hnf: hnf.stderr }))
+clause('clause 1p — a hand-off file is bound to its seat: two agents under one marker name get two files',
+  handoffPath('/s/dctr-explore-1.json', 'a1') !== handoffPath('/s/dctr-explore-1.json', 'a2') && handoffPath('/s/dctr-explore-1.json', 'a1').startsWith('/s/dctr-explore-1.json.'),
+  handoffPath('/s/dctr-explore-1.json', 'a1'))
 clause('clause 1k — isAppNotFound reads the kind it is asked about, and a transport error is never not-found',
   isAppNotFound({ stdout: '{"error":"no pane \\"P1\\""}' }, 'pane') && !isAppNotFound({ stdout: '{"error":"no pane \\"P1\\""}' }, 'tab') &&
   !isAppNotFound({ stderr: '{"error":"the window is not answering"}' }, 'pane') && !isAppNotFound({ stderr: 'no pane "x" mentioned in passing' }, 'pane'), '')
@@ -199,7 +237,18 @@ const shows = (h, pane, text) => (h === 'hc'
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 const setExec = () => { const m = model(); m.exec = true; fs.writeFileSync(STATE, JSON.stringify(m)) }
 const focusPane = (p) => { const m = model(); m.focus = { tab: allTabs(m).find((t) => t.panes.some((x) => x.pane === p)).id, pane: p }; fs.writeFileSync(STATE, JSON.stringify(m)) }
-const waitFor = (fn, ms = 8000) => { const until = Date.now() + ms; while (Date.now() < until) { if (fn()) return true; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50) } return fn() }
+
+/** A gate launched with `extra` in its environment, its check waiting on a go file; returns once its result is written.
+ *  The gate runs in a split (the column has room) and nobody is looking at it. */
+const gateWith = (h, extra) => {
+  setExec()
+  const out = path.join(tmp, `gatewith-${h}-${runs}.out`)
+  execFileSync('node', [GATE, 'g', out, '--', 'exit 0'], { env: hookEnv(h, extra), encoding: 'utf8', cwd: tmp })
+  const pane = markers().find((x) => x.role === 'gate')?.paneId
+  const done = waitFor(() => fs.existsSync(`${out}.result`))
+  sleep(1000)   // long enough for a close the completion made to land
+  return { done, pane }
+}
 
 /** One table: every row runs in both hosts against a fresh model and session, and asserts on the model alone. */
 const TABLE = [
@@ -209,7 +258,7 @@ const TABLE = [
       const side = panesOf(m, 'T1').slice(1)
       // herdr-core cannot rename a pane or type into one: the renderer is given its label and hand-off file at creation.
       const first = markers().find((x) => x.paneId === side[0]?.pane)
-      if (h === 'hc' && !(side[0]?.argv?.[2]?.includes(`'${first?.label}'`) && side[0].argv[2].includes(`${first ? path.join(seatsDir, `${first.agent}.json`) : '?'}.handoff`))) return false
+      if (h === 'hc' && !(side[0]?.argv?.[2]?.includes(`'${first?.label}'`) && side[0].argv[2].includes(first ? handoffPath(path.join(seatsDir, `${first.agent}.json`), first.agent_id) : '?'))) return false
       const seatTab = allTabs(m).find((t) => !['T1', 'T2'].includes(t.id))
       return side.length === SIDE_CAP && side[0].split === 'right' && side.slice(1).every((x) => x.split === 'down') && seatTab?.panes.length === 1 &&
         markers().length === SIDE_CAP + 1 && markers().filter((x) => x.tabId).length === 1 && m.focus.pane === 'P1'
@@ -247,7 +296,7 @@ const TABLE = [
       const marker = markers().find((x) => x.role === 'gate'), pane = marker?.paneId
       const terminal = model().spaces.flatMap((s) => s.tabs).flatMap((t) => t.panes).find((x) => x.pane === pane)?.terminal
       waitFor(() => pane && !hasPane(model(), pane))
-      const removed = waitFor(() => calls().some((c) => c.bin === 'hc' && c.args[0] === 'rm' && c.args[1] === terminal))
+      const removed = waitFor(() => model().terminals?.[terminal] === 'removed')
       return { done, out, pane, marker, terminal, removed }
     },
     ok: ({ done, out, pane, marker, terminal, removed }, h) => done && fs.readFileSync(`${out}.result`, 'utf8').startsWith('exit=3') && fs.readFileSync(out, 'utf8') === 'gated\n' && Boolean(pane) && !hasPane(model(), pane) &&
@@ -290,13 +339,117 @@ const TABLE = [
       return { p, shown }
     },
     ok: ({ p, shown }, h) => shown && hasPane(model(), p) && Boolean(markerOf(1)) },
+  // P2: the close and focus failures, in both hosts. A close that FAILED, or a focus nobody could read, keeps the pane
+  // and its record, for the seat's stop, for SessionEnd and for a gate's own completion.
+  { row: 'a side seat whose close FAILS keeps its pane and its marker',
+    run(h) { start(h, 1); const p = markerOf(1).paneId; stop(h, 1, { DCTR_FAKE_FAIL: JSON.stringify({ [CLOSE[h].pane]: 'transport' }) }); return { p } },
+    ok: ({ p }) => hasPane(model(), p) && Boolean(markerOf(1)) },
+  { row: 'a SessionEnd whose close FAILS keeps the pane, its marker and the state directory',
+    run(h) { start(h, 1); const p = markerOf(1).paneId; seatHook(h, { hook_event_name: 'SessionEnd' }, { DCTR_FAKE_FAIL: JSON.stringify({ [CLOSE[h].pane]: 'transport' }) }); return { p } },
+    ok: ({ p }) => hasPane(model(), p) && Boolean(markerOf(1)) },
+  { row: 'a gate whose own close FAILS at completion keeps its pane and its record',
+    run(h) { return gateWith(h, { DCTR_FAKE_FAIL_IN_PANE: JSON.stringify({ [CLOSE[h].pane]: 'transport' }) }) },
+    ok: ({ done, pane }) => done && hasPane(model(), pane) && Boolean(markers().find((x) => x.role === 'gate')) },
+  { row: 'a gate whose focus could not be read at completion closes nothing and keeps its record',
+    run(h) { return gateWith(h, { DCTR_FAKE_FAIL_IN_PANE: JSON.stringify({ [READ[h].pane]: 'transport' }) }) },
+    ok: ({ done, pane }) => done && hasPane(model(), pane) && Boolean(markers().find((x) => x.role === 'gate')) },
+  // RT2: a layout with an incomplete entry is partial, and a marker whose pane it does not carry is not dropped.
+  { row: 'a placement whose layout carries an incomplete entry drops no marker, even one whose pane is gone',
+    run(h) {
+      start(h, 1); const p = markerOf(1).paneId
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== p); m.lsJunk = [{ tab: 'T1' }]; fs.writeFileSync(STATE, JSON.stringify(m))
+      start(h, 2)
+      return {}
+    },
+    ok: () => Boolean(markerOf(1)) && Boolean(markerOf(2)) },
+  // P1: a hand-off is the seat's own. A seat that reuses a name must not run the line left for the seat before it.
+  { row: 'a seat reusing the name of a seat that was relabelled does not run that seat\'s hand-off, and the old hand-off is gone',
+    run(h) {
+      setExec(); start(h, 1)
+      const one = markerOf(1); waitFor(() => hasPane(model(), one.paneId)); focusPane(one.paneId); stop(h, 1)
+      waitFor(() => h !== 'hc' || shows(h, one.paneId, '· done'))
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== one.paneId); m.focus = { tab: 'T1', pane: 'P1' }; fs.writeFileSync(STATE, JSON.stringify(m))
+      start(h, 2)
+      const two = markerOf(2)
+      sleep(1000)
+      return { one, two }
+    },
+    ok: ({ one, two }, h) => two?.agent === one.agent && hasPane(model(), two.paneId) && !shows(h, two.paneId, '· done') &&
+      !fs.readdirSync(seatsDir).some((f) => f.endsWith('.handoff')) },
+  { row: 'a codex seat reusing the name of one handed to its watcher does not run that watcher, and the old hand-off is gone',
+    run(h) {
+      setExec()
+      const jobs = path.join(tmp, 'cfg', 'plugins', 'data', 'codex-openai-codex', 'state', `${path.basename(tmp)}-ws`, 'jobs')
+      fs.mkdirSync(jobs, { recursive: true })
+      const cx = (id, ev) => seatHook(h, { hook_event_name: ev, agent_id: id, agent_type: 'codex:codex-rescue', agent_transcript_path: path.join(tmp, `${id}.jsonl`) })
+      cx('cx1', 'SubagentStart')
+      const one = markers().find((x) => x.agent_id === 'cx1')
+      fs.writeFileSync(path.join(jobs, `job-${h}.json`), JSON.stringify({ id: `job-${h}`, status: 'running', workspaceRoot: tmp, createdAt: new Date().toISOString() }))
+      cx('cx1', 'SubagentStop')
+      waitFor(() => h !== 'hc' || shows(h, one.paneId, 'doctrine codex'))
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== one.paneId); fs.writeFileSync(STATE, JSON.stringify(m))
+      cx('cx2', 'SubagentStart')
+      const two = markers().find((x) => x.agent_id === 'cx2')
+      sleep(1000)
+      fs.rmSync(path.join(jobs, `job-${h}.json`), { force: true })
+      return { one, two }
+    },
+    ok: ({ one, two }, h) => two?.agent === one?.agent && hasPane(model(), two.paneId) && !shows(h, two.paneId, 'doctrine codex') &&
+      !fs.readdirSync(seatsDir).some((f) => f.endsWith('.handoff')) },
+  { row: 'a finished codex seat closed by the next codex placement takes its hand-off file with its marker',
+    run(h) {
+      setExec()
+      const jobs = path.join(tmp, 'cfg', 'plugins', 'data', 'codex-openai-codex', 'state', `${path.basename(tmp)}-ws`, 'jobs')
+      fs.mkdirSync(jobs, { recursive: true })
+      const job = path.join(jobs, `next-${h}.json`)
+      const cx = (id, ev) => seatHook(h, { hook_event_name: ev, agent_id: id, agent_type: 'codex:codex-rescue', agent_transcript_path: path.join(tmp, `${id}.jsonl`) })
+      cx('cn1', 'SubagentStart')
+      fs.writeFileSync(job, JSON.stringify({ id: `next-${h}`, status: 'running', workspaceRoot: tmp, createdAt: new Date().toISOString() }))
+      cx('cn1', 'SubagentStop')
+      const one = markers().find((x) => x.agent_id === 'cn1')
+      const had = h !== 'hc' || fs.existsSync(handoffPath(path.join(seatsDir, `${one.agent}.json`), 'cn1'))
+      fs.writeFileSync(job, JSON.stringify({ id: `next-${h}`, status: 'completed', workspaceRoot: tmp, createdAt: new Date().toISOString() }))
+      cx('cn2', 'SubagentStart')
+      fs.rmSync(job, { force: true })
+      return { one, had }
+    },
+    ok: ({ one, had }) => had && Boolean(one?.codexJob) && !markers().some((x) => x.agent_id === 'cn1') && !fs.readdirSync(seatsDir).some((f) => f.includes('cn1')) },
+  { row: 'a gate placement that drops a seat\'s stale marker drops its hand-off file too',
+    run(h) {
+      setExec(); start(h, 1)
+      const one = markerOf(1); waitFor(() => hasPane(model(), one.paneId)); focusPane(one.paneId); stop(h, 1)
+      const had = h !== 'hc' || waitFor(() => fs.existsSync(handoffPath(path.join(seatsDir, `${one.agent}.json`), 'a1')))
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== one.paneId); m.focus = { tab: 'T1', pane: 'P1' }; fs.writeFileSync(STATE, JSON.stringify(m))
+      const out = path.join(tmp, `gatestale-${h}.out`)
+      execFileSync('node', [GATE, 'g', out, '--', 'true'], { env: hookEnv(h), encoding: 'utf8', cwd: tmp })
+      waitFor(() => fs.existsSync(`${out}.result`))
+      return { had }
+    },
+    ok: ({ had }) => had && !markerOf(1) && !fs.readdirSync(seatsDir).some((f) => f.endsWith('.handoff')) },
+  // RT4: a check that may already be running is never launched a second time, whatever fails after its pane exists.
+  { row: 'a gate whose marker cannot be written once its pane exists runs its check exactly once',
+    run(h) {
+      setExec()
+      fs.mkdirSync(seatsDir, { recursive: true })
+      const m = model(); m.chmodAfterCreate = seatsDir; fs.writeFileSync(STATE, JSON.stringify(m))
+      const out = path.join(tmp, `gateonce-${h}.out`), count = path.join(tmp, `gateonce-${h}.count`)
+      execFileSync('node', [GATE, 'g', out, '--', `echo run >> ${count}`], { env: hookEnv(h), encoding: 'utf8', cwd: tmp })
+      const done = waitFor(() => fs.existsSync(`${out}.result`))
+      sleep(1500)
+      fs.chmodSync(seatsDir, 0o700)
+      return { done, runs: fs.existsSync(count) ? fs.readFileSync(count, 'utf8').split('\n').filter(Boolean).length : 0 }
+    },
+    ok: ({ done, runs }) => done && runs === 1 },
   { row: 'a seat pane that went away by itself (its program and shell ended): SessionEnd reads it gone, drops its marker and removes its terminal',
     run(h) {
       start(h, 1)
       const { paneId: p, terminal } = markerOf(1)
-      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== p); fs.writeFileSync(STATE, JSON.stringify(m))
+      // The pane went with its program: its terminal is finished, and only the marker's record can name it now.
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== p)
+      if (h === 'hc') m.terminals[terminal] = 'finished'
+      fs.writeFileSync(STATE, JSON.stringify(m))
       seatHook(h, { hook_event_name: 'SessionEnd' })
-      const removed = h !== 'hc' || waitFor(() => calls().some((c) => c.bin === 'hc' && c.args[0] === 'rm' && c.args[1] === terminal))
+      const removed = h !== 'hc' || waitFor(() => model().terminals?.[terminal] === 'removed')
       return { removed, terminal }
     },
     ok: ({ removed, terminal }, h) => removed && !fs.existsSync(path.join(tmp, `dctr-${SESSION}`)) && (h === 'hc' ? Boolean(terminal) : terminal === undefined) },
@@ -340,7 +493,7 @@ for (const t of TABLE) {
   const job = path.join(jobs, 'job-1.json')
   fs.writeFileSync(job, JSON.stringify({ id: 'job-1', status: 'running', workspaceRoot: tmp, createdAt: new Date().toISOString() }))
   seatHook('hc', { hook_event_name: 'SubagentStop', agent_id: 'cx', agent_type: 'codex:codex-rescue', agent_transcript_path: path.join(tmp, 'cx.jsonl') })
-  const handoff = `${path.join(seatsDir, `${seat?.agent}.json`)}.handoff`
+  const handoff = handoffPath(path.join(seatsDir, `${seat?.agent}.json`), 'cx')
   const line = fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : ''
   clause('clause 2w hc — a codex seat\'s stop on herdr-core writes the watcher line to its renderer\'s hand-off file, keeps the pane and records the job',
     line.includes('--codex-tail') && line.includes(job) && hasPane(model(), seat?.paneId) && markers().find((x) => x.agent_id === 'cx')?.codexJob === job, JSON.stringify({ line, marker: markers() }))
@@ -378,6 +531,23 @@ sleep(500)
 clause('clause 3f1 — the fake closes a herdr-core pane whose program exited, keeps one ending in the shell hcArgv adds, and keeps a TUI pane whose typed line ended, proved without the hooks',
   !hasPane(model(), hcEnd) && hasPane(model(), hcKept) && shows('hc', hcKept, 'kept') && hasPane(model(), tuiPane), JSON.stringify(model().spaces[0].tabs[0].panes))
 direct('herdr-app', ['do', 'pane.close', '--pane', hcKept])
+
+// The round-1 knobs, proved with the fake alone: a fault meant for what runs IN a pane reaches it and not the caller,
+// a marker directory made unwritable at creation really refuses a write, and the TUI layout really carries the
+// incomplete entry the partial-listing row stands on.
+{
+  const probe = path.join(tmp, 'probe-exit'), lockd = path.join(tmp, 'lockd'); fs.mkdirSync(lockd)
+  fresh({ exec: true, chmodAfterCreate: lockd, lsJunk: [{ tab: 'T1' }] })
+  const env = { ...process.env, DCTR_FAKE_FAIL_IN_PANE: JSON.stringify({ 'herdr-app ls': 'transport' }) }
+  spawnSync(path.join(bin, 'herdr-app'), ['do', 'pane.split', '--pane', 'P1', '--direction', 'down', '--argv', JSON.stringify(['sh', '-c', `herdr-app ls >/dev/null 2>&1; echo $? > ${probe}`])], { env })
+  waitFor(() => fs.existsSync(probe))
+  const callerLs = spawnSync(path.join(bin, 'herdr-app'), ['ls'], { env, encoding: 'utf8' }).status
+  let refused = false; try { fs.writeFileSync(path.join(lockd, 'x'), '') } catch { refused = true }
+  fs.chmodSync(lockd, 0o700)
+  const lay = JSON.parse(direct('herdr', ['pane', 'layout', '--pane', 'P1']).stdout).result.layout.panes
+  clause('clause 3k — the fake\'s in-pane fault reaches the pane\'s program (ls exits 1 there) and not the caller (0), the creation-time chmod really refuses a write, and the TUI layout really carries an entry with no pane_id, proved without the hooks',
+    fs.readFileSync(probe, 'utf8').trim() === '1' && callerLs === 0 && refused && lay.some((x) => !('pane_id' in x)), JSON.stringify({ probe: fs.readFileSync(probe, 'utf8'), callerLs, refused, lay }))
+}
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

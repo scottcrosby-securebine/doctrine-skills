@@ -28,7 +28,7 @@
 
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-import { PREFIX, termHost, shq, splitPaneArgs, tabCreateArgs } from './dctr-lib.mjs'
+import { PREFIX, termHost, shq, splitPaneArgs, tabCreateArgs, paneToken } from './dctr-lib.mjs'
 import { herdr, hostExec, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
 
 /** herdr-app's error string from a failed call, read from the top-level `error` of a JSON line on either stream, or
@@ -54,21 +54,43 @@ export const herdrApp = (args) => JSON.parse(hostExec('herdr-app', args))
  *  until it is closed or its shell exits; a pane gone that way reads not-found, and its marker goes on the next read. */
 export const hcArgv = (cwd, command) => ['sh', '-c', `${cwd ? `cd ${shq(cwd)} && ` : ''}${command}; exec "\${SHELL:-/bin/sh}" -l`]
 
-/** Every terminal herdr-app lists with a pane, as `{ space, tab, tabName, terminal, pane }`. Throws when the
- *  listing is not one, so an empty or malformed reply is never read as "no panes". */
+/** Every tab and every terminal herdr-app lists, as `{ space, tab, tabName, terminal, pane }` rows (a tab's own row
+ *  carries `isTab`). Throws when the listing is not one, so an empty or malformed reply is never read as "no panes".
+ *  An entry missing an id still gets its row, with null for what it lacks, and marks the listing PARTIAL: `tabsPartial`
+ *  for a space or tab with no id, `panesPartial` for that or a terminal with no terminal id or no pane. An id absent
+ *  from a partial listing may be the one the incomplete entry stands for, so it is never an observed absence (absent). */
 function appPanes() {
   const spaces = herdrApp(['ls']).spaces
   if (!Array.isArray(spaces)) throw new Error('herdr-app ls answered with no spaces list')
+  const id = (v) => (typeof v === 'string' && v ? v : null)
   const out = []
+  let tabsPartial = false, panesPartial = false
   for (const s of spaces) {
     if (!Array.isArray(s?.tabs)) throw new Error(`herdr-app ls answered space ${s?.id} with no tabs list`)
+    if (!id(s.id)) tabsPartial = true
     for (const t of s.tabs) {
       if (!Array.isArray(t?.terminals)) throw new Error(`herdr-app ls answered tab ${t?.id} with no terminals list`)
-      out.push({ space: s.id, tab: t.id, tabName: t.name, terminal: null, pane: null, isTab: true })
-      for (const x of t.terminals) out.push({ space: s.id, tab: t.id, tabName: t.name, terminal: x?.terminal ?? null, pane: x?.pane ?? null })
+      if (!id(t.id)) tabsPartial = true
+      out.push({ space: id(s.id), tab: id(t.id), tabName: t.name, terminal: null, pane: null, isTab: true })
+      for (const x of t.terminals) {
+        if (!id(x?.terminal) || !id(x?.pane)) panesPartial = true
+        out.push({ space: id(s.id), tab: id(t.id), tabName: t.name, terminal: id(x?.terminal), pane: id(x?.pane) })
+      }
     }
   }
-  return out
+  return Object.assign(out, { tabsPartial, panesPartial: panesPartial || tabsPartial })
+}
+/** "Not in this listing" as an answer: { exists: false } from a complete listing, a throw ("I could not look") from a
+ *  partial one. The one place a herdr-core absence is decided. */
+function absent(partial, what) {
+  if (partial) throw new Error(`herdr-app ls carried an incomplete entry, so ${what} cannot be judged absent`)
+  return { exists: false }
+}
+/** herdr-app's measured answer to a close is exactly {"ok":true}. Anything else, an empty object included, closed
+ *  nothing anyone observed, and the caller keeps its record. */
+function closedOk(r, what) {
+  if (r?.ok !== true) throw new Error(`${what} answered ${JSON.stringify(r)}, not {"ok":true}`)
+  return 'closed'
 }
 /** The window's focus as herdr-app status reports it. A field that is not a string is unknown, never a mismatch. */
 function appFocus() {
@@ -91,6 +113,7 @@ function removeWhenFinished(terminals) {
 
 export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } = {}) => ({
   name: 'herdr',
+  startsAtCreation: false,   // a TUI pane's line is typed in by run(), after its record is written
   tag: {},   // what a marker records about its host: nothing, as every TUI marker always has
   self: () => ({ pane: env.HERDR_PANE_ID, tab: env.HERDR_TAB_ID, space }),
   noSelf: 'no HERDR_PANE_ID in the environment',
@@ -150,6 +173,7 @@ export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } 
 
 export const hcHost = (env = process.env) => ({
   name: 'herdr-core',
+  startsAtCreation: true,    // the command is the pane's program, running from the moment it is created
   tag: { host: 'herdr-core' },   // so another host's placement never judges this pane (gateAnswer)
   /** This terminal's pane, tab and space from herdr-app ls, or null when it cannot be read or is not there. */
   self() {
@@ -159,10 +183,11 @@ export const hcHost = (env = process.env) => ({
     return me?.pane ? { pane: me.pane, tab: me.tab, space: me.space } : null
   },
   noSelf: `herdr-app ls could not place this terminal (HC_TERMINAL_ID ${env.HC_TERMINAL_ID || 'unset'}) in a pane`,
-  /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. */
+  /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. A terminal listed
+   *  with no pane keeps its entry, as `pane_id: null`, so staleSideSeats reads the layout as partial and drops nothing. */
   layout(me) {
     // herdr-lint: creation, not destruction. An unreadable layout is null, which takes the tab path and drops no marker.
-    try { return appPanes().filter((x) => !x.isTab && x.tab === me.tab && typeof x.pane === 'string').map((x) => ({ pane_id: x.pane })) } catch { return null }
+    try { return appPanes().filter((x) => !x.isTab && x.tab === me.tab).map((x) => ({ pane_id: x.pane })) } catch { return null }
   },
   splitRight: (pane, cwd, command) => appSplit(pane, 'right', cwd, command),
   splitDown: (pane, cwd, command) => appSplit(pane, 'down', cwd, command),
@@ -176,28 +201,33 @@ export const hcHost = (env = process.env) => ({
     return { tabId: r.tab, paneId, terminal: r.terminal ?? null }
   },
   paneInfo(paneId) {
-    const exists = appPanes().some((x) => x.pane === paneId)
-    if (!exists) return { exists: false }
+    const rows = appPanes()
+    if (!rows.some((x) => x.pane === paneId)) return absent(rows.panesPartial, `pane ${paneId}`)
     const { pane } = appFocus()
     return { exists: true, focused: pane === null ? undefined : pane === paneId }
   },
   /** Every tab herdr-app lists, in every space, `[{ tab_id, focused, label }]`. Tab ids are global, so a tab absent
    *  from this list is absent everywhere. */
   tabs() {
-    const tabs = appPanes().filter((x) => x.isTab)
+    const rows = appPanes()
+    if (rows.tabsPartial) throw new Error('herdr-app ls carried a space or tab with no id, so the tab list is not whole')
+    const tabs = rows.filter((x) => x.isTab)
     const { tab } = appFocus()
     return tabs.map((x) => ({ tab_id: x.tab, focused: tab === null ? undefined : tab === x.tab, label: x.tabName }))
   },
-  tabInfo: (tabId) => ({ exists: appPanes().some((x) => x.isTab && x.tab === tabId) }),
+  tabInfo(tabId) {
+    const rows = appPanes()
+    return rows.some((x) => x.isTab && x.tab === tabId) ? { exists: true } : absent(rows.tabsPartial, `tab ${tabId}`)
+  },
   /** `terminal`, the one its marker recorded, is removed too: a pane the user already closed is in no listing. */
   closePane(paneId, terminal) {
     removeWhenFinished([...new Set([terminal, ...appPanes().filter((x) => x.pane === paneId).map((x) => x.terminal)])])
-    try { herdrApp(['do', 'pane.close', '--pane', paneId]); return 'closed' }
+    try { return closedOk(herdrApp(['do', 'pane.close', '--pane', paneId]), 'pane.close') }
     catch (e) { if (isAppNotFound(e, 'pane')) return 'gone'; throw e }
   },
   closeTab(tabId, terminal) {
     removeWhenFinished([...new Set([terminal, ...appPanes().filter((x) => !x.isTab && x.tab === tabId).map((x) => x.terminal)])])
-    try { herdrApp(['do', 'tab.close', '--id', tabId]); return 'closed' }
+    try { return closedOk(herdrApp(['do', 'tab.close', '--id', tabId]), 'tab.close') }
     catch (e) { if (isAppNotFound(e, 'tab')) return 'gone'; throw e }
   },
   renamePane: () => {},   // measured: herdr-core has no pane rename; the pane printed its label as its first line
@@ -245,14 +275,22 @@ export const hostFor = (env = process.env, opts = {}) => (termHost(env) === 'her
  */
 export function gateAnswer(host, g) {
   if ((g.host || 'herdr') !== host.name) return 'failed'
+  // herdr-lint: a lookup that throws is 'failed', which movedGateVerdict keeps.
   try { return (g.tabId ? host.tabInfo(g.tabId) : host.paneInfo(g.paneId)).exists ? 'found' : 'not_found' } catch { return 'failed' }
 }
 
-/** The renderer's hand-off file for a seat, beside its marker. */
-export const handoffPath = (marker) => `${marker}.handoff`
+/** The renderer's hand-off file for a seat, beside its marker and bound to the seat by its agent id: names are reused
+ *  (the lowest free index), so a file named for the marker alone would be read by the next seat to take that name. */
+export const handoffPath = (marker, agentId) => `${marker}.${paneToken(agentId)}.handoff`
+/** Remove a seat's hand-off file with its marker. Bound to the agent id, so a leftover one is never read, but it is
+ *  still not left lying in the seats directory. A gate's marker names no agent and has none. */
+export const dropHandoff = (marker, agentId) => {
+  if (!agentId) return
+  for (const f of [handoffPath(marker, agentId), `${handoffPath(marker, agentId)}.partial`]) try { fs.rmSync(f, { force: true }) } catch { /* best effort */ }
+}
 /** The seat renderer's creation command, which herdr-core runs and the herdr TUI ignores: its label, printed first
  *  since no pane rename exists there, and the hand-off file the codex watcher arrives through. */
-export const seatCommand = (renderer, file, label, marker) => `node ${shq(renderer)} ${shq(file)} ${shq(label)} ${shq(handoffPath(marker))}`
+export const seatCommand = (renderer, file, label, handoff) => `node ${shq(renderer)} ${shq(file)} ${shq(label)} ${shq(handoff)}`
 /** The line the TUI types into a seat pane: the renderer alone, as it always was. */
 export const seatRunLine = (renderer, file) => `node ${shq(renderer)} ${shq(file)}`
 

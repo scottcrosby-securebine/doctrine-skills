@@ -31,6 +31,11 @@
 //
 // WHAT IT DOES NOT CHECK, and this list is the honest part:
 //
+//   - A seam call reached by any other name than `host.<method>(`: a destructured method, a host stored under
+//     another variable, or the split helpers the seat and gate build from `host.splitRight`. Creation and display
+//     methods (split, newTab, rename, relabel, run, handOff) are not judged at all, since none decides a close.
+//   - E2 over seam answers, by design (see THE SEAM below).
+
 //   - Whether the separation a catch DOES make is the right one. `isPaneNotFound` where
 //     `isTabNotFound` was meant satisfies this lint and is still a defect; a mutation entry is what
 //     catches that, and dctr-mutations.mjs carries one.
@@ -42,6 +47,13 @@
 //     loses a label and decides nothing. The gate launcher's `child.on('error')` orphaning a pane is
 //     a real instance of the same family and this lint cannot see it: there is no herdr call there
 //     at all. Round 2 found that one by reading. Do not read a clean run as covering it.
+//
+// THE SEAM (issue #111, round 1 S1). The seat hook and the gate launcher reach either host only through `host.<method>(`
+// calls, so the decisions this lint exists for moved behind those calls. A try calling a seam read or close
+// (`SEAM` below) is judged as a herdr read is: its catch must name a separator or carry a written `herdr-lint:` reason,
+// since inside the seam every not-found answer is already a return value ('gone', { exists: false }) and a throw is
+// always "I could not look". E2 is NOT extended to seam calls: a seam answer is total (`exists` is a boolean, a close
+// returns 'closed' or 'gone'), and the truthiness E2 hunts is inside the seam, where E2 still reads the transports.
 //
 // BOTH HOSTS (issue #111). herdr-core's implementation in hooks/dctr-host.mjs reaches its host through `herdrApp(...)`,
 // and reads it through `appPanes()` (herdr-app ls) and `appFocus()` (herdr-app status). Those are judged as herdr calls
@@ -72,10 +84,14 @@ export const isShipping = (name) =>
 /** The predicates that turn an error into an ANSWER. A catch naming none of these has not separated
  *  anything, whatever its comment claims. */
 const SEPARATORS = /isPaneNotFound|isTabNotFound|isAppNotFound|alreadyGone|NOT_FOUND|notFound/
-/** A call that reaches a host: herdr, or herdr-core through the seam's transport and its two readers. */
-const CALL = /\b(herdr|herdrApp|appPanes|appFocus)\s*\(/
-/** A call whose answer is a READ: a herdr reply's `.result`, or either herdr-core reader. */
-const READ = /herdr\s*\([^)]*\)[^\n]*\.result|\b(appPanes|appFocus)\s*\(/
+/** The host seam's methods whose answer a caller decides a close or a marker drop on (dctr-host.mjs): the reads, and
+ *  the closes, whose 'gone' is an answer and whose throw is not. Called as `host.<method>(` in the seat hook and the gate
+ *  launcher, and as `host.` inside the seam's own gateAnswer. */
+const SEAM = /\bhost\.(self|layout|paneInfo|tabs|tabInfo|closePane|closeTab)\s*\(/
+/** A call that reaches a host: herdr, herdr-core through the seam's transport and its two readers, or the seam. */
+const CALL = new RegExp(`\\b(herdr|herdrApp|appPanes|appFocus)\\s*\\(|${SEAM.source}`)
+/** A call whose answer is a READ: a herdr reply's `.result`, either herdr-core reader, or a seam method above. */
+const READ = new RegExp(`herdr\\s*\\([^)]*\\)[^\\n]*\\.result|\\b(appPanes|appFocus)\\s*\\(|${SEAM.source}`)
 
 export const isSuppressed = (line, prev) => /herdr-lint:\s*\S/.test(line) || /herdr-lint:\s*\S/.test(prev || '')
 

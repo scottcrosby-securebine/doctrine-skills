@@ -42,7 +42,7 @@ import {
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, PUMP_MS, POLL_MS, codexPanesToClose, sweepAction, movedGateName,
   hostOf, seatTranscriptPath, clearSweepSkip, clearSweepTargets, codexUnderClaude, UNDER_CLAUDE_WHY } from './dctr-lib.mjs'
 import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, LOCK_TIMEOUT, gatesDir, withDirLock, dropGoneGates, sideColumnReason, stateDir, seatsDir, hookLog, liveSeats as readSeats, liveSeatsPartial, reserveMarker, writeMarker, sideOccupants, withPlacementLock as placementLock, codexJobRecords, readMeta, readCodexSeat, sessionsOfPane, indexPaneSession, sleepMs } from './dctr-state.mjs'
-import { hostFor, gateAnswer, seatCommand, seatRunLine, handoffPath } from './dctr-host.mjs'
+import { hostFor, gateAnswer, seatCommand, seatRunLine, handoffPath, dropHandoff } from './dctr-host.mjs'
 
 /**
  * SessionEnd's sweep, run inline by the hook under SESSION_END_WAIT_MS and by the detached `--sweep`
@@ -104,6 +104,7 @@ function sweepSession(host, sessionId, waitMs, log) {
         }
         // Same rule as SubagentStop above: "not found" is an answer, and the thing we were about to close is already
         // gone, which is the outcome we wanted. The seam returns 'gone' for that answer alone and throws for the rest.
+        // herdr-lint: a close that throws is counted failed and keeps its record and the state directory; only the seam's 'gone' is an absence.
         try { if ((seat.tabId ? host.closeTab(seat.tabId, seat.terminal) : host.closePane(seat.paneId, seat.terminal)) === 'gone') log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`) }
         catch (e) { failed += 1; log(`SessionEnd: could not close ${seat.tabId || seat.paneId} (${String(e.message).split('\n')[0]}); keeping its record`) }
       }
@@ -263,6 +264,7 @@ const withPlacementLock = (fn) => placementLock(sessionId, fn)
 // It is in the payload; process.cwd() stands in when it is not.
 const cwd = payload.cwd || process.cwd()
 
+// herdr-lint: its catch stands the hook down, which closes nothing and drops no marker.
 try {
   if (event === 'SubagentStart') {
     if (!isSeatEvent(payload)) stand_down(notSeatReason(payload))
@@ -297,6 +299,7 @@ try {
       try { seats = liveSeats() } catch (e) { return `could not read this session's seat markers (${e.message})` }
       for (const s of staleSideSeats(seats, layout)) {
         try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
+        dropHandoff(path.join(seatsDir(sessionId), `${s.agent}.json`), s.agent_id)
         log(`dropped stale marker ${s.agent}: pane ${s.paneId} not in layout`)
       }
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
@@ -317,7 +320,7 @@ try {
         // "not focused" — destroying the tab the user was looking at.
         let tabs, tabListFailed = false
         if (seats.some((s) => s.codexJob && s.tabId)) {
-          // Separated by the tabListFailed FLAG rather than a predicate, and both answers mean do not close.
+          // herdr-lint: separated by the tabListFailed FLAG rather than a predicate, and both answers mean do not close.
           try { tabs = host.tabs() }
           catch { tabListFailed = true }
           if (!Array.isArray(tabs)) { tabs = undefined; tabListFailed = true }
@@ -348,6 +351,7 @@ try {
               else if (typeof mine.focused === 'boolean') focused = mine.focused
             }
           } else {
+            // herdr-lint: a lookup that throws leaves focus unknown, which codexPanesToClose never closes.
             try {
               const pane = host.paneInfo(s.paneId)
               // A pane that is not found IS an observation: that pane is gone, so it is not focused, and the
@@ -378,7 +382,7 @@ try {
           // tab re-asks now sit between that read and this close.
           let stillUnfocused = false
           if (s.tabId) {
-            // Separated by the stillUnfocused FLAG, which starts false. Every failure of the list leaves it false and the candidate is spared, so no answer this try can fail to get authorizes the close below.
+            // herdr-lint: separated by the stillUnfocused FLAG, which starts false: every failure of the list spares the candidate.
             try {
               const now = host.tabs()
               if (Array.isArray(now)) {
@@ -387,6 +391,7 @@ try {
               }
             } catch { stillUnfocused = false }   // a LIST that failed is "I could not look", about no tab in particular
           } else {
+            // herdr-lint: a lookup that throws leaves stillUnfocused false, which spares the candidate.
             try {
               const pane = host.paneInfo(s.paneId)
               stillUnfocused = !pane.exists || pane.focused === false   // gone IS an answer; unknown focus is not
@@ -399,6 +404,7 @@ try {
           // for the rest of the session, re-closed at every placement and again at SessionEnd, with its name
           // never freed. (A TAB marker costs no column slot — isSideSeat excludes it — so the cost there is the
           // retries and the held name, not the cap.)
+          // herdr-lint: a close that throws keeps its marker (continue); only the seam's 'gone' lets it go.
           try { if (s.tabId) host.closeTab(s.tabId, s.terminal); else host.closePane(s.paneId, s.terminal) }
           catch (e) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
           // Removed by name, and that is safe HERE and nowhere else: this runs inside the placement
@@ -419,6 +425,7 @@ try {
           // and O_EXCL stops the freed name being reused meanwhile), but it left no evidence at all.
           try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) }
           catch (e) { log(`close-on-next: closed ${s.agent} but could not remove its marker (${String(e.message).split('\n')[0]}); the next placement will retry`) }
+          dropHandoff(path.join(seatsDir(sessionId), `${s.agent}.json`), s.agent_id)
           closed.add(s.agent)
           log(`close-on-next: closed finished codex seat ${s.agent}`)
         }
@@ -478,7 +485,7 @@ try {
       // What herdr-core runs at creation, since it cannot type a line in afterwards: the renderer with its label,
       // printed first because herdr-core has no pane rename, and its hand-off file for the codex watcher. The herdr
       // TUI ignores it and types the renderer line below.
-      const created = seatCommand(renderer, file, label, marker)
+      const created = seatCommand(renderer, file, label, handoffPath(marker, payload.agent_id))
       let terminal = null   // herdr-core's, recorded so a pane already gone can still have its finished terminal removed
       const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, cwd, created, label); terminal = r.terminal; return r.paneId }
       if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
@@ -571,7 +578,7 @@ try {
         // The renderer still owns the pane's terminal. The herdr TUI interrupts it and types the watcher line into
         // the shell beneath; herdr-core writes the line to the hand-off file the renderer was started with.
         host.handOff(seat.paneId, `node ${shq(import.meta.filename)} --codex-tail ${shq(job.file)} ${shq(seat.paneId)} ${shq(label)}`, log,
-          handoffPath(path.join(seatsDir(sessionId), `${seat.agent}.json`)))
+          handoffPath(path.join(seatsDir(sessionId), `${seat.agent}.json`), seat.agent_id))
         // Record WHICH job this pane is following, so the next codex placement can ask whether it
         // has finished (close-on-next, Scott's ruling 2026-09-07). Written after `pane run` has
         // succeeded: a marker claiming a watcher that does not exist would have the next placement
@@ -618,7 +625,7 @@ try {
       // so a transport blip destroyed the tab the user was watching. The pane branch below already
       // made this separation; this branch, ten lines above it, never got the fix.
       let mine, listFailed = null
-      // Separated by the listFailed FLAG: the caller turns it into unknown and keeps the marker.
+      // herdr-lint: separated by the listFailed FLAG: the caller turns it into unknown and keeps the marker.
       try {
         const tabs = host.tabs()
         mine = tabs.find((t) => t.tab_id === seat.tabId)
@@ -646,6 +653,7 @@ try {
         spared = `${seat.tabId} is focused`
         try { host.renameTab(seat.tabId, `${mine.label} · done`) } catch { /* label only */ }
       }
+      // herdr-lint: a close that throws sets closeFailed, which keeps the marker for SessionEnd.
       else try { host.closeTab(seat.tabId, seat.terminal) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
     } else {
       // A side seat: same relabel-vs-close rule, read from the pane's own record. A pane the get
@@ -655,6 +663,7 @@ try {
       // stopAction would have spared is the focused one, the pane the user is watching. "It is gone"
       // and "I could not look" need separating here for the same reason they do on the close.
       let pane, lookupFailed = null, gone = false
+      // herdr-lint: a lookup that throws sets lookupFailed, which is unknown: nothing closes and the marker stays.
       try { const info = host.paneInfo(seat.paneId); if (info.exists) pane = info; else gone = true }
       catch (e) { lookupFailed = String(e.message).split('\n')[0] }
       // `gone` still closes, because the close is a no-op on an absent pane and its POINT is that
@@ -678,8 +687,9 @@ try {
         // seatPlacement counts one fewer side seat than the column really has and a seventh pane is
         // split onto six.
         spared = `${seat.paneId} is focused`
-        try { host.relabelSeat(seat.paneId, `${seat.label || seat.agent} · done`, log, handoffPath(path.join(seatsDir(sessionId), `${seat.agent}.json`))) } catch { /* label only */ }
+        try { host.relabelSeat(seat.paneId, `${seat.label || seat.agent} · done`, log, handoffPath(path.join(seatsDir(sessionId), `${seat.agent}.json`), seat.agent_id)) } catch { /* label only */ }
       }
+      // herdr-lint: a close that throws sets closeFailed, which keeps the marker for SessionEnd.
       else try { host.closePane(seat.paneId, seat.terminal) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
     }
 
@@ -709,6 +719,7 @@ try {
           log(`stop ${seat.agent}: that name now belongs to ${current.agent_id}; leaving its marker alone`)
         } else {
           fs.rmSync(file, { force: true })
+          dropHandoff(file, seat.agent_id)
           log(`stop ${seat.agent}: marker removed (${seat.tabId ? 'tab' : 'pane'} ${seat.tabId || seat.paneId})`)
         }
       })

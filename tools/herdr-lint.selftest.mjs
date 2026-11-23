@@ -94,6 +94,32 @@ function sweepCoreFixed(id) {
   if (present === false) destroy(id)
 }
 `
+// THE SAME CLASS ONE LAYER UP (round 1 S1): the seat hook and the gate launcher decide on the seam's answers, so a
+// catch around a seam read that turns "I could not look" into an absence is the defect at the caller.
+const BROKEN_SEAM = `
+function stopSeam(host, id) {
+  let info
+  try {
+    info = host.paneInfo(id)
+  } catch {
+    info = { exists: false }
+  }
+  if (!info.exists) dropMarker(id)
+}
+`
+const FIXED_SEAM = `
+function stopSeamFixed(host, id) {
+  let info = null
+  // herdr-lint: a lookup that throws leaves info null, which drops nothing.
+  try { info = host.paneInfo(id) } catch { info = null }
+  if (info && !info.exists) dropMarker(id)
+}
+`
+fs.writeFileSync(path.join(tmp, 'dctr-brokenseam.mjs'), BROKEN_SEAM)
+const SEAT_SRC = fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', 'dctr-seat.mjs'), 'utf8')
+fs.writeFileSync(path.join(tmp, 'dctr-seatbare.mjs'), SEAT_SRC.replace(/herdr-lint:/g, 'was-lint:'))
+const GATE_SRC = fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', 'dctr-gate.mjs'), 'utf8')
+fs.writeFileSync(path.join(tmp, 'dctr-gatebare.mjs'), GATE_SRC.replace(/herdr-lint:/g, 'was-lint:'))
 fs.writeFileSync(path.join(tmp, 'dctr-brokenhc1.mjs'), BROKEN_HC_E1)
 fs.writeFileSync(path.join(tmp, 'dctr-brokenhc2.mjs'), BROKEN_HC_E2)
 // The real seam with its written reasons taken out: the rule must reach the herdr-core sites in shipping code, not only
@@ -123,6 +149,15 @@ clause('clause 1f: the real seam with its reasons removed is reported at its her
   bare.some((l) => /appPanes\(\)\.find\(\(x\) => x\.terminal/.test(l)) && bare.some((l) => /appPanes\(\)\.filter\(\(x\) => !x\.isTab && x\.tab === me\.tab/.test(l)),
   JSON.stringify(bare))
 
+clause('clause 1g: a catch around a SEAM read that turns a failed lookup into an absence is reported (E1)',
+  tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-brokenseam.mjs'), JSON.stringify(tripped))
+const seatBare = tripped.filter((f) => f.file === 'dctr-seatbare.mjs').map((f) => SEAT_SRC.replace(/herdr-lint:/g, 'was-lint:').split('\n')[f.line - 1].trim())
+const gateBare = tripped.filter((f) => f.file === 'dctr-gatebare.mjs').map((f) => GATE_SRC.replace(/herdr-lint:/g, 'was-lint:').split('\n')[f.line - 1].trim())
+clause('clause 1h: the real seat hook and gate launcher with their reasons removed are reported at their seam reads and closes, so the rule reaches the decisions behind the seam in both callers',
+  seatBare.some((l) => /host\.paneInfo\(seat\.paneId\)/.test(l)) && seatBare.some((l) => /host\.closePane\(seat\.paneId, seat\.terminal\)/.test(l)) && seatBare.length >= 10 &&
+  gateBare.some((l) => /host\.paneInfo\(paneId\)/.test(l)) && gateBare.some((l) => /host\.closePane\(paneId\)/.test(l)),
+  JSON.stringify({ seatBare, gateBare }))
+
 // ---------------------------------------------------------------- clause 2: it stays quiet
 const FIXED = `
 import { herdr } from './dctr-state.mjs'
@@ -148,6 +183,7 @@ const quiet = fs.mkdtempSync(path.join(os.tmpdir(), 'herdr-lint-quiet-'))
 fs.writeFileSync(path.join(quiet, 'dctr-fixed.mjs'), FIXED)
 fs.writeFileSync(path.join(quiet, 'dctr-suppressed.mjs'), SUPPRESSED)
 fs.writeFileSync(path.join(quiet, 'dctr-fixedhc.mjs'), FIXED_HC)
+fs.writeFileSync(path.join(quiet, 'dctr-fixedseam.mjs'), FIXED_SEAM)
 const stayed = scan(quiet)
 clause('clause 2a: the repaired form is NOT reported', stayed.length === 0, JSON.stringify(stayed))
 
@@ -227,6 +263,14 @@ clause('clause 3k: the herdr-core E1 fixture really destroys a listed pane when 
   coreSweep(throwsTransport) === true && coreSweep(() => [{ pane: 'p1' }]) === false, '')
 clause('clause 3l: the herdr-core E2 fixture really answers "nobody" for a focus herdr-app could not report — proved without the checker',
   load(BROKEN_HC_E2, 'watcher', 'appFocus')(() => ({ pane: null }))() === 'nobody' && load(BROKEN_HC_E2, 'watcher', 'appFocus')(() => ({ pane: 'p1' }))() === 'someone', '')
+const seamStop = (src, name, paneInfo) => {
+  let dropped = false
+  load(src, name, 'dropMarker')(() => { dropped = true })({ paneInfo }, 'p1')
+  return dropped
+}
+clause('clause 3n: the seam-caller fixture really drops a live pane\'s marker when the lookup merely FAILED, and the reasoned form really does not — proved without the checker',
+  seamStop(BROKEN_SEAM, 'stopSeam', throwsTransport) === true && seamStop(FIXED_SEAM, 'stopSeamFixed', throwsTransport) === false &&
+  seamStop(BROKEN_SEAM, 'stopSeam', () => ({ exists: true })) === false && seamStop(FIXED_SEAM, 'stopSeamFixed', () => ({ exists: false })) === true, '')
 clause('clause 3m: the bare seam copy really differs from the shipping seam only in its suppression markers',
   SEAM.includes('herdr-lint:') && SEAM.replace(/herdr-lint:/g, 'was-lint:') === fs.readFileSync(path.join(tmp, 'dctr-hostbare.mjs'), 'utf8'), '')
 

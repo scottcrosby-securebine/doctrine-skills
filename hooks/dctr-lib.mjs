@@ -521,7 +521,8 @@ export function containerIdFromMountinfo(text) {
  *
  * The decision is `splitTarget`, shared by both hosts through the host seam (dctr-host.mjs); `splitPaneArgs` is
  * the herdr TUI's argv for it. herdr-core's layout carries no rects, so every height reads 0 there and the reduce
- * keeps the OLDEST side seat: the column halves that pane each time, the skew this paragraph measures.
+ * keeps the OLDEST side seat as the split target every time. Herdr.app equalizes the heights of a stacked column
+ * itself (measured 2026-11-23), so that choice decides only the order, not the sizes.
  */
 export function splitTarget(liveSeats, sessionPaneId, layoutPanes) {
   const side = liveSeats.filter(isSideSeat)
