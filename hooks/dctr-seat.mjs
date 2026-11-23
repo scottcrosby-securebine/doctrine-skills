@@ -104,7 +104,7 @@ function sweepSession(host, sessionId, waitMs, log) {
         }
         // Same rule as SubagentStop above: "not found" is an answer, and the thing we were about to close is already
         // gone, which is the outcome we wanted. The seam returns 'gone' for that answer alone and throws for the rest.
-        try { if ((seat.tabId ? host.closeTab(seat.tabId) : host.closePane(seat.paneId)) === 'gone') log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`) }
+        try { if ((seat.tabId ? host.closeTab(seat.tabId, seat.terminal) : host.closePane(seat.paneId, seat.terminal)) === 'gone') log(`SessionEnd: ${seat.tabId || seat.paneId} was already gone`) }
         catch (e) { failed += 1; log(`SessionEnd: could not close ${seat.tabId || seat.paneId} (${String(e.message).split('\n')[0]}); keeping its record`) }
       }
       if (unreadable.length) log(`SessionEnd: ${unreadable.length} marker(s) could not be read; keeping the state directory`)
@@ -399,7 +399,7 @@ try {
           // for the rest of the session, re-closed at every placement and again at SessionEnd, with its name
           // never freed. (A TAB marker costs no column slot — isSideSeat excludes it — so the cost there is the
           // retries and the held name, not the cap.)
-          try { if (s.tabId) host.closeTab(s.tabId); else host.closePane(s.paneId) }
+          try { if (s.tabId) host.closeTab(s.tabId, s.terminal); else host.closePane(s.paneId, s.terminal) }
           catch (e) { log(`close-on-next: closing ${s.agent} failed (${String(e.message).split('\n')[0]}); its marker stays`); continue }
           // Removed by name, and that is safe HERE and nowhere else: this runs inside the placement
           // lock, `seats` was read from disk in the same critical section, and every writer that can
@@ -479,7 +479,8 @@ try {
       // printed first because herdr-core has no pane rename, and its hand-off file for the codex watcher. The herdr
       // TUI ignores it and types the renderer line below.
       const created = seatCommand(renderer, file, label, marker)
-      const split = (t) => (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, cwd, created, label).paneId
+      let terminal = null   // herdr-core's, recorded so a pane already gone can still have its finished terminal removed
+      const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, cwd, created, label); terminal = r.terminal; return r.paneId }
       if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
         try { paneId = split(splitTarget(occupants, me.pane, layout)) }
         catch (e) {
@@ -488,7 +489,7 @@ try {
           catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
         }
       }
-      if (!paneId) ({ tabId, paneId } = host.newTab(me, cwd, created, label))
+      if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, cwd, created, label))
 
       // Finalize the marker the instant the pane exists, BEFORE any step that can throw — the
       // pane command and the sidebar report. Once it is on disk the seat is tracked, so whatever
@@ -503,7 +504,7 @@ try {
       // makes no herdr call at all.
       // `sessionPane` is the pane this session runs in: the Codex /clear sweep finds the ending chat's markers by it,
       // since the new chat's hook is not told the ending chat's session id (E10-D22).
-      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label, sessionPane: me.pane, ...host.tag }
+      const record = { agent: name, agent_id: payload.agent_id, role: payload.agent_type, n, tabId, paneId, file, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) }
       writeMarker(marker, record)
       reserved = null   // complete: the marker is now a record rather than a reservation
       if (hostOf(payload) === 'codex') indexPaneSession(me.pane, sessionId)   // for the /clear sweep
@@ -645,7 +646,7 @@ try {
         spared = `${seat.tabId} is focused`
         try { host.renameTab(seat.tabId, `${mine.label} · done`) } catch { /* label only */ }
       }
-      else try { host.closeTab(seat.tabId) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
+      else try { host.closeTab(seat.tabId, seat.terminal) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
     } else {
       // A side seat: same relabel-vs-close rule, read from the pane's own record. A pane the get
       // cannot find is treated as unfocused and the close is best-effort — it is already gone.
@@ -677,9 +678,9 @@ try {
         // seatPlacement counts one fewer side seat than the column really has and a seventh pane is
         // split onto six.
         spared = `${seat.paneId} is focused`
-        try { host.renamePane(seat.paneId, `${seat.label || seat.agent} · done`) } catch { /* label only */ }
+        try { host.relabelSeat(seat.paneId, `${seat.label || seat.agent} · done`, log, handoffPath(path.join(seatsDir(sessionId), `${seat.agent}.json`))) } catch { /* label only */ }
       }
-      else try { host.closePane(seat.paneId) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
+      else try { host.closePane(seat.paneId, seat.terminal) } catch (e) { closeFailed = String(e.message).split('\n')[0] }
     }
 
     // The same rule SessionEnd follows, and this is where it was missing: a close that FAILED is not

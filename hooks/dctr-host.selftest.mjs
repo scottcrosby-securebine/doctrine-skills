@@ -128,7 +128,7 @@ for (const [h, host] of Object.entries(HOSTS)) {
   if (h === 'hc') {
     const argvs = [panesOf(m, 'T1')[1].argv, tab.panes[0].argv]
     clause('clause 2f hc — herdr-core gets the command at creation, in the cwd, and the tab is made with focus false',
-      argvs.every((a) => JSON.stringify(a) === JSON.stringify(hcArgv('/w d', 'echo hi'))) && spawnSync('sh', hcArgv('/', 'pwd').slice(1), { encoding: 'utf8' }).stdout.trim() === '/' && tab.focusArg === 'false',
+      argvs.every((a) => JSON.stringify(a) === JSON.stringify(hcArgv('/w d', 'echo hi'))) && spawnSync('sh', hcArgv('/', 'pwd').slice(1), { encoding: 'utf8', env: { ...process.env, SHELL: '/bin/sh' } }).stdout.split('\n')[0] === '/' && tab.focusArg === 'false',
       JSON.stringify({ argvs, focus: tab.focusArg }))
     fresh({ splitFocuses: true })
     const stolen = host.splitRight('P1', '/', 'true', 'lbl')
@@ -192,6 +192,13 @@ const seatsDir = path.join(tmp, `dctr-${SESSION}`, 'seats')
 const markers = () => { try { return fs.readdirSync(seatsDir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(seatsDir, f), 'utf8'))) } catch { return [] } }
 const markerOf = (i) => markers().find((m) => m.agent_id === `a${i}`)
 const resetSession = () => fs.rmSync(path.join(tmp, `dctr-${SESSION}`), { recursive: true, force: true })
+/** What a pane shows: the TUI's pane name, or what a herdr-core pane's program printed (no rename exists there). */
+const shows = (h, pane, text) => (h === 'hc'
+  ? (() => { try { return fs.readFileSync(`${STATE}.${pane}.out`, 'utf8').includes(text) } catch { return false } })()
+  : allTabs(model()).some((t) => t.panes.some((x) => x.pane === pane && x.name?.includes(text))))
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+const setExec = () => { const m = model(); m.exec = true; fs.writeFileSync(STATE, JSON.stringify(m)) }
+const focusPane = (p) => { const m = model(); m.focus = { tab: allTabs(m).find((t) => t.panes.some((x) => x.pane === p)).id, pane: p }; fs.writeFileSync(STATE, JSON.stringify(m)) }
 const waitFor = (fn, ms = 8000) => { const until = Date.now() + ms; while (Date.now() < until) { if (fn()) return true; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50) } return fn() }
 
 /** One table: every row runs in both hosts against a fresh model and session, and asserts on the model alone. */
@@ -258,6 +265,41 @@ const TABLE = [
       return { done, tab }
     },
     ok: ({ done, tab }) => done && Boolean(tab) && !allTabs(model()).some((t) => t.id === tab) },
+  // F1 (live run, 2026-11-23): a herdr-core pane closes when its program exits, so a pane spared because the user is
+  // looking at it vanished with its result. In the TUI it is a shell and stays; herdr-core must match.
+  { row: 'a gate PANE the user is looking at when it finishes stays open, shows its exit status, and keeps its record',
+    run(h) {
+      setExec()
+      const out = path.join(tmp, `gatestay-${h}.out`), go = path.join(tmp, `stay-${h}`)
+      execFileSync('node', [GATE, 'g', out, '--', `until [ -f ${go} ]; do sleep 0.05; done; exit 4`], { env: hookEnv(h), encoding: 'utf8', cwd: tmp })
+      const pane = markers().find((x) => x.role === 'gate')?.paneId
+      waitFor(() => pane && hasPane(model(), pane)); focusPane(pane)
+      fs.writeFileSync(go, '')
+      const done = waitFor(() => fs.existsSync(`${out}.result`)) && waitFor(() => shows(h, pane, 'g · exit=4'))
+      sleep(1000)   // long enough for a pane whose program ended to have been taken out
+      return { done, pane }
+    },
+    ok: ({ done, pane }, h) => done && hasPane(model(), pane) && shows(h, pane, 'g · exit=4') && Boolean(markers().find((x) => x.role === 'gate')) },
+  { row: 'a seat PANE the user is looking at when it stops stays open, shows its label · done, and keeps its marker',
+    run(h) {
+      setExec(); start(h, 1)
+      const p = markerOf(1).paneId
+      waitFor(() => hasPane(model(), p)); focusPane(p); stop(h, 1)
+      const shown = waitFor(() => shows(h, p, '· done'))
+      sleep(1000)
+      return { p, shown }
+    },
+    ok: ({ p, shown }, h) => shown && hasPane(model(), p) && Boolean(markerOf(1)) },
+  { row: 'a seat pane that went away by itself (its program and shell ended): SessionEnd reads it gone, drops its marker and removes its terminal',
+    run(h) {
+      start(h, 1)
+      const { paneId: p, terminal } = markerOf(1)
+      const m = model(); m.spaces[0].tabs[0].panes = m.spaces[0].tabs[0].panes.filter((x) => x.pane !== p); fs.writeFileSync(STATE, JSON.stringify(m))
+      seatHook(h, { hook_event_name: 'SessionEnd' })
+      const removed = h !== 'hc' || waitFor(() => calls().some((c) => c.bin === 'hc' && c.args[0] === 'rm' && c.args[1] === terminal))
+      return { removed, terminal }
+    },
+    ok: ({ removed, terminal }, h) => removed && !fs.existsSync(path.join(tmp, `dctr-${SESSION}`)) && (h === 'hc' ? Boolean(terminal) : terminal === undefined) },
   { row: 'a tab gate the user is looking at when it finishes is relabelled with its exit status, and stays',
     run(h) {
       for (let i = 1; i <= SIDE_CAP; i++) start(h, i)
@@ -321,6 +363,21 @@ clause('clause 3t — the fake records a split in the model under either CLI, an
   panesOf(m3, 'T1').length === 3 && panesOf(m3, 'T1')[2].split === 'right' && panesOf(m3, 'T1')[1].split === 'down' &&
   direct('herdr-app', ['do', 'pane.close', '--pane', panesOf(m3, 'T1')[1].pane]).status === 0 && panesOf(model(), 'T1').length === 2,
   JSON.stringify(panesOf(m3, 'T1')))
+
+// The fixture F1 needed: in the fake, a herdr-core pane really goes when its program exits and a TUI pane really does
+// not, and a program ending in hcArgv's shell really keeps its pane. Proved with the fake alone.
+fresh({ exec: true })
+// One at a time: the fake rewrites its model whole, so a supervisor's write racing another call's would be lost.
+const hcEnd = JSON.parse(direct('herdr-app', ['do', 'pane.split', '--pane', 'P1', '--direction', 'down', '--argv', JSON.stringify(['sh', '-c', 'echo bye'])]).stdout).pane
+waitFor(() => !hasPane(model(), hcEnd))
+const hcKept = JSON.parse(direct('herdr-app', ['do', 'pane.split', '--pane', 'P1', '--direction', 'down', '--argv', JSON.stringify(hcArgv('/', 'echo kept'))]).stdout).pane
+direct('herdr', ['pane', 'split', 'P1', '--direction', 'right'])
+const tuiPane = panesOf(model(), 'T1').find((x) => x.split === 'right').pane
+direct('herdr', ['pane', 'run', tuiPane, 'echo bye'])
+sleep(500)
+clause('clause 3f1 — the fake closes a herdr-core pane whose program exited, keeps one ending in the shell hcArgv adds, and keeps a TUI pane whose typed line ended, proved without the hooks',
+  !hasPane(model(), hcEnd) && hasPane(model(), hcKept) && shows('hc', hcKept, 'kept') && hasPane(model(), tuiPane), JSON.stringify(model().spaces[0].tabs[0].panes))
+direct('herdr-app', ['do', 'pane.close', '--pane', hcKept])
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(bad ? `\n${bad} clause(s) FAILED` : '\nall clauses passed')

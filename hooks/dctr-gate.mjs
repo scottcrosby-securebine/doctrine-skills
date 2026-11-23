@@ -309,7 +309,7 @@ if (argv[0] === '--run') {
       } else if (act === 'relabel') {
         // The pane LIVES and the user is watching it, so its record must live too: dropping it here
         // left a focused gate pane that SessionEnd could no longer find.
-        try { host.renamePane(paneId, `${label} · ${exitLine(code)}`) } catch { /* label only */ }
+        try { host.relabelOwn(paneId, `${label} · ${exitLine(code)}`) } catch { /* label only */ }
       } else {
         // DO NOT drop the record here (Scott's ruling, 2026-09-08). The ordering is forced — this
         // call kills the shell, so nothing after it is guaranteed to run — but the price is not.
@@ -452,19 +452,20 @@ if (argv[0] === '--run') {
         // The `--run` line. herdr-core runs it at creation, before the ids exist, so it is handed SELF_PANE and finds
         // its own; the herdr TUI ignores that one and is typed the line with its ids below.
         const runLine = (p, t) => gateRunCommand(self, outFile, marker, p, t, me.space, label, command)
-        const split = (t) => (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, process.cwd(), runLine(SELF_PANE, ''), label).paneId
+        let terminal = null   // herdr-core's, recorded so a pane already gone can still have its finished terminal removed
+        const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, process.cwd(), runLine(SELF_PANE, ''), label); terminal = r.terminal; return r.paneId }
         if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
           // The catch retries the split from the session pane, and the retry sets paneId null for the tab path.
           try { paneId = split(splitTarget(occupants, me.pane, layout)) }
           catch { try { paneId = split(splitTarget([], me.pane, null)) } catch { paneId = null } }
         }
-        if (!paneId) ({ tabId, paneId } = host.newTab(me, process.cwd(), runLine(SELF_PANE, SELF_PANE), tabLabel(GATE_ROLE, n)))
+        if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, process.cwd(), runLine(SELF_PANE, SELF_PANE), tabLabel(GATE_ROLE, n)))
         // The split path had no name at all until 2026-09-07: `splitArgs` takes no label and nothing
         // renamed afterwards, so a side-column gate pane was nameless for its whole run — the
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
         // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.
         if (!tabId) try { host.renamePane(paneId, label) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
-        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag })
+        writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) })
         host.run(paneId, runLine(paneId, tabId))
         // A Codex session's gate is indexed for the /clear sweep, which finds a pane's sessions by it (E10-D22).
         if (codexShell(process.env)) indexPaneSession(me.pane, sessionId)

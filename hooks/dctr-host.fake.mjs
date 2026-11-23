@@ -14,10 +14,35 @@
 // have: a TUI pane's HERDR_ENV and HERDR_PANE_ID, a herdr-core terminal's HC_TERMINAL_ID. A close hangs up that
 // command's process group, as closing a real pane hangs up its terminal, so whatever the pane ran dies with it unless
 // it detached. `splitFocuses` makes a herdr-app split take the window's focus, which herdr-app's manual leaves unsaid.
+//
+// A herdr-core pane's program IS the pane (measured live 2026-11-23): when it exits, Herdr.app closes the pane and the
+// terminal stays in hc as finished. So a herdr-core pane's program runs under a supervisor (this file in `__supervise`
+// mode) that keeps its stdin open, writes its output to `<state>.<pane>.out`, and takes the pane out of the model
+// when the program exits. A TUI pane's line is typed into a shell that outlives it, so it is run with no supervisor.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+
+if (process.argv[2] === '__supervise') {
+  const [, , , statePath, pane, argvJson] = process.argv
+  const out = fs.openSync(`${statePath}.${pane}.out`, 'a')
+  const argv = JSON.parse(argvJson)
+  const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', out, out] })   // stdin held open: a shell waits on it
+  child.on('exit', () => {
+    const st = JSON.parse(fs.readFileSync(statePath, 'utf8'))
+    for (const sp of st.spaces) for (const t of sp.tabs) {
+      const i = t.panes.findIndex((x) => x.pane === pane)
+      if (i < 0) continue
+      st.finished = [...(st.finished ?? []), t.panes[i].terminal]
+      t.panes.splice(i, 1)
+      if (!t.panes.length) sp.tabs.splice(sp.tabs.indexOf(t), 1)
+    }
+    st.exited = [...(st.exited ?? []), pane]
+    fs.writeFileSync(`${statePath}.${process.pid}`, JSON.stringify(st)); fs.renameSync(`${statePath}.${process.pid}`, statePath)
+    process.exit(0)
+  })
+} else {
 
 const bin = path.basename(process.argv[2])
 const args = process.argv.slice(3)
@@ -50,8 +75,10 @@ const launch = (x, terminal, argv) => {
   const pane = x.pane
   const env = { ...process.env }
   for (const k of Object.keys(env)) if (k.startsWith('HERDR_') || k === 'HC_TERMINAL_ID' || k === 'TERM_PROGRAM') delete env[k]
-  Object.assign(env, terminal ? { HC_TERMINAL_ID: terminal, TERM_PROGRAM: 'ghostty' } : { HERDR_ENV: '1', HERDR_PANE_ID: pane, TERM_PROGRAM: 'herdr' })
-  const child = spawn(argv[0], argv.slice(1), { detached: true, stdio: 'ignore', env })
+  Object.assign(env, terminal ? { HC_TERMINAL_ID: terminal, TERM_PROGRAM: 'ghostty' } : { HERDR_ENV: '1', HERDR_PANE_ID: pane, TERM_PROGRAM: 'herdr' }, { SHELL: '/bin/sh' })
+  const child = terminal
+    ? spawn(process.execPath, [import.meta.filename, '__supervise', STATE, pane, JSON.stringify(argv)], { detached: true, stdio: 'ignore', env })
+    : spawn(argv[0], argv.slice(1), { detached: true, stdio: 'ignore', env })
   child.unref()
   x.pid = child.pid
 }
@@ -153,3 +180,4 @@ if (bin === 'herdr-app') {
 
 // hc: `wait` answers at once and `rm` records the removal; the log is what a clause reads.
 if (bin === 'hc') out({ ok: true })
+}
