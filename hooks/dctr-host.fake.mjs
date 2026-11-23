@@ -9,7 +9,9 @@
 //                    not-found in its CLI's own shape, or answers with an empty reply. The verb is the first two words of a
 //                    herdr call (`pane get`), the first word of a herdr-app call (`ls`), or `do <command>` (`do pane.close`).
 //                    "after", on a call that creates a pane or tab, fails it as a transport error only once the pane or
-//                    tab is in the model and its program started: a create that timed out or answered with no pane
+//                    tab is in the model and its program started: a create that timed out or answered with no pane.
+//                    "blank", on a focus read (`herdr pane get`, `herdr tab list`, `herdr-app status`), names the focus as
+//                    empty strings
 //
 // The model: { spaces: [{ id, name, tabs: [{ id, name, panes: [{ pane, terminal, name? }] }] }], focus: { tab, pane },
 // n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' } }. A herdr-core terminal is live from its
@@ -153,11 +155,12 @@ if (bin === 'herdr') {
   }
   if (verb === 'pane get') {
     if (!findPane(args[2])) notFound('pane', args[2])
+    if (fail === 'blank') out({ result: { pane: { pane_id: args[2], focused: '' } } })
     out({ result: { pane: { pane_id: args[2], focused: state.focus.pane === args[2] } } })
   }
   if (verb === 'tab list') {
     const s = state.spaces.find((x) => x.id === flag('workspace'))
-    out({ result: { tabs: (s?.tabs ?? []).map((t) => ({ tab_id: t.id, focused: state.focus.tab === t.id, label: t.name })) } })
+    out({ result: { tabs: (s?.tabs ?? []).map((t) => ({ tab_id: t.id, focused: fail === 'blank' ? '' : state.focus.tab === t.id, label: t.name })) } })
   }
   if (verb === 'tab get') { if (!findTab(args[2])) notFound('tab', args[2]); out({ result: { tab: { tab_id: args[2] } } }) }
   if (verb === 'pane close') {
@@ -186,13 +189,17 @@ if (bin === 'herdr') {
 
 if (bin === 'herdr-app') {
   if (fail === 'notfound') notFound(args[1]?.split('.')[0] ?? 'pane', flag('pane') ?? flag('id'))
-  // `lsJunk` puts an incomplete entry in the listing: a terminal with no pane in tab `tab`, or (tab: null) a tab with no id.
+  // `lsJunk` puts an incomplete entry in the listing: a terminal with no pane in tab `tab`, or (tab: null) a tab with no id
+  // listing the panes `panes` names in place of their own tab, or ({ nopane: P }) pane P's terminal listed with no pane.
   if (verb === 'ls') {
     const junk = state.lsJunk ?? []
+    const moved = new Set(junk.flatMap((j) => j.panes ?? [])), hidden = new Set(junk.map((j) => j.nopane).filter(Boolean))
+    const row = (x) => (hidden.has(x.pane) ? { terminal: x.terminal } : { terminal: x.terminal, pane: x.pane })
     out({ spaces: state.spaces.map((s, i) => ({ id: s.id, name: s.name, tabs: [...s.tabs.map((t) => ({ id: t.id, name: t.name,
-      terminals: [...t.panes.map((x) => ({ terminal: x.terminal, pane: x.pane })), ...junk.filter((j) => j.tab === t.id).map(() => ({ terminal: 't999' }))] })),
-    ...(i === 0 ? junk.filter((j) => j.tab === null).map(() => ({ name: 'no id', terminals: [] })) : [])] })) })
+      terminals: [...t.panes.filter((x) => !moved.has(x.pane)).map(row), ...junk.filter((j) => j.tab === t.id).map(() => ({ terminal: 't999' }))] })),
+    ...(i === 0 ? junk.filter((j) => j.tab === null).map((j) => ({ name: 'no id', terminals: (j.panes ?? []).map((p) => row(findPane(p).x)) })) : [])] })) })
   }
+  if (fail === 'blank' && verb === 'status') out({ space: '', tab: '', focused_pane: '' })
   if (verb === 'status') out({ space: state.spaces.find((s) => s.tabs.some((t) => t.id === state.focus.tab))?.id ?? null, tab: state.focus.tab, focused_pane: state.focus.pane })
   if (verb === 'do pane.split') {
     const at = findPane(flag('pane'))

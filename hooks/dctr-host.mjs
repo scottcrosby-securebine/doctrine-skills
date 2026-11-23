@@ -92,10 +92,12 @@ function closedOk(r, what) {
   if (r?.ok !== true) throw new Error(`${what} answered ${JSON.stringify(r)}, not {"ok":true}`)
   return 'closed'
 }
-/** The window's focus as herdr-app status reports it. A field that is not a string is unknown, never a mismatch. */
+/** The window's focus as herdr-app status reports it. A field that is not a non-empty string names nothing, so it is
+ *  unknown, never a mismatch: read as an id, an empty one made every listed pane and tab unfocused. */
 function appFocus() {
   const st = herdrApp(['status'])
-  return { pane: typeof st?.focused_pane === 'string' ? st.focused_pane : null, tab: typeof st?.tab === 'string' ? st.tab : null }
+  const named = (v) => (typeof v === 'string' && v ? v : null)
+  return { pane: named(st?.focused_pane), tab: named(st?.tab) }
 }
 
 /**
@@ -183,11 +185,15 @@ export const hcHost = (env = process.env) => ({
     return me?.pane ? { pane: me.pane, tab: me.tab, space: me.space } : null
   },
   noSelf: `herdr-app ls could not place this terminal (HC_TERMINAL_ID ${env.HC_TERMINAL_ID || 'unset'}) in a pane`,
-  /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. A terminal listed
-   *  with no pane keeps its entry, as `pane_id: null`, so staleSideSeats reads the layout as partial and drops nothing. */
+  /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. A partial listing is
+   *  null, as an unreadable one is: a pane it leaves out or files under a tab with no id may be a live seat, so the
+   *  placement takes the tab path, drops no marker and never counts the column short. */
   layout(me) {
-    // herdr-lint: creation, not destruction. An unreadable layout is null, which takes the tab path and drops no marker.
-    try { return appPanes().filter((x) => !x.isTab && x.tab === me.tab).map((x) => ({ pane_id: x.pane })) } catch { return null }
+    // herdr-lint: creation, not destruction. An unreadable or partial layout is null, which takes the tab path and drops no marker.
+    try {
+      const rows = appPanes()
+      return rows.panesPartial ? null : rows.filter((x) => !x.isTab && x.tab === me.tab).map((x) => ({ pane_id: x.pane }))
+    } catch { return null }
   },
   splitRight: (pane, cwd, command) => appSplit(pane, 'right', cwd, command),
   splitDown: (pane, cwd, command) => appSplit(pane, 'down', cwd, command),

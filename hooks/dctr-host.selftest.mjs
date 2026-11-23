@@ -69,6 +69,7 @@ const HOSTS = { herdr: herdrHost(HOST_ENV.herdr), hc: hcHost(HOST_ENV.hc) }
 const READ = { herdr: { pane: 'herdr pane get', tabs: 'herdr tab list', tab: 'herdr tab get', layout: 'herdr pane layout' },
   hc: { pane: 'herdr-app ls', tabs: 'herdr-app ls', tab: 'herdr-app ls', layout: 'herdr-app ls' } }
 const CLOSE = { herdr: { pane: 'herdr pane close', tab: 'herdr tab close' }, hc: { pane: 'herdr-app do pane.close', tab: 'herdr-app do tab.close' } }
+const FOCUS = { herdr: 'herdr pane get', hc: 'herdr-app status' }
 const CREATE = { herdr: { split: 'herdr pane split', tab: 'herdr tab create' }, hc: { split: 'herdr-app do pane.split', tab: 'herdr-app do tab.new' } }
 
 // ------------------------------------------------------------------ part A: the seam, method by method, both hosts
@@ -116,6 +117,14 @@ for (const [h, host] of Object.entries(HOSTS)) {
       blindPane.exists === true && blindPane.focused === undefined && blindTabs.every((t) => t.focused === undefined), JSON.stringify({ blindPane, blindTabs }))
     const st = direct('herdr-app', ['status'], { 'herdr-app status': 'empty' })
     clause('clause 3c3 hc — that status fixture really answers {} on exit 0, proved without the seam', st.status === 0 && st.stdout.trim() === '{}', st.stdout)
+    // B2: an empty string names no pane or tab either. Read as an id, it made every listed pane and tab unfocused.
+    const blankPane = withFail({ 'herdr-app status': 'blank' }, () => host.paneInfo('P1'))
+    const blankTabs = withFail({ 'herdr-app status': 'blank' }, () => host.tabs())
+    clause('clause 1c4 hc — a status reply naming the focus as empty strings leaves paneInfo and tabs focus UNKNOWN (undefined), never false',
+      blankPane.exists === true && blankPane.focused === undefined && blankTabs.every((t) => t.focused === undefined), JSON.stringify({ blankPane, blankTabs }))
+    const sb = direct('herdr-app', ['status'], { 'herdr-app status': 'blank' })
+    clause('clause 3c4 hc — that status fixture really names its pane and tab as empty strings on exit 0, proved without the seam',
+      sb.status === 0 && JSON.parse(sb.stdout).focused_pane === '' && JSON.parse(sb.stdout).tab === '', sb.stdout)
   }
   clause(`clause 2e/1e ${h} — tabInfo: a listed tab exists, an unlisted one does not, a failed lookup throws`,
     host.tabInfo('T2').exists === true && host.tabInfo('T404').exists === false && withFail({ [READ[h].tab]: 'transport' }, () => throws(() => host.tabInfo('T2'))), '')
@@ -173,11 +182,12 @@ for (const [h, host] of Object.entries(HOSTS)) {
     const pAbsent = (() => { try { return host.paneInfo('P404') } catch { return 'threw' } })()
     const pPresent = host.paneInfo('P2')
     fresh({ lsJunk: [{ tab: null }] })
+    const plTab = host.layout({ pane: 'P1', tab: 'T1' })
     const pAbsentTab = (() => { try { return host.paneInfo('P404') } catch { return 'threw' } })()
     const tAbsent = (() => { try { return host.tabInfo('T404') } catch { return 'threw' } })()
     const tList = (() => { try { return host.tabs() } catch { return 'threw' } })()
-    clause('clause 1l hc — a listing carrying a terminal with no pane, or a tab with no id, is partial: layout keeps the entry (pane_id null), and an absent pane or tab, and the tab list, THROW rather than answer gone',
-      pl?.some((x) => x.pane_id === null) && pAbsent === 'threw' && pAbsentTab === 'threw' && pPresent.exists === true && tAbsent === 'threw' && tList === 'threw', JSON.stringify({ pl, pAbsent, pAbsentTab, tAbsent, tList }))
+    clause('clause 1l hc — a listing carrying a terminal with no pane, or a tab with no id, is partial: layout is null (unknown, as an unreadable one is), and an absent pane or tab, and the tab list, THROW rather than answer gone',
+      pl === null && plTab === null && pAbsent === 'threw' && pAbsentTab === 'threw' && pPresent.exists === true && tAbsent === 'threw' && tList === 'threw', JSON.stringify({ pl, plTab, pAbsent, pAbsentTab, tAbsent, tList }))
     fresh({ lsJunk: [{ tab: 'T1' }, { tab: null }] })
     const junkLs = JSON.parse(direct('herdr-app', ['ls']).stdout)
     clause('clause 3l hc — that listing really carries a terminal with no pane and a tab with no id, proved without the seam',
@@ -454,6 +464,34 @@ const TABLE = [
       return { done, runs: fs.existsSync(count) ? fs.readFileSync(count, 'utf8').split('\n').filter(Boolean).length : 0 }
     },
     ok: ({ done, runs }) => done && runs === 1 },
+  // B2: a partial listing is an unknown layout, never a whole one missing a pane, and an empty focus is an unknown one.
+  { row: 'a placement whose listing files a live side pane under a tab with no id drops neither its marker nor its hand-off',
+    run(h) {
+      start(h, 1)
+      const one = markerOf(1), handoff = handoffPath(path.join(seatsDir, `${one.agent}.json`), 'a1')
+      fs.writeFileSync(handoff, 'true')
+      const m = model(); m.lsJunk = [{ tab: null, panes: [one.paneId] }]; fs.writeFileSync(STATE, JSON.stringify(m))
+      start(h, 2)
+      return { one, handoff }
+    },
+    ok: ({ one, handoff }) => Boolean(markerOf(1)) && fs.existsSync(handoff) && hasPane(model(), one.paneId) && Boolean(markerOf(2)) },
+  { row: 'six side seats and a listing carrying one of them with no pane: the cap holds (the seventh takes a tab) and no marker drops',
+    run(h) {
+      for (let i = 1; i <= SIDE_CAP; i++) start(h, i)
+      const m = model(); m.lsJunk = [{ nopane: markerOf(SIDE_CAP).paneId }]; fs.writeFileSync(STATE, JSON.stringify(m))
+      start(h, SIDE_CAP + 1)
+      return {}
+    },
+    ok: () => panesOf(model(), 'T1').length === SIDE_CAP + 1 && Boolean(markerOf(SIDE_CAP + 1)?.tabId) && markers().length === SIDE_CAP + 1 },
+  { row: 'a side seat and a tab seat whose focus is answered with empty strings are not closed and keep their markers',
+    run(h) {
+      for (let i = 1; i <= SIDE_CAP + 1; i++) start(h, i)
+      const side = markerOf(1).paneId, tab = markerOf(SIDE_CAP + 1).tabId
+      const blank = { DCTR_FAKE_FAIL: JSON.stringify({ [FOCUS[h]]: 'blank', 'herdr tab list': 'blank' }) }
+      stop(h, 1, blank); stop(h, SIDE_CAP + 1, blank)
+      return { side, tab }
+    },
+    ok: ({ side, tab }) => hasPane(model(), side) && allTabs(model()).some((t) => t.id === tab) && Boolean(markerOf(1)) && Boolean(markerOf(SIDE_CAP + 1)) },
   // B1: on herdr-core a create call can fail after its pane exists and its program started (a timeout, a reply with no
   // pane), so a retry or a fallback would run a second copy. The TUI starts nothing at creation and keeps its retries.
   { row: 'a gate whose split call fails after its pane exists runs its check exactly once; the TUI retries the split and then takes a tab',
@@ -594,6 +632,17 @@ direct('herdr-app', ['do', 'pane.close', '--pane', hcKept])
   const lay = JSON.parse(direct('herdr', ['pane', 'layout', '--pane', 'P1']).stdout).result.layout.panes
   clause('clause 3k — the fake\'s in-pane fault reaches the pane\'s program (ls exits 1 there) and not the caller (0), the creation-time chmod really refuses a write, and the TUI layout really carries an entry with no pane_id, proved without the hooks',
     fs.readFileSync(probe, 'utf8').trim() === '1' && callerLs === 0 && refused && lay.some((x) => !('pane_id' in x)), JSON.stringify({ probe: fs.readFileSync(probe, 'utf8'), callerLs, refused, lay }))
+}
+
+// B2's listings, proved with the fake alone: a pane filed under a tab with no id is missing from its own tab, a pane
+// listed with no pane id leaves a bare terminal row, and the TUI's focus reply really carries an empty string.
+{
+  fresh({ lsJunk: [{ tab: null, panes: ['P2'] }, { nopane: 'P1' }] })
+  const ls = JSON.parse(direct('herdr-app', ['ls']).stdout).spaces[0].tabs
+  const pg = JSON.parse(direct('herdr', ['pane', 'get', 'P1'], { 'herdr pane get': 'blank' }).stdout).result.pane
+  clause('clause 3l2 hc — that listing really files P2 under a tab with no id and not under T2, and lists P1\'s terminal with no pane, proved without the seam',
+    ls.find((t) => t.id === 'T2').terminals.length === 0 && ls.find((t) => !('id' in t))?.terminals.some((x) => x.pane === 'P2') &&
+    ls.find((t) => t.id === 'T1').terminals.some((x) => x.terminal === 't1' && !('pane' in x)) && pg.focused === '', JSON.stringify({ ls, pg }))
 }
 
 // B1's fault, proved with the fake alone: a create under `after` exits non-zero with no reply, yet its pane or tab is in

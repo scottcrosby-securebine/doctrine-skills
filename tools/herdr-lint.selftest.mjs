@@ -144,9 +144,10 @@ clause('clause 1d: a herdr-core listing whose FAILURE is read as an absence is r
   tripped.some((f) => f.rule === 'E1' && f.file === 'dctr-brokenhc1.mjs'), JSON.stringify(tripped))
 clause('clause 1e: a herdr-core read navigated into a ternary is reported (E2)',
   tripped.some((f) => f.rule === 'E2' && f.file === 'dctr-brokenhc2.mjs'), JSON.stringify(tripped))
-const bare = tripped.filter((f) => f.file === 'dctr-hostbare.mjs').map((f) => SEAM.split('\n')[f.line - 1].trim())
+// Each finding's line and the one after it, since a try whose body starts on the next line is reported at `try {`.
+const bare = tripped.filter((f) => f.file === 'dctr-hostbare.mjs').map((f) => SEAM.split('\n').slice(f.line - 1, f.line + 1).map((l) => l.trim()).join(' '))
 clause('clause 1f: the real seam with its reasons removed is reported at its herdr-core reads (self and layout), so the rule reaches shipping code',
-  bare.some((l) => /appPanes\(\)\.find\(\(x\) => x\.terminal/.test(l)) && bare.some((l) => /appPanes\(\)\.filter\(\(x\) => !x\.isTab && x\.tab === me\.tab/.test(l)),
+  bare.some((l) => /appPanes\(\)\.find\(\(x\) => x\.terminal/.test(l)) && bare.some((l) => /^try \{ const rows = appPanes\(\)$/.test(l)),
   JSON.stringify(bare))
 
 clause('clause 1g: a catch around a SEAM read that turns a failed lookup into an absence is reported (E1)',
