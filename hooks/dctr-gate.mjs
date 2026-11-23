@@ -16,7 +16,9 @@
 // files. The pane is display; the files are the record. It exits 0 once the check is launched, 1 only
 // on malformed arguments, when a previous run's `<out>.result` or `.result.partial` cannot be
 // removed, or when `<out>.cmd` cannot be written — a display failure
-// must never fail the gate it is showing. One path is one check at a time: two launches on the same
+// must never fail the gate it is showing. On herdr-core a create call that fails also exits 0: the check may be
+// running in a pane this launcher cannot name, or never started, and the line it prints says which to look for.
+// One path is one check at a time: two launches on the same
 // `<out>` are not detected, and the first to finish publishes under the other's name.
 //
 // TWO FILES, and the split is the whole point (Scott's ruling 2026-09-11, after three review rounds
