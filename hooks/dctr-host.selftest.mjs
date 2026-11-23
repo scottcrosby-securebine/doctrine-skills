@@ -253,10 +253,10 @@ const focusPane = (p) => { const m = model(); m.focus = { tab: allTabs(m).find((
 const createCalls = (h, kind) => calls().filter((c) => `${c.bin} ${c.args.slice(0, 2).join(' ')}` === CREATE[h][kind]).length
 /** Panes in the model that were started or typed the seat renderer. */
 const renderers = () => allTabs(model()).flatMap((t) => t.panes).filter((x) => [...(x.argv ?? []), ...(x.ran ?? [])].some((a) => a.includes('dctr-render'))).length
-/** A gate check that appends a line to `count` each time it runs: its result, then how many times it ran, read once any
- *  second copy has had time to run too. */
 /** Whether this session's hook.log says a herdr-core create call failed, as B1's stand-downs must. */
 const loggedCreate = () => { try { return fs.readFileSync(path.join(tmp, `dctr-${SESSION}`, 'hook.log'), 'utf8').includes('herdr-core create call failed') } catch { return false } }
+/** A gate check that appends a line to `count` each time it runs: its result, then how many times it ran, read once any
+ *  second copy has had time to run too. */
 const ranOnce = (out, count) => {
   const done = waitFor(() => fs.existsSync(`${out}.result`))
   sleep(1500)
@@ -458,10 +458,9 @@ const TABLE = [
       const m = model(); m.chmodAfterCreate = seatsDir; fs.writeFileSync(STATE, JSON.stringify(m))
       const out = path.join(tmp, `gateonce-${h}.out`), count = path.join(tmp, `gateonce-${h}.count`)
       execFileSync('node', [GATE, 'g', out, '--', `echo run >> ${count}`], { env: hookEnv(h), encoding: 'utf8', cwd: tmp })
-      const done = waitFor(() => fs.existsSync(`${out}.result`))
-      sleep(1500)
+      const r = ranOnce(out, count)
       fs.chmodSync(seatsDir, 0o700)
-      return { done, runs: fs.existsSync(count) ? fs.readFileSync(count, 'utf8').split('\n').filter(Boolean).length : 0 }
+      return r
     },
     ok: ({ done, runs }) => done && runs === 1 },
   // B2: a partial listing is an unknown layout, never a whole one missing a pane, and an empty focus is an unknown one.
