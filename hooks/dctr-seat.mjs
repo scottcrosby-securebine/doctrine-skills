@@ -488,15 +488,22 @@ try {
       const created = seatCommand(renderer, file, label, handoffPath(marker, payload.agent_id))
       let terminal = null   // herdr-core's, recorded so a pane already gone can still have its finished terminal removed
       const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, cwd, created, label); terminal = r.terminal; return r.paneId }
+      // herdr-core runs the renderer from the moment its pane exists, and a create call can fail after that (a timeout, a
+      // reply with no pane): there a failed create may have left a running pane, so it stands down rather than make a second (B1).
+      const unknownPane = (e) => `the herdr-core create call failed (${String(e.message).split('\n')[0]}); a pane running this seat's renderer may exist that nothing records, so no second one is made`
       if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
         try { paneId = split(splitTarget(occupants, me.pane, layout)) }
         catch (e) {
+          if (host.startsAtCreation) return unknownPane(e)
           log(`split failed (${String(e.message).split('\n')[0]}); retrying from the session pane`)
           try { paneId = split(splitTarget([], me.pane, null)) }
           catch (e2) { log(`retry failed (${String(e2.message).split('\n')[0]}); falling back to a tab`); paneId = null }
         }
       }
-      if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, cwd, created, label))
+      if (!paneId) {
+        try { ({ tabId, paneId, terminal } = host.newTab(me, cwd, created, label)) }
+        catch (e) { if (host.startsAtCreation) return unknownPane(e); throw e }
+      }
 
       // Finalize the marker the instant the pane exists, BEFORE any step that can throw — the
       // pane command and the sidebar report. Once it is on disk the seat is tracked, so whatever

@@ -446,7 +446,8 @@ if (argv[0] === '--run') {
       let tabId = null, paneId = null
       // `terminal` is herdr-core's, recorded so a pane already gone can still have its finished terminal removed.
       // `launched` is whether the check may be running: herdr-core runs it from the moment its pane exists, the TUI
-      // from `run`. A started check is never rolled back and never launched a second time (RT4).
+      // from `run`. On herdr-core it is set before the first create call, because a create can fail after its pane exists
+      // (a timeout, a reply with no pane), so from there on no failure retries, falls back to a tab or runs detached (B1).
       let terminal = null, launched = false
       const recordOf = () => ({ agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) })
       // Moved gates from ended sessions: dropped only on a server-wide not-found (B3), then counted
@@ -463,13 +464,16 @@ if (argv[0] === '--run') {
         // its own; the herdr TUI ignores that one and is typed the line with its ids below.
         const runLine = (p, t) => gateRunCommand(self, outFile, marker, p, t, me.space, label, command)
         const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, process.cwd(), runLine(SELF_PANE, ''), label); terminal = r.terminal; return r.paneId }
+        launched = host.startsAtCreation
         if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
-          // The catch retries the split from the session pane, and the retry sets paneId null for the tab path.
+          // On the TUI the catch retries the split from the session pane, and the retry sets paneId null for the tab path.
           try { paneId = split(splitTarget(occupants, me.pane, layout)) }
-          catch { try { paneId = split(splitTarget([], me.pane, null)) } catch { paneId = null } }
+          catch (e) {
+            if (launched) throw e
+            try { paneId = split(splitTarget([], me.pane, null)) } catch { paneId = null }
+          }
         }
         if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, process.cwd(), runLine(SELF_PANE, SELF_PANE), tabLabel(GATE_ROLE, n)))
-        launched = host.startsAtCreation
         // The split path had no name at all until 2026-09-07: `splitArgs` takes no label and nothing
         // renamed afterwards, so a side-column gate pane was nameless for its whole run — the
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
@@ -482,6 +486,15 @@ if (argv[0] === '--run') {
         if (codexShell(process.env)) indexPaneSession(me.pane, sessionId)
       } catch (e) {
         const record = recordOf()
+        if (launched && !paneId && !tabId) {
+          // A herdr-core create call failed, and its pane may exist and run the check, but nothing names that pane. The
+          // check finds its own pane at completion (SELF_PANE) and writes the result either way, so the reservation goes:
+          // a record with no pane would hold a column slot that nothing ever frees.
+          try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
+          const why = String(e.message).split('\n')[0]
+          hookLog(sessionId, `gate "${label}": the herdr-core create call failed (${why}); the check may be running in a pane nothing records, so it is not retried, not moved to a tab and not run detached`)
+          return { name, paneId: null, tabId: null, unknown: why }
+        }
         if (launched) {
           // The check is RUNNING in its pane, so what failed came after it started. Closing the pane would kill it and
           // the detached fallback would run it a second time against the same transcript and result. It runs on where
@@ -530,6 +543,10 @@ if (argv[0] === '--run') {
     })
   } catch (e) {
     detached(`could not place a pane — ${String(e.message).split('\n')[0]}`)
+  }
+  if (placed.unknown) {
+    console.log(`${PREFIX}-gate: ${placed.name} may be running in a pane this launcher could not name (the herdr-core create call failed: ${placed.unknown}); it was not started again. transcript ${outFile}, done when ${outFile}.result exists; if no pane shows "${label}", it never started and no result will come`)
+    process.exit(0)
   }
   hookLog(sessionId, `gate "${label}" ${placed.name}: ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}, output ${outFile}`)
   console.log(`${PREFIX}-gate: ${placed.name} running in ${placed.tabId ? 'tab ' + placed.tabId : 'pane ' + placed.paneId}; transcript ${outFile}, done when ${outFile}.result exists`)
