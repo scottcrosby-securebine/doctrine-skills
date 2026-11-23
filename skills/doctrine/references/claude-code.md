@@ -31,7 +31,7 @@ A dead pid, or a terminal status with no result, is a failed seat. A wrapper tha
 
 **Dispatch it read-only.** Say so in the dispatch's own words. It picks its sandbox from how the request reads, before Codex sees the task, and it defaults to write-capable.
 
-**Display.** In the herdr TUI, as "herdr TUI and herdr-core" below decides it, the seat hook keeps the codex seat's pane open and follows the job's log there until the record leaves running, so open no second pane. Where the hook is not running, skip the display: display never blocks a seat or a pass.
+**Display.** In the herdr TUI and in herdr-core, as "herdr TUI and herdr-core" below decides it, the seat hook keeps the codex seat's pane open and follows the job's log there until the record leaves running, so open no second pane. Where the hook is not running, skip the display: display never blocks a seat or a pass.
 
 ## Research engines
 
@@ -57,6 +57,6 @@ Doctrine supports two terminal hosts: the herdr TUI, which ordinary terminals ru
 3. Otherwise, `HERDR_ENV` is `1`: the herdr TUI.
 4. Otherwise neither.
 
-In herdr-core every doctrine hook stands down from herdr, so these do not run there in this release: seat panes, gate panes, `doctrine-pane`'s launcher, auto-cycle's typer, orchestrated lanes, which need the herdr TUI, and sidebar tokens. Seats still run, without a pane, and the gate launcher runs the check detached and writes `<out-file>.result` as it does outside herdr.
+In herdr-core, seat panes and gate panes run in the Herdr.app window, placed by the same rules as in the herdr TUI: right of your pane, stacked down to six, then tabs in your space. Herdr.app cannot rename a pane, so each such pane prints its label as its first line, and a focused one stays open with its result. The other doctrine hooks stand down from herdr there, so these do not run in this release: `doctrine-pane`'s launcher, auto-cycle's typer, orchestrated lanes, which need the herdr TUI, and sidebar tokens.
 
 When the user asks you there to start an agent or a program they will watch, do not use `herdr`, even when it is on PATH and its server answers: anything it starts lands in the herdr TUI, out of sight of the person in Herdr.app. For starting, reading, messaging and waiting on agents and programs, follow `hc --skill`. For what the person sees in the window, follow `herdr-app --skill`. Where either command is missing, tell the user which, and do not fall back to `herdr`.
