@@ -65,7 +65,7 @@ import {
   PREFIX, GATE_ROLE, agentName, tabLabel, placeSkipReason, nextIndex, stopAction, shq, SELF_PANE,
   seatPlacement, splitTarget, staleSideSeats, gateRunCommand, exitLine, elapsedLabel, ELAPSED_MS, shellSessionId, gateWaits, codexShell } from './dctr-lib.mjs'
 import { seatsDir, hookLog, liveSeats, withPlacementLock, sideOccupants, reserveMarker, writeMarker, movedGatePath, withDirLock, dropGoneGates, movedGateNames, sideColumnReason, indexPaneSession, writeDetachedGate } from './dctr-state.mjs'
-import { hostFor, gateAnswer } from './dctr-host.mjs'
+import { hostFor, gateAnswer, dropHandoff } from './dctr-host.mjs'
 
 
 const self = path.resolve(process.argv[1])
@@ -263,7 +263,7 @@ if (argv[0] === '--run') {
       // on the root was read as an observed absence and dropped the marker, orphaning the tab for
       // the rest of the session, because staleSideSeats never judges a tab seat.
       let mine, listFailed = null
-      // Separated by the listFailed FLAG: a failed list becomes `unknown`, which keeps the record and closes nothing.
+      // herdr-lint: separated by the listFailed FLAG: a failed list becomes `unknown`, which keeps the record and closes nothing.
       try {
         const tabs = host.tabs()
         mine = tabs.find((t) => t.tab_id === tabId)
@@ -286,6 +286,7 @@ if (argv[0] === '--run') {
         // The record stays, for the same reason as the pane branch below: this call kills the shell,
         // and a close that fails must leave SessionEnd something to act on. A tab marker is swept by
         // SessionEnd rather than by the next placement, since staleSideSeats never judges one.
+        // herdr-lint: a close that throws closes nothing and drops nothing: the record stays for SessionEnd.
         try { host.closeTab(tabId) } catch { /* the record stays for SessionEnd */ }
       }
     } else if (paneId) {
@@ -293,6 +294,7 @@ if (argv[0] === '--run') {
       // that is unfocused: this bare catch fed `stopAction` an undefined it could not distinguish
       // from an observed absence, so a transport blip closed the gate pane the user was watching.
       let pane, gone = false
+      // herdr-lint: a lookup that throws leaves `pane` unset, which stopAction answers as unknown: nothing closes, the record stays.
       try { const info = host.paneInfo(paneId); if (info.exists) pane = info; else gone = true }
       catch { /* unknown: stopAction answers that below */ }
       // No `lookupFailed` branch: a throw leaves `pane` unassigned and stopAction already answers
@@ -320,6 +322,7 @@ if (argv[0] === '--run') {
         // costs one gate name until the next placement and is self-correcting: its pane is gone from
         // the layout, so `staleSideSeats` drops it there, and SessionEnd's own close answers
         // `pane_not_found`, which it already reads as "already gone".
+        // herdr-lint: a close that throws drops nothing: the record stays for SessionEnd.
         try { host.closePane(paneId) } catch { /* the shell may already be gone */ }
       }
     } else dropMarker()
@@ -390,6 +393,7 @@ if (argv[0] === '--run') {
   if (reason) detached(reason)
 
   let placed
+  // herdr-lint: its catch is the detached path, which closes nothing and drops no marker.
   try {
     fs.mkdirSync(seatsDir(sessionId), { recursive: true })
     placed = withPlacementLock(sessionId, () => {
@@ -405,6 +409,7 @@ if (argv[0] === '--run') {
       try { seats = liveSeats(sessionId) } catch (e) { throw new Error(`could not read this session's seat markers (${e.message})`) }
       for (const s of staleSideSeats(seats, layout)) {
         try { fs.rmSync(path.join(seatsDir(sessionId), `${s.agent}.json`), { force: true }) } catch { /* best effort */ }
+        dropHandoff(path.join(seatsDir(sessionId), `${s.agent}.json`), s.agent_id)   // a seat's, when the stale marker is one
       }
       seats = seats.filter((s) => !staleSideSeats([s], layout).length)
       // This session id's MOVED gate names are taken too. `claude --resume` keeps the id, this seats
@@ -439,6 +444,10 @@ if (argv[0] === '--run') {
       if (!marker) throw new Error('could not allocate a gate name')
 
       let tabId = null, paneId = null
+      // `terminal` is herdr-core's, recorded so a pane already gone can still have its finished terminal removed.
+      // `launched` is whether the check may be running: herdr-core runs it from the moment its pane exists, the TUI
+      // from `run`. A started check is never rolled back and never launched a second time (RT4).
+      let terminal = null, launched = false
       // Moved gates from ended sessions: dropped only on a server-wide not-found (B3), then counted
       // by sideOccupants below when this layout carries their pane (B2).
       dropGoneGates((msg) => hookLog(sessionId, `gate "${label}": ${msg}`), (g) => gateAnswer(host, g))
@@ -452,7 +461,6 @@ if (argv[0] === '--run') {
         // The `--run` line. herdr-core runs it at creation, before the ids exist, so it is handed SELF_PANE and finds
         // its own; the herdr TUI ignores that one and is typed the line with its ids below.
         const runLine = (p, t) => gateRunCommand(self, outFile, marker, p, t, me.space, label, command)
-        let terminal = null   // herdr-core's, recorded so a pane already gone can still have its finished terminal removed
         const split = (t) => { const r = (t.direction === 'right' ? host.splitRight : host.splitDown)(t.pane, process.cwd(), runLine(SELF_PANE, ''), label); terminal = r.terminal; return r.paneId }
         if (occupants && seatPlacement(occupants, me.pane) === 'pane') {
           // The catch retries the split from the session pane, and the retry sets paneId null for the tab path.
@@ -460,6 +468,7 @@ if (argv[0] === '--run') {
           catch { try { paneId = split(splitTarget([], me.pane, null)) } catch { paneId = null } }
         }
         if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, process.cwd(), runLine(SELF_PANE, SELF_PANE), tabLabel(GATE_ROLE, n)))
+        launched = host.startsAtCreation
         // The split path had no name at all until 2026-09-07: `splitArgs` takes no label and nothing
         // renamed afterwards, so a side-column gate pane was nameless for its whole run — the
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
@@ -467,16 +476,28 @@ if (argv[0] === '--run') {
         if (!tabId) try { host.renamePane(paneId, label) } catch (e) { hookLog(sessionId, `gate "${label}": rename of ${paneId} failed (${String(e.message).split('\n')[0]})`) }
         writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) })
         host.run(paneId, runLine(paneId, tabId))
+        launched = true
         // A Codex session's gate is indexed for the /clear sweep, which finds a pane's sessions by it (E10-D22).
         if (codexShell(process.env)) indexPaneSession(me.pane, sessionId)
       } catch (e) {
+        const record = { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag, ...(terminal ? { terminal } : {}) }
+        if (launched) {
+          // The check is RUNNING in its pane, so what failed came after it started. Closing the pane would kill it and
+          // the detached fallback would run it a second time against the same transcript and result. It runs on where
+          // it is; its record is written again in case writeMarker was what failed, and the placement stands.
+          let published = false
+          try { writeMarker(marker, record); published = true } catch { /* said below */ }
+          hookLog(sessionId, `gate "${label}": ${String(e.message).split('\n')[0]}, after the check started in ${tabId || paneId}; it runs on there, ${published ? 'recorded for SessionEnd' : 'with NO record SessionEnd can reach'}`)
+          return { name, paneId, tabId }
+        }
         // Close FIRST, then drop the record, and only if the close was answered. This runs in the
         // launcher process rather than inside the pane's own shell, so the ordering the completion
         // path is forced into does not apply here — and removing the record first left a failed
         // rollback holding a live pane that nothing could ever find.
         let orphaned = false
         // The seam answers 'gone' for a pane or tab already gone and throws for anything else, which is an orphan.
-        if (paneId || tabId) try { if (tabId) host.closeTab(tabId); else host.closePane(paneId) }
+        // herdr-lint: a close that throws is an orphan: its record is published, never dropped.
+        if (paneId || tabId) try { if (tabId) host.closeTab(tabId, terminal); else host.closePane(paneId, terminal) }
         catch { orphaned = true }
         if (!orphaned) try { fs.rmSync(marker, { force: true }) } catch { /* nothing to undo */ }
         else {
@@ -495,7 +516,7 @@ if (argv[0] === '--run') {
           // SessionEnd could reach a pane whose record was still reserveMarker's `{}`.
           let published = false
           try {
-            writeMarker(marker, { agent: name, role: GATE_ROLE, n, tabId, paneId, file: outFile, label, sessionPane: me.pane, ...host.tag })
+            writeMarker(marker, record)
             published = true
           } catch (we) { hookLog(sessionId, `gate "${label}": could not publish a record for the pane it could not close (${String(we.message).split('\n')[0]})`) }
           hookLog(sessionId, published
