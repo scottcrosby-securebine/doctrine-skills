@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 import {
   hostOf, seatTranscriptPath, codexTaskName, renderRollout, renderRecord, clearSweepSkip, clearSweepTargets, shellSessionId,
   paneLabel, transcriptPath, restoreSkip, gateWaits, sweepAction, codexShell,
+  placeSkipReason,
 } from './dctr-lib.mjs'
 import { sleepMs, liveWork, sideOccupants } from './dctr-state.mjs'
 
@@ -375,14 +376,16 @@ clause('clause 3f — the staged ending session carries a seat and a running gat
     !gateWaits('/usr/bin/codex\0exec\0') && !gateWaits('bash\0-c\0codex-linux-sandbox --x\0'),
     'gateWaits misread a PID 1 command line')
 
-  // E10H-B4. The launch codex.md gives the claude -p red team: `env -u HERDR_ENV -u HERDR_PANE_ID -u
+  // E10H-B4. The launch codex.md gives the claude -p red team: `env -u HERDR_ENV -u HERDR_PANE_ID -u HC_TERMINAL_ID -u
   // CLAUDE_CODE_SESSION_ID node .../dctr-gate.mjs red-team <out> -- ...`, from a Codex shell (CODEX_SESSION_ID kept),
   // outside the sandbox (init PID 1), where it detaches. A short sleep stands in for claude -p.
   fs.rmSync(stateOf(SESSION), { recursive: true, force: true })
   fs.writeFileSync(calls, '')
   const out4 = path.join(tmp, 'g', 'red-team.out')
-  const rtEnv = { ...genv, DCTR_PID1_FILE: init }
-  for (const k of ['HERDR_ENV', 'HERDR_PANE_ID', 'CLAUDE_CODE_SESSION_ID']) delete rtEnv[k]
+  const rtEnv = { ...genv, HC_TERMINAL_ID: 't1', DCTR_PID1_FILE: init }
+  for (const k of ['HERDR_ENV', 'HERDR_PANE_ID', 'HC_TERMINAL_ID', 'CLAUDE_CODE_SESSION_ID']) delete rtEnv[k]
+  clause('clause 1ac0 — with HC_TERMINAL_ID left set, as a Herdr.app shell has it, the launcher would place a pane: the prefix clears it too',
+    placeSkipReason({ ...rtEnv, HC_TERMINAL_ID: 't1' }) === null && placeSkipReason(rtEnv) !== null, JSON.stringify(placeSkipReason(rtEnv)))
   let so4 = ''
   try { so4 = execFileSync('node', [gate, 'red-team', out4, '--', 'sh', '-c', 'sleep 2; echo verdict'], { encoding: 'utf8', timeout: 30000, env: rtEnv }) } catch (e) { so4 = String(e.stdout || '') + String(e.stderr || '') }
   process.env.TMPDIR = tmp
