@@ -115,6 +115,10 @@ export function skipReason(env) {
   return null
 }
 
+/** skipReason for the two paths that place panes in both hosts, the seat hook and the gate launcher (issue #111):
+ *  herdr-core is a host for them, not a reason to stand down. Every other hook keeps skipReason. */
+export const placeSkipReason = (env) => (termHost(env) === 'herdr-core' ? null : skipReason(env))
+
 /** One rendered line, or null for a record that shows nothing. Pure; the renderer does the I/O. */
 export function renderRecord(rec, { head = RESULT_HEAD, tail = RESULT_TAIL } = {}) {
   if (!rec || rec.type === 'attachment') return null
@@ -514,18 +518,30 @@ export function containerIdFromMountinfo(text) {
  * two and re-balances by itself when a mid-column seat closes and donates its rows to a neighbour.
  * `layoutPanes` is the observed layout (pane_id + rect); without it the newest side pane stands in.
  * `--no-focus` for the same reason as the tab path: a seat must never steal the user's cursor.
+ *
+ * The decision is `splitTarget`, shared by both hosts through the host seam (dctr-host.mjs); `splitPaneArgs` is
+ * the herdr TUI's argv for it. herdr-core's layout carries no rects, so every height reads 0 there and the reduce
+ * keeps the OLDEST side seat: the column halves that pane each time, the skew this paragraph measures.
  */
-export function splitArgs(liveSeats, sessionPaneId, layoutPanes, cwd) {
+export function splitTarget(liveSeats, sessionPaneId, layoutPanes) {
   const side = liveSeats.filter(isSideSeat)
-  if (!side.length) {
-    return ['pane', 'split', sessionPaneId, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
-  }
+  if (!side.length) return { pane: sessionPaneId, direction: 'right' }
   let target = side[side.length - 1]
   if (layoutPanes?.length) {
     const height = new Map(layoutPanes.map((p) => [p.pane_id, p.rect?.height ?? 0]))
     target = side.reduce((a, b) => ((height.get(b.paneId) ?? 0) > (height.get(a.paneId) ?? 0) ? b : a))
   }
-  return ['pane', 'split', target.paneId, '--direction', 'down', '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
+  return { pane: target.paneId, direction: 'down' }
+}
+
+/** The herdr TUI's argv for one split: right founds the column at SIDE_RATIO, down stacks under the target. */
+export const splitPaneArgs = (pane, direction, cwd) => (direction === 'right'
+  ? ['pane', 'split', pane, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
+  : ['pane', 'split', pane, '--direction', 'down', '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)])
+
+export function splitArgs(liveSeats, sessionPaneId, layoutPanes, cwd) {
+  const { pane, direction } = splitTarget(liveSeats, sessionPaneId, layoutPanes)
+  return splitPaneArgs(pane, direction, cwd)
 }
 
 /** What the stand-down line calls a throw. execFileSync errors carry `spawnargs`; a ReferenceError
@@ -630,6 +646,9 @@ export const movedGateVerdict = (answer) => (answer === 'not_found' ? 'drop' : '
  *  with it. For a side-column gate `tabId` is empty and the WORKSPACE IS NOT: the launcher passes
  *  HERDR_WORKSPACE_ID on both paths, and only the empty tab id is what sends the completion down the
  *  pane branch. */
+/** What a herdr-core gate passes in the pane and tab slots: its command is fixed at creation, before either id exists,
+ *  so `--run` reads its own pane (and, for a tab gate, its tab) from herdr-app ls when it completes. */
+export const SELF_PANE = '@self'
 export const gateRunCommand = (script, out, marker, paneId, tabId, workspace, label, command) =>
   `node ${shq(script)} --run ${shq(out)} ${shq(marker)} ${shq(paneId || '')} ${shq(tabId || '')} ${shq(workspace || '')} ${shq(label)} -- ${[].concat(command).map(shq).join(' ')}`
 

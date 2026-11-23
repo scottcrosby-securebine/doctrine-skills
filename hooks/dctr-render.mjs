@@ -2,7 +2,11 @@
 //
 // Runs inside the pane a seat's tab owns, and follows that seat's own transcript as it is written.
 //
-//   node dctr-render.mjs <path-to-agent-transcript.jsonl>
+//   node dctr-render.mjs <path-to-agent-transcript.jsonl> [<label> <hand-off-file>]
+//
+// The two optional arguments are herdr-core's (issue #111), which can neither rename a pane nor type a line into one:
+// the label is printed first, and when the hand-off file appears (the codex watcher, written whole by the seat hook)
+// the renderer stops and runs its line under sh in its place, exiting with that line's status.
 //
 // This exists rather than a PostToolUse hook because a hook fires once per tool call per seat, in
 // every project, for every installer. One reader per pane costs one process for the life of a seat
@@ -13,9 +17,10 @@
 // first record yet.
 
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import { renderRecord, renderRollout, hostOf } from './dctr-lib.mjs'
 
-const file = process.argv[2]
+const [, , file, label, handoff] = process.argv
 if (!file) { console.error('usage: dctr-render.mjs <transcript.jsonl>'); process.exit(2) }
 // A Codex seat's transcript is its rollout, whose records have another shape (E10-D7). The file name says which.
 const render = hostOf({ transcript_path: file }) === 'codex' ? renderRollout : renderRecord
@@ -25,6 +30,7 @@ let offset = 0
 let carry = ''
 let announced = false
 
+if (label) console.log(label)
 console.log(`\x1b[2m── doctrine seat · ${file}\x1b[0m`)
 
 /** Reads whatever has been appended since the last pass and renders complete lines only. */
@@ -62,5 +68,12 @@ function pump() {
   }
 }
 
-setInterval(pump, POLL_MS)
+const timer = setInterval(() => {
+  pump()
+  if (!handoff || !fs.existsSync(handoff)) return
+  let line
+  try { line = fs.readFileSync(handoff, 'utf8') } catch { return }
+  clearInterval(timer)
+  spawn('sh', ['-c', line], { stdio: 'inherit' }).on('exit', (code) => process.exit(code ?? 1))
+}, POLL_MS)
 pump()

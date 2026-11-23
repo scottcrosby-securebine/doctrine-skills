@@ -74,6 +74,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SIDE_CAP, isSideSeat, seatPlacement, shq, skipReason, splitArgs, staleSideSeats, tabCreateArgs, shellSessionId } from './dctr-lib.mjs'
+import { gateAnswer, herdrHost } from './dctr-host.mjs'
 import { acquireLock, breakIfOrphaned, dropGoneGates, herdr, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
 
 const SETTLE_MS = 400          // one beat after a write, so the echo has somewhere to land
@@ -362,7 +363,7 @@ async function open(label, tee, connect) {
       // not look", which counts as full, never as empty.
       // A gate moved here by another session's SessionEnd is dropped only on a server-wide not-found
       // (B3), and counted by sideOccupants while this layout carries its pane (B2).
-      dropGoneGates()
+      dropGoneGates(() => {}, (g) => gateAnswer(herdrHost(), g))
       const occupants = sideOccupants(liveSeats(sessionId), layout)
       if (!occupants) die('cannot observe the side column; not splitting blind')
 
