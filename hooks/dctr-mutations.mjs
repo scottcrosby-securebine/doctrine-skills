@@ -118,8 +118,10 @@ const FILES = ['dctr-lib.mjs', 'dctr-state.mjs', 'dctr-pane.mjs', 'dctr-pane.sel
  *  The page suite, measured standalone on one host, three runs: 2.66-2.75s, beside gauge 2.22-2.28s on the same host;
  *  it goes after gauge and before the lane watcher.
  *  The host suite (issue #111), measured standalone on one host, three runs: 42.5s each, beside teardown 25.5s on the
- *  same host; it goes after codex.hooks and before cycle. */
-const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-page.selftest.mjs', 'dctr-lanewatch.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-host.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
+ *  same host; it goes after codex.hooks and before cycle.
+ *  The pane suite gained its both-hosts table and was measured again 2026-11-24, one run each on one loaded host: teardown
+ *  27s, typer 46s, pane 68s, codex.hooks 72s, host 60-100s, cycle 136s. Pane moved behind typer and teardown. */
+const SUITES = ['dctr-record.selftest.mjs', 'dctr-codex.seams.selftest.mjs', 'dctr-project.history.selftest.mjs', 'dctr-orchestrate.selftest.mjs', 'dctr-project.selftest.mjs', 'dctr-notify.selftest.mjs', 'dctr-roundguard.selftest.mjs', 'dctr-restore.selftest.mjs', 'dctr-bridge.selftest.mjs', 'dctr-doctor.selftest.mjs', 'dctr-seat.selftest.mjs', 'dctr-guard.selftest.mjs', 'dctr-gauge.selftest.mjs', 'dctr-page.selftest.mjs', 'dctr-lanewatch.selftest.mjs', 'dctr-codex.selftest.mjs', 'dctr-seat.codex.selftest.mjs', 'dctr-gate.selftest.mjs', 'dctr-typer.selftest.mjs', 'dctr-seat.teardown.selftest.mjs', 'dctr-pane.selftest.mjs', 'dctr-codex.hooks.selftest.mjs', 'dctr-host.selftest.mjs', 'dctr-cycle.selftest.mjs', 'dctr-lane.selftest.mjs', 'dctr-send.selftest.mjs']
 
 /** Each entry reverts one repair to what it replaced. `clause` names what should go red — it is
  *  reported when the mutation survives, so the failure says which behaviour is unpinned. */

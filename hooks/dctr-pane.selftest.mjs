@@ -1218,7 +1218,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
     { row: 'a tab made whose pane cannot be named is reported as on screen and recorded nowhere, and no state is written',
       // herdr-core only: the TUI's reply names its root pane. The TUI half runs the same open with no fault.
       run(h) { fresh(h, SIDE_CAP, h === 'hc' ? { lsJunk: [{ nopane: `P${1000 * (n + 1) + 2}` }] } : {}); return go(['open', 'x', W.tee, CONNECT]) },
-      ok: (r, h) => (h === 'hc' ? r.code === 1 && /pane in tab T\d+ was created and then the open failed/.test(r.err) && !readState_() && creates() === 1 : r.code === 0) },
+      ok: (r, h) => (h === 'hc' ? r.code === 1 && /pane in tab T\d+ was created and then the open failed \(its tab was made and the pane in it could not be read\)/.test(r.err) && !readState_() && creates() === 1 : r.code === 0) },
     { row: 'a session whose own pane cannot be named places nothing',
       run(h) { return go(['open', 'x', W.tee, CONNECT], h === 'hc' ? { fail: { 'herdr-app ls': 'transport' } } : { HERDR_PANE_ID: undefined }) },
       ok: (r, h) => r.code === 1 && (h === 'hc' ? /could not place this terminal/ : /no HERDR_PANE_ID/).test(r.err) && creates() === 0 },

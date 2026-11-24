@@ -279,8 +279,11 @@ for (const [h, host] of Object.entries(HOSTS)) {
       try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x')) } finally { process.env.PATH = oldPath }
       clause('clause 1o7 hc — with no python3 on PATH, cannotType names python3 and typeText refuses with nothing typed and no host call', /python3/.test(why ?? '') && refusal?.nothingTyped && /python3/.test(refusal.threw) && calls().length === no, JSON.stringify({ why, refusal }))
       clause('clause 3o7 hc — that PATH really has no python3, proved without the seam', spawnSync('python3', ['-V'], { env: { ...process.env, PATH: bare } }).error?.code === 'ENOENT', '')
+      // A terminal of its own: a remover still waiting from an earlier clause may name t1, and would remove it once finished.
       fresh()
-      const bad = [{ state: 'finished', foreground: undefined }].map((hcGet) => { fresh({ hcGet }); return tried(() => host.recorderAlive('P1', 't1', 'x')) })
+      const over = host.splitRight('P1', '/', 'script x', 'lbl')
+      { const m = model(); m.terminals[over.terminal] = 'finished'; fs.writeFileSync(STATE, JSON.stringify(m)) }
+      const ended = tried(() => host.recorderAlive(over.paneId, over.terminal, over.recorder)), endedGet = JSON.parse(direct('hc', ['get', over.terminal]).stdout)
       fresh()
       const goneT = tried(() => host.recorderAlive('P1', 't99', 'x'))
       fresh({ hcGet: { foreground: {} } })
@@ -288,11 +291,11 @@ for (const [h, host] of Object.entries(HOSTS)) {
       fresh({ hcGet: { foreground: { argv: ['sh', '-c', 'script y'] } } })
       const other = tried(() => host.recorderAlive('P1', 't1', 'script x'))
       clause('clause 1m2 hc — a finished or removed terminal, and another command in the foreground, are not the recorder; a reply naming no foreground THROWS',
-        bad[0] === false && goneT === false && other === false && noArgv?.threw, JSON.stringify({ bad, goneT, other, noArgv }))
+        ended === false && goneT === false && other === false && noArgv?.threw, JSON.stringify({ ended, goneT, other, noArgv }))
       fresh()
       const g = direct('hc', ['get', 't1'])
-      clause('clause 3m hc — the fake really answers a live terminal with its size and foreground, not_found on exit 3, and refuses an attach with no terminal on stdin, proved without the seam',
-        JSON.parse(g.stdout).cols === 132 && Array.isArray(JSON.parse(g.stdout).foreground.argv) && direct('hc', ['get', 't99']).status === 3 && direct('hc', ['attach', 't1']).status === 1, g.stdout)
+      clause('clause 3m hc — the fake really answers a live terminal with its size and foreground, a finished one with neither program nor error, not_found on exit 3, and refuses an attach with no terminal on stdin, proved without the seam',
+        endedGet.state === 'finished' && !('foreground' in endedGet) && JSON.parse(g.stdout).cols === 132 && Array.isArray(JSON.parse(g.stdout).foreground.argv) && direct('hc', ['get', 't99']).status === 3 && direct('hc', ['attach', 't1']).status === 1, g.stdout)
     }
   }
 

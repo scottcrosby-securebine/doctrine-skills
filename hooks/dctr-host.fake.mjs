@@ -161,7 +161,8 @@ async function attach(t, st) {
   if (st !== 'live') { process.stdin.setRawMode(false); process.stderr.write(`error: no terminal "${t}"\n`); process.exit(3) }
   if (fail !== 'hang') { attached = true; process.stdout.write('\x1b[?1004h\x1b[2Jscreen') }
   await new Promise((r) => setTimeout(r, 30000))
-  process.exit(1)
+  process.kill(process.pid, 'SIGKILL')   // not exit, which waits on a terminal nobody reads any more
+  await new Promise(() => {})
 }
 
 if (bin === 'herdr') {
