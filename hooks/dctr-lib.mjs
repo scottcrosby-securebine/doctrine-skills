@@ -540,11 +540,6 @@ export const splitPaneArgs = (pane, direction, cwd) => (direction === 'right'
   ? ['pane', 'split', pane, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
   : ['pane', 'split', pane, '--direction', 'down', '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)])
 
-export function splitArgs(liveSeats, sessionPaneId, layoutPanes, cwd) {
-  const { pane, direction } = splitTarget(liveSeats, sessionPaneId, layoutPanes)
-  return splitPaneArgs(pane, direction, cwd)
-}
-
 /** What the stand-down line calls a throw. execFileSync errors carry `spawnargs`; a ReferenceError
  *  or TypeError from this code does not, and calling one "herdr refused an action" sent a reader
  *  to the herdr log for a defect in the hook. */

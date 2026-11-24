@@ -6,7 +6,7 @@
 //   DCTR_FAKE_STATE  the model, JSON, rewritten whole by rename after every change
 //   DCTR_FAKE_CALLS  one JSON line per call, {bin, args}, appended
 //   DCTR_FAKE_FAIL   JSON {"<bin> <verb>": "transport" | "notfound" | "empty"}: that call fails as a transport error, answers
-//                    not-found in its CLI's own shape, or answers with an empty reply. The verb is the first two words of a
+//                    not-found in its CLI's own shape (herdr and herdr-app), or answers with an empty reply. The verb is the first two words of a
 //                    herdr call (`pane get`), the first word of a herdr-app call (`ls`), or `do <command>` (`do pane.close`).
 //                    "after", on a call that creates a pane or tab, fails it as a transport error only once the pane or
 //                    tab is in the model and its program started: a create that timed out or answered with no pane.
@@ -283,7 +283,6 @@ if (bin === 'herdr-app') {
 if (bin === 'hc') {
   const t = args[1], st = () => JSON.parse(fs.readFileSync(STATE, 'utf8')).terminals?.[t]
   const err = (kind, code) => { process.stderr.write(`${JSON.stringify({ error: { kind, message: `${kind}: ${t}` } })}\n`); process.exit(code) }
-  if (fail === 'notfound') err('not_found', 3)
   if (args[0] === 'get') {
     const now = st()
     if (!now || now === 'removed') err('not_found', 3)

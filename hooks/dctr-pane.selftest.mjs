@@ -1204,7 +1204,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
       },
       ok: ({ c, none }) => c.every((r) => r.code === 1 && /contained session/.test(r.err)) && /no CLAUDE_CODE_SESSION_ID/.test(none.err) && callsOf().length === 0 },
     { row: 'a create call that failed opens nothing twice: the transcript is whole, no marker, one create, and no tab in its place',
-      run(h) { fs.writeFileSync(W.tee, ''); const t = path.join(W.dir, 'old.log'); fs.writeFileSync(t, OLD); putState({}); fs.rmSync(`${W.tee}.state.json`)
+      run(h) { const t = path.join(W.dir, 'old.log'); fs.writeFileSync(t, OLD)
         fs.writeFileSync(`${t}.state.json`, JSON.stringify({ paneId: 'GONE', tee: t, label: 'x', owner: 'user', cursor: 0, ...(h === 'hc' ? { ...TAG.hc, terminal: 't9', recorder: 'r' } : {}) }))
         const r = go(['open', 'x', t, CONNECT], { fail: { [CREATE[h].split]: 'transport' } }); return { r, t } },
       ok: ({ r, t }, h) => r.code === 1 && fs.readFileSync(t, 'utf8') === OLD && creates() === 1 && fs.readdirSync(W.md).length === 0 && (h === 'hc' ? /was not tried again/.test(r.err) : /nothing was opened/.test(r.err)) },
@@ -1262,7 +1262,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
       },
       ok: ({ byState, byMarker, looked, type, enter, quiet, read }) => [byState, byMarker].every((r) => r.code === 1 && /other terminal host opened GONE/.test(r.err)) && looked === 0 && marker('GONE') && creates() === 0 && [type, enter].every((r) => r.code === 1 && /this session was opened in/.test(r.err)) && quiet && read.code === 0 },
     { row: 'type types exactly the text with no Enter, enter sends Enter alone, and each moves the cursor',
-      run() { ready(); const text = 'echo "$HOME" | cat_x:(~+) &*'; const t = go(['type', W.tee, text]), at = typedInto(), keys = count(ENTER[W.h]); fs.appendFileSync(W.tee, ''); return { t, text, at, keys, e: go(['enter', W.tee]), after: count(ENTER[W.h]) } },
+      run() { ready(); const text = 'echo "$HOME" | cat_x:(~+) &*'; const t = go(['type', W.tee, text]), at = typedInto(), keys = count(ENTER[W.h]); return { t, text, at, keys, e: go(['enter', W.tee]), after: count(ENTER[W.h]) } },
       ok: ({ t, text, at, keys, e, after }) => t.code === 0 && /ENTER NOT SENT/.test(t.out) && at === text && keys === 0 && e.code === 0 && after === 1 },
     { row: 'type and enter refuse on unread output, the user\'s pane, no profile, a control character, an exited recorder and a lookup that failed, with nothing sent',
       run(h) {
@@ -1279,8 +1279,8 @@ console.log('both hosts — one table over the fake host, every row in the herdr
         ready(); const before = fs.readFileSync(`${W.tee}.state.json`, 'utf8')
         const never = go(['type', W.tee, 'x'], { fail: { [TYPE[h]]: 'transport' } }), one = count(TYPE[h])
         const late = go(['type', W.tee, 'abc'], { fail: { [TYPE[h]]: h === 'hc' ? 'after' : 'transport' } }), two = count(TYPE[h])
-        const key = go(['enter', W.tee], { fail: { [ENTER[h]]: 'transport' } }), blank = h === 'hc' ? go(['enter', W.tee], { fail: { 'hc get': 'empty' } }) : null
-        return { never, one, late, two, key, keys: count(ENTER[h]), blank, same: fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before }
+        const key = go(['enter', W.tee], { fail: { [ENTER[h]]: 'transport' } })
+        return { never, one, late, two, key, keys: count(ENTER[h]), same: fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before }
       },
       ok: ({ never, one, late, two, key, keys, same }, h) => [never, late, key].every((r) => r.code === 1) && /may have been typed/.test(late.err) && /`read`/.test(late.err) && /may have been sent/.test(key.err) &&
         (h === 'hc' ? /nothing was typed/.test(never.err) : /may have been typed/.test(never.err)) && one === 1 && two === 2 && keys === 1 && same },
@@ -1290,15 +1290,15 @@ console.log('both hosts — one table over the fake host, every row in the herdr
     { row: 'with no python3, herdr-core refuses to open or type and names it, placing and typing nothing; the herdr TUI needs none',
       run() { ready(); const PATH = `${fakeBin}:${bare}`; const t = path.join(W.dir, 'p.log'); return { type: go(['type', W.tee, 'x'], { PATH }), open: go(['open', 'x', t, CONNECT], { PATH }) } },
       ok: ({ type, open }, h) => (h === 'hc' ? [type, open].every((r) => r.code === 1 && /python3/.test(r.err)) && creates() === 0 && typedInto() === null : type.code === 0 && open.code === 0) },
-    { row: 'a pane whose recorder never empties the transcript is refused: the last session is not shown as this one\'s and no state is written',
-      // herdr-core only: the TUI empties the transcript itself. `exec` off is a pane whose program never ran.
+    { row: 'a pane whose recorder never empties the transcript is refused on herdr-core: the last session is not shown as this one\'s and no state is written; the herdr TUI empties it itself and opens',
+      // `exec` off is a pane whose program never ran.
       run(h) {
-        if (h !== 'hc') return { code: 1, err: 'its recorder has not started', out: '' }
         const m = model(); m.exec = false; fs.writeFileSync(W.state, JSON.stringify(m))
-        fs.writeFileSync(W.tee, OLD); putState({ paneId: 'GONE', tee: W.tee, label: 'x', owner: 'user', cursor: 0, ...TAG.hc, terminal: 't9', recorder: 'r' })
+        fs.writeFileSync(W.tee, OLD); putState({ paneId: 'GONE', tee: W.tee, label: 'x', owner: 'user', cursor: 0, ...(h === 'hc' ? { ...TAG.hc, terminal: 't9', recorder: 'r' } : {}) })
         return go(['open', 'x', W.tee, CONNECT])
       },
-      ok: (r, h) => r.code === 1 && /its recorder has not started/.test(r.err) && !r.out.includes('last session') && (h !== 'hc' || (readState_().paneId === 'GONE' && teeText() === OLD && Boolean(marker(panes('T1')[1]?.pane)))) },
+      ok: (r, h) => !r.out.includes('last session') && Boolean(marker(panes('T1')[1]?.pane)) && (h === 'hc' ? r.code === 1 && /its recorder has not started/.test(r.err) && readState_().paneId === 'GONE' && teeText() === OLD
+        : r.code === 0 && readState_().paneId === panes('T1')[1].pane && teeText() === '') },
     { row: 'a herdr-core record that names no terminal or no recorder is refused before any host call',
       run(h) { const bad = (over) => { ready(h === 'hc' ? over : { host: 'herdr-core', terminal: 't2', recorder: 'r', ...over }); return go(['type', W.tee, 'x']) }; return [bad({ terminal: '' }), bad({ recorder: undefined })] },
       ok: (rs) => rs.every((r) => r.code === 1 && /names no terminal or no recorder/.test(r.err)) && callsOf().length === 0 },

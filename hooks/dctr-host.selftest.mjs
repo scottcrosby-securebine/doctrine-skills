@@ -248,11 +248,10 @@ for (const [h, host] of Object.entries(HOSTS)) {
       const fault = (f, extra = {}) => {
         fresh(extra)
         const x = host.splitRight('P1', '/', 'script x', 'lbl')
-        const t0 = Date.now()
         const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => host.typeText(x.paneId, x.terminal, text)))
         const pid = (() => { try { return Number(fs.readFileSync(`${STATE}.${x.terminal}.pid`, 'utf8')) } catch { return null } })()
         const running = (() => { if (!pid) return false; try { process.kill(pid, 0); return true } catch { return false } })()
-        return { r, pid, running, typed: typedOf(x.terminal), attaches: calls().filter((c) => c.args[0] === 'attach').length, ms: Date.now() - t0 }
+        return { r, pid, running, typed: typedOf(x.terminal), attaches: calls().filter((c) => c.args[0] === 'attach').length }
       }
       const died = fault('after'), stuck = fault('nodetach'), hung = fault('hang')
       clause('clause 1o3 hc — an attach that died after reading the text, and one that would not detach, THROW without saying nothing was typed, are sent once, and the attach is killed',

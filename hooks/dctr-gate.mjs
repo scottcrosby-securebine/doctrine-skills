@@ -476,7 +476,7 @@ if (argv[0] === '--run') {
           }
         }
         if (!paneId) ({ tabId, paneId, terminal } = host.newTab(me, process.cwd(), runLine(SELF_PANE, SELF_PANE), tabLabel(GATE_ROLE, n)))
-        // The split path had no name at all until 2026-09-07: `splitArgs` takes no label and nothing
+        // The split path had no name at all until 2026-09-07: `splitTarget` takes no label and nothing
         // renamed afterwards, so a side-column gate pane was nameless for its whole run — the
         // completion rename below fires only on a FOCUSED pane. Both sibling launchers rename after
         // a split (dctr-seat.mjs, dctr-pane.mjs). The tab path is already named by `tab create`.

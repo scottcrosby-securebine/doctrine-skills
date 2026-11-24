@@ -248,7 +248,7 @@ clause('clause 1e: the tab path creates with the same --cwd',
 }
 
 // Item 3 (user-observed, 2026-09-07): the split path never named its pane. The tab path passes
-// tabLabel into `tab create`, so an overflow gate tab is named; the split path calls splitArgs,
+// tabLabel into `tab create`, so an overflow gate tab is named; the split path calls splitTarget,
 // which takes no label, and nothing renamed afterwards. A side-column gate pane was therefore
 // nameless for its whole run, since the completion rename fires only on a FOCUSED pane. Both
 // sibling launchers rename after a split (dctr-seat.mjs, dctr-pane.mjs); this one did not.

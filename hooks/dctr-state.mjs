@@ -306,7 +306,7 @@ export function sideOccupants(seats, layout) {
   try { panes = interactivePanes() } catch { return null }
   // BOTH are narrowed, which is what this said and did not do: seats were concatenated whole, so a
   // seat marker the layout no longer carries still counted against the cap and could be handed to
-  // splitArgs as a split target in another tab.
+  // splitTarget as a split target in another tab.
   //
   // A TAB seat is dropped here too, and that is correct but easy to misread: a tab seat records its
   // TAB'S ROOT paneId, which this layout never holds. It occupies no column slot, so no placement

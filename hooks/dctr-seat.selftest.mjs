@@ -22,13 +22,19 @@ import { SESSION_END_WAIT_MS, SWEEP_WAIT_MS, PLACEMENT_WAIT_MS } from './dctr-st
 import {
   agentName, tabLabel, slug, transcriptPath, isSeatEvent, notSeatReason, skipReason, nextIndex, stopAction, anchorVerdict, shardOf, failLines, baselineReport,
   renderRecord, truncate, AGENT_NAME_RE, PREFIX, RESULT_HEAD, RESULT_TAIL, parseHerdr, shq, tabCreateArgs,
-  seatPlacement, splitArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
+  seatPlacement, splitTarget, splitPaneArgs, isSideSeat, SIDE_CAP, SIDE_RATIO, reportsSidebarRow,
   seatEnvArgs, SEAT_HISTFILE,
   metadataTokenArgs, TOKEN_TTL_MS, staleSideSeats,
   paneToken, viewRequestPath, viewRequest, containerIdFromMountinfo,
   errorLabel, paneLabel, metaPath, codexJobMatch, CODEX_ROLE, mapPool, codexPanesToClose, codexTerminal, elapsedLabel, poolShortfall, anchorCount,
   suiteOutcome, progressLine, GATE_ROLE, sweepAction, movedGateName, movedGateVerdict, termHost, herdrPane,
 } from './dctr-lib.mjs'
+
+/** The herdr TUI's argv for the split the decision chose, as the host seam builds it. */
+const splitArgs = (liveSeats, sessionPaneId, layoutPanes, cwd) => {
+  const { pane, direction } = splitTarget(liveSeats, sessionPaneId, layoutPanes)
+  return splitPaneArgs(pane, direction, cwd)
+}
 
 const execFileAsync = promisify(execFile)
 
