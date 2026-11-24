@@ -90,7 +90,8 @@ placement are the ones this skill states. These differ:
 - **`type` takes at most 1000 bytes**, counted as UTF-8, because a longer text can be split by what
   the user types at that moment. It refuses a longer one with nothing typed. Send it in shorter
   pieces: type one, `read`, then type the next.
-- **It needs python3**, which types the text. Without it `open` and `type` refuse and name it.
+- **It needs python3**, which types the text and presses Enter. Without it `open`, `type` and `enter`
+  refuse and name it.
 - **A create call that failed may still have made the pane**, with the connection running in it. The
   launcher does not try again. Look for a pane whose first line is the label, through the user if you
   cannot see the window, before you open another.
@@ -133,10 +134,10 @@ What it refuses, and none of it is advisory:
   may be a pager, may be the user mid-command. Run `read` and judge them. This covers what was on
   screen when you asked and anything that arrived while the launcher was checking — not the instant
   of the send itself, which no lock can cover, because the device is not in the transaction. That
-  instant is the one between the launcher's last look and herdr's send. In herdr-core `type` looks
-  once more when it has attached to the terminal, so there it is the one between that look and the
-  write, and a `type` that says output arrived while attaching typed nothing: `read`, judge it, and
-  type again. Enter in herdr-core has no second look.
+  instant is the one between the launcher's last look and herdr's send. In herdr-core `type` and
+  `enter` each look once more when they have attached to the terminal, so there it is the one between
+  that look and the write, and one that says output arrived while attaching sent nothing: `read`, judge
+  it, and send it again.
 - Typing before the session has a **profile**.
 - Typing when the pane is the **user's**.
 - Any **control character** in the text, because a bare CR is Enter and one write would then carry
@@ -146,8 +147,8 @@ What it refuses, and none of it is advisory:
 - Writing when it **could not observe** something. A failed stat or a failed pane lookup is "I could
   not look", never "safe".
 
-A `type` or `enter` whose own call failed says which of two things it knows. **Nothing was typed**
-means that, and you may type again once the reason it names is dealt with. **It may have been typed**,
+A `type` or `enter` whose own call failed says which of two things it knows. **Nothing was typed**,
+or sent, means that, and you may send it again once the reason it names is dealt with. **It may have been typed**,
 or sent, means nobody knows: do not repeat it, but `read`, look at the pane or ask the user, and judge
 whether it arrived.
 

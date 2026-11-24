@@ -61,9 +61,9 @@ The launcher refuses to send when:
 - it **could not check** something, since a failed lookup means "I could not look", never "safe";
 - in Herdr.app, the text is **over 1000 bytes** (UTF-8), since a longer text can be split by what you type at that moment. The agent sends it in shorter pieces, reading between them.
 
-A send whose own call failed is reported either as one that typed nothing, which the agent may type again, or as one that may have arrived, and the launcher never repeats either. After the second the agent reads and looks before it types again.
+A send whose own call failed is reported either as one that sent nothing, which the agent may send again, or as one that may have arrived, and the launcher never repeats either. After the second the agent reads and looks before it types again.
 
-The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction. In herdr that moment ends with herdr's send. In Herdr.app, typing text takes about a second to attach to the terminal, so the launcher checks the transcript again once it has, and types nothing if output arrived. Enter there has no second check.
+The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction. In herdr that moment ends with herdr's send. In Herdr.app, text and Enter each take about a second to attach to the terminal, so the launcher checks the transcript again once it has, and sends nothing if output arrived.
 
 A refusal prints `dctr-pane: <reason>` and exits 1. The agent quotes every refusal to you exactly as printed and never works around it. When `read` refuses, the agent does not open the transcript file itself. When `open` refuses, it does not start the session another way.
 
@@ -126,7 +126,7 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 ## Requirements
 
 - herdr 0.8.2 or later, with the session in a herdr pane, or Herdr.app with the session in one of its terminals. In herdr, `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app: `HC_TERMINAL_ID` set, and not a herdr TUI running inside it, which sets `TERM_PROGRAM=herdr`) is Herdr.app's even when it carries those variables. There `open` needs `herdr-app ls` to name the session's pane.
-- In Herdr.app, python3, which types the text. `open` and `type` refuse without it. In herdr nothing needs it.
+- In Herdr.app, python3, which types the text and presses Enter. `open`, `type` and `enter` refuse without it. In herdr nothing needs it.
 - A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one `open` refuses.
 - Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set, `open`, `type` and `enter` refuse, because a pane is a process on the host.
 - On Codex in a herdr TUI pane, the doctrine hooks, which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
