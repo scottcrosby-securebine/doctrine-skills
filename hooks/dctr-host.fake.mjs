@@ -15,7 +15,7 @@
 //                    program as usual, then answers with an empty pane or tab id
 //
 // The model: { spaces: [{ id, name, tabs: [{ id, name, panes: [{ pane, terminal, name? }] }] }], focus: { tab, pane },
-// n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' }, hcGet, recorderGone }. A herdr-core terminal is live from its
+// n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' }, hcGet, recorderGone, lag }. A herdr-core terminal is live from its
 // pane's creation, finished when its pane is closed or its program exits, and removed by `hc rm`, which refuses one
 // still live; `hc wait` returns once a terminal is no longer live (or after 20s). `exec` runs every created pane's command (sh -c) detached in an environment that pane would
 // have: a TUI pane's HERDR_ENV and HERDR_PANE_ID, a herdr-core terminal's HC_TERMINAL_ID. A close hangs up that
@@ -29,6 +29,8 @@
 //
 // `hc get` answers a terminal's state, size and foreground program (its pane's own argv, or a shell's when `recorderGone`
 // is set, as after the recorder exits; a TUI `pane process-info` follows the same switch), with `hcGet` merged over it.
+// `lag` is the foreground the next answers give in its place, one per call in order, as a new tab's does before its program
+// is named: 'none' is no foreground key, 'shell' is the shell Herdr.app starts a tab's program through.
 // `hc attach` plays the measured client: it needs a terminal on stdin, goes raw and queries at once, throws away what
 // arrives before it is attached (written to `<state>.<t>.early`), announces itself with ESC[?1004h, appends what it is
 // typed to `<state>.<t>.typed` and its size to `<state>.<t>.size`, and leaves on ctrl+\\. Its faults: "after" dies once
@@ -288,6 +290,9 @@ if (bin === 'hc') {
     if (!now || now === 'removed') err('not_found', 3)
     const x = tabs().flatMap(({ t: tab }) => tab.panes).find((p) => p.terminal === t)
     const foreground = now === 'live' ? { argv: state.recorderGone || !x?.argv ? ['/bin/zsh', '-l'] : x.argv } : undefined
+    const late = state.lag?.shift()
+    if (late) save()
+    if (late) out({ address: t, state: now, cols: 132, rows: 43, ...(late === 'shell' ? { foreground: { argv: ['/bin/zsh', '-lic', '"$@"; exec "$0" -li', '/bin/zsh', ...(x?.argv ?? [])] } } : {}) })
     out({ address: t, state: now, cols: 132, rows: 43, foreground, ...(state.hcGet ?? {}) })
   }
   if (args[0] === 'keys') { if (st() !== 'live') err('not_found', 3); out({ status: null, turn: 0 }) }

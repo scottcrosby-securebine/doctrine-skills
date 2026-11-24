@@ -64,6 +64,9 @@
 // nothing that arrived while this launcher was looking, is written over unseen. It does not
 // guarantee the device was silent at the instant of the send.
 //
+// On herdr-core the recorder check trails a disconnect by a moment, because `hc get`'s foreground is not live: text typed
+// in that moment can land in the local shell. Enter is checked separately, by its own call, so it can still be refused.
+//
 // And: if the
 // user is part-way through typing a command and the agent reads those bytes and misjudges them as
 // finished output, a later `type` appends to that line and Enter executes the join. No lock fixes
@@ -430,6 +433,11 @@ async function open(label, tee, connect) {
   if (launched) {
     for (const until = Date.now() + RECORDER_WAIT_MS; transcriptStamp(tee) === emptied && Date.now() < until;) await sleep(50)
     if (transcriptStamp(tee) === emptied) die(`pane ${paneId} is open and its recorder has not started, so there is no session to read; look at the pane, close it, and open again.`)
+    // Herdr.app starts a tab's program through a shell and `hc get` names what runs late, so the first write would refuse a
+    // live session as exited. Past the bound the state is written all the same: a connection that ended at once shows its error.
+    // herdr-lint: a lookup that throws is not yet. Nothing is decided on it but when to stop waiting.
+    const named = () => { try { return host.recorderAlive(paneId, terminal, recorder) } catch { return false } }
+    for (const until = Date.now() + RECORDER_WAIT_MS; !named() && Date.now() < until;) await sleep(50)
   }
   writeState(tee, { paneId, tee, label, owner: 'user', cursor: 0, marker: markerFor(paneId), ...host.tag, ...(launched ? { terminal, recorder } : {}) })
   console.log(`owner=user tee=${tee}`)

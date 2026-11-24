@@ -1299,6 +1299,24 @@ console.log('both hosts — one table over the fake host, every row in the herdr
       },
       ok: (r, h) => !r.out.includes('last session') && Boolean(marker(panes('T1')[1]?.pane)) && (h === 'hc' ? r.code === 1 && /its recorder has not started/.test(r.err) && readState_().paneId === 'GONE' && teeText() === OLD
         : r.code === 0 && readState_().paneId === panes('T1')[1].pane && teeText() === '') },
+    { row: 'open into a tab whose foreground names the recorder late returns once it does, so a type straight after goes through; the herdr TUI looks up no recorder at open',
+      run(h) {
+        const lag = ['none', 'shell', 'shell']
+        fresh(h, SIDE_CAP, h === 'hc' ? { lag } : {})
+        const open = go(['open', 'late', W.tee, CONNECT]), looked = count(READ_REC[h]), left = model().lag?.length ?? 0
+        const steps = [['own', W.tee, 'agent'], ['read', W.tee], ['profile', W.tee, 'x'.repeat(120)], ['type', W.tee, 'x']].map((a) => go(a))
+        return { open, looked, left, steps }
+      },
+      ok: ({ open, looked, left, steps }, h) => open.code === 0 && /overflow=tab/.test(open.out) && left === 0 && looked === (h === 'hc' ? 4 : 0) && steps.every((r) => r.code === 0) },
+    { row: 'open on a connection that ends at once, or whose recorder cannot be looked up, shows its output and writes its state within the bound; the herdr TUI does as it always did',
+      run(h) {
+        const t0 = Date.now(), one = (o) => { const r = go(['open', 'brief', W.tee, 'echo refused'], o); return { r, s: readState_() } }
+        fresh(h, 0, { recorderGone: true }); const ended = one({}); reap()
+        fresh(h); const failed = one({ fail: { [READ_REC[h]]: 'transport' } }); reap()
+        fresh(h); const empty = one({ fail: { [READ_REC[h]]: 'empty' } })
+        return { all: [ended, failed, empty], ms: Date.now() - t0 }
+      },
+      ok: ({ all, ms }) => ms < 55000 && all.every(({ r, s }) => r.code === 0 && /refused/.test(r.out) && /owner=user/.test(r.out) && s?.owner === 'user') },
     { row: 'a herdr-core record that names no terminal or no recorder is refused before any host call',
       run(h) { const bad = (over) => { ready(h === 'hc' ? over : { host: 'herdr-core', terminal: 't2', recorder: 'r', ...over }); return go(['type', W.tee, 'x']) }; return [bad({ terminal: '' }), bad({ recorder: undefined })] },
       ok: (rs) => rs.every((r) => r.code === 1 && /names no terminal or no recorder/.test(r.err)) && callsOf().length === 0 },
@@ -1329,6 +1347,10 @@ console.log('both hosts — one table over the fake host, every row in the herdr
     const m = model(); m.spaces[0].tabs[1].panes[0].argv = ['sh', '-c', 'script r']; fs.writeFileSync(W.state, JSON.stringify(m))
     const a = read(); m.recorderGone = true; fs.writeFileSync(W.state, JSON.stringify(m)); const b = read()
     return JSON.stringify([a, b]) === '[["script","sh"],["zsh","/bin/zsh"]]'
+  })())
+  check('the fake\'s late foreground is really missing, then the shell, then the launched line, proved without the launcher', (() => {
+    const m = model(); delete m.recorderGone; m.lag = ['none', 'shell']; fs.writeFileSync(W.state, JSON.stringify(m))
+    return JSON.stringify([1, 2, 3].map(() => JSON.parse(raw('hc', ['get', 't2']).stdout).foreground?.argv[0] ?? null)) === '[null,"/bin/zsh","sh"]'
   })())
   const order = fs.mkdtempSync(path.join(tmp, 'emptied-')), f = path.join(order, 't'); fs.writeFileSync(f, OLD)
   const ino = fs.statSync(f, { bigint: true }).mtimeNs; spawnSync('sh', ['-c', `: > '${f}'`])
