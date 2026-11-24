@@ -132,7 +132,11 @@ What it refuses, and none of it is advisory:
 - Typing while the session has **unread output**. Bytes you have not looked at may be the device,
   may be a pager, may be the user mid-command. Run `read` and judge them. This covers what was on
   screen when you asked and anything that arrived while the launcher was checking — not the instant
-  of the send itself, which no lock can cover, because the device is not in the transaction.
+  of the send itself, which no lock can cover, because the device is not in the transaction. That
+  instant is the one between the launcher's last look and herdr's send. In herdr-core `type` looks
+  once more when it has attached to the terminal, so there it is the one between that look and the
+  write, and a `type` that says output arrived while attaching typed nothing: `read`, judge it, and
+  type again. Enter in herdr-core has no second look.
 - Typing before the session has a **profile**.
 - Typing when the pane is the **user's**.
 - Any **control character** in the text, because a bare CR is Enter and one write would then carry
@@ -142,8 +146,10 @@ What it refuses, and none of it is advisory:
 - Writing when it **could not observe** something. A failed stat or a failed pane lookup is "I could
   not look", never "safe".
 
-A `type` or `enter` whose own call failed says it **may have been typed**, or sent. Do not repeat it:
-`read`, look at the pane or ask the user, and judge whether it arrived.
+A `type` or `enter` whose own call failed says which of two things it knows. **Nothing was typed**
+means that, and you may type again once the reason it names is dealt with. **It may have been typed**,
+or sent, means nobody knows: do not repeat it, but `read`, look at the pane or ask the user, and judge
+whether it arrived.
 
 Any refusal from any launcher command, these and the ones this skill names elsewhere, goes to the
 user quoted verbatim, the line exactly as the launcher printed it, never paraphrased. Never work

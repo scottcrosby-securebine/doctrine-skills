@@ -96,7 +96,7 @@ jobs:
 
       - name: host seam tamper test, herdr TUI and herdr-core
         # The seam's methods in both hosts, and the seat hook and gate launcher run from one table in both, against a
-        # fake that answers as herdr, herdr-app and hc. Needs only node and sh.
+        # fake that answers as herdr, herdr-app and hc. Needs node, sh and python3, which types into the fake's terminals.
         run: node hooks/dctr-host.selftest.mjs
 
       - name: orchestrator capacity command tamper test

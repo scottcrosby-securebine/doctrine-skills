@@ -61,9 +61,9 @@ The launcher refuses to send when:
 - it **could not check** something, since a failed lookup means "I could not look", never "safe";
 - in Herdr.app, the text is **over 1000 bytes** (UTF-8), since a longer text can be split by what you type at that moment. The agent sends it in shorter pieces, reading between them.
 
-A send whose own call failed is reported as one that may have arrived, and the launcher never repeats it. The agent reads and looks before it types again.
+A send whose own call failed is reported either as one that typed nothing, which the agent may type again, or as one that may have arrived, and the launcher never repeats either. After the second the agent reads and looks before it types again.
 
-The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction.
+The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction. In herdr that moment ends with herdr's send. In Herdr.app, typing text takes about a second to attach to the terminal, so the launcher checks the transcript again once it has, and types nothing if output arrived. Enter there has no second check.
 
 A refusal prints `dctr-pane: <reason>` and exits 1. The agent quotes every refusal to you exactly as printed and never works around it. When `read` refuses, the agent does not open the transcript file itself. When `open` refuses, it does not start the session another way.
 
@@ -87,7 +87,7 @@ Inside a doctrine run, only the orchestrating session opens panes, never an agen
 
 You close the pane. The agent never does, and closing the pane kills the session inside it. The pane outlives the agent's session, so a log you are watching keeps running after the agent stops.
 
-The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, when the other of herdr and Herdr.app opened it, or when the file holds a transcript and nothing records which pane wrote it.
+The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when the pane is gone but its program still runs (Herdr.app can park a terminal), when it cannot look the pane up, when the other of herdr and Herdr.app opened it, or when the file holds a transcript and nothing records which pane wrote it.
 
 There is no weaker version of the skill. When `open` refuses because the session is outside herdr and Herdr.app or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
 

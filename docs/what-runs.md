@@ -24,7 +24,7 @@ The hook set also loads one hooks module, `hooks/band/register.tsx`, the **doctr
 |---|---|---|
 | `dctr-typer.mjs` | `dctr-cycle.mjs`, detached | Waits until your focus has moved off the session's herdr pane, then types `/clear` and the resume command into it and appends the cycle line to the record. In a container it exits before any herdr call. |
 | `dctr-render.mjs` | `dctr-seat.mjs`, in a seat's pane | Renders the subagent's transcript in its pane as it grows. It writes nothing and calls no herdr. |
-| `dctr-attach.py` | `dctr-pane.mjs`, in Herdr.app only | Types one text, given on its stdin, into a session's terminal by attaching to it for about a second, then leaves. It presses no Enter and writes nothing else. It needs python3. |
+| `dctr-attach.py` | `dctr-pane.mjs`, in Herdr.app only | Types one text, given on its stdin, into a session's terminal by attaching to it for about a second, then leaves. It types nothing when the session's transcript changed while it attached. It presses no Enter and writes nothing else. It needs python3. |
 | `dctr-watch.mjs` | `dctr-cycle.mjs`, on Codex only | Codex fires no hook for an API error, an idle session or a background command's exit. This watches for them in the session's rollout, the process tree under the Codex process and, in a herdr pane, herdr's reading of that pane, and hands the cycle hook the event Claude Code would have fired. It writes only its own lines to `hook.log`. |
 
 Four modules are only imported by the others: `dctr-lib.mjs` (the decisions), `dctr-state.mjs` (the files, locks and herdr calls), `dctr-host.mjs` (the host seam: the herdr TUI or herdr-core) and `dctr-record.mjs` (the record line parser).
