@@ -56,6 +56,9 @@ export const PLACEMENT_STALE_MS = 10000
 export const herdr = (args, timeout = HERDR_TIMEOUT_MS) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout })) }
 /** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
 export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
+/** herdr-core's two commands, `hc` and `herdr-app`, under the same bound and the same lock renewal as herdr(). Only
+ *  the host seam (dctr-host.mjs) calls it. Returns stdout; throws as herdr() does. */
+export const hostExec = (bin, args) => { renewHeldLocks(); return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }) }
 
 /** herdr answers a pane that does not exist with **exit 1 and a structured error code**, not with a
  *  null pane, so `execFileSync` throws and every caller that read a throw as "I could not look"
@@ -255,15 +258,11 @@ export function movedGates() {
  * have its record taken. Best effort: whatever this cannot do leaves the marker, which is the safe
  * direction, and it never throws into a placement.
  */
-export function dropGoneGates(log = () => {}) {
+export function dropGoneGates(log, answerOf) {
   let found
   try { found = movedGates() } catch (e) { log(`moved gates could not be listed (${e.message}); dropping none`); return }
-  const gone = found.gates.filter((g) => {
-    let answer = 'failed'
-    try { herdr(g.tabId ? ['tab', 'get', g.tabId] : ['pane', 'get', g.paneId]); answer = 'found' }
-    catch (e) { if (g.tabId ? isTabNotFound(e) : isPaneNotFound(e)) answer = 'not_found' }
-    return movedGateVerdict(answer) === 'drop'
-  })
+  // `answerOf` is the host seam's gateAnswer (dctr-host.mjs): 'found', 'not_found' or 'failed' for one gate.
+  const gone = found.gates.filter((g) => movedGateVerdict(answerOf(g)) === 'drop')
   if (!gone.length) return
   try {
     withDirLock(gatesDir(), () => {

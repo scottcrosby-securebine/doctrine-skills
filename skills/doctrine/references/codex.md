@@ -30,14 +30,14 @@ The red team here is Claude, run through the Claude Code CLI in headless mode. A
 **Run it.** Write the assembled brief to a file. Start the seat through the doctrine's gate launcher, which detaches it: a plain `&` job can die when Codex's shell call returns. Limit the seat's tool set to read-only tools and allow those tools, so it has no tool that writes, runs commands or dispatches:
 
 ```
-env -u HERDR_ENV -u HERDR_PANE_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
+env -u HERDR_ENV -u HERDR_PANE_ID -u HC_TERMINAL_ID -u CLAUDE_CODE_SESSION_ID node <plugin-root>/hooks/dctr-gate.mjs red-team <out-file> -- sh -c 'claude -p --strict-mcp-config --tools "Read,Grep,Glob,WebSearch,WebFetch" --allowedTools "Read,Grep,Glob,WebSearch,WebFetch" < <brief-file>'
 ```
 
 Then wait on `<out-file>.result` as the table says, which the launcher writes with `exit=N` when the seat ends.
 
 **The brief.** The seat runs no commands, so hand it its artifact verbatim in the brief. Where the artifact is too large for one brief, split it by file across seats. Never hand this seat a command that produces its artifact.
 
-**The `env -u` prefix.** It sits on the launcher on purpose, not after `--`: it clears the variables the launcher itself reads, so it runs the seat detached instead of trying to place a herdr pane from inside Codex.
+**The `env -u` prefix.** It sits on the launcher on purpose, not after `--`: it clears the variables the launcher itself reads, so it runs the seat detached instead of trying to place a herdr or Herdr.app pane from inside Codex.
 
 **Where it survives.** On Linux, Codex's sandbox runs each shell call in its own process namespace, which ends when the call returns, and the detached seat ends with it. No result file appears, and the seat fails at its deadline.
 
@@ -78,9 +78,9 @@ The hub's Fallbacks section then routes it: a missing `claude` command is the to
 ## Auto-cycle and the hooks
 
 - The user installs the hooks with `node <plugin-root>/hooks/dctr-codex.mjs install`, adding `--codex-home <dir>` for a home other than `$CODEX_HOME` or `~/.codex`, and runs it again after each plugin update. It writes the entries into that home's `hooks.json` and trusts them in its `config.toml`. Where `sandbox_workspace_write.network_access` is unset it sets it to `true`, so a command you run in the workspace-write sandbox can reach herdr, and where `agents.max_concurrent_threads_per_session` is unset it sets it to 8, so Codex does not refuse a seat past its default limit. A value the user set for either is left as it is and the install prints a line saying so: with `network_access` not `true`, a command in the sandbox cannot reach herdr. Where either setting's table is written inline or with dotted keys and the setting is unset, it leaves that line as it is and prints how to add the setting by hand.
-- Once installed, the herdr seat panes (in the herdr TUI), the restore after `/clear`, the context gauge and auto-cycle run on Codex as they do on Claude Code. The typer types `/clear` and then `$doctrine:doctrine-resume`, and reads the pane only to find the composer empty before each send. It pauses rather than type into a draft. Whether the `/clear` took is settled by the prompt gate, `dctr-promptgate.mjs` on UserPromptSubmit: it blocks the resume line in any session but the one the `/clear` started, so a `/clear` that did not take pauses auto-cycle instead of resuming the old session. Without the install none of them runs, and auto-cycle is off: no gauge warns you and no hook types `/clear`.
+- Once installed, the seat panes (in the herdr TUI and in herdr-core), the restore after `/clear`, the context gauge and auto-cycle run on Codex as they do on Claude Code. The typer types `/clear` and then `$doctrine:doctrine-resume`, and reads the pane only to find the composer empty before each send. It pauses rather than type into a draft. Whether the `/clear` took is settled by the prompt gate, `dctr-promptgate.mjs` on UserPromptSubmit: it blocks the resume line in any session but the one the `/clear` started, so a `/clear` that did not take pauses auto-cycle instead of resuming the old session. Without the install none of them runs, and auto-cycle is off: no gauge warns you and no hook types `/clear`.
 - `doctrine-pane` runs once installed: its launcher reads the session from `CODEX_SESSION_ID` and reaches herdr through the same sandbox network access. The pane runs on the host, outside the sandbox.
-- The gate launcher does run. Outside herdr it runs the check detached and writes `<out-file>.result` itself; inside Codex's sandbox, where a detached child dies with the command, it runs the check to completion first. Either way, wait on that file as the table says.
+- The gate launcher does run. Outside the herdr TUI and herdr-core it runs the check detached and writes `<out-file>.result` itself; inside Codex's sandbox, where a detached child dies with the command, it runs the check to completion first. Either way, wait on that file as the table says.
 
 ## herdr TUI and herdr-core
 
