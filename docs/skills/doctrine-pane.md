@@ -1,6 +1,6 @@
 # doctrine-pane
 
-The agent runs an interactive terminal session in a herdr pane beside your session, so you see what it sees and can take the keyboard at any moment. Unlike the wrapper skills, it does not load the doctrine posture, because it is usually called in the middle of other work to run a few commands. A doctrine run can call it too: `doctrine-debug` names it for a bug that lives on a device you log into.
+The agent runs an interactive terminal session in a pane beside your session, in herdr or in Herdr.app, so you see what it sees and can take the keyboard at any moment. Unlike the wrapper skills, it does not load the doctrine posture, because it is usually called in the middle of other work to run a few commands. A doctrine run can call it too: `doctrine-debug` names it for a bug that lives on a device you log into.
 
 ![The doctrine-pane loop: the agent opens the pane and you answer the login, the agent reads and profiles the platform, you hand the pane over, and the agent types, judges the echo, then presses Enter in a separate call. Every send is checked, and is refused on unread output, a missing profile, a pane that is yours, a control character, a dead recorder or a check it could not make. A refusal is quoted to you verbatim](doctrine-pane.png)
 
@@ -58,7 +58,10 @@ The launcher refuses to send when:
 - the pane is **yours**;
 - the text holds a **control character**, since a bare carriage return is Enter;
 - the **recorder has exited**, which means the connection closed and the pane is now a shell on the agent's own machine;
-- it **could not check** something, since a failed lookup means "I could not look", never "safe".
+- it **could not check** something, since a failed lookup means "I could not look", never "safe";
+- in Herdr.app, the text is **over 1000 bytes** (UTF-8), since a longer text can be split by what you type at that moment. The agent sends it in shorter pieces, reading between them.
+
+A send whose own call failed is reported as one that may have arrived, and the launcher never repeats it. The agent reads and looks before it types again.
 
 The unread-output check covers what was on screen when the agent asked and anything that arrived while the launcher was checking. Output can still land in the moment between the last check and the keystroke, and no lock can prevent that, because the device is not part of the transaction.
 
@@ -68,7 +71,7 @@ A refusal prints `dctr-pane: <reason>` and exits 1. The agent quotes every refus
 
 ## Panes, tabs and transcripts
 
-Six panes fit beside your session. The cap counts this session's dispatched seats and gate panes as well as interactive panes, and every placement takes the same lock. Past six, the new pane opens as a tab listed in herdr's sidebar, which you watch and take over the same way. The launcher prints `overflow=tab` when that happens. It never closes a pane to make room.
+Six panes fit beside your session. The cap counts this session's dispatched seats and gate panes as well as interactive panes, and every placement takes the same lock. Past six, the new pane opens as a tab listed in the sidebar, which you watch and take over the same way. The launcher prints `overflow=tab` when that happens. It never closes a pane to make room. Herdr.app cannot rename a pane, so there the label is the first line the pane prints.
 
 If you omit the tee file, the launcher picks one named for the label under `dctr-pane-logs` in your temporary directory and prints it as `tee=<path>`. Labels are reduced to letters, digits, dash and underscore, so two labels can share a file, and a repeated label reuses an earlier session's file. Give an explicit path whenever the transcript matters.
 
@@ -84,9 +87,9 @@ Inside a doctrine run, only the orchestrating session opens panes, never an agen
 
 You close the pane. The agent never does, and closing the pane kills the session inside it. The pane outlives the agent's session, so a log you are watching keeps running after the agent stops.
 
-The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, or when the file holds a transcript and nothing records which pane wrote it.
+The transcript and its `.state.json` record stay on disk, at the default path or yours, until you remove them. Nothing in the plugin cleans them up. One thing does end a transcript: `open` on the same path empties it, once the launcher has confirmed that the pane which wrote it is gone. It refuses instead when that pane is still live, when it cannot look the pane up, when the other of herdr and Herdr.app opened it, or when the file holds a transcript and nothing records which pane wrote it.
 
-There is no weaker version of the skill. When `open` refuses because the session is outside herdr or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed. In a Herdr.app terminal (herdr-core) `open` refuses as well, and the agent opens the session through herdr-core's own `hc` instead, as the skill's "In herdr-core" section says.
+There is no weaker version of the skill. When `open` refuses because the session is outside herdr and Herdr.app or contained, a doctrine run continues by its non-interactive path, and the interactive step is recorded as not run, never as passed.
 
 ## An example
 
@@ -122,16 +125,17 @@ If you then type a command yourself, the agent's next `type` is refused with `` 
 
 ## Requirements
 
-- herdr 0.8.2 or later, with Claude Code or Codex CLI running inside a herdr pane. `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app: `HC_TERMINAL_ID` set, and not a herdr TUI running inside it, which sets `TERM_PROGRAM=herdr`) counts as outside herdr even when it carries those variables.
+- herdr 0.8.2 or later, with the session in a herdr pane, or Herdr.app with the session in one of its terminals. In herdr, `open`, `type` and `enter` refuse unless `HERDR_ENV` is `1` and `HERDR_WORKSPACE_ID` is set, and `open` also needs `HERDR_PANE_ID`. A herdr-core terminal (Herdr.app: `HC_TERMINAL_ID` set, and not a herdr TUI running inside it, which sets `TERM_PROGRAM=herdr`) is Herdr.app's even when it carries those variables. There `open` needs `herdr-app ls` to name the session's pane.
+- In Herdr.app, python3, which types the text. `open` and `type` refuse without it. In herdr nothing needs it.
 - A session id, `CLAUDE_CODE_SESSION_ID` or Codex's `CODEX_SESSION_ID`, so the pane counts against the same cap and lock as seats and gates. Without one `open` refuses.
 - Not a contained session: with `DCTR_VIEW_REQUEST_DIR` set, `open`, `type` and `enter` refuse, because a pane is a process on the host.
-- On Codex in a herdr TUI pane, the doctrine hooks (the herdr-core route needs none), which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
+- On Codex in a herdr TUI pane, the doctrine hooks, which you install yourself with `node <plugin-root>/hooks/dctr-codex.mjs install`. That install lets a command in Codex's sandbox reach herdr. The pane runs on the host, outside Codex's sandbox, so whatever is typed into it runs unsandboxed.
 
 [docs/requirements.md](../requirements.md) and [docs/watching-a-run.md](../watching-a-run.md) cover the herdr setup.
 
 ## How it is checked
 
-The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push. It trips the refusals for a missing profile, a bad read position, unread output, a control character, a pane that is yours, a contained session and a missing session id, and shows that each of them calls herdr zero times. It also shows that output arriving during the recorder lookup stops the send, that a valid session is not refused, that the broken fixtures are broken without the launcher, and that both the macOS and Linux forms of the `script(1)` command line are asserted. It does not trip every refusal: its stand-in herdr always reports a live recorder and every run sets herdr's environment, so the dead-recorder, outside-herdr and missing-pane refusals are not exercised. A doctrine phase that uses a pane still runs its own gate.
+The skill has no review loop of its own. The launcher has a tamper test, `node hooks/dctr-pane.selftest.mjs`, which CI runs on every push. It trips the refusals for a missing profile, a bad read position, unread output, a control character, a pane that is yours, a contained session and a missing session id, and shows that each of them calls herdr zero times. It also shows that output arriving during the recorder lookup stops the send, that a valid session is not refused, that the broken fixtures are broken without the launcher, and that both the macOS and Linux forms of the `script(1)` command line are asserted. It then runs one table of cases in herdr and in Herdr.app against a stand-in for both: opening, the cap, the sweep, the refusals, a failed or unanswered call, and typing and pressing Enter. It does not trip every refusal: every run sets one host's environment, so the refusal outside both is not exercised. A doctrine phase that uses a pane still runs its own gate.
 
 ## Signs it is being misused
 

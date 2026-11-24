@@ -5,11 +5,11 @@ description: Use when the user asks you to pop a pane, ssh into a box, log into 
 
 # doctrine-pane
 
-An interactive terminal session in a herdr pane, so the user sees exactly what you see and can take
-the keyboard whenever they want it. In herdr-core the session lives in an hc terminal instead, as
-"In herdr-core" below says.
+An interactive terminal session in a pane, in the herdr TUI or in herdr-core (Herdr.app), so the user
+sees exactly what you see and can take the keyboard whenever they want it. What differs in herdr-core
+is in "In herdr-core" below.
 
-**On Codex CLI in a herdr TUI pane it needs the doctrine hooks installed** (the herdr-core route below needs none), which the user does, not you: ask them to run
+**On Codex CLI in a herdr TUI pane it needs the doctrine hooks installed**, which the user does, not you: ask them to run
 `node <plugin-root>/hooks/dctr-codex.mjs install` (`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
 workspace-write sandbox reach herdr. Without it the launcher's herdr calls fail and it refuses. The pane
 itself runs on the host, outside Codex's sandbox, so whatever you type into it runs unsandboxed.
@@ -59,7 +59,7 @@ matters: when it must be kept, when it must not be, or when two sessions could c
 
 Six panes fit beside the session, and that cap counts your dispatched seats and gate panes alongside
 interactive ones, placed under the same lock they use. **Past it, a session opens as a tab instead**
-— listed in herdr's sidebar, watched and taken over the same way, just not at a glance. Four routers
+— listed in the sidebar, watched and taken over the same way, just not at a glance. Four routers
 is four panes; ten is ten sessions, which no column holds and which six unreadable panes would not
 serve. The launcher prints `overflow=tab` when that happens, so you can say which it was. It still
 cannot close anything for you.
@@ -70,7 +70,7 @@ session. It reads the session from the environment exactly as the gate launcher 
 two launchers resolving the session differently could lock different sessions, and a lock that is not
 the same lock is not a lock.
 
-It refuses outside herdr and inside a contained agent, because a pane is a host process and an
+It refuses outside both hosts and inside a contained agent, because a pane is a host process and an
 interactive session nobody can watch has no purpose. In a doctrine run that refusal is recorded as
 a step that **did not run**, never as one that passed, and the run continues by its non-interactive
 path (doctrine step 3).
@@ -80,17 +80,24 @@ path (doctrine step 3).
 herdr-core is the terminal core behind Herdr.app, driven by `hc` and `herdr-app`. Your session is in
 it when `HC_TERMINAL_ID` is set, unless `TERM_PROGRAM` is `herdr` and `HERDR_ENV` is `1`, which is a
 herdr TUI running inside a herdr-core terminal. `HERDR_*` variables alone do not make it the TUI: a
-herdr-core started from a herdr pane hands them to every terminal it runs. In herdr-core the launcher
-refuses, and everything else in this skill about panes, tabs, the cap and the launcher's commands
-belongs to the herdr TUI.
+herdr-core started from a herdr pane hands them to every terminal it runs.
 
-That refusal does not end the request. herdr-core has its own way to give the user a session they can
-watch and take over: start it in an hc terminal the person can attach to, as `hc --skill` says, and
-show it in the Herdr.app window when they ask, as `herdr-app --skill` says. Read those manuals for the
-commands; this skill does not repeat them. Never reach for `herdr` there, even when it is on PATH and
-its server answers: what it opens appears in the herdr TUI, which the person in Herdr.app does not
-see. The loop and Ownership below still bind you, with no launcher enforcing them. Where `hc` is not
-installed, tell the user so and open nothing.
+The launcher opens the session in the Herdr.app window, and its commands, refusals, cap and
+placement are the ones this skill states. These differ:
+
+- **The pane's name.** Herdr.app cannot rename a pane, so the label is the first line the pane prints.
+  A session past the cap is a tab, which carries the label as its name, in your space.
+- **`type` takes at most 1000 bytes**, counted as UTF-8, because a longer text can be split by what
+  the user types at that moment. It refuses a longer one with nothing typed. Send it in shorter
+  pieces: type one, `read`, then type the next.
+- **It needs python3**, which types the text. Without it `open` and `type` refuse and name it.
+- **A create call that failed may still have made the pane**, with the connection running in it. The
+  launcher does not try again. Look for a pane whose first line is the label, through the user if you
+  cannot see the window, before you open another.
+
+A session is typed into only from the host that opened it, and a transcript the other host recorded
+is refused. Never reach for `herdr` there, even when it is on PATH and its server answers: what it
+opens appears in the herdr TUI, which the person in Herdr.app does not see.
 
 **The connect command is not yours to invent.** This plugin carries no device-vendor knowledge and
 must work in any repo. Take the connect command from the project you are working in — its docs, its
@@ -135,11 +142,13 @@ What it refuses, and none of it is advisory:
 - Writing when it **could not observe** something. A failed stat or a failed pane lookup is "I could
   not look", never "safe".
 
+A `type` or `enter` whose own call failed says it **may have been typed**, or sent. Do not repeat it:
+`read`, look at the pane or ask the user, and judge whether it arrived.
+
 Any refusal from any launcher command, these and the ones this skill names elsewhere, goes to the
 user quoted verbatim, the line exactly as the launcher printed it, never paraphrased. Never work
 around a refusal: when `read` refuses, do not read the session's tee file yourself, and when `open`
-refuses, do not start the session some other way. The one exception is herdr-core's refusal, whose
-other way "In herdr-core" names.
+refuses, do not start the session some other way.
 
 ## Ownership
 

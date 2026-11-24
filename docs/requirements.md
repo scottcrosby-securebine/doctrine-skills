@@ -17,7 +17,7 @@ Not `npx playwright install`. That command belongs to the full `playwright` pack
 ## herdr, for `doctrine-pane` and `doctrine-orchestrate`
 
 The README states the requirement. The detail it leaves out: inside a container a pane would be a
-process on the host, so a contained session refuses for the same reason a non-herdr one does. See
+process on the host, so a contained session refuses for the same reason one outside both hosts does. In Herdr.app `doctrine-pane` types through python3, with its standard library alone. See
 [watching a run](watching-a-run.md).
 
 `doctrine-orchestrate` puts every session of a run, the orchestrator, each lane and the merge session, in its own herdr pane, and its sender types into those panes and its lane watcher reads them, so without herdr, or in a contained session, it refuses to start a run and says why. It also refuses on Codex and in a repo without `docs/PROJECT.md`, and stops before the run starts unless every repo of the run already ignores `SESSION_MEMORY.md`, `docs/handoffs/` and the project's records folder in `.gitignore`. Install herdr's Claude integration (`herdr integration install claude`) so herdr reports which session each pane runs, and set up auto-cycle, below, since each session of the run cycles on its own.

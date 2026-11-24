@@ -91,7 +91,7 @@ Nothing must be installed. Each dependency has a fallback:
 - A red team from the other model family: on Claude Code, the `codex:codex-rescue` subagent from OpenAI's codex plugin. Without it, a fresh-context subagent of the same model, and the report says so.
 - superpowers, for the parallel probe wave. Without it, parallel subagents, each with its prompt written out in full.
 - ponytail, for the simplification review. Without it, `/simplify` or a manual pass that deletes what nobody asked for.
-- `doctrine-pane` and [herdr](https://herdr.dev) 0.8.2 or later, only for a pane you asked for. Without them the agent runs the commands non-interactively and records the interactive step as not run.
+- `doctrine-pane` and [herdr](https://herdr.dev) 0.8.2 or later or Herdr.app, only for a pane you asked for. Without them the agent runs the commands non-interactively and records the interactive step as not run.
 
 Every substitution is written in the record and named in the exit statement. Install commands are in [requirements](../requirements.md).
 
