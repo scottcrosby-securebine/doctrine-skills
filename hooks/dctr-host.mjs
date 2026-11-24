@@ -1,5 +1,5 @@
-// doctrine — the host seam (issue #111, phase A): the one file that runs `herdr`, `hc` or `herdr-app` for the seat
-// hook and the gate launcher.
+// doctrine — the host seam (issue #111): the one file that runs `herdr`, `hc` or `herdr-app` for the seat hook, the gate
+// launcher and the pane launcher.
 //
 // Two hosts, one object each with the same methods, chosen by termHost (dctr-lib.mjs):
 //
@@ -16,6 +16,10 @@
 //                 window's shown space, tab and focused pane. Neither carries geometry
 //               - no pane rename exists, so a herdr-core pane prints its label as its first line instead, and a
 //                 command is passed at creation rather than typed in afterwards (`run` is a no-op there)
+//               - `hc send` always presses Enter and `hc keys` refuses or misspells shifted characters, so text goes in
+//                 through `hc attach` under a pty (dctr-attach.py); `hc keys <t> enter` presses Enter alone
+//               - `hc get` answers a terminal's state, cols, rows and foreground program, or {"error":{"kind":"not_found"}}
+//                 and exit 3. An attach at any size but that one resizes the program
 //               - a pane's PROGRAM is the pane: Herdr.app closes the pane when it exits, and leaves its terminal in hc
 //                 as `finished` (measured live, 2026-11-23: a focused gate pane vanished at completion). A TUI pane is
 //                 a shell the command was typed into and outlives it, so herdr-core's command ends in the user's shell
@@ -27,27 +31,33 @@
 // is an observed absence. Every other failure throws, and the caller keeps its record.
 
 import fs from 'node:fs'
+import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { PREFIX, termHost, shq, splitPaneArgs, tabCreateArgs, paneToken } from './dctr-lib.mjs'
 import { herdr, hostExec, isPaneNotFound, isTabNotFound } from './dctr-state.mjs'
 
-/** herdr-app's error string from a failed call, read from the top-level `error` of a JSON line on either stream, or
- *  null. Parsed, never grepped, for the reason herdrErrorCode in dctr-state.mjs gives. */
+/** herdr-app's error string, or hc's error kind, from a failed call, read from the top-level `error` of a JSON line on either
+ *  stream, or null. Parsed, never grepped, for the reason herdrErrorCode in dctr-state.mjs gives. */
 function appError(e) {
   for (const stream of [e?.stdout, e?.stderr]) {
     for (const line of String(stream ?? '').split('\n')) {
       const t = line.trim()
       if (!t.startsWith('{')) continue
-      try { const err = JSON.parse(t)?.error; if (typeof err === 'string') return err } catch { /* not this line */ }
+      try { const err = JSON.parse(t)?.error; if (typeof err === 'string') return err; if (typeof err?.kind === 'string') return err.kind } catch { /* not this line */ }
     }
   }
   return null
 }
 /** herdr-app's answer for a pane or tab that does not exist (`kind` 'pane' or 'tab'). Measured: `no pane "<p>"`. */
 export const isAppNotFound = (e, kind) => (appError(e) ?? '').startsWith(`no ${kind} "`)
+/** hc's answer for a terminal that does not exist. Measured: {"error":{"kind":"not_found",...}}, exit 3. */
+export const isHcNotFound = (e) => appError(e) === 'not_found'
 
 /** One herdr-app call, its JSON reply parsed. A reply that is not JSON throws. */
 export const herdrApp = (args) => JSON.parse(hostExec('herdr-app', args))
+
+/** One terminal as `hc get` reports it. A reply that is not JSON throws. */
+const hcGet = (terminal) => JSON.parse(hostExec('hc', ['get', terminal]))
 
 /** The sh argv a herdr-core terminal runs: the command, in `cwd` when one is given (the TUI's `--cwd`), then the user's
  *  shell in its place, as a TUI pane's shell outlives the line typed into it. Whatever ends the command, the pane stays
@@ -113,6 +123,18 @@ function removeWhenFinished(terminals) {
   }
 }
 
+/** Whether a marker or state record was written by `host`. A TUI record names no host, as every one always has. */
+export const sameHost = (host, record) => (record.host || 'herdr') === host.name
+const workspaceOf = (paneId) => String(paneId).split(':')[0]
+
+/** The program that types for typeText on herdr-core, where no hc command can (dctr-attach.py says why). */
+const ATTACH = path.join(import.meta.dirname, 'dctr-attach.py')
+/** The most bytes one typeText may carry on herdr-core (Scott's ruling B-R1, 2026-11-24): hc passes an attach's input on
+ *  in pieces of 1022 bytes, so a longer text can be split by what the user types at the same moment. */
+const TYPE_BYTES = 1000
+/** An error thrown before anything could reach the terminal. Any other throw from typeText leaves that unknown. */
+const nothingTyped = (msg) => Object.assign(new Error(msg), { nothingTyped: true })
+
 export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } = {}) => ({
   name: 'herdr',
   startsAtCreation: false,   // a TUI pane's line is typed in by run(), after its record is written
@@ -161,6 +183,16 @@ export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } 
   /** A stopped seat's result on its pane, called from the hook: the TUI renames it. */
   relabelSeat: (paneId, label) => { herdr(['pane', 'rename', paneId, label]) },
   run: (paneId, command) => { herdr(['pane', 'run', paneId, command]) },
+  /** Whether a marker records a pane of this session's workspace, which a TUI pane id names before its colon. */
+  mine(marker, me) { return sameHost(this, marker) && workspaceOf(marker.paneId) === workspaceOf(me.pane) },
+  cannotType: () => null,
+  /** Types text and never sends Enter. */
+  typeText: (paneId, terminal, text) => { herdr(['pane', 'send-text', paneId, text]) },
+  pressEnter: (paneId) => { herdr(['pane', 'send-keys', paneId, 'enter']) },
+  recorderAlive(paneId) {
+    const info = herdr(['pane', 'process-info', '--pane', paneId]).result.process_info
+    return (info.foreground_processes || []).some((p) => p.name === 'script')
+  },
   /** The sidebar's agent row, herdr only. `message` is omitted on the idle report, as it always was. */
   reportAgent: (paneId, name, state, message) => {
     herdr(['pane', 'report-agent', paneId, '--source', `custom:${PREFIX}`, '--agent', name, '--state', state, ...(message === undefined ? [] : ['--message', message])])
@@ -205,7 +237,7 @@ export const hcHost = (env = process.env) => ({
     let paneId = null
     // herdr-lint: creation. The pane id is display and the tab id is what any close uses.
     try { paneId = appPanes().find((x) => x.terminal === r.terminal)?.pane ?? null } catch { /* the tab id is enough */ }
-    return { tabId: r.tab, paneId, terminal: r.terminal ?? null }
+    return { tabId: r.tab, paneId, terminal: r.terminal ?? null, recorder: hcArgv(cwd, command)[2] }
   },
   paneInfo(paneId) {
     const rows = appPanes()
@@ -244,6 +276,35 @@ export const hcHost = (env = process.env) => ({
   /** The seat's renderer is handed a line that prints the result in its place; the shell after it keeps the pane. */
   relabelSeat(paneId, label, log, handoff) { this.handOff(paneId, `printf '%s\\n' ${shq(label)}`, log, handoff) },
   run: () => {},          // the command was passed at creation
+  /** Pane ids are global here, so every herdr-core marker is this session's to look up. */
+  mine(marker) { return sameHost(this, marker) },
+  /** Why nothing could be typed into a pane here, or null. macOS ships a python3 that only offers to install one, so it is run. */
+  cannotType() {
+    try { hostExec('python3', ['-I', '-c', 'import fcntl, pty, termios']); return null }
+    catch { return 'python3 could not be run, and typing into a herdr-core pane needs it (install python3 and put it on PATH)' }
+  },
+  /** Types text and never sends Enter. */
+  typeText(paneId, terminal, text) {
+    const bytes = Buffer.byteLength(text)
+    if (bytes > TYPE_BYTES) throw nothingTyped(`the text is ${bytes} bytes and herdr-core takes at most ${TYPE_BYTES} bytes in one \`type\`; send it in shorter pieces: type one, \`read\`, then type the next`)
+    const why = this.cannotType()
+    if (why) throw nothingTyped(why)
+    let size
+    // herdr-lint: nothing is destroyed. An unreadable size refuses the write, with nothing typed.
+    try { size = hcGet(terminal) } catch (e) { throw nothingTyped(`the terminal's size could not be read (${e.message})`) }
+    if (![size?.cols, size?.rows].every((n) => Number.isInteger(n) && n > 0)) throw nothingTyped(`hc get answered ${terminal} with no size (${size?.cols}x${size?.rows}), and an attach at any other size would resize it`)
+    try { hostExec('python3', ['-I', ATTACH, terminal, String(size.cols), String(size.rows)], text) }
+    catch (e) { if (e.status === 3) throw nothingTyped(`hc attach could not take ${terminal} (${e.message})`); throw e }
+  },
+  pressEnter: (paneId, terminal) => { hostExec('hc', ['keys', terminal, 'enter']) },
+  /** hc names the terminal's foreground program: the launched line while the recorder runs, the shell it ends in after. */
+  recorderAlive(paneId, terminal, recorderLine) {
+    let t
+    try { t = hcGet(terminal) } catch (e) { if (isHcNotFound(e)) return false; throw e }
+    if (t?.state === 'finished') return false
+    if (!Array.isArray(t?.foreground?.argv)) throw new Error(`hc get answered ${terminal} with no foreground program`)
+    return JSON.stringify(t.foreground.argv) === JSON.stringify(['sh', '-c', recorderLine])
+  },
   reportAgent: () => {},  // herdr-core has no agent-row report
   /** The codex watcher on herdr-core: the renderer was started with `handoff` as its hand-off file and runs whatever
    *  line appears there in its place. Written whole by rename, so the renderer never reads half a line. */
@@ -269,7 +330,7 @@ function appSplit(pane, direction, cwd, command) {
     // herdr-lint: display only. A failed restore leaves focus where the split put it.
     try { if (appFocus().pane === r.pane) herdrApp(['do', 'pane.focus', '--pane', before]) } catch { /* focus stays */ }
   }
-  return { paneId: r.pane, terminal: r.terminal ?? null }
+  return { paneId: r.pane, terminal: r.terminal ?? null, recorder: hcArgv(cwd, command)[2] }
 }
 
 /** The host this environment's session runs in. Anything but herdr-core is the herdr TUI, as it always was. */
@@ -281,7 +342,7 @@ export const hostFor = (env = process.env, opts = {}) => (termHost(env) === 'her
  * still running in the TUI.
  */
 export function gateAnswer(host, g) {
-  if ((g.host || 'herdr') !== host.name) return 'failed'
+  if (!sameHost(host, g)) return 'failed'
   // herdr-lint: a lookup that throws is 'failed', which movedGateVerdict keeps.
   try { return (g.tabId ? host.tabInfo(g.tabId) : host.paneInfo(g.paneId)).exists ? 'found' : 'not_found' } catch { return 'failed' }
 }
