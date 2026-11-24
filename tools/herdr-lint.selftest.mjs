@@ -115,6 +115,46 @@ function stopSeamFixed(host, id) {
   if (info && !info.exists) dropMarker(id)
 }
 `
+// The pane launcher's recorder check, and hc's own reader under it (issue #111, phase B): a lookup that FAILED read as "the
+// recorder is running" lets a write through to whatever the pane now runs.
+const BROKEN_REC = `
+function writeRec(host, id) {
+  let alive
+  try {
+    alive = host.recorderAlive(id)
+  } catch {
+    alive = true
+  }
+  if (alive) send(id)
+}
+`
+const BROKEN_HCGET = `
+function writeHc(id) {
+  let alive
+  try {
+    alive = hcGet(id).state === 'live'
+  } catch {
+    alive = true
+  }
+  if (alive) send(id)
+}
+`
+const FIXED_REC = `
+function writeRecFixed(host, id) {
+  let alive = false
+  try { alive = host.recorderAlive(id) } catch (e) { if (!isPaneNotFound(e)) throw e }
+  if (alive) send(id)
+}
+function writeHcFixed(id) {
+  let alive = false
+  try { alive = hcGet(id).state === 'live' } catch (e) { if (!isHcNotFound(e)) throw e }
+  if (alive) send(id)
+}
+`
+fs.writeFileSync(path.join(tmp, 'dctr-brokenrec.mjs'), BROKEN_REC)
+fs.writeFileSync(path.join(tmp, 'dctr-brokenhcget.mjs'), BROKEN_HCGET)
+const PANE_SRC = fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', 'dctr-pane.mjs'), 'utf8')
+fs.writeFileSync(path.join(tmp, 'dctr-panebare.mjs'), PANE_SRC.replace(/herdr-lint:/g, 'was-lint:'))
 fs.writeFileSync(path.join(tmp, 'dctr-brokenseam.mjs'), BROKEN_SEAM)
 const SEAT_SRC = fs.readFileSync(path.join(import.meta.dirname, '..', 'hooks', 'dctr-seat.mjs'), 'utf8')
 fs.writeFileSync(path.join(tmp, 'dctr-seatbare.mjs'), SEAT_SRC.replace(/herdr-lint:/g, 'was-lint:'))
@@ -159,6 +199,11 @@ clause('clause 1h: the real seat hook and gate launcher with their reasons remov
   gateBare.some((l) => /host\.paneInfo\(paneId\)/.test(l)) && gateBare.some((l) => /host\.closePane\(paneId\)/.test(l)),
   JSON.stringify({ seatBare, gateBare }))
 
+const paneBare = tripped.filter((f) => f.file === 'dctr-panebare.mjs').map((f) => PANE_SRC.split('\n').slice(f.line - 1, f.line + 1).map((l) => l.trim()).join(' '))
+clause('clause 1i: a recorder check, or hc\'s reader under it, whose FAILURE is read as alive is reported (E1), and the real pane launcher with its reasons removed is reported at its pane lookups',
+  ['dctr-brokenrec.mjs', 'dctr-brokenhcget.mjs'].every((n) => tripped.some((f) => f.rule === 'E1' && f.file === n)) &&
+  paneBare.some((l) => /const pane = host\.paneInfo\(paneId\)/.test(l)) && paneBare.some((l) => /host\.paneInfo\(dead\.paneId\)/.test(l)), JSON.stringify({ tripped, paneBare }))
+
 // ---------------------------------------------------------------- clause 2: it stays quiet
 const FIXED = `
 import { herdr } from './dctr-state.mjs'
@@ -185,6 +230,7 @@ fs.writeFileSync(path.join(quiet, 'dctr-fixed.mjs'), FIXED)
 fs.writeFileSync(path.join(quiet, 'dctr-suppressed.mjs'), SUPPRESSED)
 fs.writeFileSync(path.join(quiet, 'dctr-fixedhc.mjs'), FIXED_HC)
 fs.writeFileSync(path.join(quiet, 'dctr-fixedseam.mjs'), FIXED_SEAM)
+fs.writeFileSync(path.join(quiet, 'dctr-fixedrec.mjs'), FIXED_REC)
 const stayed = scan(quiet)
 clause('clause 2a: the repaired form is NOT reported', stayed.length === 0, JSON.stringify(stayed))
 
@@ -272,6 +318,15 @@ const seamStop = (src, name, paneInfo) => {
 clause('clause 3n: the seam-caller fixture really drops a live pane\'s marker when the lookup merely FAILED, and the reasoned form really does not — proved without the checker',
   seamStop(BROKEN_SEAM, 'stopSeam', throwsTransport) === true && seamStop(FIXED_SEAM, 'stopSeamFixed', throwsTransport) === false &&
   seamStop(BROKEN_SEAM, 'stopSeam', () => ({ exists: true })) === false && seamStop(FIXED_SEAM, 'stopSeamFixed', () => ({ exists: false })) === true, '')
+const wrote = (src, name, dep, via) => {
+  let sent = false
+  try { load(src, name, 'send', 'hcGet', 'isPaneNotFound', 'isHcNotFound')(() => { sent = true }, dep, () => false, () => false)(...via) } catch { /* the repaired form throws */ }
+  return sent
+}
+clause('clause 3o: the recorder fixtures really send when the lookup merely FAILED, and the repaired forms really do not — proved without the checker',
+  wrote(BROKEN_REC, 'writeRec', null, [{ recorderAlive: throwsTransport }, 'p1']) && wrote(BROKEN_HCGET, 'writeHc', throwsTransport, ['p1']) &&
+  !wrote(FIXED_REC, 'writeRecFixed', null, [{ recorderAlive: throwsTransport }, 'p1']) && !wrote(FIXED_REC, 'writeHcFixed', throwsTransport, ['p1']) &&
+  wrote(FIXED_REC, 'writeRecFixed', null, [{ recorderAlive: () => true }, 'p1']) && wrote(FIXED_REC, 'writeHcFixed', () => ({ state: 'live' }), ['p1']), '')
 clause('clause 3m: the bare seam copy really differs from the shipping seam only in its suppression markers',
   SEAM.includes('herdr-lint:') && SEAM.replace(/herdr-lint:/g, 'was-lint:') === fs.readFileSync(path.join(tmp, 'dctr-hostbare.mjs'), 'utf8'), '')
 

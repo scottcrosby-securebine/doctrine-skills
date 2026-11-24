@@ -84,7 +84,8 @@ jobs:
         # Three clauses over dctr-pane.mjs: every refusal path trips AND calls herdr zero times
         # (tripwire on PATH), a valid session is not refused, and the fixtures are proved to carry
         # their defects without calling the checker. Also asserts BOTH script(1) invocations, so the
-        # macOS argument shape — file first, no -c — is checked on Linux without a Mac.
+        # macOS argument shape — file first, no -c — is checked on Linux without a Mac. One table then runs the launcher in
+        # the herdr TUI and in herdr-core against a fake of both; the herdr-core half types through python3.
         run: node hooks/dctr-pane.selftest.mjs
 
       - name: seat hook teardown tamper test
