@@ -53,7 +53,7 @@
 // TWO HOSTS, ONE CODE PATH (issue #111). Every host call goes through the seam (dctr-host.mjs). What differs on
 // herdr-core: the recorder is the pane's own program, so it is already running when the create call answers and that call
 // is never retried; its own command prints the label, since no pane rename exists, and empties the transcript; and text
-// goes in through dctr-attach.py.
+// and Enter go in through dctr-attach.py.
 //
 // WHAT IS NOT MECHANICALLY CLOSED, stated because a silent gap is worse than a known one.
 //
@@ -63,11 +63,11 @@
 // transaction. What the rule guarantees is that nothing already on screen when you asked, and
 // nothing that arrived while this launcher was looking, is written over unseen. It does not
 // guarantee the device was silent at the instant of the send. In the TUI that gap runs from the second read to herdr's
-// send. On herdr-core text takes a moment to attach, so dctr-attach.py reads the size once more when it is ready, and
-// the gap runs from that read to its write; Enter there has no such read, and its gap runs from the second read to hc's key.
+// send. On herdr-core text and Enter each take a moment to attach, so dctr-attach.py reads the size once more when it is
+// ready, and the gap runs from that read to its write.
 //
 // On herdr-core the recorder check trails a disconnect by a moment, because `hc get`'s foreground is not live: text typed
-// in that moment can land in the local shell. Enter is checked separately, by its own call, so it can still be refused.
+// in that moment can land in the local shell. Enter has its own recorder check and its own size read, so it can still be refused.
 //
 // And: if the
 // user is part-way through typing a command and the agent reads those bytes and misjudges them as
@@ -506,7 +506,7 @@ async function enter(tee) {
   const host = usableHost()
   const s = guardWrite(tee, host)
   const before = s.seen
-  send('sent', () => host.pressEnter(s.paneId, s.terminal))
+  send('sent', () => host.pressEnter(s.paneId, s.terminal, { tee, size: s.seen }))
   await sleep(SETTLE_MS)
   const end = size(tee)
   const out = region(tee, before, end)

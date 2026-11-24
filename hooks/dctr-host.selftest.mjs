@@ -228,7 +228,7 @@ for (const [h, host] of Object.entries(HOSTS)) {
   // Issue #111, phase B: the three calls the pane launcher makes into a session's terminal.
   {
     const tried = (f) => { try { return f() } catch (e) { return { threw: e.message, nothingTyped: Boolean(e.nothingTyped) } } }
-    const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc keys' }
+    const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc attach' }
     const typedOf = (t) => { try { return fs.readFileSync(`${STATE}.${t}.typed`, 'utf8') } catch { return null } }
     const text = 'echo "$HOME" | cat_x:(~+) &* \u00e9'
     // The transcript the caller settled on, and its size then.
@@ -244,14 +244,15 @@ for (const [h, host] of Object.entries(HOSTS)) {
     clause(`clause 2m/1m ${h} — recorderAlive: true while the recorder is the foreground program, false once a shell is, and a THROW for a failed or empty lookup`,
       alive === true && shell === false && readFail?.threw && readEmpty?.threw, JSON.stringify({ alive, shell, readFail, readEmpty }))
     const typeFail = withFail({ [TYPE[h]]: 'transport' }, () => tried(() => host.typeText(s.paneId, s.terminal, text, SEEN)))
-    const enterFail = withFail({ [ENTER[h]]: 'transport' }, () => tried(() => host.pressEnter(s.paneId, s.terminal)))
-    clause(`clause 1o ${h} — a typeText or pressEnter whose call failed THROWS, and only herdr-core's attach that never happened says nothing was typed`,
-      typeFail?.threw && typeFail.nothingTyped === (h === 'hc') && enterFail?.threw && !enterFail.nothingTyped, JSON.stringify({ typeFail, enterFail }))
+    const enterFail = withFail({ [ENTER[h]]: 'transport' }, () => tried(() => host.pressEnter(s.paneId, s.terminal, SEEN)))
+    clause(`clause 1o ${h} — a typeText or pressEnter whose call failed THROWS, and only herdr-core's attach that never happened says nothing was typed or sent`,
+      typeFail?.threw && typeFail.nothingTyped === (h === 'hc') && enterFail?.threw && enterFail.nothingTyped === (h === 'hc'), JSON.stringify({ typeFail, enterFail }))
     fresh()
     const s2 = host.splitRight('P1', '/w d', 'script x', 'lbl')
     const typed = tried(() => host.typeText(s2.paneId, s2.terminal, text, SEEN))
     const sent = calls()
-    const entered = tried(() => host.pressEnter(s2.paneId, s2.terminal))
+    const gotText = typedOf(s2.terminal)
+    const entered = tried(() => host.pressEnter(s2.paneId, s2.terminal, SEEN))
     const after = calls().slice(sent.length)
     if (h === 'herdr') {
       clause('clause 2o herdr — typeText and pressEnter send the argv they always sent, and typing sends no key',
@@ -259,15 +260,15 @@ for (const [h, host] of Object.entries(HOSTS)) {
         JSON.stringify({ typed, entered, sent, after }))
     } else {
       const own = (name) => { try { return fs.readFileSync(`${STATE}.${s2.terminal}.${name}`, 'utf8') } catch { return null } }
-      clause('clause 2o hc — typeText types exactly the text through an attach of the terminal\'s own size, nothing before it is attached, no key, and leaves; pressEnter sends Enter alone',
-        typed === undefined && typedOf(s2.terminal) === text && own('early') === null && own('size') === '132x43' && !sent.some((c) => c.args[0] === 'keys') &&
-        entered === undefined && JSON.stringify(after) === JSON.stringify([{ bin: 'hc', args: ['keys', s2.terminal, 'enter'] }]) && host.cannotType() === null,
-        JSON.stringify({ typed, got: typedOf(s2.terminal), early: own('early'), size: own('size'), entered, after }))
+      clause('clause 2o hc — typeText types exactly the text through an attach of the terminal\'s own size, nothing before it is attached, and leaves; pressEnter sends exactly one CR the same way and nothing else',
+        typed === undefined && gotText === text && own('early') === null && own('size') === '132x43' && entered === undefined && typedOf(s2.terminal) === `${text}\r` &&
+        JSON.stringify(after) === JSON.stringify([{ bin: 'hc', args: ['get', s2.terminal] }, { bin: 'hc', args: ['attach', s2.terminal] }]) && host.cannotType() === null,
+        JSON.stringify({ typed, gotText, got: typedOf(s2.terminal), early: own('early'), size: own('size'), entered, after }))
       clause('clause 1o2 hc — no argument of any call, hc or python3, carries the text', !sent.some((c) => c.args.some((a) => a.includes('cat_x'))) && sent.some((c) => c.args[0] === 'attach') && fs.readFileSync(PY_ARGS, 'utf8').includes('dctr-attach.py') && !fs.readFileSync(PY_ARGS, 'utf8').includes('cat_x'), JSON.stringify(sent))
-      const fault = (f, extra = {}) => {
+      const fault = (f, extra = {}, write = (x) => host.typeText(x.paneId, x.terminal, text, SEEN)) => {
         fresh(extra)
         const x = host.splitRight('P1', '/', 'script x', 'lbl')
-        const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => host.typeText(x.paneId, x.terminal, text, SEEN)))
+        const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => write(x)))
         const pid = (() => { try { return Number(fs.readFileSync(`${STATE}.${x.terminal}.pid`, 'utf8')) } catch { return null } })()
         const running = (() => { if (!pid) return false; try { process.kill(pid, 0); return true } catch { return false } })()
         return { r, pid, running, typed: typedOf(x.terminal), attaches: calls().filter((c) => c.args[0] === 'attach').length }
@@ -287,6 +288,14 @@ for (const [h, host] of Object.entries(HOSTS)) {
       clause('clause 1o8 hc — a transcript that grew, shrank or vanished while attaching refuses with nothing typed, saying output arrived and to read it, and leaves no attach running',
         changed.every((x) => x.r?.nothingTyped && /while attaching/.test(x.r.threw) && /`read`/.test(x.r.threw) && x.typed === null && x.attaches === 1 && !x.running), JSON.stringify(changed))
       clause('clause 3o8 hc — those faults really grew, emptied and removed the transcript during the attach, proved without the seam\'s answer', JSON.stringify(changed.map((x) => x.now)) === '[19,0,null]', JSON.stringify(changed.map((x) => x.now)))
+      // The same, for Enter.
+      const enter = (x) => host.pressEnter(x.paneId, x.terminal, SEEN)
+      const eDied = fault('after', {}, enter), eStuck = fault('nodetach', {}, enter), eSize = fault(null, { hcGet: { cols: 0 } }, enter)
+      const eChanged = ['output', 'shrink', 'vanish'].map((f) => { const r = fault(f, {}, enter); fs.writeFileSync(SEEN.tee, 'banner\n'); return r })
+      clause('clause 1o10 hc — an Enter whose attach died after reading it, or would not detach, THROWS without saying nothing was sent, is sent once and leaves no attach; a size that is not one sends nothing',
+        eDied.r?.threw && !eDied.r.nothingTyped && eDied.typed === '\r' && eDied.attaches === 1 && eStuck.r?.threw && !eStuck.r.nothingTyped && eStuck.attaches === 1 && !eStuck.running && eSize.r?.nothingTyped && eSize.attaches === 0, JSON.stringify({ eDied, eStuck, eSize }))
+      clause('clause 1o11 hc — an Enter into a transcript that grew, shrank or vanished while attaching sends nothing and says to read it and then `enter` again',
+        eChanged.every((x) => x.r?.nothingTyped && /`read`/.test(x.r.threw) && /then `enter` again/.test(x.r.threw) && x.typed === null && x.attaches === 1 && !x.running) && changed.every((x) => /then `type` again/.test(x.r.threw)), JSON.stringify({ eChanged, changed }))
       // An attach that keeps writing and will not leave: what it has drawn stays unread at the kill.
       const floodBin = path.join(tmp, 'floodbin'); fs.mkdirSync(floodBin)
       fs.writeFileSync(path.join(floodBin, 'hc'), `#!/bin/sh\ntrap "echo hup > '${floodBin}/hup'; exit 1" HUP\ntrap '' QUIT\nprintf '\\033[?1004h'\nwhile :; do echo flood flood flood flood flood flood; done\n`, { mode: 0o755 })
@@ -312,9 +321,9 @@ for (const [h, host] of Object.entries(HOSTS)) {
       const oldPath = process.env.PATH
       process.env.PATH = bare
       const no = calls().length
-      let why, refusal
-      try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x', SEEN)) } finally { process.env.PATH = oldPath }
-      clause('clause 1o7 hc — with no python3 on PATH, cannotType names python3 and typeText refuses with nothing typed and no host call', /python3/.test(why ?? '') && refusal?.nothingTyped && /python3/.test(refusal.threw) && calls().length === no, JSON.stringify({ why, refusal }))
+      let why, refusal, noEnter
+      try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x', SEEN)); noEnter = tried(() => host.pressEnter('P2', 't2', SEEN)) } finally { process.env.PATH = oldPath }
+      clause('clause 1o7 hc — with no python3 on PATH, cannotType names python3, and typeText and pressEnter refuse with nothing sent and no host call', /python3/.test(why ?? '') && refusal?.nothingTyped && /python3/.test(refusal.threw) && noEnter?.nothingTyped && /python3/.test(noEnter.threw) && calls().length === no, JSON.stringify({ why, refusal }))
       clause('clause 3o7 hc — that PATH really has no python3, proved without the seam', spawnSync('python3', ['-V'], { env: { ...process.env, PATH: bare } }).error?.code === 'ENOENT', '')
       // A terminal of its own: a remover still waiting from an earlier clause may name t1, and would remove it once finished.
       fresh()

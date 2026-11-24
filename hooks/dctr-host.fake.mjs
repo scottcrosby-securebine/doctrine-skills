@@ -309,7 +309,6 @@ if (bin === 'hc') {
     if (late) out({ address: t, state: now, cols: 132, rows: 43, ...(late === 'shell' ? { foreground: { argv: ['/bin/zsh', '-lic', '"$@"; exec "$0" -li', '/bin/zsh', ...(x?.argv ?? [])] } } : {}) })
     out({ address: t, state: now, cols: 132, rows: 43, foreground, ...(state.hcGet ?? {}) })
   }
-  if (args[0] === 'keys') { if (st() !== 'live') err('not_found', 3); out({ status: null, turn: 0 }) }
   if (args[0] === 'attach') await attach(t, st())
   if (args[0] === 'wait') {
     const until = Date.now() + 20000

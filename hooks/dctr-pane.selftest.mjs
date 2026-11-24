@@ -1126,7 +1126,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
   }
   const CREATE = { herdr: { split: 'herdr pane split', tab: 'herdr tab create' }, hc: { split: 'herdr-app do pane.split', tab: 'herdr-app do tab.new' } }
   const LOOK = { herdr: 'herdr pane get', hc: 'herdr-app status' }
-  const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc keys' }
+  const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc attach' }
   const TAG = { herdr: {}, hc: { host: 'herdr-core' } }, OTHER = { herdr: { host: 'herdr-core', terminal: 't2', recorder: 'r' }, hc: {} }
   let n = 0, W
   /** A fresh model and TMPDIR: session pane P1 in tab T1, a second tab T2 holding P2, `stacked` panes X0.. beside the
@@ -1264,9 +1264,9 @@ console.log('both hosts — one table over the fake host, every row in the herdr
         return { byState, byMarker, looked, type: go(['type', W.tee, 'x']), enter: go(['enter', W.tee]), quiet: callsOf().length === before, read: go(['read', W.tee]) }
       },
       ok: ({ byState, byMarker, looked, type, enter, quiet, read }) => [byState, byMarker].every((r) => r.code === 1 && /other terminal host opened GONE/.test(r.err)) && looked === 0 && marker('GONE') && creates() === 0 && [type, enter].every((r) => r.code === 1 && /this session was opened in/.test(r.err)) && quiet && read.code === 0 },
-    { row: 'type types exactly the text with no Enter, enter sends Enter alone, and each moves the cursor',
-      run() { ready(); const text = 'echo "$HOME" | cat_x:(~+) &*'; const t = go(['type', W.tee, text]), at = typedInto(), keys = count(ENTER[W.h]); return { t, text, at, keys, e: go(['enter', W.tee]), after: count(ENTER[W.h]) } },
-      ok: ({ t, text, at, keys, e, after }) => t.code === 0 && /ENTER NOT SENT/.test(t.out) && at === text && keys === 0 && e.code === 0 && after === 1 },
+    { row: 'type types exactly the text with no Enter, enter sends Enter alone, once',
+      run() { ready(); const text = 'echo "$HOME" | cat_x:(~+) &*'; const t = go(['type', W.tee, text]), at = typedInto(), keys = count('herdr pane send-keys'); return { t, text, at, keys, e: go(['enter', W.tee]), then: typedInto(), after: count('herdr pane send-keys') } },
+      ok: ({ t, text, at, keys, e, then, after }, h) => t.code === 0 && /ENTER NOT SENT/.test(t.out) && at === text && keys === 0 && e.code === 0 && (h === 'hc' ? then === `${text}\r` && count('hc attach') === 2 : after === 1) },
     { row: 'type and enter refuse on unread output, the user\'s pane, no profile, a control character, an exited recorder and a lookup that failed, with nothing sent',
       run(h) {
         const each = (over, args = [['type', W.tee, 'x'], ['enter', W.tee]], o = {}) => { ready(over); return args.map((a) => go(a, o)) }
@@ -1282,11 +1282,12 @@ console.log('both hosts — one table over the fake host, every row in the herdr
         ready(); const before = fs.readFileSync(`${W.tee}.state.json`, 'utf8')
         const never = go(['type', W.tee, 'x'], { fail: { [TYPE[h]]: 'transport' } }), one = count(TYPE[h])
         const late = go(['type', W.tee, 'abc'], { fail: { [TYPE[h]]: h === 'hc' ? 'after' : 'transport' } }), two = count(TYPE[h])
-        const key = go(['enter', W.tee], { fail: { [ENTER[h]]: 'transport' } })
-        return { never, one, late, two, key, keys: count(ENTER[h]), same: fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before }
+        const noKey = go(['enter', W.tee], { fail: { [ENTER[h]]: 'transport' } }), three = count(ENTER[h])
+        const key = go(['enter', W.tee], { fail: { [ENTER[h]]: h === 'hc' ? 'after' : 'transport' } })
+        return { never, one, late, two, noKey, three, key, keys: count(ENTER[h]), same: fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before }
       },
-      ok: ({ never, one, late, two, key, keys, same }, h) => [never, late, key].every((r) => r.code === 1) && /may have been typed/.test(late.err) && /`read`/.test(late.err) && /may have been sent/.test(key.err) &&
-        (h === 'hc' ? /nothing was typed/.test(never.err) : /may have been typed/.test(never.err)) && one === 1 && two === 2 && keys === 1 && same },
+      ok: ({ never, one, late, two, noKey, three, key, keys, same }, h) => [never, late, noKey, key].every((r) => r.code === 1) && /may have been typed/.test(late.err) && /`read`/.test(late.err) && /may have been sent/.test(key.err) &&
+        (h === 'hc' ? /nothing was typed/.test(never.err) : /may have been typed/.test(never.err)) && (h === 'hc' ? /nothing was sent/ : /may have been sent/).test(noKey.err) && one === 1 && two === 2 && three === (h === 'hc' ? 3 : 1) && keys === three + 1 && same },
     { row: 'output that arrives while the text is being attached is never typed over: nothing is typed, the state is as it was, the next read shows it, and a quiet session is typed into; a transcript that vanishes refuses',
       // The TUI types in one call, with nothing to attach: its half is the same writes with no fault.
       run(h) {
@@ -1300,6 +1301,15 @@ console.log('both hosts — one table over the fake host, every row in the herdr
       ok: ({ over, at, same, shown, quiet, then, lost, gone }, h) => quiet.code === 0 && (h === 'hc'
         ? over.code === 1 && /nothing was typed/.test(over.err) && /while attaching/.test(over.err) && at === null && same && /---\(more\)---/.test(shown.out) && then === 'y' && lost.code === 1 && /nothing was typed/.test(lost.err) && gone && typedInto() === 'y'
         : over.code === 0 && lost.code === 0) },
+    { row: 'output that arrives while Enter is being attached stops it: nothing is sent, the state is as it was, the next read shows it, and a quiet session gets its Enter; the herdr TUI sends its key as it always did',
+      run(h) {
+        ready(); const before = fs.readFileSync(`${W.tee}.state.json`, 'utf8')
+        const over = go(['enter', W.tee], { fail: h === 'hc' ? { 'hc attach': 'output' } : {} }), at = typedInto(), same = fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before
+        return { over, at, same, shown: go(['read', W.tee]), quiet: go(['enter', W.tee]), then: typedInto(), keys: count('herdr pane send-keys P2 enter') }
+      },
+      ok: ({ over, at, same, shown, quiet, then, keys }, h) => quiet.code === 0 && (h === 'hc'
+        ? over.code === 1 && /nothing was sent/.test(over.err) && /then `enter` again/.test(over.err) && at === null && same && /---\(more\)---/.test(shown.out) && then === '\r'
+        : over.code === 0 && keys === 2) },
     { row: 'a transcript whose pane is gone but whose terminal still runs (a parked pane) is refused and kept whole, and the sweep keeps its marker; a finished or removed terminal is gone, a failed look refuses; the herdr TUI has no park and reads the pane gone',
       run(h) {
         const T = h === 'hc' ? { ...TAG.hc, terminal: 't2', recorder: 'r' } : {}
@@ -1332,9 +1342,9 @@ console.log('both hosts — one table over the fake host, every row in the herdr
     { row: 'a text over 1000 bytes is refused on herdr-core with nothing typed, naming the limit; the herdr TUI types it',
       run() { ready(); return { long: go(['type', W.tee, 'y'.repeat(1001)]), at: typedInto() } },
       ok: ({ long, at }, h) => (h === 'hc' ? long.code === 1 && /1000 bytes/.test(long.err) && /shorter pieces/.test(long.err) && at === null && count('hc attach') === 0 : long.code === 0 && at?.length === 1001) },
-    { row: 'with no python3, herdr-core refuses to open or type and names it, placing and typing nothing; the herdr TUI needs none',
-      run() { ready(); const PATH = `${fakeBin}:${bare}`; const t = path.join(W.dir, 'p.log'); return { type: go(['type', W.tee, 'x'], { PATH }), open: go(['open', 'x', t, CONNECT], { PATH }) } },
-      ok: ({ type, open }, h) => (h === 'hc' ? [type, open].every((r) => r.code === 1 && /python3/.test(r.err)) && creates() === 0 && typedInto() === null : type.code === 0 && open.code === 0) },
+    { row: 'with no python3, herdr-core refuses to open, type or enter and names it, placing and sending nothing; the herdr TUI needs none',
+      run() { ready(); const PATH = `${fakeBin}:${bare}`; const t = path.join(W.dir, 'p.log'); return { enter: go(['enter', W.tee], { PATH }), type: go(['type', W.tee, 'x'], { PATH }), open: go(['open', 'x', t, CONNECT], { PATH }) } },
+      ok: ({ enter, type, open }, h) => (h === 'hc' ? [enter, type, open].every((r) => r.code === 1 && /python3/.test(r.err)) && creates() === 0 && typedInto() === null && /nothing was sent/.test(enter.err) : enter.code === 0 && type.code === 0 && open.code === 0) },
     { row: 'a pane whose recorder never empties the transcript is refused on herdr-core: the last session is not shown as this one\'s and no state is written; the herdr TUI empties it itself and opens',
       // `exec` off is a pane whose program never ran.
       run(h) {

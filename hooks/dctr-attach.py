@@ -1,18 +1,19 @@
-"""Types one text into a herdr-core terminal, and nothing else (issue #111, phase B). Run by dctr-host.mjs's hcHost.typeText.
+"""Writes one text, or one Enter (a CR), into a herdr-core terminal (issue #111, phase B). Run by dctr-host.mjs's
+hcHost.attachWrite.
 
     python3 -I dctr-attach.py <terminal> <cols> <rows> <transcript> <size>
 
-The text arrives on stdin, so no command line carries it.
+What to write arrives on stdin, so no command line carries it.
 
-`hc keys` cannot spell every character and `hc send` always presses Enter, so the text goes through `hc attach`, which
-needs a terminal on its stdin: a pty of the size given, which must be the terminal's own, or the attach resizes it.
+`hc keys` cannot spell every character and holds a key, Enter too, until the terminal is quiet, and `hc send` always
+presses Enter, so it goes through `hc attach`, which needs a terminal on its stdin: a pty of the size given, which must be the terminal's own, or the attach resizes it.
 
 The exit code is the answer, and the caller reads nothing else:
-    0  attached, typed, detached
-    3  NOTHING was typed: the attach never happened, or the transcript is no longer the size its reader settled on, looked at
+    0  attached, written, detached
+    3  NOTHING was written: the attach never happened, or the transcript is no longer the size its reader settled on, looked at
        just before the write. The attach takes a moment, and output in it may be a pager nobody has judged. What the attach
        draws goes to its own pty, never to the transcript, so a quiet session keeps its size
-    anything else  the text MAY have been typed. Never resent here; a detach that fails kills the attach.
+    anything else  it MAY have been written. Never resent here; a detach that fails kills the attach.
 """
 import fcntl, os, pty, select, signal, struct, sys, termios, time
 
@@ -22,7 +23,7 @@ NEVER, MAYBE = 3, 4
 ATTACHED = b'\x1b[?1004h'
 DETACH = b'\x1c'                      # ctrl+\
 ATTACH_S, WRITE_S, DETACH_S = 8, 5, 3   # each under the caller's own bound on this process, together with the pauses
-SETTLE_S = 0.3                        # for the attach to pass the text on before it is told to leave
+SETTLE_S = 0.3                        # for the attach to pass the write on before it is told to leave
 
 term, cols, rows, tee, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], int(sys.argv[5])
 text = sys.stdin.buffer.read()
@@ -98,7 +99,8 @@ try:
             if not unread and ended() and status == 0:
                 code = 0
     if unread:
-        sys.stderr.write('the transcript changed while attaching: output arrived that nobody has judged; `read` and judge it, then type again\n')
+        again = 'enter' if text == b'\r' else 'type'
+        sys.stderr.write(f'the transcript changed while attaching: output arrived that nobody has judged; `read` and judge it, then `{again}` again\n')
     elif code == NEVER:
         sys.stderr.write(seen[-300:].decode('utf-8', 'replace').replace('\x1b', ''))
 except OSError as e:

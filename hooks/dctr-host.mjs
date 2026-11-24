@@ -16,8 +16,8 @@
 //                 window's shown space, tab and focused pane. Neither carries geometry
 //               - no pane rename exists, so a herdr-core pane prints its label as its first line instead, and a
 //                 command is passed at creation rather than typed in afterwards (`run` is a no-op there)
-//               - `hc send` always presses Enter and `hc keys` refuses or misspells shifted characters, so text goes in
-//                 through `hc attach` under a pty (dctr-attach.py); `hc keys <t> enter` presses Enter alone
+//               - `hc send` always presses Enter and `hc keys` refuses or misspells shifted characters, and holds a key
+//                 until the terminal is quiet, so text and Enter go in through `hc attach` under a pty (dctr-attach.py)
 //               - `hc get` answers a terminal's state, cols, rows and foreground program, or {"error":{"kind":"not_found"}}
 //                 and exit 3. An attach at any size but that one resizes the program
 //               - a pane's PROGRAM is the pane: Herdr.app closes the pane when it exits, and leaves its terminal in hc
@@ -135,12 +135,12 @@ function removeWhenFinished(terminals) {
 export const sameHost = (host, record) => (record.host || 'herdr') === host.name
 const workspaceOf = (paneId) => String(paneId).split(':')[0]
 
-/** The program that types for typeText on herdr-core, where no hc command can (dctr-attach.py says why). */
+/** The program that writes for typeText and pressEnter on herdr-core, where no hc command can (dctr-attach.py says why). */
 const ATTACH = path.join(import.meta.dirname, 'dctr-attach.py')
 /** The most bytes one typeText may carry on herdr-core (Scott's ruling B-R1, 2026-11-24): hc passes an attach's input on
  *  in pieces of 1022 bytes, so a longer text can be split by what the user types at the same moment. */
 const TYPE_BYTES = 1000
-/** An error thrown before anything could reach the terminal. Any other throw from typeText leaves that unknown. */
+/** An error thrown before anything could reach the terminal. Any other throw from a write leaves that unknown. */
 const nothingTyped = (msg) => Object.assign(new Error(msg), { nothingTyped: true })
 
 export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } = {}) => ({
@@ -295,13 +295,19 @@ export const hcHost = (env = process.env) => ({
   /** Why nothing could be typed into a pane here, or null. macOS ships a python3 that only offers to install one, so it is run. */
   cannotType() {
     try { hostExec('python3', ['-I', '-c', 'import fcntl, pty, termios']); return null }
-    catch { return 'python3 could not be run, and typing into a herdr-core pane needs it (install python3 and put it on PATH)' }
+    catch { return 'python3 could not be run, and typing or pressing Enter in a herdr-core pane needs it (install python3 and put it on PATH)' }
   },
-  /** Types text and never sends Enter. `seen` is the transcript and the size its reader settled on: at any other size when
-   *  the attach is ready, nothing is typed. */
+  /** Types text and never sends Enter. */
   typeText(paneId, terminal, text, seen) {
     const bytes = Buffer.byteLength(text)
     if (bytes > TYPE_BYTES) throw nothingTyped(`the text is ${bytes} bytes and herdr-core takes at most ${TYPE_BYTES} bytes in one \`type\`; send it in shorter pieces: type one, \`read\`, then type the next`)
+    this.attachWrite(terminal, text, seen)
+  },
+  /** Sends one CR and nothing else. */
+  pressEnter(paneId, terminal, seen) { this.attachWrite(terminal, '\r', seen) },
+  /** One write through an attach. `seen` is the transcript and the size its reader settled on: at any other size when the
+   *  attach is ready, nothing is sent. */
+  attachWrite(terminal, text, seen) {
     const why = this.cannotType()
     if (why) throw nothingTyped(why)
     let size
@@ -309,9 +315,8 @@ export const hcHost = (env = process.env) => ({
     try { size = hcGet(terminal) } catch (e) { throw nothingTyped(`the terminal's size could not be read (${e.message})`) }
     if (![size?.cols, size?.rows].every((n) => Number.isInteger(n) && n > 0)) throw nothingTyped(`hc get answered ${terminal} with no size (${size?.cols}x${size?.rows}), and an attach at any other size would resize it`)
     try { hostExec('python3', ['-I', ATTACH, terminal, String(size.cols), String(size.rows), seen.tee, String(seen.size)], text) }
-    catch (e) { if (e.status === 3) throw nothingTyped(`attaching to ${terminal} stopped before the text (${String(e.stderr).trim()})`); throw e }
+    catch (e) { if (e.status === 3) throw nothingTyped(`attaching to ${terminal} sent nothing (${String(e.stderr).trim()})`); throw e }
   },
-  pressEnter: (paneId, terminal) => { hostExec('hc', ['keys', terminal, 'enter']) },
   /** hc names the terminal's foreground program: the launched line while the recorder runs, the shell it ends in after. */
   recorderAlive(paneId, terminal, recorderLine) {
     let t
