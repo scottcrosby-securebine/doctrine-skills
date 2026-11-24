@@ -11,7 +11,7 @@
 //                    "after", on a call that creates a pane or tab, fails it as a transport error only once the pane or
 //                    tab is in the model and its program started: a create that timed out or answered with no pane.
 //                    "blank", on a focus read (`herdr pane get`, `herdr tab list`, `herdr-app status`), names the focus as
-//                    empty strings. "noid", on a herdr-app pane.split or tab.new, creates the pane and starts its
+//                    empty strings. "noid", on a pane split of either CLI or a herdr-app tab.new, creates the pane and starts its
 //                    program as usual, then answers with an empty pane or tab id
 //
 // The model: { spaces: [{ id, name, tabs: [{ id, name, panes: [{ pane, terminal, name? }] }] }], focus: { tab, pane },
@@ -33,7 +33,9 @@
 // is named: 'none' is no foreground key, 'shell' is the shell Herdr.app starts a tab's program through.
 // `hc attach` plays the measured client: it needs a terminal on stdin, goes raw and queries at once, throws away what
 // arrives before it is attached (written to `<state>.<t>.early`), announces itself with ESC[?1004h, appends what it is
-// typed to `<state>.<t>.typed` and its size to `<state>.<t>.size`, and leaves on ctrl+\\. Its faults: "after" dies once
+// typed to `<state>.<t>.typed` and its size to `<state>.<t>.size`, and leaves on ctrl+\. The screen it draws goes to
+// its own terminal and never to a transcript. Its faults, the first three on the transcript DCTR_FAKE_TEE names, as it
+// attaches: "output" appends to it, "shrink" empties it, "vanish" removes it, and "after" dies once
 // it has read typed bytes, "nodetach" ignores ctrl+\\ and a hang-up (its pid is in `<state>.<t>.pid`), "hang" never
 // announces itself.
 //
@@ -155,12 +157,16 @@ async function attach(t, st) {
   process.stdin.on('data', (d) => {
     if (!attached) { fs.appendFileSync(at('early'), d); return }
     const end = fail === 'nodetach' ? -1 : d.indexOf(0x1c)
-    fs.appendFileSync(at('typed'), end < 0 ? d : d.subarray(0, end))
+    const text = end < 0 ? d : d.subarray(0, end)
+    if (text.length) fs.appendFileSync(at('typed'), text)
     if (fail === 'after') process.exit(1)
     if (end >= 0) process.exit(0)
   })
   await new Promise((r) => setTimeout(r, 300))
   if (st !== 'live') { process.stdin.setRawMode(false); process.stderr.write(`error: no terminal "${t}"\n`); process.exit(3) }
+  if (fail === 'output') fs.appendFileSync(process.env.DCTR_FAKE_TEE, '---(more)---')
+  if (fail === 'shrink') fs.truncateSync(process.env.DCTR_FAKE_TEE)
+  if (fail === 'vanish') fs.rmSync(process.env.DCTR_FAKE_TEE)
   if (fail !== 'hang') { attached = true; process.stdout.write('\x1b[?1004h\x1b[2Jscreen') }
   await new Promise((r) => setTimeout(r, 30000))
   process.kill(process.pid, 'SIGKILL')   // not exit, which waits on a terminal nobody reads any more
@@ -180,7 +186,7 @@ if (bin === 'herdr') {
     if (!at) notFound('pane', args[2])
     const pane = next('P')
     at.t.panes.splice(at.t.panes.indexOf(at.x) + 1, 0, { pane, terminal: null, split: flag('direction'), cwd: flag('cwd') })
-    created({ result: { pane: { pane_id: pane } } })
+    created({ result: { pane: { pane_id: fail === 'noid' ? '' : pane } } })
   }
   if (verb === 'tab create') {
     const s = state.spaces.find((x) => x.id === flag('workspace'))
@@ -274,6 +280,14 @@ if (bin === 'herdr-app') {
     at.s.tabs.splice(at.s.tabs.indexOf(at.t), 1)
     finish(at.t.panes)
     save(); hangUp(at.t.panes); out({ ok: true })
+  }
+  // Measured: park takes the pane out of the window and leaves its terminal running.
+  if (verb === 'do terminal.park') {
+    const at = tabs().map(({ s, t }) => ({ s, t, x: t.panes.find((q) => q.terminal === flag('terminal')) })).find((q) => q.x)
+    if (!at) notFound('terminal', flag('terminal'))
+    at.t.panes.splice(at.t.panes.indexOf(at.x), 1)
+    if (!at.t.panes.length) at.s.tabs.splice(at.s.tabs.indexOf(at.t), 1)
+    save(); out({ ok: true })
   }
   if (verb === 'do tab.rename') { const at = findTab(flag('id')); if (!at) notFound('tab', flag('id')); at.t.name = flag('name'); save(); out({ ok: true }) }
   if (verb === 'do pane.focus') { const at = findPane(flag('pane')); if (!at) notFound('pane', flag('pane')); state.focus = { tab: at.t.id, pane: at.x.pane }; save(); out({ ok: true }) }

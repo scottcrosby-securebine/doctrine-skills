@@ -104,6 +104,22 @@ for (const [h, host] of Object.entries(HOSTS)) {
   const info = host.paneInfo('P1'), other = host.paneInfo('P2'), gone = host.paneInfo('P404')
   clause(`clause 2c ${h} — paneInfo: the focused pane is focused, another is not`, info.exists && info.focused === true && other.exists && other.focused === false, JSON.stringify({ info, other }))
   clause(`clause 1c ${h} — paneInfo: a pane the host does not have is { exists: false }, with no focus to misread`, gone.exists === false && !('focused' in gone), JSON.stringify(gone))
+  if (h === 'hc') {
+    // A parked pane is in no listing and its program still runs.
+    const park = (extra = {}) => { fresh(extra); const x = host.splitRight('P1', '/', 'true', 'l'); const p = direct('herdr-app', ['do', 'terminal.park', '--terminal', x.terminal]); return { ...x, parked: p.status } }
+    const look = (x, terminal = x.terminal) => { try { return host.paneInfo(x.paneId, terminal) } catch { return 'threw' } }
+    const a = park(), live = look(a), none = (() => { try { return host.paneInfo(a.paneId) } catch { return 'threw' } })(), lost = look(a, 't404')
+    const gets = calls().filter((c) => c.bin === 'hc' && c.args[0] === 'get').length
+    const failed = withFail({ 'hc get': 'transport' }, () => look(a)), empty = withFail({ 'hc get': 'empty' }, () => look(a))
+    const odd = look(park({ hcGet: { state: 'starting' } }))
+    const done = (() => { const x = park(); const m = model(); m.terminals[x.terminal] = 'finished'; fs.writeFileSync(STATE, JSON.stringify(m)); return look(x) })()
+    fresh(); const there = host.paneInfo('P2', 't2'), asked = calls().some((c) => c.bin === 'hc')
+    clause('clause 2c5/1c5 hc — paneInfo of an absent pane whose terminal still runs exists and is parked; finished or not found is gone; a failed, empty or unknown answer THROWS; with no terminal recorded it is gone as before; a listed pane asks hc nothing',
+      live.exists === true && live.parked === true && lost.exists === false && done.exists === false && none.exists === false && [failed, empty, odd].every((x) => x === 'threw') && gets === 2 && there.exists === true && !there.parked && !asked, JSON.stringify({ live, none, lost, done, failed, empty, odd, gets, there, asked }))
+    const b = park()
+    clause('clause 3c5 hc — a park really leaves the pane out of every listing and its terminal live, proved without the seam', b.parked === 0 && !hasPane(model(), b.paneId) && JSON.parse(direct('hc', ['get', b.terminal]).stdout).state === 'live', JSON.stringify(b))
+    fresh({ focus: { tab: 'T1', pane: 'P1' } })
+  }
   clause(`clause 1c2 ${h} — paneInfo: a failed or empty lookup THROWS, never answers gone`,
     withFail({ [READ[h].pane]: 'transport' }, () => throws(() => host.paneInfo('P1'))) && withFail({ [READ[h].pane]: 'empty' }, () => { try { return host.paneInfo('P1').exists !== false } catch { return true } }),
     'a lookup that failed must not read as an absence')
@@ -215,6 +231,9 @@ for (const [h, host] of Object.entries(HOSTS)) {
     const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc keys' }
     const typedOf = (t) => { try { return fs.readFileSync(`${STATE}.${t}.typed`, 'utf8') } catch { return null } }
     const text = 'echo "$HOME" | cat_x:(~+) &* \u00e9'
+    // The transcript the caller settled on, and its size then.
+    const SEEN = { tee: path.join(tmp, 'seen.log'), size: 7 }
+    fs.writeFileSync(SEEN.tee, 'banner\n'); process.env.DCTR_FAKE_TEE = SEEN.tee
     fresh()
     const s = host.splitRight('P1', '/w d', 'script x', 'lbl')
     const alive = tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder))
@@ -224,13 +243,13 @@ for (const [h, host] of Object.entries(HOSTS)) {
     const shell = tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder))
     clause(`clause 2m/1m ${h} — recorderAlive: true while the recorder is the foreground program, false once a shell is, and a THROW for a failed or empty lookup`,
       alive === true && shell === false && readFail?.threw && readEmpty?.threw, JSON.stringify({ alive, shell, readFail, readEmpty }))
-    const typeFail = withFail({ [TYPE[h]]: 'transport' }, () => tried(() => host.typeText(s.paneId, s.terminal, text)))
+    const typeFail = withFail({ [TYPE[h]]: 'transport' }, () => tried(() => host.typeText(s.paneId, s.terminal, text, SEEN)))
     const enterFail = withFail({ [ENTER[h]]: 'transport' }, () => tried(() => host.pressEnter(s.paneId, s.terminal)))
     clause(`clause 1o ${h} — a typeText or pressEnter whose call failed THROWS, and only herdr-core's attach that never happened says nothing was typed`,
       typeFail?.threw && typeFail.nothingTyped === (h === 'hc') && enterFail?.threw && !enterFail.nothingTyped, JSON.stringify({ typeFail, enterFail }))
     fresh()
     const s2 = host.splitRight('P1', '/w d', 'script x', 'lbl')
-    const typed = tried(() => host.typeText(s2.paneId, s2.terminal, text))
+    const typed = tried(() => host.typeText(s2.paneId, s2.terminal, text, SEEN))
     const sent = calls()
     const entered = tried(() => host.pressEnter(s2.paneId, s2.terminal))
     const after = calls().slice(sent.length)
@@ -248,7 +267,7 @@ for (const [h, host] of Object.entries(HOSTS)) {
       const fault = (f, extra = {}) => {
         fresh(extra)
         const x = host.splitRight('P1', '/', 'script x', 'lbl')
-        const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => host.typeText(x.paneId, x.terminal, text)))
+        const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => host.typeText(x.paneId, x.terminal, text, SEEN)))
         const pid = (() => { try { return Number(fs.readFileSync(`${STATE}.${x.terminal}.pid`, 'utf8')) } catch { return null } })()
         const running = (() => { if (!pid) return false; try { process.kill(pid, 0); return true } catch { return false } })()
         return { r, pid, running, typed: typedOf(x.terminal), attaches: calls().filter((c) => c.args[0] === 'attach').length }
@@ -258,11 +277,30 @@ for (const [h, host] of Object.entries(HOSTS)) {
         died.r?.threw && !died.r.nothingTyped && died.typed === text && died.attaches === 1 && stuck.r?.threw && !stuck.r.nothingTyped && stuck.attaches === 1 && stuck.pid && !stuck.running, JSON.stringify({ died, stuck }))
       clause('clause 1o4 hc — an attach that never reports itself attached is killed with nothing typed, and says so',
         hung.r?.nothingTyped === true && hung.typed === null && hung.pid && !hung.running && hung.attaches === 1, JSON.stringify(hung))
+      clause('clause 2o8 hc — an attach that drew its screen left the transcript the size it was, so a quiet session is typed into', fs.statSync(SEEN.tee).size === 7 && died.typed === text, '')
+      // What the transcript does while the attach is under way. Each fault's own effect is read back, with no seam.
+      const changed = ['output', 'shrink', 'vanish'].map((f) => {
+        const r = fault(f), now = (() => { try { return fs.statSync(SEEN.tee).size } catch { return null } })()
+        fs.writeFileSync(SEEN.tee, 'banner\n')
+        return { ...r, now }
+      })
+      clause('clause 1o8 hc — a transcript that grew, shrank or vanished while attaching refuses with nothing typed, saying output arrived and to read it, and leaves no attach running',
+        changed.every((x) => x.r?.nothingTyped && /while attaching/.test(x.r.threw) && /`read`/.test(x.r.threw) && x.typed === null && x.attaches === 1 && !x.running), JSON.stringify(changed))
+      clause('clause 3o8 hc — those faults really grew, emptied and removed the transcript during the attach, proved without the seam\'s answer', JSON.stringify(changed.map((x) => x.now)) === '[19,0,null]', JSON.stringify(changed.map((x) => x.now)))
+      // An attach that keeps writing and will not leave: what it has drawn stays unread at the kill.
+      const floodBin = path.join(tmp, 'floodbin'); fs.mkdirSync(floodBin)
+      fs.writeFileSync(path.join(floodBin, 'hc'), `#!/bin/sh\ntrap "echo hup > '${floodBin}/hup'; exit 1" HUP\ntrap '' QUIT\nprintf '\\033[?1004h'\nwhile :; do echo flood flood flood flood flood flood; done\n`, { mode: 0o755 })
+      const t1 = Date.now()
+      const flood = spawnSync('python3', ['-I', path.join(HERE, 'dctr-attach.py'), 't', '80', '24', SEEN.tee, '7'], { input: 'x', encoding: 'utf8', timeout: 25000, env: { ...process.env, PATH: `${floodBin}:${process.env.PATH}` } })
+      clause('clause 1o9 hc — an attach that floods and will not leave is hung up before it is killed, and the helper ends well inside its caller\'s bound, saying the text may have been typed',
+        flood.status === 4 && Date.now() - t1 < 20000 && fs.existsSync(path.join(floodBin, 'hup')), JSON.stringify({ status: flood.status, signal: flood.signal, ms: Date.now() - t1, err: flood.stderr?.slice(0, 200) }))
+      const floods = spawnSync(path.join(floodBin, 'hc'), [], { encoding: 'utf8', timeout: 1000, killSignal: 'SIGKILL', maxBuffer: 1e9 })
+      clause('clause 3o9 hc — that stand-in really announces itself, floods and never ends by itself, proved without the helper', floods.error?.code === 'ETIMEDOUT' && floods.stdout.startsWith('\x1b[?1004h') && floods.stdout.length > 10000, JSON.stringify({ err: floods.error?.code, n: floods.stdout?.length }))
       const sizes = [{ cols: 0 }, { rows: null }, { cols: '132' }, { rows: 43.5 }].map((hcGet) => fault(null, { hcGet }))
-      const noSize = withFail({ 'hc get': 'transport' }, () => tried(() => host.typeText('P1', 't1', text)))
+      const noSize = withFail({ 'hc get': 'transport' }, () => tried(() => host.typeText('P1', 't1', text, SEEN)))
       clause('clause 1o5 hc — a size that cannot be read, or is not one, refuses with nothing typed and no attach', sizes.every((x) => x.r?.nothingTyped && x.attaches === 0) && noSize?.nothingTyped === true, JSON.stringify({ sizes, noSize }))
       fresh()
-      const at = (n, ch = 'a') => tried(() => host.typeText('P2', 't2', ch.repeat(n)))
+      const at = (n, ch = 'a') => tried(() => host.typeText('P2', 't2', ch.repeat(n), SEEN))
       const ok1000 = at(1000), typed1000 = typedOf('t2')?.length
       const before = calls().length
       const no1001 = at(1001), bytes = at(501, '\u00e9')
@@ -275,7 +313,7 @@ for (const [h, host] of Object.entries(HOSTS)) {
       process.env.PATH = bare
       const no = calls().length
       let why, refusal
-      try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x')) } finally { process.env.PATH = oldPath }
+      try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x', SEEN)) } finally { process.env.PATH = oldPath }
       clause('clause 1o7 hc — with no python3 on PATH, cannotType names python3 and typeText refuses with nothing typed and no host call', /python3/.test(why ?? '') && refusal?.nothingTyped && /python3/.test(refusal.threw) && calls().length === no, JSON.stringify({ why, refusal }))
       clause('clause 3o7 hc — that PATH really has no python3, proved without the seam', spawnSync('python3', ['-V'], { env: { ...process.env, PATH: bare } }).error?.code === 'ENOENT', '')
       // A terminal of its own: a remover still waiting from an earlier clause may name t1, and would remove it once finished.

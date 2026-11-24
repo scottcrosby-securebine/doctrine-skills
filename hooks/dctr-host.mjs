@@ -1,10 +1,10 @@
-// doctrine — the host seam (issue #111): the one file that runs `herdr`, `hc` or `herdr-app` for the seat hook, the gate
-// launcher and the pane launcher.
+// doctrine — the host seam (issue #111): the one way to `herdr`, `hc` and `herdr-app` for the seat hook, the gate launcher
+// and the pane launcher. It runs them itself, but for the `hc attach` that types, which dctr-attach.py runs for it.
 //
 // Two hosts, one object each with the same methods, chosen by termHost (dctr-lib.mjs):
 //
 //   herdr       the TUI multiplexer, through dctr-state.mjs's herdr(). Every argv here is the one the seat hook and
-//               the gate launcher sent before the seam existed, byte for byte.
+//               the two launchers sent before the seam existed, byte for byte.
 //   herdr-core  `hc` (the runtime) and `herdr-app` (the window behind Herdr.app), measured on hc 0.1.21:
 //               - `herdr-app do pane.split --pane P --direction right|down --argv '[...]'` answers {pane, terminal};
 //                 the new terminal starts in the split pane's folder, so a command is prefixed `cd <cwd> &&`
@@ -58,6 +58,14 @@ export const herdrApp = (args) => JSON.parse(hostExec('herdr-app', args))
 
 /** One terminal as `hc get` reports it. A reply that is not JSON throws. */
 const hcGet = (terminal) => JSON.parse(hostExec('hc', ['get', terminal]))
+
+/** Whether a terminal's program still runs. Only finished and not_found say it does not; any other answer throws. */
+function terminalRuns(terminal) {
+  let t
+  try { t = hcGet(terminal) } catch (e) { if (!isHcNotFound(e)) throw e; return false }
+  if (t?.state !== 'live' && t?.state !== 'finished') throw new Error(`hc get answered ${terminal} with state ${JSON.stringify(t?.state)}`)
+  return t.state === 'live'
+}
 
 /** The sh argv a herdr-core terminal runs: the command, in `cwd` when one is given (the TUI's `--cwd`), then the user's
  *  shell in its place, as a TUI pane's shell outlives the line typed into it. Whatever ends the command, the pane stays
@@ -142,7 +150,7 @@ export const herdrHost = (env = process.env, { space = env.HERDR_WORKSPACE_ID } 
   self: () => ({ pane: env.HERDR_PANE_ID, tab: env.HERDR_TAB_ID, space }),
   noSelf: 'no HERDR_PANE_ID in the environment',
   layout(me) {
-    // herdr-lint: creation, not destruction. An unreadable layout is null, which takes the tab path and drops no marker.
+    // herdr-lint: creation, not destruction. An unreadable layout is null: the seat and gate take the tab path, the pane launcher refuses, and no marker drops.
     try { return herdr(['pane', 'layout', '--pane', me.pane]).result.layout.panes } catch { return null }
   },
   splitRight: (pane, cwd) => ({ paneId: herdr(splitPaneArgs(pane, 'right', cwd)).result.pane.pane_id, terminal: null }),
@@ -212,17 +220,17 @@ export const hcHost = (env = process.env) => ({
   /** This terminal's pane, tab and space from herdr-app ls, or null when it cannot be read or is not there. */
   self() {
     let me
-    // herdr-lint: no destruction follows. A null self stands the seat down and sends the gate to its detached path.
+    // herdr-lint: no destruction follows. A null self stands the seat down, sends the gate to its detached path, and the pane launcher refuses on it.
     try { me = appPanes().find((x) => x.terminal && x.terminal === env.HC_TERMINAL_ID) } catch { return null }
-    // All three named, or none: a self with no space or tab id cannot place a tab, and the seat and gate act on null.
+    // All three named, or none: a self with no space or tab id cannot place a tab, and every caller acts on null.
     return me?.pane && me.tab && me.space ? { pane: me.pane, tab: me.tab, space: me.space } : null
   },
   noSelf: `herdr-app ls could not place this terminal (HC_TERMINAL_ID ${env.HC_TERMINAL_ID || 'unset'}) in a pane`,
   /** The session tab's panes in herdr-app ls order, with no rect: herdr-core reports no geometry. A partial listing is
-   *  null, as an unreadable one is: a pane it leaves out or files under a tab with no id may be a live seat, so the
-   *  placement takes the tab path, drops no marker and never counts the column short. */
+   *  null, as an unreadable one is: a pane it leaves out or files under a tab with no id may be a live seat. The seat
+   *  and gate take the tab path on it and the pane launcher refuses, so none drops a marker or counts the column short. */
   layout(me) {
-    // herdr-lint: creation, not destruction. An unreadable or partial layout is null, which takes the tab path and drops no marker.
+    // herdr-lint: creation, not destruction. An unreadable or partial layout is null: the seat and gate take the tab path, the pane launcher refuses, and no marker drops.
     try {
       const rows = appPanes()
       return rows.panesPartial ? null : rows.filter((x) => !x.isTab && x.tab === me.tab).map((x) => ({ pane_id: x.pane }))
@@ -233,15 +241,21 @@ export const hcHost = (env = process.env) => ({
   newTab(me, cwd, command, label) {
     const r = herdrApp(['do', 'tab.new', '--space', me.space, '--name', label, '--folder', cwd, '--argv', JSON.stringify(hcArgv(cwd, command)), '--focus', 'false'])
     if (typeof r?.tab !== 'string' || !r.tab) throw new Error(`tab.new answered with no tab (${JSON.stringify(r)})`)
-    // The reply names the terminal, not its pane. A pane this listing cannot find stays null: the tab id closes it.
+    // The reply names the terminal, not its pane. A pane this listing cannot find stays null: the seat and gate close
+    // by the tab id, and the pane launcher, which needs the pane, reports the tab and records nothing.
     let paneId = null
-    // herdr-lint: creation. The pane id is display and the tab id is what any close uses.
+    // herdr-lint: creation. A null pane id closes nothing and drops no marker in any caller.
     try { paneId = appPanes().find((x) => x.terminal === r.terminal)?.pane ?? null } catch { /* the tab id is enough */ }
     return { tabId: r.tab, paneId, terminal: r.terminal ?? null, recorder: hcArgv(cwd, command)[2] }
   },
-  paneInfo(paneId) {
+  /** `terminal`, where a record names one, is asked about only when its pane is absent: `terminal.park` takes a pane out of
+   *  the window and leaves its program running, so absence alone does not say the session is over. */
+  paneInfo(paneId, terminal) {
     const rows = appPanes()
-    if (!rows.some((x) => x.pane === paneId)) return absent(rows.panesPartial, `pane ${paneId}`)
+    if (!rows.some((x) => x.pane === paneId)) {
+      const gone = absent(rows.panesPartial, `pane ${paneId}`)
+      return terminal && terminalRuns(terminal) ? { exists: true, parked: true } : gone
+    }
     const { pane } = appFocus()
     return { exists: true, focused: pane === null ? undefined : pane === paneId }
   },
@@ -283,8 +297,9 @@ export const hcHost = (env = process.env) => ({
     try { hostExec('python3', ['-I', '-c', 'import fcntl, pty, termios']); return null }
     catch { return 'python3 could not be run, and typing into a herdr-core pane needs it (install python3 and put it on PATH)' }
   },
-  /** Types text and never sends Enter. */
-  typeText(paneId, terminal, text) {
+  /** Types text and never sends Enter. `seen` is the transcript and the size its reader settled on: at any other size when
+   *  the attach is ready, nothing is typed. */
+  typeText(paneId, terminal, text, seen) {
     const bytes = Buffer.byteLength(text)
     if (bytes > TYPE_BYTES) throw nothingTyped(`the text is ${bytes} bytes and herdr-core takes at most ${TYPE_BYTES} bytes in one \`type\`; send it in shorter pieces: type one, \`read\`, then type the next`)
     const why = this.cannotType()
@@ -293,8 +308,8 @@ export const hcHost = (env = process.env) => ({
     // herdr-lint: nothing is destroyed. An unreadable size refuses the write, with nothing typed.
     try { size = hcGet(terminal) } catch (e) { throw nothingTyped(`the terminal's size could not be read (${e.message})`) }
     if (![size?.cols, size?.rows].every((n) => Number.isInteger(n) && n > 0)) throw nothingTyped(`hc get answered ${terminal} with no size (${size?.cols}x${size?.rows}), and an attach at any other size would resize it`)
-    try { hostExec('python3', ['-I', ATTACH, terminal, String(size.cols), String(size.rows)], text) }
-    catch (e) { if (e.status === 3) throw nothingTyped(`hc attach could not take ${terminal} (${e.message})`); throw e }
+    try { hostExec('python3', ['-I', ATTACH, terminal, String(size.cols), String(size.rows), seen.tee, String(seen.size)], text) }
+    catch (e) { if (e.status === 3) throw nothingTyped(`attaching to ${terminal} stopped before the text (${String(e.stderr).trim()})`); throw e }
   },
   pressEnter: (paneId, terminal) => { hostExec('hc', ['keys', terminal, 'enter']) },
   /** hc names the terminal's foreground program: the launched line while the recorder runs, the shell it ends in after. */

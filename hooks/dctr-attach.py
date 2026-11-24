@@ -1,13 +1,17 @@
 """Types one text into a herdr-core terminal, and nothing else (issue #111, phase B). Run by dctr-host.mjs's hcHost.typeText.
 
-    python3 -I dctr-attach.py <terminal> <cols> <rows>      the text arrives on stdin, so no command line carries it
+    python3 -I dctr-attach.py <terminal> <cols> <rows> <transcript> <size>
+
+The text arrives on stdin, so no command line carries it.
 
 `hc keys` cannot spell every character and `hc send` always presses Enter, so the text goes through `hc attach`, which
 needs a terminal on its stdin: a pty of the size given, which must be the terminal's own, or the attach resizes it.
 
 The exit code is the answer, and the caller reads nothing else:
     0  attached, typed, detached
-    3  NOTHING was typed: the attach never happened
+    3  NOTHING was typed: the attach never happened, or the transcript is no longer the size its reader settled on, looked at
+       just before the write. The attach takes a moment, and output in it may be a pager nobody has judged. What the attach
+       draws goes to its own pty, never to the transcript, so a quiet session keeps its size
     anything else  the text MAY have been typed. Never resent here; a detach that fails kills the attach.
 """
 import fcntl, os, pty, select, signal, struct, sys, termios, time
@@ -20,7 +24,7 @@ DETACH = b'\x1c'                      # ctrl+\
 ATTACH_S, WRITE_S, DETACH_S = 8, 5, 3   # each under the caller's own bound on this process, together with the pauses
 SETTLE_S = 0.3                        # for the attach to pass the text on before it is told to leave
 
-term, cols, rows = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+term, cols, rows, tee, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], int(sys.argv[5])
 text = sys.stdin.buffer.read()
 code = NEVER
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(code))
@@ -33,7 +37,7 @@ if pid == 0:
     finally:
         os._exit(127)
 
-seen, status = b'', None
+seen, status, unread = b'', None, False
 
 
 def ended():
@@ -61,6 +65,14 @@ def pump(seconds, until=lambda: False):
             seen += got
 
 
+def settled():
+    """Whether the transcript still holds exactly what its reader settled on. One that cannot be read does not."""
+    try:
+        return os.stat(tee).st_size == size
+    except OSError:
+        return False
+
+
 def write(data):
     """All of `data`, or an OSError. Non-blocking, so an attach that stops reading cannot hold this process."""
     end = time.monotonic() + WRITE_S
@@ -75,19 +87,28 @@ try:
     pump(ATTACH_S, lambda: ATTACHED in seen)
     if ATTACHED in seen and not ended():
         os.set_blocking(fd, False)
-        code = MAYBE
-        write(text)
-        pump(SETTLE_S)
+        unread = not settled()
+        if not unread:
+            code = MAYBE
+            write(text)
+            pump(SETTLE_S)
         if not ended():
             write(DETACH)
             pump(DETACH_S)
-            if ended() and status == 0:
+            if not unread and ended() and status == 0:
                 code = 0
-    if code == NEVER:
+    if unread:
+        sys.stderr.write('the transcript changed while attaching: output arrived that nobody has judged; `read` and judge it, then type again\n')
+    elif code == NEVER:
         sys.stderr.write(seen[-300:].decode('utf-8', 'replace').replace('\x1b', ''))
 except OSError as e:
     sys.stderr.write(f'{e}\n')
 finally:
+    os.close(fd)   # first: macOS does not let a killed process go while what it drew is unread on an open pty
+    for _ in range(20):   # the hang-up that gives it ends an attach by itself
+        if ended():
+            break
+        time.sleep(0.01)
     if not ended():
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)

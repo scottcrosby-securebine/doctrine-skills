@@ -5,7 +5,7 @@
 // The third clause is the one the first two cannot do. A refusal that fired for the wrong reason —
 // a missing binary, a typo in a path — prints exactly what a correct refusal prints.
 //
-// Needs only node and bash. A tripwire `herdr` is put on PATH so "refused without touching the
+// Needs node and bash, and python3 for the both-hosts table. A tripwire `herdr` is put on PATH so "refused without touching the
 // device" is proved by counting invocations rather than assumed from an exit code.
 
 // A herdr-core terminal running the suite would hand every child its HC_TERMINAL_ID, and termHost would read herdr-core where a clause means a herdr TUI pane or no host.
@@ -1034,6 +1034,8 @@ console.log('the decision table — every cell, driven, with herdr injected')
   // to "nothing records which pane wrote it" and refuse, after deleting the marker that said so.
   cell('a marker names a GONE pane, transcript non-empty -> proceed, marker stale',
     { stateRecord: null, markerPanes: ['M'], teeBytes: 10, ask: ask({ M: 'gone' }) }, { proceed: true, stale: ['M'] })
+  cell('a record answers PARKED, its program running with no pane -> refuse',
+    { stateRecord: { paneId: 'P' }, markerPanes: [], teeBytes: 10, ask: ask({ P: 'parked' }) }, { proceed: false })
   cell('several markers, one still live -> refuse',
     { stateRecord: null, markerPanes: ['M1', 'M2'], teeBytes: 10, ask: ask({ M1: 'gone', M2: 'live' }) }, { proceed: false })
   cell('records disagree, the strictest answer wins',
@@ -1152,7 +1154,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
   const go = (args, { fail = {}, ...env } = {}) => {
     const r = spawnSync('node', [LAUNCHER, ...args], { encoding: 'utf8', timeout: 60000, cwd: tmp, env: (() => {
       const e = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, ...ENV[W.h], TMPDIR: W.dir, CLAUDE_CODE_SESSION_ID: 'both', DCTR_VIEW_REQUEST_DIR: '',
-        DCTR_FAKE_STATE: W.state, DCTR_FAKE_CALLS: W.calls, DCTR_FAKE_OWNER: String(process.pid), DCTR_FAKE_FAIL: JSON.stringify(fail), DCTR_FAKE_FAIL_IN_PANE: '{}', ...env }
+        DCTR_FAKE_STATE: W.state, DCTR_FAKE_CALLS: W.calls, DCTR_FAKE_OWNER: String(process.pid), DCTR_FAKE_FAIL: JSON.stringify(fail), DCTR_FAKE_TEE: W.tee, DCTR_FAKE_FAIL_IN_PANE: '{}', ...env }
       for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k]
       return e
     })() })
@@ -1170,6 +1172,7 @@ console.log('both hosts — one table over the fake host, every row in the herdr
   }
   const typedInto = () => (W.h === 'hc' ? (() => { try { return fs.readFileSync(`${W.state}.t2.typed`, 'utf8') } catch { return null } })() : callsOf().find((c) => c.args[1] === 'send-text')?.args[3] ?? null)
   const reap = () => { for (const x of allTabs().flatMap((t) => t.panes)) if (x.pid) try { process.kill(-x.pid, 'SIGKILL') } catch { /* gone */ } }
+  const raw = (b, a, fail = {}) => spawnSync(path.join(fakeBin, b), a, { encoding: 'utf8', env: { ...process.env, DCTR_FAKE_STATE: W.state, DCTR_FAKE_CALLS: W.calls, DCTR_FAKE_FAIL: JSON.stringify(fail) } })
   const CONNECT = 'echo "it\'s a banner"; sleep 60'
   const TABLE = [
     { row: 'open splits right beside the session, shows its label, records the pane and its host, and empties the last transcript',
@@ -1284,6 +1287,48 @@ console.log('both hosts — one table over the fake host, every row in the herdr
       },
       ok: ({ never, one, late, two, key, keys, same }, h) => [never, late, key].every((r) => r.code === 1) && /may have been typed/.test(late.err) && /`read`/.test(late.err) && /may have been sent/.test(key.err) &&
         (h === 'hc' ? /nothing was typed/.test(never.err) : /may have been typed/.test(never.err)) && one === 1 && two === 2 && keys === 1 && same },
+    { row: 'output that arrives while the text is being attached is never typed over: nothing is typed, the state is as it was, the next read shows it, and a quiet session is typed into; a transcript that vanishes refuses',
+      // The TUI types in one call, with nothing to attach: its half is the same writes with no fault.
+      run(h) {
+        ready(); const before = fs.readFileSync(`${W.tee}.state.json`, 'utf8')
+        const f = (n) => ({ fail: h === 'hc' ? { 'hc attach': n } : {} })
+        const over = go(['type', W.tee, 'x'], f('output')), at = typedInto(), same = fs.readFileSync(`${W.tee}.state.json`, 'utf8') === before
+        const shown = go(['read', W.tee]), quiet = go(['type', W.tee, 'y']), then = typedInto()
+        const lost = go(['type', W.tee, 'z'], f('vanish'))
+        return { over, at, same, shown, quiet, then, lost, gone: !fs.existsSync(W.tee) }
+      },
+      ok: ({ over, at, same, shown, quiet, then, lost, gone }, h) => quiet.code === 0 && (h === 'hc'
+        ? over.code === 1 && /nothing was typed/.test(over.err) && /while attaching/.test(over.err) && at === null && same && /---\(more\)---/.test(shown.out) && then === 'y' && lost.code === 1 && /nothing was typed/.test(lost.err) && gone && typedInto() === 'y'
+        : over.code === 0 && lost.code === 0) },
+    { row: 'a transcript whose pane is gone but whose terminal still runs (a parked pane) is refused and kept whole, and the sweep keeps its marker; a finished or removed terminal is gone, a failed look refuses; the herdr TUI has no park and reads the pane gone',
+      run(h) {
+        const T = h === 'hc' ? { ...TAG.hc, terminal: 't2', recorder: 'r' } : {}
+        const set = (st) => { const m = model(); m.terminals.t2 = st; fs.writeFileSync(W.state, JSON.stringify(m)) }
+        const open = (tee = W.tee, o) => { const r = go(['open', 'x', tee, CONNECT], o); reap(); return r }
+        fs.writeFileSync(W.tee, OLD); putState({ paneId: 'P2', tee: W.tee, label: 'x', owner: 'user', cursor: 0, ...T })
+        if (h === 'hc') raw('herdr-app', ['do', 'terminal.park', '--terminal', 't2']); else raw('herdr', ['pane', 'close', 'P2'])
+        const byState = open(), text1 = teeText()
+        const mt = path.join(W.dir, 'marked.log'); plant('P1:PARK', { ...T, tee: mt }); fs.writeFileSync(mt, OLD)
+        const byMarker = open(mt), text2 = fs.readFileSync(mt, 'utf8'), blind = open(mt, { fail: { 'hc get': 'transport' } })
+        plant('P1:PARK', { ...T, tee: path.join(W.dir, 'parked.log') })
+        const sweep = open(path.join(W.dir, 'other.log')), kept = Boolean(marker('P1:PARK'))
+        // With hc unable to answer, the sweep keeps the marker too, and its own session opens all the same.
+        const sweepBlind = open(path.join(W.dir, 'blind.log'), { fail: { 'hc get': 'transport' } }), keptBlind = Boolean(marker('P1:PARK'))
+        const over = ['finished', 'removed', 'bare'].map((how, i) => {
+          const tee = path.join(W.dir, `over-${i}.log`); fs.writeFileSync(tee, OLD)
+          if (how === 'bare') set('live'); else set(how)
+          // 'bare' names no terminal, so only its pane can be asked about.
+          plant('P1:PARK', how === 'bare' ? { ...TAG[h], tee } : { ...T, tee })
+          return open(tee).code === 0 && !marker('P1:PARK')
+        })
+        return { byState, text1, byMarker, text2, blind, sweep, kept, sweepBlind, keptBlind, over }
+      },
+      ok: (r, h) => r.over.every(Boolean) && r.sweep.code === 0 && (h === 'hc'
+        ? [r.byState, r.byMarker].every((x) => x.code === 1 && /still running/.test(x.err) && /no pane shows it/.test(x.err)) && r.text1 === OLD && r.text2 === OLD && r.blind.code === 1 && /could not be looked up/.test(r.blind.err) && r.kept && r.sweepBlind.code === 0 && r.keptBlind
+        : r.byState.code === 0 && r.byMarker.code === 0 && !r.kept) },
+    { row: 'a split answered with no pane id is reported as made and recorded nowhere, naming no tab that was never made',
+      run(h) { return go(['open', 'x', W.tee, CONNECT], { fail: { [CREATE[h].split]: 'noid' } }) },
+      ok: (r, h) => r.code === 1 && !/tab null|undefined/.test(r.err) && creates() === 1 && !readState_() && fs.readdirSync(W.md).length === 0 && (h === 'hc' ? /may exist all the same/ : /was created and then the open failed \(the split was answered with no pane id\)/).test(r.err) },
     { row: 'a text over 1000 bytes is refused on herdr-core with nothing typed, naming the limit; the herdr TUI types it',
       run() { ready(); return { long: go(['type', W.tee, 'y'.repeat(1001)]), at: typedInto() } },
       ok: ({ long, at }, h) => (h === 'hc' ? long.code === 1 && /1000 bytes/.test(long.err) && /shorter pieces/.test(long.err) && at === null && count('hc attach') === 0 : long.code === 0 && at?.length === 1001) },
@@ -1338,7 +1383,6 @@ console.log('both hosts — one table over the fake host, every row in the herdr
 
   // The last row's and the python3 row's fixtures, and the fake's own answers the rows stand on, with no launcher.
   fresh('hc')
-  const raw = (b, a, fail = {}) => spawnSync(path.join(fakeBin, b), a, { encoding: 'utf8', env: { ...process.env, DCTR_FAKE_STATE: W.state, DCTR_FAKE_CALLS: W.calls, DCTR_FAKE_FAIL: JSON.stringify(fail) } })
   check('the no-python3 PATH really has none', spawnSync('python3', ['-V'], { env: { ...process.env, PATH: `${fakeBin}:${bare}` } }).error?.code === 'ENOENT')
   check('the fake really answers an unlisted pane as gone, a failed status on exit 1 and an empty one as {}',
     !JSON.parse(raw('herdr-app', ['ls']).stdout).spaces[0].tabs.some((t) => t.terminals.some((x) => x.pane === 'GONE')) && raw('herdr', ['pane', 'get', 'GONE']).status === 1 && raw('herdr-app', ['status'], { 'herdr-app status': 'transport' }).status === 1 && raw('herdr-app', ['status'], { 'herdr-app status': 'empty' }).stdout.trim() === '{}')

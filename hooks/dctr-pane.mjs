@@ -62,7 +62,9 @@
 // second read and the keystroke arriving, and no lock closes it, because the device is not in the
 // transaction. What the rule guarantees is that nothing already on screen when you asked, and
 // nothing that arrived while this launcher was looking, is written over unseen. It does not
-// guarantee the device was silent at the instant of the send.
+// guarantee the device was silent at the instant of the send. In the TUI that gap runs from the second read to herdr's
+// send. On herdr-core text takes a moment to attach, so dctr-attach.py reads the size once more when it is ready, and
+// the gap runs from that read to its write; Enter there has no such read, and its gap runs from the second read to hc's key.
 //
 // On herdr-core the recorder check trails a disconnect by a moment, because `hc get`'s foreground is not live: text typed
 // in that moment can land in the local shell. Enter is checked separately, by its own call, so it can still be refused.
@@ -208,8 +210,8 @@ export const defaultTeeDir = () => TEES_DIR
 /**
  * MAY THIS TRANSCRIPT BE REPLACED? One decision over the whole table, rather than a prologue of
  * predicates nobody had enumerated. Three records can bear on it — the state file, any marker naming
- * this tee, and the transcript's own bytes — crossed with the three answers herdr can give about a
- * pane: live, gone, or unknowable.
+ * this tee, and the transcript's own bytes — crossed with the answers a host can give about a
+ * pane: live, parked (gone from the window, its program still running), gone, or unknowable.
  *
  * Two rules fall out of the table and neither survived being written one branch at a time:
  *  - A record that answered "gone" is STILL A RECORD. The branch for "nothing recorded this
@@ -227,6 +229,8 @@ export function openDecision({ stateRecord, markerPanes, teeBytes, ask }) {
   const answers = named.map((id) => [id, ask(id)])
   const live = answers.find(([, a]) => a === 'live')
   if (live) return { proceed: false, why: `is already recorded by live pane ${live[0]}; close that pane or choose another tee path`, stale: [] }
+  const parked = answers.find(([, a]) => a === 'parked')
+  if (parked) return { proceed: false, why: `records pane ${parked[0]}, which is gone while its program is still running: no pane shows it, or a new one does; that session is not over, so end its program or choose another tee path`, stale: [] }
   const unknown = answers.find(([, a]) => a === 'unknowable')
   if (unknown) return { proceed: false, why: `records pane ${unknown[0]} and that pane could not be looked up; not replacing a transcript that may still be live`, stale: [] }
   // Every record answered "gone". That IS an answer, and the records that gave it are stale.
@@ -250,20 +254,23 @@ function readRecords(tee, host) {
   const naming = markers.filter((m) => m.tee && path.resolve(m.tee) === here)
   const markerPanes = naming.map((m) => m.paneId)
   // The panes the other host recorded. This one cannot answer for them, so they are never asked about.
-  const foreign = [...naming, ...(stateRecord?.paneId ? [stateRecord] : [])].filter((r) => !sameHost(host, r)).map((r) => r.paneId)
+  const all = [...naming, ...(stateRecord?.paneId ? [stateRecord] : [])]
+  const foreign = all.filter((r) => !sameHost(host, r)).map((r) => r.paneId)
+  const terminals = Object.fromEntries(all.filter((r) => r.terminal).map((r) => [r.paneId, r.terminal]))
   let teeBytes = 0
   try { teeBytes = size(tee) } catch { teeBytes = 0 }
-  return { stateRecord, markerPanes, teeBytes, foreign }
+  return { stateRecord, markerPanes, teeBytes, foreign, terminals }
 }
 
-/** live | gone | unknowable. Only the seam's `exists: false` is an answer of absence: a lookup that threw, and a reply
+/** live | parked | gone | unknowable. Only the seam's `exists: false` is an answer of absence: a lookup that threw, and a reply
  *  carrying no pane (which has no focus either), answered nothing. Read as gone, that reply would let `open` TRUNCATE the
  *  user's transcript. */
-function askPane(host, paneId) {
+function askPane(host, paneId, terminal) {
   // herdr-lint: a lookup that throws is unknowable, which openDecision refuses on.
   try {
-    const pane = host.paneInfo(paneId)
+    const pane = host.paneInfo(paneId, terminal)
     if (!pane.exists) return 'gone'
+    if (pane.parked) return 'parked'
     return typeof pane.focused === 'boolean' ? 'live' : 'unknowable'
   } catch { return 'unknowable' }
 }
@@ -322,8 +329,8 @@ async function open(label, tee, connect) {
   // Refuse to touch a transcript whose pane may still be alive — ONE decision over the whole table,
   // and it writes nothing. Whatever it finds stale is handed to the sweep that runs under the
   // placement lock below, where every other marker removal already happens.
-  const { foreign, ...records } = readRecords(tee, host)
-  const decision = openDecision({ ...records, ask: (id) => (foreign.includes(id) ? 'unknowable' : askPane(host, id)) })
+  const { foreign, terminals, ...records } = readRecords(tee, host)
+  const decision = openDecision({ ...records, ask: (id) => (foreign.includes(id) ? 'unknowable' : askPane(host, id, terminals[id])) })
   if (!decision.proceed) die(`${path.basename(tee)} ${decision.why}${foreign.length ? ` (the other terminal host opened ${foreign.join(', ')})` : ''}`)
 
   fs.mkdirSync(PANES_DIR, { recursive: true })
@@ -366,7 +373,7 @@ async function open(label, tee, connect) {
         // Only a DEFINITE absence may remove a record: a lookup that threw, and a reply carrying no pane, keep it.
         let gone = false
         // herdr-lint: a lookup that throws leaves `gone` false, which keeps the marker.
-        try { gone = host.paneInfo(dead.paneId).exists === false } catch { /* kept */ }
+        try { gone = host.paneInfo(dead.paneId, dead.terminal).exists === false } catch { /* kept */ }
         if (gone) try { fs.rmSync(markerFor(dead.paneId), { force: true }) } catch { /* already gone */ }
       }
 
@@ -395,8 +402,8 @@ async function open(label, tee, connect) {
         ;({ paneId: id, tabId, terminal, recorder } = host.newTab(me, process.cwd(), command, label))
         console.log(`overflow=tab ${tabId} (${occupants.filter(isSideSeat).length} panes already beside this session, cap ${SIDE_CAP})`)
       }
-      opened = id || `in tab ${tabId}`
-      if (!id) throw new Error('its tab was made and the pane in it could not be read')
+      opened = id || (tabId ? `in tab ${tabId}` : 'with no id')
+      if (!id) throw new Error(tabId ? 'its tab was made and the pane in it could not be read' : 'the split was answered with no pane id')
       // The marker goes down before anything else can fail, so an interrupted open leaves a pane
       // that is still findable rather than an orphan nothing records.
       writeMarker(markerFor(id), { paneId: id, tabId, tee: path.resolve(tee), label, pid: process.pid, ...host.tag, ...(terminal ? { terminal } : {}) })
@@ -484,7 +491,7 @@ async function type(tee, text) {
   const host = usableHost()
   const s = guardWrite(tee, host)
   const before = s.seen
-  send('typed', () => host.typeText(s.paneId, s.terminal, text))
+  send('typed', () => host.typeText(s.paneId, s.terminal, text, { tee, size: s.seen }))
   await sleep(SETTLE_MS)
   const end = size(tee)
   const echo = region(tee, before, end)
