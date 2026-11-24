@@ -91,7 +91,7 @@ const SEPARATORS = /isPaneNotFound|isTabNotFound|isAppNotFound|isHcNotFound|alre
  *  the closes, whose 'gone' is an answer and whose throw is not, and recorderAlive, which decides a write. Called as
  *  `host.<method>(` in the seat hook, the gate launcher and the pane launcher, and as `host.` inside the seam's own gateAnswer. */
 const SEAM = /\bhost\.(self|layout|paneInfo|tabs|tabInfo|closePane|closeTab|recorderAlive)\s*\(/
-/** A call that reaches a host: herdr, herdr-core through the seam's transport and its two readers, or the seam. */
+/** A call that reaches a host: herdr, herdr-core through the seam's transport and its three readers, or the seam. */
 const CALL = new RegExp(`\\b(herdr|herdrApp|appPanes|appFocus|hcGet)\\s*\\(|${SEAM.source}`)
 /** A call whose answer is a READ: a herdr reply's `.result`, a herdr-core reader, or a seam method above. */
 const READ = new RegExp(`herdr\\s*\\([^)]*\\)[^\\n]*\\.result|\\b(appPanes|appFocus|hcGet)\\s*\\(|${SEAM.source}`)
@@ -114,7 +114,7 @@ export const emptinessFinding = (line) => {
   // separating, so matching it here would have cried wolf on all of them — a corpus fact, not a
   // property of the syntax, and it stops being true the moment someone writes one without the guard.
   const ternary = /herdr\s*\([^)]*\)[^?\n]*\.result[^?\n]*\?[^.]/.test(stripped) ||
-    /\b(appPanes|appFocus)\s*\(\)[^?\n]*\.\w[^?\n]*\?[^.]/.test(stripped)
+    /\b(appPanes|appFocus|hcGet)\s*\([^)]*\)[^?\n]*\.\w[^?\n]*\?[^.]/.test(stripped)
   const negated = /!\s*(herdr|herdrApp|appPanes|appFocus|hcGet)\s*\(/.test(stripped)
   if (!ternary && !negated) return null
   return ternary
