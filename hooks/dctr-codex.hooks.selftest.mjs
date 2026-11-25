@@ -488,7 +488,11 @@ const wgtT = rollout(wgt, 'v3', readyTurn)
 stopNow(wgt, 'v3', wgtT, { turn_id: 'turn-v3', last_assistant_message: 'Handoff written.\nauto-cycle: ready' })
 const wgtLog = path.join(wgt.dir, 'events.log')
 const wgtGets0 = gets(wgt)
-const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3')
+// The watcher's Codex root is an idle process with no children, not the suite: a suite child live at poll 1 (gone()'s
+// ps) can read blind, hold that poll, and land a mutant's early Stop after the read below.
+const wgtRoot = idle(baseEnv)
+orphans.push(wgtRoot.pid)
+const wgtRun = watcher(wgt, 'v3', wgtT, 0, { DCTR_CYCLE_SCRIPT: stub, STUB_LOG: wgtLog }, 'turn-v3', { pid: wgtRoot.pid, start: null })
 const wgtPolled = await polled(wgt, wgtGets0)
 const wgtBefore = events(wgtLog)
 // Ruling R1 (2026-11-05), for the R2-B2 mutation CI alone misses: where the gate sets DCTR_DEBUG_LOG, record what this
@@ -497,6 +501,7 @@ const wgtDebug = process.env.DCTR_DEBUG_LOG
 const wgtLate = wgtDebug ? await new Promise((r) => { setTimeout(() => r(events(wgtLog).length), 2000) }) : null
 write(`${wgtOut}.result`, 'exit=0\n')
 await wgtRun
+wgtRoot.kill()
 const wgtEvents = events(wgtLog)
 if (wgtDebug) fs.appendFileSync(wgtDebug, `${JSON.stringify({ tree: path.basename(import.meta.dirname), polled: wgtPolled, before: wgtBefore.length, late: wgtLate, after: wgtEvents.length })}\n`)
 clause('clause 1d8 — a Stop held on a detached gate: the watcher hands nothing on while the gate is live, even on the ready line, and hands the hook the Stop again once its result file exists (E10H-R2-B2, red team R2-N2)',
