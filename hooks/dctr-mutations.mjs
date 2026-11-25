@@ -6202,6 +6202,14 @@ const MUTATIONS = [
     clause: "a write whose call failed is reported as maybe sent",
     from: "  send('sent', ",
     to: "  send('typed', " },
+  { name: "(#111 B P2) the transcript is checked before the attach announces itself", file: "dctr-attach.py",
+    clause: "clause 1o8 hc — a transcript that grew, shrank or vanished while attaching refuses with nothing typed",
+    from: "    pump(ATTACH_S, lambda: ATTACHED in seen)\n    if ATTACHED in seen and not ended():\n        os.set_blocking(fd, False)\n        unread = not settled()\n",
+    to: "    unread = not settled()\n    pump(ATTACH_S, lambda: ATTACHED in seen)\n    if ATTACHED in seen and not ended():\n        os.set_blocking(fd, False)\n" },
+  { name: "(#111 B P2) the launcher's type carries no transcript", file: "dctr-pane.mjs",
+    clause: "type types exactly the text with no Enter, enter sends Enter alone, once",
+    from: "host.typeText(s.paneId, s.terminal, text, { tee, size: s.seen }))",
+    to: "host.typeText(s.paneId, s.terminal, text))" },
 ]
 
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a

@@ -278,7 +278,7 @@ for (const [h, host] of Object.entries(HOSTS)) {
         died.r?.threw && !died.r.nothingTyped && died.typed === text && died.attaches === 1 && stuck.r?.threw && !stuck.r.nothingTyped && stuck.attaches === 1 && stuck.pid && !stuck.running, JSON.stringify({ died, stuck }))
       clause('clause 1o4 hc — an attach that never reports itself attached is killed with nothing typed, and says so',
         hung.r?.nothingTyped === true && hung.typed === null && hung.pid && !hung.running && hung.attaches === 1, JSON.stringify(hung))
-      clause('clause 2o8 hc — an attach that drew its screen left the transcript the size it was, so a quiet session is typed into', fs.statSync(SEEN.tee).size === 7 && died.typed === text, '')
+      clause('clause 2o8 hc — the fake host\'s contract: its attach draws its screen to its own pty and never to the transcript, so a quiet session keeps its size and is typed into; the real hc attach rests on a live measurement, not on this clause', fs.statSync(SEEN.tee).size === 7 && died.typed === text, '')
       // What the transcript does while the attach is under way. Each fault's own effect is read back, with no seam.
       const changed = ['output', 'shrink', 'vanish'].map((f) => {
         const r = fault(f), now = (() => { try { return fs.statSync(SEEN.tee).size } catch { return null } })()
