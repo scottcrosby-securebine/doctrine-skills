@@ -67,11 +67,11 @@ Larger architectural refactors found along the way are not rewritten mid-audit. 
 
 ## The gates
 
-**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team, looping until one pass comes clean. A pass counts as clean only once one complete path has also run end to end in the environment the work ships to, or the nearest one that runs the real code, with the change's effect observed. Where no such environment is reachable, the run says the check is unrun and never calls the pass clean.
+**Each fix phase** passes the hub's gate: your project's documented checks, a designated review, and a red team. By default that is one pass, the repairs and one pass that reads only the repair. On the full gate it loops until one pass comes clean. A pass counts as clean only once one complete path has also run end to end in the environment the work ships to, or the nearest one that runs the real code, with the change's effect observed. Where no such environment is reachable, the run says the check is unrun and never calls the pass clean.
 
 Every blocking finding gets the hub's class question: where else would the same defect have left the same mark? The agent looks at every such site, fixes the ones inside your scope, and lists those outside it in the report, or asks you where it cannot tell. A fix to one call site therefore often lands in the shared code they all use. A site outside your scope that the work leaves broken still blocks.
 
-Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate. It keeps your checks, the end-to-end run and an adversarial review, re-run on each repair, but drops the loop, the designated review and the alarms, and a second blocking finding moves the phase to the full gate. If you do not answer, the phase runs the full gate.
+Before a phase, the agent searches what the change reaches and proposes a gate to you. Only your choice puts a phase on the hub's reduced gate. It keeps your checks, the end-to-end run and an adversarial review, re-run on each repair, but drops the loop, the designated review and the alarms, and a second blocking finding moves the phase to the standard gate. If you do not answer, the phase runs the standard gate.
 
 The hub's two alarms bound every phase on the full gate: the round alarm, every fourth round that found a blocking finding unless you set another figure, and the time alarm, two hours without a round closing unless you set another budget. Either alarm stops the loop and puts a diagnosis to you for a ruling. The hub's simplification review runs inside each phase, before the pass that certifies it.
 

@@ -26,7 +26,7 @@ over the range its own caller iterates. Both hooks therefore read listed-and-abs
 absence, which is what `hooks/dctr-seat.mjs` and `hooks/dctr-gate.mjs` do. Re-check if `TabInfo`
 ever gains an optional field.
 
-**The mutation gate covers `hooks/` only, by decision rather than by oversight.** The reason is
+**The mutation table covers `hooks/` only, by decision rather than by oversight, and since 2026-11-26 it is not run as a gate.** The reason is
 written in `hooks/dctr-mutations.mjs`'s header. A repair under `tools/` is pinned by that tool's own
 three-clause tamper test, which runs in CI.
 

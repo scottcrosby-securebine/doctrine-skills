@@ -1,5 +1,5 @@
 # The gates that need nothing installed beyond bubblewrap. Every one of these is documented in CLAUDE.md as a
-# command run by hand; this file is the same commands, run on push, and it is not a substitute
+# command run by hand; this file is the same commands, run on every push and pull request, and it is not a substitute
 # for the ones it cannot run.
 #
 # What this does NOT run, so a green tick here is never read as a full pass:
@@ -14,13 +14,14 @@ name: gates
 
 on:
   push:
-    branches: [main]
   pull_request:
 
-# One run per change: a newer push to the same branch or pull request replaces the run before it.
+# One finished run per change. A push to a branch and the pull request from that branch share a group, so one
+# replaces the other, and a newer push replaces the run before it. A branch with no pull request still gets its
+# push run. Runs on main are never cancelled, so every commit that lands there has a finished run.
 concurrency:
-  group: gates-${{ github.ref }}
-  cancel-in-progress: true
+  group: gates-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   gates:

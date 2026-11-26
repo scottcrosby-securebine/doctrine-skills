@@ -1,8 +1,8 @@
 # Doctrine Skills
 
 Fifteen skills for Claude Code that put an agent's work through a real gate: every check your project
-documents, an adversary that did not write the code, and a loop that does not exit until one full
-pass comes back clean.
+documents, an adversary that did not write the code, and a review that ends on a clean pass or stops
+and tells you what is left.
 
 ## The problem
 
