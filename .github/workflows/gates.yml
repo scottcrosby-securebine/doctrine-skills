@@ -16,12 +16,13 @@ on:
   push:
   pull_request:
 
-# One finished run per change. A push to a branch and the pull request from that branch share a group, so one
-# replaces the other, and a newer push replaces the run before it. A branch with no pull request still gets its
-# push run. Runs on main are never cancelled, so every commit that lands there has a finished run.
+# At most one run in flight per branch, and the newest commit on a branch always gets one. The group is the branch
+# with its owner, so a push to a branch and the pull request from that branch share it and one replaces the other,
+# a newer push replaces the run before it, and a fork's branch never shares a group with a branch here, whatever
+# its name. A branch with no pull request still gets its push run.
 concurrency:
-  group: gates-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: gates-${{ github.event.pull_request.head.label || format('{0}:{1}', github.repository_owner, github.ref_name) }}
+  cancel-in-progress: true
 
 jobs:
   gates:

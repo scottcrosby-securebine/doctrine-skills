@@ -40,7 +40,9 @@ try {
 
   const good = run(HERE)
   const whole = total(good)
-  clause('clause 2a — the real tree stays quiet: exit 0, every entry counted', good.status === 0 && whole > 0, tail(good))
+  const inFile = (fs.readFileSync(path.join(HERE, 'dctr-mutations.mjs'), 'utf8').match(/^\s*\{ name: /gm) || []).length
+  clause('clause 2a — the real tree stays quiet: exit 0, and the count it reports is the number of entries in the table file',
+    good.status === 0 && whole > 0 && whole === inFile, `${tail(good)} (entries in the file ${inFile})`)
   const sharded = run(HERE, { DCTR_SHARD: '0/4' })
   clause('clause 2b — with DCTR_SHARD set the real tree still reads the whole table, not a quarter of it',
     sharded.status === 0 && total(sharded) === whole, `${tail(sharded)} (whole ${whole})`)
