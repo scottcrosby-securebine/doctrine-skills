@@ -1,8 +1,8 @@
 # Doctrine Skills
 
 Fifteen skills for Claude Code that put an agent's work through a real gate: every check your project
-documents, an adversary that did not write the code, and a loop that does not exit until one full
-pass comes back clean.
+documents, an adversary that did not write the code, and a review that ends on a clean pass or stops
+and tells you what is left.
 
 ## The problem
 
@@ -32,9 +32,12 @@ point of rule 6.
 5. **Ask where else.** Every blocking finding that survives verification gets one question: what else
    the same mistake would have touched. The fix clears every place that question turns up, not just
    the one that was reported.
-6. **Loop** until one full pass comes back clean with no blocking finding left over from an
-   earlier pass. Two alarms stop the loop
-   and put the decision to you rather than spending your budget without telling you.
+6. **Review twice, then stop.** By default a phase gets one full pass, its repairs, and one pass aimed
+   at the repair. A clean pass certifies it. If the second is not clean the phase stops and puts what
+   is left in front of you: ship with that list, or ask for the full loop, which repeats until one full
+   pass comes back clean with no blocking finding left over from an earlier pass. Two alarms stop that
+   loop and put the decision to you rather than spending your budget without telling you. Work with
+   little reach can take a lighter gate, on your say.
 7. **Cut what nobody asked for** before the pass that certifies the work, so the cut is inside what
    that pass checked, **then deliver** by whatever route your project normally ships work, and say
    whether what shipped is what the clean pass certified.

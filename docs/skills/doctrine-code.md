@@ -2,7 +2,7 @@
 
 Use it for general coding work done with the doctrine: building a feature, wiring modules, or implementing a spec or tickets, on the backend, the frontend or the UI. Parallel agents build the work, and a code review, and then a red team from another model family, stand between it and delivery.
 
-![The doctrine-code shape: questions settle a requirements file and the test seams, the fixed point is pinned, wave agents build test-first in their own worktrees, and the phase gate runs simplification first, then native checks, matts-code-review and a red team, looping until one pass is clean.](doctrine-code.png)
+![The doctrine-code shape: questions settle a requirements file and the test seams, the fixed point is pinned, wave agents build test-first in their own worktrees, and the phase gate runs simplification first, then native checks, matts-code-review and a red team, run twice at most by default.](doctrine-code.png)
 
 The figure shows the order this page walks through: the questions, the build, then the gate, where simplification runs first in every pass.
 
@@ -49,7 +49,7 @@ Each pass runs in this order:
 3. **`matts-code-review`**, the designated review, along two axes: Standards and Spec.
 4. **The red team**, from the other model family.
 
-The loop repeats until one pass comes clean.
+By default the phase then runs one pass that reads only the repair, and stops there, clean or not. On the full gate the loop repeats until one pass comes clean.
 
 ### What the review needs
 
@@ -86,11 +86,11 @@ On UI work the red team also gets the reuse rule, every wave agent's grep, and t
 
 ## How it ends
 
-The exit is the hub's: one clean pass of the full gate on one identified revision, with nothing blocking left open from an earlier pass and the real-environment run on record. Two alarms stop the loop and put a diagnosis to you: the round alarm, at every fourth round that found a blocking finding, and the time alarm, at two hours without a round closing. Your request can set other figures for both. Only a ruling you give after an alarm fires restarts the loop.
+The exit is the hub's. By default that is the standard gate: one pass of the full gate, the repairs, and one pass that reads only the repair. A clean pass on one identified revision, with nothing blocking left open and the real-environment run on record, is the exit. If the second pass is not clean the phase stops and puts what is left to you, and you ship with it or choose the full gate. On the full gate the loop repeats until one pass comes clean, and two alarms stop it and put a diagnosis to you: the round alarm, at every fourth round that found a blocking finding, and the time alarm, at two hours without a round closing. Your request can set other figures for both. Only a ruling you give after an alarm fires restarts the loop.
 
-The hub's reduced gate is open to this wrapper. The agent checks how far the change reaches and proposes a gate. Only your choice puts a phase on the reduced one. That gate runs the native checks, the real-environment run and one red-team review. A blocking finding from the review is repaired and the review re-run on the repair, and a blocking finding from that re-run moves the phase to the full gate. It has no loop, no designated review and no alarms.
+The hub's reduced gate is open to this wrapper. The agent checks how far the change reaches and proposes a gate. Only your choice puts a phase on the reduced one. That gate runs the native checks, the real-environment run and one red-team review. A blocking finding from the review is repaired and the review re-run on the repair, and a blocking finding from that re-run moves the phase to the standard gate. It has no loop, no designated review and no alarms.
 
-A phase ends in one of five states: Exited, the only clean one; Stopped, when you end the loop; Shipped at an escalation, when you choose to deliver from an alarm; Blocked, when the session ends with a question about direction, one only you can answer, still open; and Unable, when the run cannot resume by itself.
+A phase ends in one of five states: Exited, the only clean one; Stopped, when you end the loop; Shipped at an escalation, when you choose to deliver from an alarm or from the standard gate's stop; Blocked, when the session ends with a question about direction, one only you can answer, still open; and Unable, when the run cannot resume by itself.
 
 Delivery follows your repo's norm: commit, then push and open a PR only where that norm or you say to. Where no norm is documented, the agent commits locally and asks. The report opens with one line: whether the shipping revision is certified, which blocking findings are open, the difference between the certified and shipping revisions where they differ, and any punch list.
 

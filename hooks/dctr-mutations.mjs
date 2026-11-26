@@ -7,7 +7,8 @@
 // take: a clause asserting a variable it never read, a fixture using a record shape no code writes,
 // a fixture whose pane id the workspace filter excluded so the branch under test never ran once, and
 // two repairs whose reverts left the whole suite green. A reviewer found each of those by reverting
-// something and re-running. This does that on every push, in about half a minute.
+// something and re-running. This did that as a gate until 2026-11-26. Since then no phase and no merge runs it
+// (CLAUDE.md, "A fix is proven once"); only its --anchors mode still runs.
 //
 // It mutates a COPY. The repo is never written to.
 //
@@ -6212,8 +6213,28 @@ const MUTATIONS = [
     to: "host.typeText(s.paneId, s.terminal, text))" },
 ]
 
-// DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so CI's matrix jobs each take a
-// disjoint part; a malformed or empty selection throws here, before the work tree exists. The baseline suites always all run.
+// --anchors checks every entry's text and runs nothing: each `from` must still occur exactly once in its file, and
+// the table must not have grown. No gate runs the mutations any more (Scott's ruling, 2026-11-26), and an edit can
+// retire an entry's text without anyone noticing; this is what keeps the table usable for its one remaining job.
+// It is decided here, before DCTR_SHARD is read, so it always covers the whole table.
+/** The most entries the table may hold. Lower it in the commit that deletes entries; nothing raises it. */
+const TABLE_CEILING = 1743
+if (process.argv.includes('--anchors')) {
+  let bad = 0
+  for (const m of MUTATIONS) {
+    let text = ''
+    try { text = fs.readFileSync(path.join(HERE, m.file), 'utf8') } catch { /* a missing file has no anchor */ }
+    const hits = anchorCount(text, m.from)
+    if (anchorVerdict(hits) !== 'apply') { bad += 1; console.log(`  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}`) }
+  }
+  if (MUTATIONS.length > TABLE_CEILING) { bad += 1; console.log(`  FAIL the table holds ${MUTATIONS.length} entries, over its ceiling of ${TABLE_CEILING}; a fix is proven once and adds no entry`) }
+  console.log(bad ? `\n${bad} FAILED of ${MUTATIONS.length} entries` : `\nall ${MUTATIONS.length} anchors occur exactly once`)
+  process.exit(bad ? 1 : 0)
+}
+
+// DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so several hosts can each take a
+// disjoint part of a full run; a malformed or empty selection throws here, before the work tree exists. The baseline
+// suites always all run. --anchors, above, is decided before this and always reads the whole table.
 if (process.env.DCTR_SHARD) {
   const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
   console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)

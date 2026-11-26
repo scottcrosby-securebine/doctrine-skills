@@ -1,5 +1,5 @@
 # The gates that need nothing installed beyond bubblewrap. Every one of these is documented in CLAUDE.md as a
-# command run by hand; this file is the same commands, run on push, and it is not a substitute
+# command run by hand; this file is the same commands, run on every push and pull request, and it is not a substitute
 # for the ones it cannot run.
 #
 # What this does NOT run, so a green tick here is never read as a full pass:
@@ -16,6 +16,14 @@ on:
   push:
   pull_request:
 
+# At most one run in flight per branch, and the newest commit on a branch always gets one. The group is the branch
+# with its owner, so a push to a branch and the pull request from that branch share it and one replaces the other,
+# a newer push replaces the run before it, and a fork's branch never shares a group with a branch here, whatever
+# its name. A branch with no pull request still gets its push run.
+concurrency:
+  group: gates-${{ github.event.pull_request.head.label || format('{0}:{1}', github.repository_owner, github.ref_name) }}
+  cancel-in-progress: true
+
 jobs:
   gates:
     runs-on: ubuntu-latest
@@ -27,7 +35,7 @@ jobs:
 
       - name: bubblewrap for the pane selftest's namespace clauses
         # The one install each job needs. Without `bwrap --unshare-pid` the pane selftest skips its namespace
-        # clauses and the mutation gate fails on the repairs only they pin. The runner image
+        # clauses, which are the only tests of the repairs they pin. The runner image
         # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
         # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
         run: |
@@ -212,6 +220,14 @@ jobs:
       - name: doctor verdict tamper test
         # The verdict over live captures from both hosts; the live doctor itself needs Codex, Claude Code and herdr.
         run: node hooks/dctr-doctor.selftest.mjs
+
+      - name: mutation table anchors
+        # Not the mutation run, which no gate runs since 2026-11-26. Every entry's text must still occur exactly
+        # once in its file, so the table stays usable for the one check a unit gets when its tests are rewritten.
+        run: node hooks/dctr-mutations.mjs --anchors
+
+      - name: mutation table anchors tamper test
+        run: node hooks/dctr-mutations.anchors.selftest.mjs
 
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null

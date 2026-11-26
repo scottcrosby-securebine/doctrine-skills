@@ -198,7 +198,7 @@ clause('clause 1aw — the gate applies an anchor that occurs exactly once, and 
     at.length === 2 && at.every((i) => raw[i + 1] && !/^ *(PASS|FAIL) /.test(raw[i + 1])) && typeof gone.code !== 'number' &&
       adjNext.some((n) => /^PASS /.test(n)) && adjNext.some((n) => /^FAIL /.test(n)), JSON.stringify({ at, adjNext }))
 }
-// DCTR_SHARD splits the mutation gate across CI jobs: the shards of one n must cover every index exactly once, and a
+// DCTR_SHARD splits a full mutation run across hosts: the shards of one n must cover every index exactly once, and a
 // spec that is not that shape must throw rather than keep a subset nobody asked for.
 {
   const N = 1417, seen = new Array(N).fill(0)
