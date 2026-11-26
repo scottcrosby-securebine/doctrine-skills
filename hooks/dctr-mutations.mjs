@@ -6220,6 +6220,21 @@ if (process.env.DCTR_SHARD) {
   MUTATIONS.splice(0, MUTATIONS.length, ...keep)
 }
 
+// --anchors checks every entry's text and runs nothing: each `from` must still occur exactly once in its file.
+// No gate runs the mutations any more (Scott's ruling, 2026-11-26), and an edit can retire an entry's text without
+// anyone noticing; this is what keeps the table usable for its one remaining job.
+if (process.argv.includes('--anchors')) {
+  let bad = 0
+  for (const m of MUTATIONS) {
+    let text = ''
+    try { text = fs.readFileSync(path.join(HERE, m.file), 'utf8') } catch { /* a missing file has no anchor */ }
+    const hits = anchorCount(text, m.from)
+    if (anchorVerdict(hits) !== 'apply') { bad += 1; console.log(`  FAIL ${m.name} — its anchor occurs ${hits} times in ${m.file}`) }
+  }
+  console.log(bad ? `\n${bad} of ${MUTATIONS.length} anchors FAILED` : `\nall ${MUTATIONS.length} anchors occur exactly once`)
+  process.exit(bad ? 1 : 0)
+}
+
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
 // Every copy sits one level under `work`, so a suite reading a skill's text at ../skills (the cycle suite reads
 // doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets skills/, so a link will do;

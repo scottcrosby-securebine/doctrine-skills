@@ -14,7 +14,13 @@ name: gates
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+# One run per change: a newer push to the same branch or pull request replaces the run before it.
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gates:
@@ -27,7 +33,7 @@ jobs:
 
       - name: bubblewrap for the pane selftest's namespace clauses
         # The one install each job needs. Without `bwrap --unshare-pid` the pane selftest skips its namespace
-        # clauses and the mutation gate fails on the repairs only they pin. The runner image
+        # clauses, which are the only tests of the repairs they pin. The runner image
         # restricts unprivileged user namespaces, which an unprivileged bwrap needs. The probe runs
         # the selftest's own arguments, so a runner where they do not work fails here, not hours later.
         run: |
@@ -212,6 +218,14 @@ jobs:
       - name: doctor verdict tamper test
         # The verdict over live captures from both hosts; the live doctor itself needs Codex, Claude Code and herdr.
         run: node hooks/dctr-doctor.selftest.mjs
+
+      - name: mutation table anchors
+        # Not the mutation run, which no gate runs since 2026-11-26. Every entry's text must still occur exactly
+        # once in its file, so the table stays usable for the one check a unit gets when its tests are rewritten.
+        run: node hooks/dctr-mutations.mjs --anchors
+
+      - name: mutation table anchors tamper test
+        run: node hooks/dctr-mutations.anchors.selftest.mjs
 
       - name: plugin hook manifest parses
         run: python3 -m json.tool hooks/hooks.json > /dev/null
