@@ -26,6 +26,9 @@ for (const name of ['herdr', 'herdr-app', 'hc']) {
   fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec node ${JSON.stringify(path.join(HERE, 'dctr-host.fake.mjs'))} "$0" "$@"\n`)
   fs.chmodSync(path.join(bin, name), 0o755)
 }
+// The real python3 behind a wrapper that writes down its arguments, so a clause can say what they carried.
+const PY_ARGS = path.join(tmp, 'python-args')
+fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\nprintf '%s\\n' "$@" >> '${PY_ARGS}'\nexec '${execFileSync('sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim()}' "$@"\n`, { mode: 0o755 })
 // The fake reads its CLI name from the wrapper's own path, "$0".
 const STATE = path.join(tmp, 'state.json')
 process.env.PATH = `${bin}:${process.env.PATH}`
@@ -101,6 +104,22 @@ for (const [h, host] of Object.entries(HOSTS)) {
   const info = host.paneInfo('P1'), other = host.paneInfo('P2'), gone = host.paneInfo('P404')
   clause(`clause 2c ${h} — paneInfo: the focused pane is focused, another is not`, info.exists && info.focused === true && other.exists && other.focused === false, JSON.stringify({ info, other }))
   clause(`clause 1c ${h} — paneInfo: a pane the host does not have is { exists: false }, with no focus to misread`, gone.exists === false && !('focused' in gone), JSON.stringify(gone))
+  if (h === 'hc') {
+    // A parked pane is in no listing and its program still runs.
+    const park = (extra = {}) => { fresh(extra); const x = host.splitRight('P1', '/', 'true', 'l'); const p = direct('herdr-app', ['do', 'terminal.park', '--terminal', x.terminal]); return { ...x, parked: p.status } }
+    const look = (x, terminal = x.terminal) => { try { return host.paneInfo(x.paneId, terminal) } catch { return 'threw' } }
+    const a = park(), live = look(a), none = (() => { try { return host.paneInfo(a.paneId) } catch { return 'threw' } })(), lost = look(a, 't404')
+    const gets = calls().filter((c) => c.bin === 'hc' && c.args[0] === 'get').length
+    const failed = withFail({ 'hc get': 'transport' }, () => look(a)), empty = withFail({ 'hc get': 'empty' }, () => look(a))
+    const odd = look(park({ hcGet: { state: 'starting' } }))
+    const done = (() => { const x = park(); const m = model(); m.terminals[x.terminal] = 'finished'; fs.writeFileSync(STATE, JSON.stringify(m)); return look(x) })()
+    fresh(); const there = host.paneInfo('P2', 't2'), asked = calls().some((c) => c.bin === 'hc')
+    clause('clause 2c5/1c5 hc — paneInfo of an absent pane whose terminal still runs exists and is parked; finished or not found is gone; a failed, empty or unknown answer THROWS; with no terminal recorded it is gone as before; a listed pane asks hc nothing',
+      live.exists === true && live.parked === true && lost.exists === false && done.exists === false && none.exists === false && [failed, empty, odd].every((x) => x === 'threw') && gets === 2 && there.exists === true && !there.parked && !asked, JSON.stringify({ live, none, lost, done, failed, empty, odd, gets, there, asked }))
+    const b = park()
+    clause('clause 3c5 hc — a park really leaves the pane out of every listing and its terminal live, proved without the seam', b.parked === 0 && !hasPane(model(), b.paneId) && JSON.parse(direct('hc', ['get', b.terminal]).stdout).state === 'live', JSON.stringify(b))
+    fresh({ focus: { tab: 'T1', pane: 'P1' } })
+  }
   clause(`clause 1c2 ${h} — paneInfo: a failed or empty lookup THROWS, never answers gone`,
     withFail({ [READ[h].pane]: 'transport' }, () => throws(() => host.paneInfo('P1'))) && withFail({ [READ[h].pane]: 'empty' }, () => { try { return host.paneInfo('P1').exists !== false } catch { return true } }),
     'a lookup that failed must not read as an absence')
@@ -204,6 +223,126 @@ for (const [h, host] of Object.entries(HOSTS)) {
     const rmDone = direct('hc', ['rm', own.terminal]).status
     clause('clause 3i hc — the fake\'s terminals really live, finish on close and are removed by rm, which refuses a live one, proved without the seam',
       rmLive !== 0 && afterClose === 'finished' && rmDone === 0 && model().terminals[own.terminal] === 'removed', JSON.stringify({ rmLive, afterClose, rmDone, t: model().terminals }))
+  }
+
+  // Issue #111, phase B: the three calls the pane launcher makes into a session's terminal.
+  {
+    const tried = (f) => { try { return f() } catch (e) { return { threw: e.message, nothingTyped: Boolean(e.nothingTyped) } } }
+    const READ_REC = { herdr: 'herdr pane process-info', hc: 'hc get' }, TYPE = { herdr: 'herdr pane send-text', hc: 'hc attach' }, ENTER = { herdr: 'herdr pane send-keys', hc: 'hc attach' }
+    const typedOf = (t) => { try { return fs.readFileSync(`${STATE}.${t}.typed`, 'utf8') } catch { return null } }
+    const text = 'echo "$HOME" | cat_x:(~+) &* \u00e9'
+    // The transcript the caller settled on, and its size then.
+    const SEEN = { tee: path.join(tmp, 'seen.log'), size: 7 }
+    fs.writeFileSync(SEEN.tee, 'banner\n'); process.env.DCTR_FAKE_TEE = SEEN.tee
+    fresh()
+    const s = host.splitRight('P1', '/w d', 'script x', 'lbl')
+    const alive = tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder))
+    const readFail = withFail({ [READ_REC[h]]: 'transport' }, () => tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder)))
+    const readEmpty = withFail({ [READ_REC[h]]: 'empty' }, () => tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder)))
+    { const m = model(); m.recorderGone = true; fs.writeFileSync(STATE, JSON.stringify(m)) }
+    const shell = tried(() => host.recorderAlive(s.paneId, s.terminal, s.recorder))
+    clause(`clause 2m/1m ${h} — recorderAlive: true while the recorder is the foreground program, false once a shell is, and a THROW for a failed or empty lookup`,
+      alive === true && shell === false && readFail?.threw && readEmpty?.threw, JSON.stringify({ alive, shell, readFail, readEmpty }))
+    const typeFail = withFail({ [TYPE[h]]: 'transport' }, () => tried(() => host.typeText(s.paneId, s.terminal, text, SEEN)))
+    const enterFail = withFail({ [ENTER[h]]: 'transport' }, () => tried(() => host.pressEnter(s.paneId, s.terminal, SEEN)))
+    clause(`clause 1o ${h} — a typeText or pressEnter whose call failed THROWS, and only herdr-core's attach that never happened says nothing was typed or sent`,
+      typeFail?.threw && typeFail.nothingTyped === (h === 'hc') && enterFail?.threw && enterFail.nothingTyped === (h === 'hc'), JSON.stringify({ typeFail, enterFail }))
+    fresh()
+    const s2 = host.splitRight('P1', '/w d', 'script x', 'lbl')
+    const typed = tried(() => host.typeText(s2.paneId, s2.terminal, text, SEEN))
+    const sent = calls()
+    const gotText = typedOf(s2.terminal)
+    const entered = tried(() => host.pressEnter(s2.paneId, s2.terminal, SEEN))
+    const after = calls().slice(sent.length)
+    if (h === 'herdr') {
+      clause('clause 2o herdr — typeText and pressEnter send the argv they always sent, and typing sends no key',
+        JSON.stringify(sent.slice(1)) === JSON.stringify([{ bin: 'herdr', args: ['pane', 'send-text', s2.paneId, text] }]) && JSON.stringify(after) === JSON.stringify([{ bin: 'herdr', args: ['pane', 'send-keys', s2.paneId, 'enter'] }]) && host.cannotType() === null,
+        JSON.stringify({ typed, entered, sent, after }))
+    } else {
+      const own = (name) => { try { return fs.readFileSync(`${STATE}.${s2.terminal}.${name}`, 'utf8') } catch { return null } }
+      clause('clause 2o hc — typeText types exactly the text through an attach of the terminal\'s own size, nothing before it is attached, and leaves; pressEnter sends exactly one CR the same way and nothing else',
+        typed === undefined && gotText === text && own('early') === null && own('size') === '132x43' && entered === undefined && typedOf(s2.terminal) === `${text}\r` &&
+        JSON.stringify(after) === JSON.stringify([{ bin: 'hc', args: ['get', s2.terminal] }, { bin: 'hc', args: ['attach', s2.terminal] }]) && host.cannotType() === null,
+        JSON.stringify({ typed, gotText, got: typedOf(s2.terminal), early: own('early'), size: own('size'), entered, after }))
+      clause('clause 1o2 hc — no argument of any call, hc or python3, carries the text', !sent.some((c) => c.args.some((a) => a.includes('cat_x'))) && sent.some((c) => c.args[0] === 'attach') && fs.readFileSync(PY_ARGS, 'utf8').includes('dctr-attach.py') && !fs.readFileSync(PY_ARGS, 'utf8').includes('cat_x'), JSON.stringify(sent))
+      const fault = (f, extra = {}, write = (x) => host.typeText(x.paneId, x.terminal, text, SEEN)) => {
+        fresh(extra)
+        const x = host.splitRight('P1', '/', 'script x', 'lbl')
+        const r = withFail(f ? { 'hc attach': f } : {}, () => tried(() => write(x)))
+        const pid = (() => { try { return Number(fs.readFileSync(`${STATE}.${x.terminal}.pid`, 'utf8')) } catch { return null } })()
+        const running = (() => { if (!pid) return false; try { process.kill(pid, 0); return true } catch { return false } })()
+        return { r, pid, running, typed: typedOf(x.terminal), attaches: calls().filter((c) => c.args[0] === 'attach').length }
+      }
+      const died = fault('after'), stuck = fault('nodetach'), hung = fault('hang')
+      clause('clause 1o3 hc — an attach that died after reading the text, and one that would not detach, THROW without saying nothing was typed, are sent once, and the attach is killed',
+        died.r?.threw && !died.r.nothingTyped && died.typed === text && died.attaches === 1 && stuck.r?.threw && !stuck.r.nothingTyped && stuck.attaches === 1 && stuck.pid && !stuck.running, JSON.stringify({ died, stuck }))
+      clause('clause 1o4 hc — an attach that never reports itself attached is killed with nothing typed, and says so',
+        hung.r?.nothingTyped === true && hung.typed === null && hung.pid && !hung.running && hung.attaches === 1, JSON.stringify(hung))
+      clause('clause 2o8 hc — the fake host\'s contract: its attach draws its screen to its own pty and never to the transcript, so a quiet session keeps its size and is typed into; the real hc attach rests on a live measurement, not on this clause', fs.statSync(SEEN.tee).size === 7 && died.typed === text, '')
+      // What the transcript does while the attach is under way. Each fault's own effect is read back, with no seam.
+      const changed = ['output', 'shrink', 'vanish'].map((f) => {
+        const r = fault(f), now = (() => { try { return fs.statSync(SEEN.tee).size } catch { return null } })()
+        fs.writeFileSync(SEEN.tee, 'banner\n')
+        return { ...r, now }
+      })
+      clause('clause 1o8 hc — a transcript that grew, shrank or vanished while attaching refuses with nothing typed, saying output arrived and to read it, and leaves no attach running',
+        changed.every((x) => x.r?.nothingTyped && /while attaching/.test(x.r.threw) && /`read`/.test(x.r.threw) && x.typed === null && x.attaches === 1 && !x.running), JSON.stringify(changed))
+      clause('clause 3o8 hc — those faults really grew, emptied and removed the transcript during the attach, proved without the seam\'s answer', JSON.stringify(changed.map((x) => x.now)) === '[19,0,null]', JSON.stringify(changed.map((x) => x.now)))
+      // The same, for Enter.
+      const enter = (x) => host.pressEnter(x.paneId, x.terminal, SEEN)
+      const eDied = fault('after', {}, enter), eStuck = fault('nodetach', {}, enter), eSize = fault(null, { hcGet: { cols: 0 } }, enter)
+      const eChanged = ['output', 'shrink', 'vanish'].map((f) => { const r = fault(f, {}, enter); fs.writeFileSync(SEEN.tee, 'banner\n'); return r })
+      clause('clause 1o10 hc — an Enter whose attach died after reading it, or would not detach, THROWS without saying nothing was sent, is sent once and leaves no attach; a size that is not one sends nothing',
+        eDied.r?.threw && !eDied.r.nothingTyped && eDied.typed === '\r' && eDied.attaches === 1 && eStuck.r?.threw && !eStuck.r.nothingTyped && eStuck.attaches === 1 && !eStuck.running && eSize.r?.nothingTyped && eSize.attaches === 0, JSON.stringify({ eDied, eStuck, eSize }))
+      clause('clause 1o11 hc — an Enter into a transcript that grew, shrank or vanished while attaching sends nothing and says to read it and then `enter` again',
+        eChanged.every((x) => x.r?.nothingTyped && /`read`/.test(x.r.threw) && /then `enter` again/.test(x.r.threw) && x.typed === null && x.attaches === 1 && !x.running) && changed.every((x) => /then `type` again/.test(x.r.threw)), JSON.stringify({ eChanged, changed }))
+      // An attach that keeps writing and will not leave: what it has drawn stays unread at the kill.
+      const floodBin = path.join(tmp, 'floodbin'); fs.mkdirSync(floodBin)
+      fs.writeFileSync(path.join(floodBin, 'hc'), `#!/bin/sh\ntrap "echo hup > '${floodBin}/hup'; exit 1" HUP\ntrap '' QUIT\nprintf '\\033[?1004h'\nwhile :; do echo flood flood flood flood flood flood; done\n`, { mode: 0o755 })
+      const t1 = Date.now()
+      const flood = spawnSync('python3', ['-I', path.join(HERE, 'dctr-attach.py'), 't', '80', '24', SEEN.tee, '7'], { input: 'x', encoding: 'utf8', timeout: 25000, env: { ...process.env, PATH: `${floodBin}:${process.env.PATH}` } })
+      clause('clause 1o9 hc — an attach that floods and will not leave is hung up before it is killed, and the helper ends well inside its caller\'s bound, saying the text may have been typed',
+        flood.status === 4 && Date.now() - t1 < 20000 && fs.existsSync(path.join(floodBin, 'hup')), JSON.stringify({ status: flood.status, signal: flood.signal, ms: Date.now() - t1, err: flood.stderr?.slice(0, 200) }))
+      const floods = spawnSync(path.join(floodBin, 'hc'), [], { encoding: 'utf8', timeout: 1000, killSignal: 'SIGKILL', maxBuffer: 1e9 })
+      clause('clause 3o9 hc — that stand-in really announces itself, floods and never ends by itself, proved without the helper', floods.error?.code === 'ETIMEDOUT' && floods.stdout.startsWith('\x1b[?1004h') && floods.stdout.length > 10000, JSON.stringify({ err: floods.error?.code, n: floods.stdout?.length }))
+      const sizes = [{ cols: 0 }, { rows: null }, { cols: '132' }, { rows: 43.5 }].map((hcGet) => fault(null, { hcGet }))
+      const noSize = withFail({ 'hc get': 'transport' }, () => tried(() => host.typeText('P1', 't1', text, SEEN)))
+      clause('clause 1o5 hc — a size that cannot be read, or is not one, refuses with nothing typed and no attach', sizes.every((x) => x.r?.nothingTyped && x.attaches === 0) && noSize?.nothingTyped === true, JSON.stringify({ sizes, noSize }))
+      fresh()
+      const at = (n, ch = 'a') => tried(() => host.typeText('P2', 't2', ch.repeat(n), SEEN))
+      const ok1000 = at(1000), typed1000 = typedOf('t2')?.length
+      const before = calls().length
+      const no1001 = at(1001), bytes = at(501, '\u00e9')
+      clause('clause 1o6 hc — 1000 bytes are typed whole and 1001 are refused before any call, in bytes and not characters, naming the limit and shorter pieces',
+        ok1000 === undefined && typed1000 === 1000 && [no1001, bytes].every((x) => x?.nothingTyped && /1000 bytes/.test(x.threw) && /shorter pieces/.test(x.threw)) && calls().length === before, JSON.stringify({ ok1000, typed1000, no1001, bytes }))
+      // A PATH with the fake's CLIs and no python3 of any kind.
+      const bare = path.join(tmp, 'bare'); fs.mkdirSync(bare, { recursive: true })
+      for (const [n, f] of [['node', process.execPath], ['sh', '/bin/sh'], ...['herdr-app', 'hc'].map((x) => [x, path.join(bin, x)])]) if (!fs.existsSync(path.join(bare, n))) fs.symlinkSync(f, path.join(bare, n))
+      const oldPath = process.env.PATH
+      process.env.PATH = bare
+      const no = calls().length
+      let why, refusal, noEnter
+      try { why = host.cannotType(); refusal = tried(() => host.typeText('P2', 't2', 'x', SEEN)); noEnter = tried(() => host.pressEnter('P2', 't2', SEEN)) } finally { process.env.PATH = oldPath }
+      clause('clause 1o7 hc — with no python3 on PATH, cannotType names python3, and typeText and pressEnter refuse with nothing sent and no host call', /python3/.test(why ?? '') && refusal?.nothingTyped && /python3/.test(refusal.threw) && noEnter?.nothingTyped && /python3/.test(noEnter.threw) && calls().length === no, JSON.stringify({ why, refusal }))
+      clause('clause 3o7 hc — that PATH really has no python3, proved without the seam', spawnSync('python3', ['-V'], { env: { ...process.env, PATH: bare } }).error?.code === 'ENOENT', '')
+      // A terminal of its own: a remover still waiting from an earlier clause may name t1, and would remove it once finished.
+      fresh()
+      const over = host.splitRight('P1', '/', 'script x', 'lbl')
+      { const m = model(); m.terminals[over.terminal] = 'finished'; fs.writeFileSync(STATE, JSON.stringify(m)) }
+      const ended = tried(() => host.recorderAlive(over.paneId, over.terminal, over.recorder)), endedGet = JSON.parse(direct('hc', ['get', over.terminal]).stdout)
+      fresh()
+      const goneT = tried(() => host.recorderAlive('P1', 't99', 'x'))
+      fresh({ hcGet: { foreground: {} } })
+      const noArgv = tried(() => host.recorderAlive('P1', 't1', 'x'))
+      fresh({ hcGet: { foreground: { argv: ['sh', '-c', 'script y'] } } })
+      const other = tried(() => host.recorderAlive('P1', 't1', 'script x'))
+      clause('clause 1m2 hc — a finished or removed terminal, and another command in the foreground, are not the recorder; a reply naming no foreground THROWS',
+        ended === false && goneT === false && other === false && noArgv?.threw, JSON.stringify({ ended, goneT, other, noArgv }))
+      fresh()
+      const g = direct('hc', ['get', 't1'])
+      clause('clause 3m hc — the fake really answers a live terminal with its size and foreground, a finished one with neither program nor error, not_found on exit 3, and refuses an attach with no terminal on stdin, proved without the seam',
+        endedGet.state === 'finished' && !('foreground' in endedGet) && JSON.parse(g.stdout).cols === 132 && Array.isArray(JSON.parse(g.stdout).foreground.argv) && direct('hc', ['get', 't99']).status === 3 && direct('hc', ['attach', 't1']).status === 1, g.stdout)
+    }
   }
 
   // gateAnswer: found, not_found, failed, and another host's gate is never judged.

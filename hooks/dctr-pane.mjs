@@ -38,15 +38,22 @@
 //    output where the user can see whether the work was done. It exists because the agent knew `| no-more` and typed anyway, under momentum, and put
 //    a filename prompt on a live switch.
 //  - The recorder must still be alive: when ssh exits, script(1) exits and the pane falls back to a
-//    shell ON THIS MACHINE. Narrowed, not closed — see recorderAlive.
+//    shell ON THIS MACHINE. Narrowed, not closed — see guardWrite.
 //  - Every observation fails closed, placement included. A layout lookup that throws refuses rather
 //    than treating every recorded pane as a candidate, which could split another workspace's pane.
 //  - State is validated on read. A cursor that was missing, non-numeric or larger than the file
 //    sailed through the unread check.
 //  - One command per write: any control character is rejected, because a bare CR is Enter.
-//  - Refuse outside herdr and in a contained agent, on every subcommand that reaches herdr.
+//  - Refuse outside herdr and herdr-core, and in a contained agent, on every subcommand that reaches a host.
+//  - A session is written to only from the host that opened it. A record of the other host is never looked up, swept or
+//    typed into: its ids mean nothing here, and an id this host does not know reads as gone.
 //  - Past the six-pane cap, open a sidebar-listed TAB rather than refusing. Ten routers is more
 //    sessions than a column can hold, and six unreadable panes serve nobody.
+//
+// TWO HOSTS, ONE CODE PATH (issue #111). Every host call goes through the seam (dctr-host.mjs). What differs on
+// herdr-core: the recorder is the pane's own program, so it is already running when the create call answers and that call
+// is never retried; its own command prints the label, since no pane rename exists, and empties the transcript; and text
+// and Enter go in through dctr-attach.py.
 //
 // WHAT IS NOT MECHANICALLY CLOSED, stated because a silent gap is worse than a known one.
 //
@@ -55,7 +62,12 @@
 // second read and the keystroke arriving, and no lock closes it, because the device is not in the
 // transaction. What the rule guarantees is that nothing already on screen when you asked, and
 // nothing that arrived while this launcher was looking, is written over unseen. It does not
-// guarantee the device was silent at the instant of the send.
+// guarantee the device was silent at the instant of the send. In the TUI that gap runs from the second read to herdr's
+// send. On herdr-core text and Enter each take a moment to attach, so dctr-attach.py reads the size once more when it is
+// ready, and the gap runs from that read to its write.
+//
+// On herdr-core the recorder check trails a disconnect by a moment, because `hc get`'s foreground is not live: text typed
+// in that moment can land in the local shell. Enter has its own recorder check and its own size read, so it can still be refused.
 //
 // And: if the
 // user is part-way through typing a command and the agent reads those bytes and misjudges them as
@@ -73,13 +85,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SIDE_CAP, isSideSeat, seatPlacement, shq, skipReason, splitArgs, staleSideSeats, tabCreateArgs, shellSessionId } from './dctr-lib.mjs'
-import { gateAnswer, herdrHost } from './dctr-host.mjs'
-import { acquireLock, breakIfOrphaned, dropGoneGates, herdr, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
+import { SIDE_CAP, isSideSeat, seatPlacement, shq, placeSkipReason, splitTarget, staleSideSeats, shellSessionId } from './dctr-lib.mjs'
+import { gateAnswer, hostFor, sameHost } from './dctr-host.mjs'
+import { acquireLock, breakIfOrphaned, dropGoneGates, interactivePanes, isPaneNotFound, liveSeats, panesDir, releaseLock, sideOccupants, withPlacementLock, writeMarker } from './dctr-state.mjs'
 
 const SETTLE_MS = 400          // one beat after a write, so the echo has somewhere to land
+const RECORDER_WAIT_MS = 5000
 const LOCK_WAIT_MS = 5000
-// Not "longer than any operation": one `open` makes up to eight herdr calls, each bounded at
+// Not "longer than any operation": one `open` makes many host calls, each bounded at
 // HERDR_TIMEOUT_MS, so a live holder can far outlast this. It is only the age past which a lock is
 // worth EXAMINING; whether it is broken is decided by whether its holder is running.
 const LOCK_STALE_MS = 30000
@@ -107,10 +120,12 @@ class Refusal extends Error {}
 const die = (msg) => { throw new Refusal(msg) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function refuseUnlessHerdr() {
+/** The host seam (dctr-host.mjs) this session may place and type through, or a refusal that has called neither host. */
+function usableHost() {
   if (process.env.DCTR_VIEW_REQUEST_DIR) die('contained session: a pane is a host process, refusing')
-  const why = skipReason(process.env)
+  const why = placeSkipReason(process.env)
   if (why) die(`${why}; refusing (an interactive pane nobody can watch has no purpose)`)
+  return hostFor(process.env)
 }
 
 /** mkdir as the mutex, keyed on the tee. Same protocol as withPlacementLock — both call the shared
@@ -127,7 +142,7 @@ async function withDirLock(lock, fn) {
     let held
     try { held = acquireLock(lock) } catch (e) { die(e.message) }
     if (held) { try { return await fn() } finally { releaseLock(lock) } }
-    // Age alone is not evidence the holder is dead. An operation makes several bounded herdr calls
+    // Age alone is not evidence the holder is dead. An operation makes several bounded host calls
     // and sleeps between them, so a live one can outlast LOCK_STALE_MS; breaking its lock on age
     // lets two operations write the same session. breakIfOrphaned reads the holder once, judges that
     // holder, and condemns that same holder, so the lock it renames away is the lock it judged.
@@ -152,6 +167,8 @@ function readState(tee) {
   if (!s || typeof s !== 'object') die('state file is not an object')
   if (!['agent', 'user'].includes(s.owner)) die(`state has no usable owner (${JSON.stringify(s.owner)})`)
   if (typeof s.paneId !== 'string' || !s.paneId) die('state has no pane id')
+  // A record that names a host is herdr-core's, where a write goes to the terminal and the recorder is told by its line.
+  if (s.host && ![s.terminal, s.recorder].every((v) => typeof v === 'string' && v)) die('state names no terminal or no recorder; close that pane and open the session again')
   if (!Number.isInteger(s.cursor) || s.cursor < 0) die(`state cursor is not a byte offset (${JSON.stringify(s.cursor)})`)
   let end
   try { end = size(tee) } catch (e) { die(`cannot observe the session (${e.message})`) }
@@ -186,7 +203,6 @@ const markerFor = (paneId) => path.join(PANES_DIR, `${paneId.replace(/[^A-Za-z0-
 /** Q8's default transcript path. Keyed by the sanitised label, so two sessions share a tee only
  *  when their labels sanitise to the same string. */
 const defaultTee = (label) => path.join(TEES_DIR, `${String(label).replace(/[^A-Za-z0-9_-]/g, '_') || 'pane'}.log`)
-const workspaceOf = (paneId) => String(paneId).split(':')[0]
 /** Exposed so the selftest can assert the two directories are actually distinct, rather than
  *  restating the paths and passing while the launcher uses different ones. */
 export const markerDir = () => PANES_DIR
@@ -194,8 +210,8 @@ export const defaultTeeDir = () => TEES_DIR
 /**
  * MAY THIS TRANSCRIPT BE REPLACED? One decision over the whole table, rather than a prologue of
  * predicates nobody had enumerated. Three records can bear on it — the state file, any marker naming
- * this tee, and the transcript's own bytes — crossed with the three answers herdr can give about a
- * pane: live, gone, or unknowable.
+ * this tee, and the transcript's own bytes — crossed with the answers a host can give about a
+ * pane: live, parked (gone from the window, its program still running), gone, or unknowable.
  *
  * Two rules fall out of the table and neither survived being written one branch at a time:
  *  - A record that answered "gone" is STILL A RECORD. The branch for "nothing recorded this
@@ -213,6 +229,8 @@ export function openDecision({ stateRecord, markerPanes, teeBytes, ask }) {
   const answers = named.map((id) => [id, ask(id)])
   const live = answers.find(([, a]) => a === 'live')
   if (live) return { proceed: false, why: `is already recorded by live pane ${live[0]}; close that pane or choose another tee path`, stale: [] }
+  const parked = answers.find(([, a]) => a === 'parked')
+  if (parked) return { proceed: false, why: `records pane ${parked[0]}, which is gone while its program is still running: no pane shows it, or a new one does; that session is not over, so end its program or choose another tee path`, stale: [] }
   const unknown = answers.find(([, a]) => a === 'unknowable')
   if (unknown) return { proceed: false, why: `records pane ${unknown[0]} and that pane could not be looked up; not replacing a transcript that may still be live`, stale: [] }
   // Every record answered "gone". That IS an answer, and the records that gave it are stale.
@@ -223,7 +241,7 @@ export function openDecision({ stateRecord, markerPanes, teeBytes, ask }) {
 
 /** What the records say, read and never written. `stateRecord` is null when there is no state file,
  *  the string 'invalid' when there is one that records no usable pane, else the parsed record. */
-function readRecords(tee) {
+function readRecords(tee, host) {
   let stateRecord = null
   if (fs.existsSync(statePath(tee))) {
     let prior
@@ -233,53 +251,51 @@ function readRecords(tee) {
   let markers
   try { markers = interactivePanes() } catch (e) { die(`cannot read the interactive pane markers (${e.message}); not opening`) }
   const here = path.resolve(tee)
-  const markerPanes = markers.filter((m) => m.tee && path.resolve(m.tee) === here).map((m) => m.paneId)
+  const naming = markers.filter((m) => m.tee && path.resolve(m.tee) === here)
+  const markerPanes = naming.map((m) => m.paneId)
+  // The panes the other host recorded. This one cannot answer for them, so they are never asked about.
+  const all = [...naming, ...(stateRecord?.paneId ? [stateRecord] : [])]
+  const foreign = all.filter((r) => !sameHost(host, r)).map((r) => r.paneId)
+  const terminals = Object.fromEntries(all.filter((r) => r.terminal).map((r) => [r.paneId, r.terminal]))
   let teeBytes = 0
   try { teeBytes = size(tee) } catch { teeBytes = 0 }
-  return { stateRecord, markerPanes, teeBytes }
+  return { stateRecord, markerPanes, teeBytes, foreign, terminals }
 }
 
-/** live | gone | unknowable. herdr answers a pane that does not exist with an error CODE and exit 1,
- *  which is an answer; anything else that throws is an observation that failed. */
-function askPane(paneId) {
+/** live | parked | gone | unknowable. Only the seam's `exists: false` is an answer of absence: a lookup that threw, and a reply
+ *  carrying no pane (which has no focus either), answered nothing. Read as gone, that reply would let `open` TRUNCATE the
+ *  user's transcript. */
+function askPane(host, paneId, terminal) {
+  // herdr-lint: a lookup that throws is unknowable, which openDecision refuses on.
   try {
-    // The SUCCESS half needs the same three answers as the catch half below, and did not have them:
-    // `.result.pane ? 'live' : 'gone'` read a reply carrying `result` but no `pane` as a definite
-    // absence. Downstream that is `proceed: true` with the pane listed stale, and guardWrite then
-    // TRUNCATES the user's transcript. A reply that answered nothing is not a pane that is gone.
-    const reply = herdr(['pane', 'get', paneId]).result
-    if (reply && typeof reply === 'object' && 'pane' in reply) return reply.pane ? 'live' : 'gone'
-    return 'unknowable'
-  }
-  catch (e) { return isPaneNotFound(e) ? 'gone' : 'unknowable' }
-}
-
-
-/** Narrowed, not closed. The recorder can exit between this check and the send that follows; no
- *  transaction spans a process lookup and a keystroke. What this does catch is the common case,
- *  proven on real hardware: ssh exited 255, the pane became a local shell, and the write refused. */
-function recorderAlive(paneId) {
-  const info = herdr(['pane', 'process-info', '--pane', paneId]).result.process_info
-  return (info.foreground_processes || []).some((p) => p.name === 'script')
+    const pane = host.paneInfo(paneId, terminal)
+    if (!pane.exists) return 'gone'
+    if (pane.parked) return 'parked'
+    return typeof pane.focused === 'boolean' ? 'live' : 'unknowable'
+  } catch { return 'unknowable' }
 }
 
 /** Shared preamble for anything that writes. Runs inside the lock. Never returns on a refusal. */
 const MIN_PROFILE = 80
 
-function guardWrite(tee) {
+function guardWrite(tee, host) {
   const s = readState(tee)
+  if (!sameHost(host, s)) die(`this session was opened in ${s.host || 'herdr'} and this shell is in ${host.name}, which cannot reach its pane. Not writing.`)
   if (s.owner !== 'agent') die("the pane is the user's; ask them to hand it over, then `own <tee> agent`")
   if (!s.profile) die('this session has no platform profile. `read` the banner to see what you are on, go find out how that platform pages, cancels and destroys, then record it with `profile <tee> "<what you found>"`.')
   const end = size(tee)
   if (end > s.cursor) die(`${end - s.cursor} bytes of unread output; run \`read\` and judge it before typing`)
+  // Narrowed, not closed. The recorder can exit between this check and the send that follows; no transaction spans a
+  // process lookup and a keystroke. What this does catch is the common case, proven on real hardware: ssh exited 255, the
+  // pane became a local shell, and the write refused.
   try {
-    if (!recorderAlive(s.paneId)) die('the recorder has exited: the connection is closed and this pane is now a local shell. Not writing.')
+    if (!host.recorderAlive(s.paneId, s.terminal, s.recorder)) die('the recorder has exited: the connection is closed and this pane is now a local shell. Not writing.')
   } catch (e) {
     if (e instanceof Refusal) throw e
     if (isPaneNotFound(e)) die(`pane ${s.paneId} no longer exists: that session is over. Not writing.`)
     die(`cannot read the pane's processes (${e.message}); not writing`)
   }
-  // The recorder check spawns herdr and takes real time, so bytes can land DURING it. An earlier
+  // The recorder check asks the host and takes real time, so bytes can land DURING it. An earlier
   // repair made those bytes appear in the readback afterwards, which fixed the accounting and left
   // the rule itself unenforced: the write still went out over output nobody had judged. That is the
   // pager case. Re-read once here and refuse, rather than send and explain afterwards.
@@ -292,9 +308,7 @@ function guardWrite(tee) {
 }
 
 async function open(label, tee, connect) {
-  refuseUnlessHerdr()
-  const sessionPane = process.env.HERDR_PANE_ID
-  if (!sessionPane) die('no HERDR_PANE_ID')
+  const host = usableHost()
   // The session id, so this pane is placed under the SAME lock and counted in the SAME column as
   // seats and gate panes. ONE variable, the one the gate launcher already reads: accepting a second
   // name lets the launcher lock one session while the gate locks another, and a lock that is not the
@@ -306,13 +320,18 @@ async function open(label, tee, connect) {
   // The one resolver the gate launcher reads, shellSessionId: Claude Code's id, else Codex's CODEX_SESSION_ID (E10-D12).
   const sessionId = shellSessionId(process.env)
   if (!sessionId) die('no CLAUDE_CODE_SESSION_ID (nor a Codex CODEX_SESSION_ID); without it this pane cannot be counted against the seat and gate cap, and splitting blind is what that cap prevents')
+  const me = host.self()
+  if (!me?.pane) die(host.noSelf)
+  const sessionPane = me.pane
+  const untypable = host.cannotType()
+  if (untypable) die(untypable)
 
   // Refuse to touch a transcript whose pane may still be alive — ONE decision over the whole table,
   // and it writes nothing. Whatever it finds stale is handed to the sweep that runs under the
   // placement lock below, where every other marker removal already happens.
-  const records = readRecords(tee)
-  const decision = openDecision({ ...records, ask: askPane })
-  if (!decision.proceed) die(`${path.basename(tee)} ${decision.why}`)
+  const { foreign, terminals, ...records } = readRecords(tee, host)
+  const decision = openDecision({ ...records, ask: (id) => (foreign.includes(id) ? 'unknowable' : askPane(host, id, terminals[id])) })
+  if (!decision.proceed) die(`${path.basename(tee)} ${decision.why}${foreign.length ? ` (the other terminal host opened ${foreign.join(', ')})` : ''}`)
 
   fs.mkdirSync(PANES_DIR, { recursive: true })
   fs.mkdirSync(path.dirname(path.resolve(tee)), { recursive: true })
@@ -322,13 +341,16 @@ async function open(label, tee, connect) {
   // two opens could snapshot the same five panes, and the second would exclude the first's new pane
   // as "not in the layout" and split a seventh. A snapshot taken before the lock is not evidence of
   // anything by the time the lock is held.
-  let paneId, opened = null
+  //
+  // `launched` is whether the recorder may be running: herdr-core runs it from the moment its pane exists, and a create
+  // call there can fail after its pane exists, so it is set before the call and that call is never retried.
+  let paneId, opened = null, launched = false, terminal = null, recorder
+  const emptied = host.startsAtCreation ? transcriptStamp(tee) : null
+  const command = `printf '%s\\n' ${shq(label)} && : > ${shq(path.resolve(tee))} && chmod 600 ${shq(path.resolve(tee))} && ${recorderLine(path.resolve(tee), connect)}`
   // herdr-lint: creation, not destruction. The split and the tab create are the only reads this try owns; a failure leaves through the catch below, which dies and closes nothing.
   try {
     paneId = withPlacementLock(sessionId, () => {
-      let layout
-      // herdr-lint: separated by DIE, not by a predicate: the next line refuses to split blind.
-      try { layout = herdr(['pane', 'layout', '--pane', sessionPane]).result.layout.panes } catch { layout = null }
+      const layout = host.layout(me)
       if (!layout?.length) die('cannot observe the pane layout; not splitting blind')
 
       // Sweep only this workspace's markers: staleSideSeats over every recorded pane would delete
@@ -341,20 +363,17 @@ async function open(label, tee, connect) {
       // workspace. staleSideSeats offers only side seats, and an overflow session records a tabId,
       // so nothing ever offered a closed tab's marker and they accumulated for good in a directory
       // every placement reads.
-      const mine = panes.filter((p) => workspaceOf(p.paneId) === workspaceOf(sessionPane))
+      const mine = panes.filter((p) => host.mine(p, me))
       // Three sources of candidate: side-pane markers the layout no longer carries, every tab marker
       // in this workspace (staleSideSeats offers none, because a tab marker is not a side seat), and
       // whatever the prologue's decision found had answered "gone". The decision does not delete
       // them itself: that raced this sweep and mutated a record in the middle of reading it.
       const staleFromDecision = mine.filter((p) => decision.stale.includes(p.paneId))
       for (const dead of [...staleSideSeats(mine, layout), ...mine.filter((p) => p.tabId), ...staleFromDecision]) {
-        // Same three answers, same reason: only a DEFINITE absence may remove a record. This read
-        // negated the reply directly, so a response carrying nothing deleted a live pane's marker.
+        // Only a DEFINITE absence may remove a record: a lookup that threw, and a reply carrying no pane, keep it.
         let gone = false
-        try {
-          const reply = herdr(['pane', 'get', dead.paneId]).result
-          gone = !!(reply && typeof reply === 'object' && 'pane' in reply && !reply.pane)
-        } catch (e) { gone = isPaneNotFound(e) }
+        // herdr-lint: a lookup that throws leaves `gone` false, which keeps the marker.
+        try { gone = host.paneInfo(dead.paneId, dead.terminal).exists === false } catch { /* kept */ }
         if (gone) try { fs.rmSync(markerFor(dead.paneId), { force: true }) } catch { /* already gone */ }
       }
 
@@ -363,7 +382,7 @@ async function open(label, tee, connect) {
       // not look", which counts as full, never as empty.
       // A gate moved here by another session's SessionEnd is dropped only on a server-wide not-found
       // (B3), and counted by sideOccupants while this layout carries its pane (B2).
-      dropGoneGates(() => {}, (g) => gateAnswer(herdrHost(), g))
+      dropGoneGates(() => {}, (g) => gateAnswer(host, g))
       const occupants = sideOccupants(liveSeats(sessionId), layout)
       if (!occupants) die('cannot observe the side column; not splitting blind')
 
@@ -375,48 +394,66 @@ async function open(label, tee, connect) {
       // The pane shell starts where herdr is told to, not where this launcher runs, and the
       // launcher runs in the session cwd.
       let id, tabId = null
+      launched = host.startsAtCreation
       if (seatPlacement(occupants, sessionPane) === 'pane') {
-        id = herdr(splitArgs(occupants, sessionPane, layout, process.cwd())).result.pane.pane_id
+        const at = splitTarget(occupants, sessionPane, layout)
+        ;({ paneId: id, terminal, recorder } = (at.direction === 'right' ? host.splitRight : host.splitDown)(at.pane, process.cwd(), command, label))
       } else {
-        const tab = herdr(tabCreateArgs(process.env.HERDR_WORKSPACE_ID, label, process.cwd()))
-        tabId = tab.result.tab.tab_id
-        id = tab.result.root_pane.pane_id
+        ;({ paneId: id, tabId, terminal, recorder } = host.newTab(me, process.cwd(), command, label))
         console.log(`overflow=tab ${tabId} (${occupants.filter(isSideSeat).length} panes already beside this session, cap ${SIDE_CAP})`)
       }
-      opened = id
+      opened = id || (tabId ? `in tab ${tabId}` : 'with no id')
+      if (!id) throw new Error(tabId ? 'its tab was made and the pane in it could not be read' : 'the split was answered with no pane id')
       // The marker goes down before anything else can fail, so an interrupted open leaves a pane
       // that is still findable rather than an orphan nothing records.
-      writeMarker(markerFor(id), { paneId: id, tabId, tee: path.resolve(tee), label, pid: process.pid })
+      writeMarker(markerFor(id), { paneId: id, tabId, tee: path.resolve(tee), label, pid: process.pid, ...host.tag, ...(terminal ? { terminal } : {}) })
       return id
     })
   } catch (e) {
     // Report what is actually on screen. A split that succeeded and a marker write that then failed
     // used to be reported as "nothing was opened", so the pane existed, nothing recorded it, and the
     // operator was invited to retry and make a second one.
-    if (opened) die(`pane ${opened} was created and then the open failed (${e.message}); it is on screen, nothing records it, and this launcher may not close it — close it yourself. The transcript was not touched.`)
+    if (opened) die(`pane ${opened} was created and then the open failed (${e.message}); it is on screen, nothing records it, and this launcher may not close it — close it yourself. ${launched ? 'Its recorder may be running, and the transcript is its own from here.' : 'The transcript was not touched.'}`)
     if (e instanceof Refusal) throw e
+    // Every refusal above is made before the create call, so a throw with `launched` set is that call failing.
+    if (launched) die(`the create call failed (${e.message}) and its pane may exist all the same, connecting and recording into the transcript with nothing recording it. It was not tried again: look for a pane whose first line is ${JSON.stringify(label)}, close it if it is there, and only then open again.`)
     die(`placement failed (${e.message}); nothing was opened and no transcript was touched`)
   }
 
-  // ONLY NOW is the transcript touched — after the split has actually succeeded. Truncating before
+  // ONLY NOW is the transcript touched — after the split has actually succeeded. On herdr-core the pane's own command
+  // has the emptying to do, before its recorder starts: done here it would erase what that recorder wrote. Truncating before
   // it meant a failed split emptied the previous session's transcript and opened nothing in its
   // place. `mode:` on writeFileSync applies only to a file it creates, so a supplied 0644 path
   // would keep 0644 and record the session world-readable. chmod unconditionally.
-  fs.writeFileSync(tee, '')
-  fs.chmodSync(tee, 0o600)
+  if (!launched) {
+    fs.writeFileSync(tee, '')
+    fs.chmodSync(tee, 0o600)
+  }
   console.log(`pane=${paneId}`)
-  try { herdr(['pane', 'rename', paneId, label]) } catch { /* label only */ }
-  herdr(['pane', 'run', paneId, recorderLine(tee, connect)])
+  try { host.renamePane(paneId, label) } catch { /* label only */ }
+  host.run(paneId, recorderLine(tee, connect))
 
   // The pane is the user's the moment it exists. The connect banner, a host-key question and any
   // password prompt all happen inside that window by construction — on two real logins today the
   // first thing on screen was an unknown-host-key prompt, which is not the agent's to answer.
   await sleep(SETTLE_MS * 4)
-  writeState(tee, { paneId, tee, label, owner: 'user', cursor: 0, marker: markerFor(paneId) })
+  if (launched) {
+    for (const until = Date.now() + RECORDER_WAIT_MS; transcriptStamp(tee) === emptied && Date.now() < until;) await sleep(50)
+    if (transcriptStamp(tee) === emptied) die(`pane ${paneId} is open and its recorder has not started, so there is no session to read; look at the pane, close it, and open again.`)
+    // Herdr.app starts a tab's program through a shell and `hc get` names what runs late, so the first write would refuse a
+    // live session as exited. Past the bound the state is written all the same: a connection that ended at once shows its error.
+    // herdr-lint: a lookup that throws is not yet. Nothing is decided on it but when to stop waiting.
+    const named = () => { try { return host.recorderAlive(paneId, terminal, recorder) } catch { return false } }
+    for (const until = Date.now() + RECORDER_WAIT_MS; !named() && Date.now() < until;) await sleep(50)
+  }
+  writeState(tee, { paneId, tee, label, owner: 'user', cursor: 0, marker: markerFor(paneId), ...host.tag, ...(launched ? { terminal, recorder } : {}) })
   console.log(`owner=user tee=${tee}`)
   console.log('--- session so far (judge it yourself; nothing here was parsed) ---')
   console.log(region(tee, 0, size(tee)))
 }
+
+/** Changes when the transcript is emptied, so `open` never shows the last session's bytes as this one's. */
+const transcriptStamp = (tee) => { try { const st = fs.statSync(tee, { bigint: true }); return `${st.ino} ${st.mtimeNs}` } catch { return 'absent' } }
 
 /** script(1) is not portable: util-linux takes the command via -c with the file LAST, macOS takes
  *  the file FIRST and the command positionally and has no -c (apple-oss-distributions shell_cmds
@@ -440,13 +477,21 @@ function read(tee) {
   console.log(`--- read ${shown} new bytes; owner=${s.owner}; cursor=${end}`)
 }
 
+/** One write. A failure the host does not say came before anything could arrive is UNKNOWN, and is never sent again here:
+ *  the state is left as it was, so whatever it echoed is unread output the next write refuses on. */
+function send(verb, write) {
+  try { write() } catch (e) {
+    die(e.nothingTyped ? `nothing was ${verb}: ${e.message}` : `it may have been ${verb}, and the call failed (${e.message}); \`read\` and look at the pane before trying again`)
+  }
+}
+
 /** Types text and stops. Enter is a separate call, always, so the echo can be judged first. */
 async function type(tee, text) {
   if (CONTROL.test(text)) die('control characters are rejected: a bare CR is Enter, so one write could execute a command you have not judged')
-  refuseUnlessHerdr()
-  const s = guardWrite(tee)
+  const host = usableHost()
+  const s = guardWrite(tee, host)
   const before = s.seen
-  herdr(['pane', 'send-text', s.paneId, text])
+  send('typed', () => host.typeText(s.paneId, s.terminal, text, { tee, size: s.seen }))
   await sleep(SETTLE_MS)
   const end = size(tee)
   const echo = region(tee, before, end)
@@ -458,10 +503,10 @@ async function type(tee, text) {
 }
 
 async function enter(tee) {
-  refuseUnlessHerdr()
-  const s = guardWrite(tee)
+  const host = usableHost()
+  const s = guardWrite(tee, host)
   const before = s.seen
-  herdr(['pane', 'send-keys', s.paneId, 'enter'])
+  send('sent', () => host.pressEnter(s.paneId, s.terminal, { tee, size: s.seen }))
   await sleep(SETTLE_MS)
   const end = size(tee)
   const out = region(tee, before, end)

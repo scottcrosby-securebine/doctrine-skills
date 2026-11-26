@@ -6,16 +6,16 @@
 //   DCTR_FAKE_STATE  the model, JSON, rewritten whole by rename after every change
 //   DCTR_FAKE_CALLS  one JSON line per call, {bin, args}, appended
 //   DCTR_FAKE_FAIL   JSON {"<bin> <verb>": "transport" | "notfound" | "empty"}: that call fails as a transport error, answers
-//                    not-found in its CLI's own shape, or answers with an empty reply. The verb is the first two words of a
+//                    not-found in its CLI's own shape (herdr and herdr-app), or answers with an empty reply. The verb is the first two words of a
 //                    herdr call (`pane get`), the first word of a herdr-app call (`ls`), or `do <command>` (`do pane.close`).
 //                    "after", on a call that creates a pane or tab, fails it as a transport error only once the pane or
 //                    tab is in the model and its program started: a create that timed out or answered with no pane.
 //                    "blank", on a focus read (`herdr pane get`, `herdr tab list`, `herdr-app status`), names the focus as
-//                    empty strings. "noid", on a herdr-app pane.split or tab.new, creates the pane and starts its
+//                    empty strings. "noid", on a pane split of either CLI or a herdr-app tab.new, creates the pane and starts its
 //                    program as usual, then answers with an empty pane or tab id
 //
 // The model: { spaces: [{ id, name, tabs: [{ id, name, panes: [{ pane, terminal, name? }] }] }], focus: { tab, pane },
-// n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' } }. A herdr-core terminal is live from its
+// n, exec, splitFocuses, terminals: { <id>: 'live' | 'finished' | 'removed' }, hcGet, recorderGone, lag }. A herdr-core terminal is live from its
 // pane's creation, finished when its pane is closed or its program exits, and removed by `hc rm`, which refuses one
 // still live; `hc wait` returns once a terminal is no longer live (or after 20s). `exec` runs every created pane's command (sh -c) detached in an environment that pane would
 // have: a TUI pane's HERDR_ENV and HERDR_PANE_ID, a herdr-core terminal's HC_TERMINAL_ID. A close hangs up that
@@ -26,6 +26,18 @@
 // terminal stays in hc as finished. So a herdr-core pane's program runs under a supervisor (this file in `__supervise`
 // mode) that keeps its stdin open, writes its output to `<state>.<pane>.out`, and takes the pane out of the model
 // when the program exits. A TUI pane's line is typed into a shell that outlives it, so its supervisor leaves the pane.
+//
+// `hc get` answers a terminal's state, size and foreground program (its pane's own argv, or a shell's when `recorderGone`
+// is set, as after the recorder exits; a TUI `pane process-info` follows the same switch), with `hcGet` merged over it.
+// `lag` is the foreground the next answers give in its place, one per call in order, as a new tab's does before its program
+// is named: 'none' is no foreground key, 'shell' is the shell Herdr.app starts a tab's program through.
+// `hc attach` plays the measured client: it needs a terminal on stdin, goes raw and queries at once, throws away what
+// arrives before it is attached (written to `<state>.<t>.early`), announces itself with ESC[?1004h, appends what it is
+// typed to `<state>.<t>.typed` and its size to `<state>.<t>.size`, and leaves on ctrl+\. The screen it draws goes to
+// its own terminal and never to a transcript. Its faults, the first three on the transcript DCTR_FAKE_TEE names, as it
+// attaches: "output" appends to it, "shrink" empties it, "vanish" removes it, and "after" dies once
+// it has read typed bytes, "nodetach" ignores ctrl+\\ and a hang-up (its pid is in `<state>.<t>.pid`), "hang" never
+// announces itself.
 //
 // NOTHING OUTLIVES THE SUITE. Every supervisor watches DCTR_FAKE_OWNER, the suite's pid, and kills its program's
 // process group the moment that pid is gone, however the suite ended: a renderer started by a seat row runs forever
@@ -80,7 +92,7 @@ const bin = path.basename(process.argv[2])
 const args = process.argv.slice(3)
 const STATE = process.env.DCTR_FAKE_STATE
 fs.appendFileSync(process.env.DCTR_FAKE_CALLS, `${JSON.stringify({ bin, args })}\n`)
-const waits = bin === 'hc' && args[0] === 'wait'   // polls without the lock, or it would hold every other call
+const waits = bin === 'hc' && ['wait', 'attach'].includes(args[0])   // an attach stays open and a wait polls, without the lock, or it would hold every other call
 if (!waits) lock()
 process.on('exit', () => { if (!waits) unlock() })
 const state = JSON.parse(fs.readFileSync(STATE, 'utf8'))
@@ -132,6 +144,35 @@ const launch = (x, terminal, argv) => {
   x.pid = child.pid
 }
 
+/** The attach client, for `hc attach` alone. Never returns: the process ends with the client. */
+async function attach(t, st) {
+  const at = (name) => `${STATE}.${t}.${name}`
+  if (!process.stdin.isTTY) { process.stderr.write('error: attach needs a terminal\n'); process.exit(1) }
+  fs.writeFileSync(at('size'), `${process.stdout.columns}x${process.stdout.rows}`)
+  fs.writeFileSync(at('pid'), String(process.pid))
+  if (fail === 'nodetach') process.on('SIGHUP', () => {})
+  process.stdin.setRawMode(true)
+  process.stdout.write('\x1b]10;?\x1b\\\x1b[c')
+  let attached = false
+  process.stdin.on('data', (d) => {
+    if (!attached) { fs.appendFileSync(at('early'), d); return }
+    const end = fail === 'nodetach' ? -1 : d.indexOf(0x1c)
+    const text = end < 0 ? d : d.subarray(0, end)
+    if (text.length) fs.appendFileSync(at('typed'), text)
+    if (fail === 'after') process.exit(1)
+    if (end >= 0) process.exit(0)
+  })
+  await new Promise((r) => setTimeout(r, 300))
+  if (st !== 'live') { process.stdin.setRawMode(false); process.stderr.write(`error: no terminal "${t}"\n`); process.exit(3) }
+  if (fail === 'output') fs.appendFileSync(process.env.DCTR_FAKE_TEE, '---(more)---')
+  if (fail === 'shrink') fs.truncateSync(process.env.DCTR_FAKE_TEE)
+  if (fail === 'vanish') fs.rmSync(process.env.DCTR_FAKE_TEE)
+  if (fail !== 'hang') { attached = true; process.stdout.write('\x1b[?1004h\x1b[2Jscreen') }
+  await new Promise((r) => setTimeout(r, 30000))
+  process.kill(process.pid, 'SIGKILL')   // not exit, which waits on a terminal nobody reads any more
+  await new Promise(() => {})
+}
+
 if (bin === 'herdr') {
   if (fail === 'notfound') notFound(verb.split(' ')[0], args[2] ?? flag('pane'))
   if (verb === 'pane layout') {
@@ -145,7 +186,7 @@ if (bin === 'herdr') {
     if (!at) notFound('pane', args[2])
     const pane = next('P')
     at.t.panes.splice(at.t.panes.indexOf(at.x) + 1, 0, { pane, terminal: null, split: flag('direction'), cwd: flag('cwd') })
-    created({ result: { pane: { pane_id: pane } } })
+    created({ result: { pane: { pane_id: fail === 'noid' ? '' : pane } } })
   }
   if (verb === 'tab create') {
     const s = state.spaces.find((x) => x.id === flag('workspace'))
@@ -185,7 +226,11 @@ if (bin === 'herdr') {
     at.x.ran = [...(at.x.ran ?? []), args[3]]
     launch(at.x, null, ['sh', '-c', args[3]]); save(); out({ result: {} })
   }
-  out({ result: {} })   // report-agent, send-keys: accepted
+  if (verb === 'pane process-info') {
+    if (!findPane(flag('pane'))) notFound('pane', flag('pane'))
+    out({ result: { process_info: { foreground_processes: [{ name: state.recorderGone ? 'zsh' : 'script' }] } } })
+  }
+  out({ result: {} })   // report-agent, send-text, send-keys: accepted
 }
 
 if (bin === 'herdr-app') {
@@ -236,6 +281,14 @@ if (bin === 'herdr-app') {
     finish(at.t.panes)
     save(); hangUp(at.t.panes); out({ ok: true })
   }
+  // Measured: park takes the pane out of the window and leaves its terminal running.
+  if (verb === 'do terminal.park') {
+    const at = tabs().map(({ s, t }) => ({ s, t, x: t.panes.find((q) => q.terminal === flag('terminal')) })).find((q) => q.x)
+    if (!at) notFound('terminal', flag('terminal'))
+    at.t.panes.splice(at.t.panes.indexOf(at.x), 1)
+    if (!at.t.panes.length) at.s.tabs.splice(at.s.tabs.indexOf(at.t), 1)
+    save(); out({ ok: true })
+  }
   if (verb === 'do tab.rename') { const at = findTab(flag('id')); if (!at) notFound('tab', flag('id')); at.t.name = flag('name'); save(); out({ ok: true }) }
   if (verb === 'do pane.focus') { const at = findPane(flag('pane')); if (!at) notFound('pane', flag('pane')); state.focus = { tab: at.t.id, pane: at.x.pane }; save(); out({ ok: true }) }
   out({ error: `unknown command ${verb}` })
@@ -246,6 +299,17 @@ if (bin === 'herdr-app') {
 if (bin === 'hc') {
   const t = args[1], st = () => JSON.parse(fs.readFileSync(STATE, 'utf8')).terminals?.[t]
   const err = (kind, code) => { process.stderr.write(`${JSON.stringify({ error: { kind, message: `${kind}: ${t}` } })}\n`); process.exit(code) }
+  if (args[0] === 'get') {
+    const now = st()
+    if (!now || now === 'removed') err('not_found', 3)
+    const x = tabs().flatMap(({ t: tab }) => tab.panes).find((p) => p.terminal === t)
+    const foreground = now === 'live' ? { argv: state.recorderGone || !x?.argv ? ['/bin/zsh', '-l'] : x.argv } : undefined
+    const late = state.lag?.shift()
+    if (late) save()
+    if (late) out({ address: t, state: now, cols: 132, rows: 43, ...(late === 'shell' ? { foreground: { argv: ['/bin/zsh', '-lic', '"$@"; exec "$0" -li', '/bin/zsh', ...(x?.argv ?? [])] } } : {}) })
+    out({ address: t, state: now, cols: 132, rows: 43, foreground, ...(state.hcGet ?? {}) })
+  }
+  if (args[0] === 'attach') await attach(t, st())
   if (args[0] === 'wait') {
     const until = Date.now() + 20000
     while (st() === 'live' && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)

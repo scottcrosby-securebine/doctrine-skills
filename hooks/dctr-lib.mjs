@@ -115,8 +115,8 @@ export function skipReason(env) {
   return null
 }
 
-/** skipReason for the two paths that place panes in both hosts, the seat hook and the gate launcher (issue #111):
- *  herdr-core is a host for them, not a reason to stand down. Every other hook keeps skipReason. */
+/** skipReason for the paths that place panes in both hosts, the seat hook, the gate launcher and the pane launcher (issue
+ *  #111): herdr-core is a host for them, not a reason to stand down. Everything else keeps skipReason. */
 export const placeSkipReason = (env) => (termHost(env) === 'herdr-core' ? null : skipReason(env))
 
 /** One rendered line, or null for a record that shows nothing. Pure; the renderer does the I/O. */
@@ -540,11 +540,6 @@ export const splitPaneArgs = (pane, direction, cwd) => (direction === 'right'
   ? ['pane', 'split', pane, '--direction', 'right', '--ratio', String(SIDE_RATIO), '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)]
   : ['pane', 'split', pane, '--direction', 'down', '--no-focus', ...seatEnvArgs(), ...cwdArgs(cwd)])
 
-export function splitArgs(liveSeats, sessionPaneId, layoutPanes, cwd) {
-  const { pane, direction } = splitTarget(liveSeats, sessionPaneId, layoutPanes)
-  return splitPaneArgs(pane, direction, cwd)
-}
-
 /** What the stand-down line calls a throw. execFileSync errors carry `spawnargs`; a ReferenceError
  *  or TypeError from this code does not, and calling one "herdr refused an action" sent a reader
  *  to the herdr log for a defect in the hook. */
@@ -643,7 +638,7 @@ export const movedGateVerdict = (answer) => (answer === 'not_found' ? 'drop' : '
  *  starts with a fresh environment: `HERDR_WORKSPACE_ID` is not there, and `tab list --workspace` is
  *  the only tab read this codebase has. Deriving the workspace from the tab id's prefix was rejected
  *  on evidence — dctr-seat.selftest.mjs runs workspace `w4W` with tab ids `w4Z:t9`, so the prefix is
- *  not the workspace id even here, and `workspaceOf` in dctr-pane.mjs only ever compares two ids
+ *  not the workspace id even here, and `workspaceOf` in dctr-host.mjs only ever compares two ids
  *  with it. For a side-column gate `tabId` is empty and the WORKSPACE IS NOT: the launcher passes
  *  HERDR_WORKSPACE_ID on both paths, and only the empty tab id is what sends the completion down the
  *  pane branch. */

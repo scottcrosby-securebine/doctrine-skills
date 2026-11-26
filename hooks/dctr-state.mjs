@@ -56,9 +56,9 @@ export const PLACEMENT_STALE_MS = 10000
 export const herdr = (args, timeout = HERDR_TIMEOUT_MS) => { renewHeldLocks(); return parseHerdr(execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout })) }
 /** A herdr call whose answer is text, not JSON: `pane read` (the Codex typer's one screen read, Q6). Throws as herdr() does. */
 export const herdrText = (args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS })
-/** herdr-core's two commands, `hc` and `herdr-app`, under the same bound and the same lock renewal as herdr(). Only
- *  the host seam (dctr-host.mjs) calls it. Returns stdout; throws as herdr() does. */
-export const hostExec = (bin, args) => { renewHeldLocks(); return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }) }
+/** herdr-core's two commands, `hc` and `herdr-app`, under the same bound and the same lock renewal as herdr(), and the
+ *  python3 that types for it, whose `input` is its stdin. Only the host seam (dctr-host.mjs) calls it. Returns stdout; throws as herdr() does. */
+export const hostExec = (bin, args, input) => { renewHeldLocks(); return execFileSync(bin, args, { encoding: 'utf8', input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], timeout: HERDR_TIMEOUT_MS }) }
 
 /** herdr answers a pane that does not exist with **exit 1 and a structured error code**, not with a
  *  null pane, so `execFileSync` throws and every caller that read a throw as "I could not look"
@@ -306,7 +306,7 @@ export function sideOccupants(seats, layout) {
   try { panes = interactivePanes() } catch { return null }
   // BOTH are narrowed, which is what this said and did not do: seats were concatenated whole, so a
   // seat marker the layout no longer carries still counted against the cap and could be handed to
-  // splitArgs as a split target in another tab.
+  // splitTarget as a split target in another tab.
   //
   // A TAB seat is dropped here too, and that is correct but easy to misread: a tab seat records its
   // TAB'S ROOT paneId, which this layout never holds. It occupies no column slot, so no placement

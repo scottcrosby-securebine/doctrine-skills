@@ -32,8 +32,9 @@
 // WHAT IT DOES NOT CHECK, and this list is the honest part:
 //
 //   - A seam call reached by any other name than `host.<method>(`: a destructured method, a host stored under
-//     another variable, or the split helpers the seat and gate build from `host.splitRight`. Creation and display
-//     methods (split, newTab, rename, relabel, run, handOff) are not judged at all, since none decides a close.
+//     another variable, or the split helpers the seat and the two launchers build from `host.splitRight`. Creation, display
+//     and typing methods (split, newTab, rename, relabel, run, handOff, typeText, pressEnter) are not judged at all, since none
+//     decides a close.
 //   - A seam read or close method added to dctr-host.mjs under a name `SEAM` below does not list: that regex names
 //     each method, so a new one is never judged until it is added there.
 //   - E2 over seam answers, by design (see THE SEAM below).
@@ -50,7 +51,7 @@
 //     a real instance of the same family and this lint cannot see it: there is no herdr call there
 //     at all. Round 2 found that one by reading. Do not read a clean run as covering it.
 //
-// THE SEAM (issue #111, round 1 S1). The seat hook and the gate launcher reach either host only through `host.<method>(`
+// THE SEAM (issue #111, round 1 S1). The seat hook, the gate launcher and the pane launcher reach either host only through `host.<method>(`
 // calls, so the decisions this lint exists for moved behind those calls. A try calling a seam read or close
 // (`SEAM` below) is judged as a herdr read is: its catch must name a separator or carry a written `herdr-lint:` reason,
 // since inside the seam every not-found answer is already a return value ('gone', { exists: false }) and a throw is
@@ -58,9 +59,9 @@
 // returns 'closed' or 'gone'), and the truthiness E2 hunts is inside the seam, where E2 still reads the transports.
 //
 // BOTH HOSTS (issue #111). herdr-core's implementation in hooks/dctr-host.mjs reaches its host through `herdrApp(...)`,
-// and reads it through `appPanes()` (herdr-app ls) and `appFocus()` (herdr-app status). Those are judged as herdr calls
-// are: a try calling one of them is a herdr call, a try calling `appPanes(` or `appFocus(` is a READ (they return the
-// listing, never a command's acknowledgement), and `isAppNotFound` is a separator. E2 judges a herdr-core read
+// and reads it through `appPanes()` (herdr-app ls), `appFocus()` (herdr-app status) and `hcGet(t)` (hc get). Those are judged as herdr calls
+// are: a try calling one of them is a herdr call, a try calling one of the three readers is a READ (they return
+// what is there, never a command's acknowledgement), and `isAppNotFound` and `isHcNotFound` are separators. E2 judges a herdr-core read
 // navigated into a ternary or negated, by the same narrow one-line forms.
 //
 // SUPPRESSION. Not every herdr call decides something. A rename is display, and display failing is
@@ -85,15 +86,15 @@ export const isShipping = (name) =>
 
 /** The predicates that turn an error into an ANSWER. A catch naming none of these has not separated
  *  anything, whatever its comment claims. */
-const SEPARATORS = /isPaneNotFound|isTabNotFound|isAppNotFound|alreadyGone|NOT_FOUND|notFound/
+const SEPARATORS = /isPaneNotFound|isTabNotFound|isAppNotFound|isHcNotFound|alreadyGone|NOT_FOUND|notFound/
 /** The host seam's methods whose answer a caller decides a close or a marker drop on (dctr-host.mjs): the reads, and
- *  the closes, whose 'gone' is an answer and whose throw is not. Called as `host.<method>(` in the seat hook and the gate
- *  launcher, and as `host.` inside the seam's own gateAnswer. */
-const SEAM = /\bhost\.(self|layout|paneInfo|tabs|tabInfo|closePane|closeTab)\s*\(/
-/** A call that reaches a host: herdr, herdr-core through the seam's transport and its two readers, or the seam. */
-const CALL = new RegExp(`\\b(herdr|herdrApp|appPanes|appFocus)\\s*\\(|${SEAM.source}`)
-/** A call whose answer is a READ: a herdr reply's `.result`, either herdr-core reader, or a seam method above. */
-const READ = new RegExp(`herdr\\s*\\([^)]*\\)[^\\n]*\\.result|\\b(appPanes|appFocus)\\s*\\(|${SEAM.source}`)
+ *  the closes, whose 'gone' is an answer and whose throw is not, and recorderAlive, which decides a write. Called as
+ *  `host.<method>(` in the seat hook, the gate launcher and the pane launcher, and as `host.` inside the seam's own gateAnswer. */
+const SEAM = /\bhost\.(self|layout|paneInfo|tabs|tabInfo|closePane|closeTab|recorderAlive)\s*\(/
+/** A call that reaches a host: herdr, herdr-core through the seam's transport and its three readers, or the seam. */
+const CALL = new RegExp(`\\b(herdr|herdrApp|appPanes|appFocus|hcGet)\\s*\\(|${SEAM.source}`)
+/** A call whose answer is a READ: a herdr reply's `.result`, a herdr-core reader, or a seam method above. */
+const READ = new RegExp(`herdr\\s*\\([^)]*\\)[^\\n]*\\.result|\\b(appPanes|appFocus|hcGet)\\s*\\(|${SEAM.source}`)
 
 export const isSuppressed = (line, prev) => /herdr-lint:\s*\S/.test(line) || /herdr-lint:\s*\S/.test(prev || '')
 
@@ -113,8 +114,8 @@ export const emptinessFinding = (line) => {
   // separating, so matching it here would have cried wolf on all of them — a corpus fact, not a
   // property of the syntax, and it stops being true the moment someone writes one without the guard.
   const ternary = /herdr\s*\([^)]*\)[^?\n]*\.result[^?\n]*\?[^.]/.test(stripped) ||
-    /\b(appPanes|appFocus)\s*\(\)[^?\n]*\.\w[^?\n]*\?[^.]/.test(stripped)
-  const negated = /!\s*(herdr|herdrApp|appPanes|appFocus)\s*\(/.test(stripped)
+    /\b(appPanes|appFocus|hcGet)\s*\([^)]*\)[^?\n]*\.\w[^?\n]*\?[^.]/.test(stripped)
+  const negated = /!\s*(herdr|herdrApp|appPanes|appFocus|hcGet)\s*\(/.test(stripped)
   if (!ternary && !negated) return null
   return ternary
     ? 'a herdr reply is navigated straight into a ternary: a reply carrying `result` but not the field reads as a definite answer'
