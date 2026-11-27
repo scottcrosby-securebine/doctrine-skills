@@ -62,7 +62,7 @@ function scene(t) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-gate-test-'))
   const bin = path.join(tmp, 'bin'); fs.mkdirSync(bin)
   const s = {
-    tmp, bin, pids: [], groups: [], dirs: [],
+    tmp, bin, pids: [], dirs: [],
     calls: path.join(tmp, 'calls'), cwds: path.join(tmp, 'cwds'),
     seats: path.join(tmp, `dctr-${SESSION}`, 'seats'),
     state: path.join(tmp, 'state.json'), fakeCalls: path.join(tmp, 'fake-calls'),
@@ -92,9 +92,10 @@ function scene(t) {
     return fs.existsSync(`${out}.result`)
   }
   s.detachedPid = (r) => Number(/pid (\d+)/.exec(r.stdout ?? '')?.[1]) || null
+  s.gateMarkers = () => { try { return fs.readdirSync(s.seats).filter((f) => f.startsWith('dctr-gate-') && f.endsWith('.json')).map((f) => readJson(path.join(s.seats, f))) } catch { return [] } }
+  s.log = () => read(path.join(s.tmp, `dctr-${SESSION}`, 'hook.log')) ?? ''
   t.after(() => {
     for (const pid of s.pids) { try { process.kill(-pid, 'SIGKILL') } catch { /* gone */ } }
-    for (const pid of s.groups) { try { process.kill(-pid, 'SIGKILL') } catch { /* gone */ } }
     const m = readJson(s.state)
     for (const x of (m?.spaces ?? []).flatMap((sp) => sp.tabs).flatMap((tb) => tb.panes)) if (x.pid) try { process.kill(-x.pid, 'SIGKILL') } catch { /* gone */ }
     for (const d of [s.seats, ...s.dirs]) try { fs.chmodSync(d, 0o700) } catch { /* not there */ }
@@ -120,8 +121,6 @@ function coreScene(t) {
   s.fake = () => (read(s.fakeCalls) ?? '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   s.tabs = () => s.model().spaces.flatMap((sp) => sp.tabs)
   s.count = (bin, a, b) => s.fake().filter((c) => c.bin === bin && c.args[0] === a && c.args[1] === b).length
-  s.gateMarkers = () => { try { return fs.readdirSync(s.seats).filter((f) => f.startsWith('dctr-gate-') && f.endsWith('.json')).map((f) => readJson(path.join(s.seats, f))) } catch { return [] } }
-  s.log = () => read(path.join(s.tmp, `dctr-${SESSION}`, 'hook.log')) ?? ''
   /** Six side seats in the session's tab, each with its pane and marker, so the next placement takes a tab. */
   s.fillColumn = () => {
     const m = s.model()
@@ -550,7 +549,7 @@ test('the launcher log names an unreadable moved marker as why it could not obse
   const gates = path.join(s.tmp, 'dctr-gates'); fs.mkdirSync(gates)
   const broken = path.join(gates, 'other.dctr-gate-7.json'); fs.writeFileSync(broken, 'not json')
   s.launch(s.tui(), 'reason', path.join(s.tmp, 'reason.out'), ['true'])
-  const log = read(path.join(s.tmp, `dctr-${SESSION}`, 'hook.log')) ?? ''
+  const log = s.log()
   assert.match(log, /could not observe the side column/)
   assert.ok(log.includes(broken), log)
 })
@@ -559,7 +558,7 @@ test('a rollback that could not close its pane publishes a record carrying the p
   const s = scene(t)
   const out = path.join(s.tmp, 'roll.out')
   const r = s.launch(s.tui({ DCTR_TEST_RUN_FAILS: '1', DCTR_TEST_CLOSE_FAILS: '1', DCTR_TEST_SEATS_RO: '1' }), 'rollback gate', out, ['true'])
-  const mine = fs.readdirSync(s.seats).filter((f) => f.startsWith('dctr-gate-') && f.endsWith('.json')).map((f) => readJson(path.join(s.seats, f))).find((b) => b?.label === 'rollback gate')
+  const mine = s.gateMarkers().find((b) => b?.label === 'rollback gate')
   assert.equal(mine?.paneId, 'w1:pS', JSON.stringify(mine))
   assert.ok(s.callLines().includes('pane close w1:pS'))
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
@@ -634,7 +633,7 @@ test('while the check runs the pane name carries elapsed time that increases', a
   const s = scene(t)
   const child = spawn('node', [GATE, '--run', path.join(s.tmp, 'tick.out'), '', 'w1:pS', '', '', 'ticking gate', '--', 'sleep 30'],
     { env: s.tui({ DCTR_ELAPSED_MS: '50' }), stdio: 'ignore', detached: true })
-  s.groups.push(child.pid)
+  s.pids.push(child.pid)
   const ticks = () => [...s.callText().matchAll(/^pane rename w1:pS ticking gate · (\d+)s elapsed$/gm)].map((x) => Number(x[1]))
   const rose = () => { const v = ticks(); return new Set(v).size >= 2 && Math.max(...v) > Math.min(...v) }
   const until = Date.now() + 20000

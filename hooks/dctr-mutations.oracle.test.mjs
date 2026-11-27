@@ -181,7 +181,7 @@ test('the table suites are never run', (t) => {
 
 test('the fixtures carry their defects without the mode', (t) => {
   const { dir, trip } = fixture(t, [])
-  const passes = (r, name) => r.stdout.split('\n').some((l) => l.trim() === `ok ${l.trim().split(' ')[1]} - ${name}`)
+  const passes = (r, name) => r.stdout.split('\n').some((l) => /^\s*ok \d+ - /.test(l) && l.trim().endsWith(` - ${name}`))
   const fails = (r, name) => r.stdout.split('\n').some((l) => /^\s*not ok \d+ - /.test(l) && l.trim().endsWith(` - ${name}`))
   const clean = byHand(t, dir, 'catching.test.mjs')
   assert.ok(clean.status === 0 && passes(clean, 'add sums') && passes(clean, 'neg negates') && passes(clean, 'one is one'), say(clean))

@@ -6265,7 +6265,7 @@ const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
 
 if (ORACLE) {
   console.log(`started ${new Date().toISOString()}`)
-  const done = (code, line) => { if (line) console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
+  const done = (code, line) => { console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
   const arg = (flag) => { const i = process.argv.indexOf(flag); return i < 0 ? undefined : process.argv[i + 1] }
   const unit = arg('--file')
   const tests = arg('--tests')
