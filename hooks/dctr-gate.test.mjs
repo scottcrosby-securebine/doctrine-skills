@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { exitLine, shq } from './dctr-lib.mjs'
+import { shq } from './dctr-lib.mjs'
 
 const HERE = import.meta.dirname
 const GATE = path.join(HERE, 'dctr-gate.mjs')
@@ -31,15 +31,15 @@ const clean = () => {
 
 /** A herdr TUI that records every call and answers by the DCTR_TEST_* switches in the caller's environment. */
 const recorder = (calls, cwds, seats) => `#!/usr/bin/env bash
-echo "$@" >> ${JSON.stringify(calls)}
-prev=''; for a in "$@"; do if [ "$prev" = "--cwd" ]; then printf '%s\\n' "$a" >> ${JSON.stringify(cwds)}; fi; prev="$a"; done
+echo "$@" >> ${shq(calls)}
+prev=''; for a in "$@"; do if [ "$prev" = "--cwd" ]; then printf '%s\\n' "$a" >> ${shq(cwds)}; fi; prev="$a"; done
 fail() { echo '{"error":{"code":"transport_error","message":"no route to server"}}' >&2; exit 1; }
 if [ "$1 $2" = "pane layout" ] && [ -n "$DCTR_TEST_LAYOUT_FAILS" ]; then fail; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FOCUSED" ]; then echo '{"result":{"pane":{"pane_id":"'"$3"'","focused":true}}}'; exit 0; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_FAILS" ]; then fail; fi
 if [ "$1 $2" = "pane get" ] && [ -n "$DCTR_TEST_GET_GONE" ]; then echo '{"error":{"code":"pane_not_found","message":"no such pane"}}' >&2; exit 1; fi
-if [ "$1 $2" = "pane rename" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 500 ${JSON.stringify(seats)}; fi
-if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 700 ${JSON.stringify(seats)}; fi
+if [ "$1 $2" = "pane rename" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 500 ${shq(seats)}; fi
+if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_SEATS_RO" ]; then chmod 700 ${shq(seats)}; fi
 if [ "$1 $2" = "pane close" ] && [ -n "$DCTR_TEST_CLOSE_FAILS" ]; then fail; fi
 if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TABLIST_FAILS" ]; then fail; fi
 if [ "$1 $2" = "tab list" ] && [ -n "$DCTR_TEST_TAB_ABSENT" ]; then echo '{"result":{"tabs":[{"tab_id":"w9:decoy","focused":false}]}}'; exit 0; fi
@@ -68,11 +68,13 @@ function scene(t) {
     state: path.join(tmp, 'state.json'), fakeCalls: path.join(tmp, 'fake-calls'),
   }
   fs.writeFileSync(s.calls, ''); fs.writeFileSync(s.cwds, '')
+  // On a host whose PID 1 is Codex's sandbox the launcher rightly runs in the foreground, so every scene names its own.
+  s.pid1 = path.join(tmp, 'pid1-init'); fs.writeFileSync(s.pid1, '/sbin/init\0splash\0')
   fs.writeFileSync(path.join(bin, 'herdr'), recorder(s.calls, s.cwds, s.seats), { mode: 0o755 })
   s.callText = () => read(s.calls) ?? ''
   s.callLines = () => s.callText().split('\n').filter(Boolean)
   s.cwdArgs = () => (read(s.cwds) ?? '').split('\n').filter(Boolean)
-  s.none = (extra = {}) => ({ ...clean(), PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, ...extra })
+  s.none = (extra = {}) => ({ ...clean(), PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp, DCTR_PID1_FILE: s.pid1, ...extra })
   s.tui = (extra = {}) => s.none({ TERM_PROGRAM: 'herdr', HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p1', CLAUDE_CODE_SESSION_ID: SESSION, ...extra })
   s.launch = (env, label, out, cmd, opts = {}) => {
     const r = spawnSync('node', [GATE, label, out, '--', ...cmd], { env, encoding: 'utf8', timeout: 30000, ...opts })
@@ -108,7 +110,7 @@ function scene(t) {
 function coreScene(t) {
   const s = scene(t)
   for (const name of ['herdr', 'herdr-app', 'hc']) {
-    fs.writeFileSync(path.join(s.bin, name), `#!/bin/sh\nexec node ${JSON.stringify(FAKE_HOST)} "$0" "$@"\n`, { mode: 0o755 })
+    fs.writeFileSync(path.join(s.bin, name), `#!/bin/sh\nexec node ${shq(FAKE_HOST)} "$0" "$@"\n`, { mode: 0o755 })
   }
   fs.writeFileSync(s.fakeCalls, '')
   fs.writeFileSync(s.state, JSON.stringify({ n: 1000, exec: true, splitFocuses: false, focus: { tab: 'T1', pane: 'P1' },
@@ -135,7 +137,7 @@ function coreScene(t) {
   /** A check that appends a line to `count` each time it runs, and how many times it ran once a second copy has had time to. */
   s.counted = async (env, tag) => {
     const out = path.join(s.tmp, `${tag}.out`), count = path.join(s.tmp, `${tag}.count`)
-    const r = s.launch(env, 'g', out, [`echo run >> ${count}`], { cwd: s.tmp })
+    const r = s.launch(env, 'g', out, [`echo run >> ${shq(count)}`], { cwd: s.tmp })
     const done = await s.waitResult(out, s.detachedPid(r))
     await sleep(1500)
     return { r, out, done, runs: (read(count) ?? '').split('\n').filter(Boolean).length }
@@ -163,7 +165,7 @@ test('a failing check puts its status in the result file and only its own output
   assert.match(r.stdout, /detached/)
   assert.ok(r.stdout.includes(`${out}.result`))
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(3))
+  assert.equal(verdict(out), 'exit=3')
   assert.equal(read(out), 'about to fail\n')
   assert.equal(s.callText(), '', 'the no-host path called herdr')
   assert.equal(spawnSync('bash', ['-c', BROKEN]).status, 3)
@@ -174,14 +176,14 @@ test('a passing check records stdout, stderr and quoted text, and a one-line res
   const out = path.join(s.tmp, 'good.out')
   const r = s.launch(s.none(), 'good gate', out, [GOOD])
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(read(`${out}.result`), `${exitLine(0)}\n`)
+  assert.equal(read(`${out}.result`), 'exit=0\n')
   const tr = read(out)
   assert.ok(tr.includes('one\n') && tr.includes('two\n') && tr.includes("it's quoted"), tr)
 })
 
 test('an argv command keeps its quoting through the launcher', async (t) => {
   const { verdict: v, transcript } = await argvVerdict(t, ['bash', '-c', 'echo "a  b"; printf %s "$0"; exit 4'])
-  assert.equal(v, exitLine(4))
+  assert.equal(v, 'exit=4')
   assert.ok(transcript.split('\n').includes('a  b'), transcript)
 })
 
@@ -200,7 +202,7 @@ test('a command whose text holds a marker line puts nothing in the transcript', 
   const r = s.launch(s.none(), 'header gate', out, [cmd])
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
   assert.equal(read(out), '')
-  assert.equal(verdict(out), exitLine(7))
+  assert.equal(verdict(out), 'exit=7')
   assert.equal(spawnSync('bash', ['-c', cmd]).status, 7)
 })
 
@@ -209,7 +211,7 @@ test('a check that prints its own exit line cannot touch the verdict', async (t)
   const out = path.join(s.tmp, 'forge.out')
   const r = s.launch(s.none(), 'forging gate', out, ['env -i exit=0; exit 7'])
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(7))
+  assert.equal(verdict(out), 'exit=7')
   assert.ok(read(out).split('\n').includes('exit=0'))
 })
 
@@ -231,7 +233,7 @@ test('many multi-byte characters across chunk boundaries arrive intact', async (
   const tr = read(out)
   assert.ok(!tr.includes('�'))
   assert.equal(tr.split('€').length - 1, 100000)
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
 })
 
 test('a transcript the launcher could not fully write gives a result saying capture incomplete', async (t) => {
@@ -242,20 +244,20 @@ test('a transcript the launcher could not fully write gives a result saying capt
   const r = spawnSync('bash', ['-c', `ulimit -f 1; exec node ${shq(GATE)} 'limited gate' ${shq(out)} -- ${shq(check)}`], { env: s.none(), encoding: 'utf8', timeout: 30000 })
   const pid = s.detachedPid(r); if (pid) s.pids.push(pid)
   assert.ok(await s.waitResult(out, pid), r.stdout + r.stderr)
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
   assert.ok(read(`${out}.result`).split('\n').includes('capture=incomplete'), read(`${out}.result`))
   const probe = spawnSync('bash', ['-c', `ulimit -f 1; head -c 8000 /dev/zero > ${shq(path.join(s.tmp, 'probe'))}`])
-  assert.notEqual(probe.status, 0)
+  assert.ok(probe.status > 0, JSON.stringify({ status: probe.status, signal: probe.signal }))
 })
 
 test('a previous result on the same path is gone when the launcher returns', async (t) => {
   const s = scene(t)
   const out = path.join(s.tmp, 'reuse.out')
-  fs.writeFileSync(`${out}.result`, `${exitLine(0)}\n`)
+  fs.writeFileSync(`${out}.result`, 'exit=0\n')
   const r = s.launch(s.none(), 'reuse gate', out, ['sleep 1; exit 7'])
   assert.equal(fs.existsSync(`${out}.result`), false, 'the stale verdict was still there at return')
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(7))
+  assert.equal(verdict(out), 'exit=7')
 })
 
 test('a stale result that cannot be removed makes the launcher refuse and the check never runs', async (t) => {
@@ -263,14 +265,14 @@ test('a stale result that cannot be removed makes the launcher refuse and the ch
   const s = scene(t)
   const locked = path.join(s.tmp, 'locked'); fs.mkdirSync(locked); s.dirs.push(locked)
   const out = path.join(locked, 'stale.out')
-  fs.writeFileSync(`${out}.result`, `${exitLine(0)}\n`)
+  fs.writeFileSync(`${out}.result`, 'exit=0\n')
   fs.chmodSync(locked, 0o500)
   const r = s.launch(s.none(), 'locked gate', out, ['echo ran'])
   await sleep(300)
   assert.equal(r.status, 1)
   assert.match(r.stderr, /refusing to run/)
   assert.equal(read(out), null)
-  assert.equal(read(`${out}.result`), `${exitLine(0)}\n`)
+  assert.equal(read(`${out}.result`), 'exit=0\n')
   assert.throws(() => fs.rmSync(`${out}.result`))
 })
 
@@ -291,7 +293,7 @@ test('a result path the launcher cannot clear refuses before the record and the 
 test('a command record the launcher cannot write makes it refuse and the check never runs', async (t) => {
   const s = scene(t)
   const out = path.join(s.tmp, 'norec.out')
-  fs.writeFileSync(`${out}.result`, `${exitLine(0)}\n`)
+  fs.writeFileSync(`${out}.result`, 'exit=0\n')
   fs.mkdirSync(`${out}.cmd.partial`); fs.writeFileSync(path.join(`${out}.cmd.partial`, 'keep'), 'x')
   const r = s.launch(s.none(), 'norec gate', out, ['echo ran'])
   await sleep(300)
@@ -319,7 +321,7 @@ test('the command record is in place when the launcher returns, before the check
   assert.deepEqual(readJson(`${out}.cmd`), ['sleep 2; echo late'])
   assert.equal(fs.existsSync(`${out}.result`), false)
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
   assert.ok(read(out).includes('late'))
 })
 
@@ -330,7 +332,7 @@ test('a single-string pipeline whose upstream fails records a failure', async (t
   const out = path.join(s.tmp, 'pipe.out')
   const r = s.launch(s.none(), 'piped gate', out, ['false | cat'])
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(1))
+  assert.equal(verdict(out), 'exit=1')
   assert.equal(bareStatus(['bash', '-c', 'false | cat']), 0)
 })
 
@@ -339,125 +341,127 @@ test('a single-string pipeline that passes still records exit 0', async (t) => {
   const out = path.join(s.tmp, 'pipe.out')
   const r = s.launch(s.none(), 'piped good gate', out, ['echo ok | cat'])
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
   assert.ok(read(out).split('\n').includes('ok'))
 })
 
 test('an argv bash -c pipeline whose upstream fails records a failure', async (t) => {
   const cmd = ['bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('an argv bash -c pipeline that passes still records exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['bash', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('an env K equals V prefix before bash -c still records the upstream failure', async (t) => {
   const cmd = ['env', 'DCTR_K=1', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('an env-prefixed passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['env', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['env', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('an argv that does not run bash is spawned untouched', async (t) => {
-  assert.equal((await argvVerdict(t, ['sh', '-c', 'false | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['sh', '-c', 'false | cat'])).verdict, 'exit=0')
 })
 
 test('a long option before -c with a failing upstream records a failure', async (t) => {
   const cmd = ['bash', '--norc', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('a long option before -c on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['bash', '--norc', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', '--norc', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('env -u NAME before bash still records the upstream failure', async (t) => {
   const cmd = ['env', '-u', 'DCTR_K', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('an env -u operand named bash is not taken for the program', async (t) => {
-  assert.equal((await argvVerdict(t, ['env', '-u', 'bash', 'bash', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  const cmd = ['env', '-u', 'bash', 'bash', '-c', 'false | cat']
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
+  assert.equal(bareStatus(cmd), 0)
 })
 
 test('an uppercase option clustered with c still records the upstream failure', async (t) => {
   const cmd = ['bash', '-Ec', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('an uppercase cluster on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['bash', '-Ec', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', '-Ec', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('a script given -c as its own argument is spawned untouched', async (t) => {
   const s = scene(t)
   const script = path.join(s.tmp, 'pf.sh'); fs.writeFileSync(script, 'false | cat\n')
-  assert.equal((await argvVerdict(t, ['bash', script, '-c'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', script, '-c'])).verdict, 'exit=0')
 })
 
 test('a bash -o operand before -c still records the upstream failure', async (t) => {
   const cmd = ['bash', '-o', 'errexit', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('a bash -o operand before -c on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['bash', '-o', 'errexit', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', '-o', 'errexit', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('a rcfile operand before -c still records the upstream failure', async (t) => {
   const cmd = ['bash', '--rcfile', '/dev/null', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('a rcfile operand before -c on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['bash', '--rcfile', '/dev/null', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['bash', '--rcfile', '/dev/null', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('env -- then an assignment still records the upstream failure', async (t) => {
   const cmd = ['env', '--', 'DCTR_K=1', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('env -- then an assignment on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['env', '--', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['env', '--', 'DCTR_K=1', 'bash', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('env with a clustered -iu NAME still records the upstream failure', async (t) => {
   const cmd = ['env', '-iu', 'DCTR_K', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('env with an assignment whose name has a dot still records the upstream failure', async (t) => {
   const cmd = ['env', 'dctr.k=1', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('a dotted assignment name on a passing pipeline stays exit 0', async (t) => {
-  assert.equal((await argvVerdict(t, ['env', 'dctr.k=1', 'bash', '-c', 'echo ok | cat'])).verdict, exitLine(0))
+  assert.equal((await argvVerdict(t, ['env', 'dctr.k=1', 'bash', '-c', 'echo ok | cat'])).verdict, 'exit=0')
 })
 
 test('env -u with its name attached and ending in P still records the upstream failure', async (t) => {
   const cmd = ['env', '-uGROUP', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
 test('env -u with an attached name holding S still records the upstream failure', async (t) => {
   const cmd = ['env', '-uS', 'bash', '-c', 'false | cat']
-  assert.equal((await argvVerdict(t, cmd)).verdict, exitLine(1))
+  assert.equal((await argvVerdict(t, cmd)).verdict, 'exit=1')
   assert.equal(bareStatus(cmd), 0)
 })
 
@@ -496,8 +500,8 @@ test('the tab path creates its tab in the launcher cwd', (t) => {
 test('the tab path is not renamed at placement and keeps its create label', (t) => {
   const s = scene(t)
   const r = s.launch(s.tui({ DCTR_TEST_LAYOUT_FAILS: '1' }), 'tab named', path.join(s.tmp, 'tabnamed.out'), ['true'])
-  assert.ok(!s.callLines().some((l) => l.startsWith('pane rename ')), s.callText())
-  assert.ok(s.callLines().find((l) => l.startsWith('tab create '))?.includes('--label'))
+  assert.ok(!s.callLines().some((l) => l.startsWith('pane rename ') || l.startsWith('tab rename ')), s.callText())
+  assert.ok(s.callLines().find((l) => l.startsWith('tab create '))?.includes(' --label dctr · gate · 1 --no-focus '), s.callText())
   assert.match(r.stdout, /running in tab w1:tT/)
 })
 
@@ -505,16 +509,17 @@ test('the tab placement hands its own tab id and workspace to the line it types'
   const s = scene(t)
   s.launch(s.tui({ DCTR_TEST_LAYOUT_FAILS: '1' }), 'tab ids', path.join(s.tmp, 'tabids.out'), ['true'])
   const line = s.callLines().find((l) => l.startsWith('pane run w1:pT ')) ?? ''
-  assert.ok(line.includes(` ${shq('w1:tT')} `) && line.includes(` ${shq('w1')} `) && line.includes(` ${shq('w1:pT')} `), line)
+  assert.ok(line.includes(" 'w1:tT' ") && line.includes(" 'w1' ") && line.includes(" 'w1:pT' "), line)
 })
 
 test('a contained session inside herdr runs the check detached and calls herdr zero times', async (t) => {
   const s = scene(t)
   const out = path.join(s.tmp, 'contained.out')
-  const r = s.launch(s.tui({ DCTR_VIEW_REQUEST_DIR: path.join(s.tmp, 'views') }), 'contained gate', out, ['bash', '-c', 'echo ran contained'])
-  assert.match(r.stdout, /contained session/)
+  const r = s.launch(s.tui({ DCTR_VIEW_REQUEST_DIR: path.join(s.tmp, 'views') }), 'contained gate', out, ['bash', '-c', 'sleep 1; echo ran contained'])
+  assert.match(r.stdout, /contained session.*running detached/)
+  assert.equal(fs.existsSync(`${out}.result`), false, 'the check finished before the launcher returned')
   assert.ok(await s.waitResult(out, s.detachedPid(r)))
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
   assert.ok(read(out).includes('ran contained'))
   assert.equal(s.callText(), '')
 })
@@ -624,7 +629,7 @@ test('a focused pane is relabelled last with its exit status and keeps its recor
   const { m, lines } = paneDone(s, { DCTR_ELAPSED_MS: '20', DCTR_TEST_GET_FOCUSED: '1' }, 'ending gate', 'sleep 0.3')
   const renames = lines.filter((l) => l.startsWith('pane rename'))
   assert.ok(renames.length > 1, renames.join(' | '))
-  assert.equal(renames.at(-1), `pane rename w1:pS ending gate · ${exitLine(0)}`)
+  assert.equal(renames.at(-1), 'pane rename w1:pS ending gate · exit=0')
   assert.ok(!lines.some((l) => l.startsWith('pane close')))
   assert.ok(fs.existsSync(m))
 })
@@ -635,7 +640,7 @@ test('while the check runs the pane name carries elapsed time that increases', a
     { env: s.tui({ DCTR_ELAPSED_MS: '50' }), stdio: 'ignore', detached: true })
   s.pids.push(child.pid)
   const ticks = () => [...s.callText().matchAll(/^pane rename w1:pS ticking gate · (\d+)s elapsed$/gm)].map((x) => Number(x[1]))
-  const rose = () => { const v = ticks(); return new Set(v).size >= 2 && Math.max(...v) > Math.min(...v) }
+  const rose = () => { const v = ticks(); return v.length >= 2 && v.every((x, i) => i === 0 || x >= v[i - 1]) && v.at(-1) > v[0] }
   const until = Date.now() + 20000
   while (Date.now() < until && !rose()) await sleep(25)
   assert.ok(rose(), JSON.stringify(ticks()))
@@ -649,7 +654,7 @@ test('a check that could not be spawned keeps its record and puts the error in t
   const r = s.run(s.tui(), [out, m, 'w1:pS', '', '', 'unspawnable', '--', 'definitely-not-a-real-binary-xyz', 'arg'])
   assert.equal(r.status, 127)
   assert.ok(fs.existsSync(m))
-  assert.equal(verdict(out), exitLine(127))
+  assert.equal(verdict(out), 'exit=127')
   assert.ok(read(`${out}.result`).split('\n').some((l) => l.startsWith('error=') && /ENOENT/.test(l)), read(`${out}.result`))
   assert.equal(read(out), '')
 })
@@ -657,7 +662,8 @@ test('a check that could not be spawned keeps its record and puts the error in t
 test('a run line with a positional missing is refused and touches herdr not at all', (t) => {
   const s = scene(t)
   const r = s.run(s.tui(), [path.join(s.tmp, 'slid.out'), path.join(s.tmp, 'slid.json'), 'w1:pR', 'w1:tG', 'lbl', '--', 'true'])
-  assert.notEqual(r.status, 0)
+  assert.equal(r.signal, null, 'the launcher was killed at the timeout')
+  assert.equal(r.status, 1)
   assert.equal(s.callText(), '')
   assert.equal(fs.existsSync(path.join(s.tmp, 'slid.out.result')), false)
 })
@@ -686,7 +692,7 @@ test('an unfocused tab is closed by its own id, its root pane never, and its rec
 test('a focused tab is renamed to its exit status, not closed, and keeps its record', (t) => {
   const s = scene(t)
   const { m, lines } = tabDone(s, { DCTR_TEST_TAB_FOCUSED: '1' }, 'tab focused')
-  assert.ok(lines.includes(`tab rename w1:tG tab focused · ${exitLine(0)}`), lines.join(' | '))
+  assert.ok(lines.includes('tab rename w1:tG tab focused · exit=0'), lines.join(' | '))
   assert.ok(!lines.some((l) => l.startsWith('tab close') || l.startsWith('pane close')))
   assert.ok(fs.existsSync(m))
 })
@@ -808,7 +814,7 @@ test('inside the Codex sandbox the gate runs its check to completion before retu
   const out = path.join(s.tmp, 'g', 'sandboxed.out')
   const r = s.launch(codexEnv(s, { DCTR_PID1_FILE: pid1, DCTR_VIEW_REQUEST_DIR: path.join(s.tmp, 'views') }), 'probe', out, ['sleep 1; echo done'])
   assert.match(r.stdout, /ran in the foreground/)
-  assert.equal(verdict(out), exitLine(0))
+  assert.equal(verdict(out), 'exit=0')
   assert.ok(read(out).includes('done'))
   assert.equal(s.callText(), '')
 })
@@ -852,12 +858,17 @@ test('a herdr-core gate runs in a split, writes its status, and closes its own u
   const marker = s.gateMarkers()[0]
   assert.equal(marker?.host, 'herdr-core')
   assert.ok(await s.waitResult(out))
-  assert.equal(verdict(out), exitLine(3))
+  assert.equal(verdict(out), 'exit=3')
   assert.equal(read(out), 'gated\n')
   const until = Date.now() + 15000
-  const closed = () => s.fake().some((c) => c.bin === 'herdr-app' && c.args[0] === 'do' && c.args[1] === 'pane.close' && c.args.includes(marker.paneId))
+  const made = Object.keys(s.model().terminals).filter((x) => !['t1', 't2'].includes(x))
+  assert.equal(made.length, 1, JSON.stringify(s.model()))
+  const terminal = made[0]
+  const called = () => s.fake().some((c) => c.bin === 'herdr-app' && c.args[0] === 'do' && c.args[1] === 'pane.close' && c.args.includes(marker.paneId))
+  // The fake drops a pane whose program exited on its own and lists it in `exited`; a close hangs that program up first.
+  const closed = () => { const m = s.model(); return called() && !s.tabs().some((x) => x.panes.some((p) => p.pane === marker.paneId)) && m.terminals[terminal] === 'removed' && !(m.exited ?? []).includes(marker.paneId) }
   while (Date.now() < until && !closed()) await sleep(50)
-  assert.ok(closed(), JSON.stringify(s.fake()))
+  assert.ok(closed(), JSON.stringify({ model: s.model(), calls: s.fake() }))
   assert.ok(!s.fake().some((c) => c.bin === 'herdr'), 'herdr-core called the herdr TUI')
 })
 
@@ -865,7 +876,7 @@ test('a herdr-core tab gate the user is looking at when it finishes is relabelle
   const s = coreScene(t)
   s.fillColumn()
   const out = path.join(s.tmp, 'gatefocus.out'), go = path.join(s.tmp, 'go')
-  const r = s.launch(s.core(), 'g', out, [`until [ -f ${go} ]; do sleep 0.05; done; exit 4`], { cwd: s.tmp })
+  const r = s.launch(s.core(), 'g', out, [`until [ -f ${shq(go)} ]; do sleep 0.05; done; exit 4`], { cwd: s.tmp })
   assert.match(r.stdout, /running in tab/)
   const tab = s.gateMarkers()[0]?.tabId
   assert.ok(tab)
@@ -873,7 +884,7 @@ test('a herdr-core tab gate the user is looking at when it finishes is relabelle
   fs.writeFileSync(go, '')
   assert.ok(await s.waitResult(out))
   const until = Date.now() + 15000
-  const renamed = () => s.tabs().some((x) => x.id === tab && x.name?.endsWith(`· ${exitLine(4)}`))
+  const renamed = () => s.tabs().some((x) => x.id === tab && x.name?.endsWith('· exit=4'))
   while (Date.now() < until && !renamed()) await sleep(50)
   assert.ok(renamed(), JSON.stringify(s.tabs()))
   assert.ok(!s.fake().some((c) => c.bin === 'herdr'))
@@ -883,8 +894,11 @@ test('a herdr-core gate whose marker cannot be written once its pane exists runs
   const s = coreScene(t)
   fs.mkdirSync(s.seats, { recursive: true })
   const m = s.model(); m.chmodAfterCreate = s.seats; s.save(m)
+  if (process.getuid?.() === 0) return t.skip('root writes into a directory without its write bit')
   const r = await s.counted(s.core(), 'gateonce')
+  let refused = false; try { fs.writeFileSync(path.join(s.seats, 'probe'), '') } catch { refused = true }
   fs.chmodSync(s.seats, 0o700)
+  assert.ok(refused, 'the marker directory still took a write after placement')
   assert.ok(r.done)
   assert.equal(r.runs, 1)
   assert.match(r.r.stdout, /running in pane P/)
