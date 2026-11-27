@@ -6235,7 +6235,9 @@ if (process.argv.includes('--anchors')) {
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so several hosts can each take a
 // disjoint part of a full run; a malformed or empty selection throws here, before the work tree exists. The baseline
 // suites always all run. --anchors, above, is decided before this and always reads the whole table.
-if (process.env.DCTR_SHARD) {
+// --file <unit> --tests <test file> judges one unit's entries against one test file and never reaches the full run below.
+const ORACLE = process.argv.includes('--file') || process.argv.includes('--tests')
+if (process.env.DCTR_SHARD && !ORACLE) {
   const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
   console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
   MUTATIONS.splice(0, MUTATIONS.length, ...keep)
@@ -6260,6 +6262,62 @@ const ENV_JOBS = Number(process.env.DCTR_JOBS)
 const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
   ? Math.max(1, Math.floor(ENV_JOBS))
   : Math.min(8, os.availableParallelism?.() ?? 4)
+
+if (ORACLE) {
+  console.log(`started ${new Date().toISOString()}`)
+  const done = (code, line) => { if (line) console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
+  const arg = (flag) => { const i = process.argv.indexOf(flag); return i < 0 ? undefined : process.argv[i + 1] }
+  const unit = arg('--file')
+  const tests = arg('--tests')
+  if (!unit || !tests) done(2, 'usage: node hooks/dctr-mutations.mjs --file <unit> --tests <test file relative to hooks/>')
+  if (!fs.statSync(path.join(HERE, tests), { throwIfNoEntry: false })?.isFile()) done(2, `no test file at hooks/${tests}`)
+  const selected = MUTATIONS.filter((m) => m.file === unit)
+  if (!selected.length) done(2, `no table entry names ${unit}`)
+  const copy = (dir) => {
+    for (const f of [...FILES, tests]) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(dir, f)) }
+  }
+  const env = { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' }
+  // A runner started from inside another `node --test` would otherwise report to its parent instead of printing TAP.
+  delete env.NODE_TEST_CONTEXT
+  /** Each TAP result line's name as passed or failed; skipped and todo results are neither. */
+  const runTests = async (dir) => {
+    let code = 0
+    let out = ''
+    try {
+      out = (await execFileAsync('node', ['--test', '--test-reporter=tap', path.join(dir, tests)], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
+    } catch (e) { code = e.code ?? e.signal; out = String(e.stdout || '') }
+    const passed = new Set()
+    const failed = new Set()
+    for (const l of out.split('\n')) {
+      const m = /^\s*(not )?ok \d+ - (.*?)( # (SKIP|TODO)\b.*)?$/i.exec(l)
+      if (m && !m[3]) (m[1] ? failed : passed).add(m[2])
+    }
+    return { code, passed, failed }
+  }
+  const base = path.join(work, 'baseline')
+  copy(base)
+  const b = await runTests(base)
+  if (b.code !== 0 || !b.passed.size) done(1, `the baseline is red: node --test ${tests} exited ${b.code} with ${b.passed.size} tests passed, so no entry can be judged`)
+  const verdicts = await mapPool(selected, JOBS, async (m, idx) => {
+    const dir = path.join(work, String(idx).padStart(3, '0'))
+    copy(dir)
+    const target = path.join(dir, m.file)
+    const before = fs.readFileSync(target, 'utf8')
+    const hits = anchorCount(before, m.from)
+    if (anchorVerdict(hits) !== 'apply') return ['unjudged', `its anchor occurs ${hits} times in ${m.file}`]
+    fs.writeFileSync(target, before.replace(m.from, m.to))
+    const r = await runTests(dir)
+    if ([...b.passed].some((n) => r.failed.has(n))) return ['caught']
+    return r.code === 0 ? ['missed', `nothing in ${tests} pins "${m.clause}"`] : ['unjudged', `node --test exited ${r.code} with no baseline test failing`]
+  })
+  const count = { caught: 0, missed: 0, unjudged: 0 }
+  selected.forEach((m, i) => {
+    const [v, why] = verdicts[i] || ['unjudged', 'the pool returned no result']
+    count[v] += 1
+    console.log(`  ${v.padEnd(8)} ${m.name}${why ? ` — ${why}` : ''}`)
+  })
+  done(count.caught === selected.length ? 0 : 1, `${count.caught} caught, ${count.missed} missed, ${count.unjudged} unjudged`)
+}
 
 /**
  * What is running right now, and the ticker that says so (issue #62).
