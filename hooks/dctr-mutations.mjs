@@ -8,7 +8,8 @@
 // a fixture whose pane id the workspace filter excluded so the branch under test never ran once, and
 // two repairs whose reverts left the whole suite green. A reviewer found each of those by reverting
 // something and re-running. This did that as a gate until 2026-11-26. Since then no phase and no merge runs it
-// (CLAUDE.md, "A fix is proven once"); only its --anchors mode still runs.
+// (CLAUDE.md, "A fix is proven once"). Its --anchors mode runs on every change, and its by-file mode runs one
+// unit's entries against that unit's rewritten tests.
 //
 // It mutates a COPY. The repo is never written to.
 //
@@ -29,7 +30,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mapPool, poolShortfall, anchorCount, anchorVerdict, shardOf, baselineReport, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -6213,13 +6214,21 @@ const MUTATIONS = [
     to: "host.typeText(s.paneId, s.terminal, text))" },
 ]
 
+// Only three argument shapes run anything: none (the full run), `--anchors` alone, and the by-file pair in either order.
+const ARGS = process.argv.slice(2)
+const ORACLE = ARGS.length === 4 && ['--file', '--tests'].every((f) => [ARGS[0], ARGS[2]].includes(f))
+if (ARGS.length && !(ARGS.length === 1 && ARGS[0] === '--anchors') && !ORACLE) {
+  console.log('usage: node hooks/dctr-mutations.mjs [--anchors | --file <unit> --tests <test file in hooks/>]')
+  process.exit(2)
+}
+
 // --anchors checks every entry's text and runs nothing: each `from` must still occur exactly once in its file, and
 // the table must not have grown. No gate runs the mutations any more (Scott's ruling, 2026-11-26), and an edit can
 // retire an entry's text without anyone noticing; this is what keeps the table usable for its one remaining job.
 // It is decided here, before DCTR_SHARD is read, so it always covers the whole table.
 /** The most entries the table may hold. Lower it in the commit that deletes entries; nothing raises it. */
 const TABLE_CEILING = 1743
-if (process.argv.includes('--anchors')) {
+if (ARGS.length === 1) {
   let bad = 0
   for (const m of MUTATIONS) {
     let text = ''
@@ -6235,10 +6244,28 @@ if (process.argv.includes('--anchors')) {
 // DCTR_SHARD=k[,k...]/n runs only the mutations whose index i has i % n among the ks, so several hosts can each take a
 // disjoint part of a full run; a malformed or empty selection throws here, before the work tree exists. The baseline
 // suites always all run. --anchors, above, is decided before this and always reads the whole table.
-if (process.env.DCTR_SHARD) {
+// --file <unit> --tests <test file> judges one unit's entries against one test file and never reaches the full run below.
+if (process.env.DCTR_SHARD && !ORACLE) {
   const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
   console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
   MUTATIONS.splice(0, MUTATIONS.length, ...keep)
+}
+
+// The by-file arguments are checked before the temp directory exists, so a bad one exits 2 whatever TMPDIR holds.
+let unit, tests, selected
+if (ORACLE) {
+  console.log(`started ${new Date().toISOString()}`)
+  const refuse = (line) => { console.log(line); process.exit(2) }
+  const opt = { [ARGS[0]]: ARGS[1], [ARGS[2]]: ARGS[3] }
+  unit = opt['--file']
+  tests = opt['--tests']
+  // Anything else could be this runner or an old selftest, and `node --test` would execute it in the copy.
+  if (/[/\\]|\.\./.test(tests) || !tests.endsWith('.test.mjs')) refuse(`--tests takes a bare file name ending in .test.mjs in hooks/, not ${tests}`)
+  const st = fs.lstatSync(path.join(HERE, tests), { throwIfNoEntry: false })
+  if (st?.isSymbolicLink()) refuse(`--tests takes a test file, not a symbolic link: hooks/${tests}`)
+  if (!st?.isFile()) refuse(`no test file at hooks/${tests}`)
+  selected = MUTATIONS.filter((m) => m.file === unit)
+  if (!selected.length) refuse(`no table entry names ${unit}`)
 }
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
@@ -6260,6 +6287,63 @@ const ENV_JOBS = Number(process.env.DCTR_JOBS)
 const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
   ? Math.max(1, Math.floor(ENV_JOBS))
   : Math.min(8, os.availableParallelism?.() ?? 4)
+
+if (ORACLE) {
+  const done = (code, line) => { console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
+  const copy = (dir) => {
+    for (const f of [...FILES, tests]) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(dir, f)) }
+  }
+  const env = { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' }
+  // A runner started from inside another `node --test` would otherwise report to its parent instead of printing the reporter's lines.
+  delete env.NODE_TEST_CONTEXT
+  // A reporter printing one JSON line per result, so a result is read from node's own fields and never from text.
+  const reporter = path.join(work, 'results.reporter.mjs')
+  fs.writeFileSync(reporter, "export default async function* (source) { for await (const { type, data } of source) if (type === 'test:pass' || type === 'test:fail') yield JSON.stringify({ type, name: data.name, kind: data.details?.type, failureType: data.details?.error?.failureType, skip: data.skip, todo: data.todo }) + '\\n' }\n")
+  /** The names of real tests that passed and that failed in their own right. */
+  const runTests = async (dir) => {
+    let code = 0
+    let out = ''
+    try {
+      // A file URL, because node reads a bare reporter path as a module specifier; an absolute path, because node hands a relative one to its child as an argument, where a leading dash is an option.
+      out = (await execFileAsync('node', ['--test', `--test-reporter=${pathToFileURL(reporter).href}`, path.join(dir, tests)], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
+    } catch (e) { code = e.code ?? e.signal; out = String(e.stdout || '') }
+    const passed = new Set()
+    const failed = new Set()
+    for (const l of out.split('\n')) {
+      let r
+      try { r = JSON.parse(l) } catch { continue }
+      // Node reports the file itself as a test named after it, and a suite, a skip and a todo are no test's own result.
+      // Node sets skip and todo only on a test so marked, and its reason may be an empty string, so presence is what counts.
+      if (r?.kind !== 'test' || r.name === path.join(dir, tests) || 'skip' in r || 'todo' in r) continue
+      if (r.type === 'test:pass') passed.add(r.name)
+      else if (r.failureType !== 'cancelledByParent' && r.failureType !== 'subtestsFailed') failed.add(r.name)
+    }
+    return { code, passed, failed }
+  }
+  const base = path.join(work, 'baseline')
+  copy(base)
+  const b = await runTests(base)
+  if (b.code !== 0 || !b.passed.size) done(1, `the baseline is red: node --test ${tests} exited ${b.code} with ${b.passed.size} tests passed, so no entry can be judged`)
+  const verdicts = await mapPool(selected, JOBS, async (m, idx) => {
+    const dir = path.join(work, String(idx).padStart(3, '0'))
+    copy(dir)
+    const target = path.join(dir, m.file)
+    const before = fs.readFileSync(target, 'utf8')
+    const hits = anchorCount(before, m.from)
+    if (anchorVerdict(hits) !== 'apply') return ['unjudged', `its anchor occurs ${hits} times in ${m.file}`]
+    fs.writeFileSync(target, before.replace(m.from, m.to))
+    const r = await runTests(dir)
+    if (r.code !== 0 && [...b.passed].some((n) => r.failed.has(n))) return ['caught']
+    return r.code === 0 ? ['missed', `nothing in ${tests} pins "${m.clause}"`] : ['unjudged', `node --test exited ${r.code} with no baseline test failing`]
+  })
+  const count = { caught: 0, missed: 0, unjudged: 0 }
+  selected.forEach((m, i) => {
+    const [v, why] = verdicts[i] || ['unjudged', 'the pool returned no result']
+    count[v] += 1
+    console.log(`  ${v.padEnd(8)} ${m.name}${why ? ` — ${why}` : ''}`)
+  })
+  done(count.caught === selected.length ? 0 : 1, `${count.caught} caught, ${count.missed} missed, ${count.unjudged} unjudged`)
+}
 
 /**
  * What is running right now, and the ticker that says so (issue #62).
