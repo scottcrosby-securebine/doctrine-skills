@@ -8,7 +8,8 @@
 // a fixture whose pane id the workspace filter excluded so the branch under test never ran once, and
 // two repairs whose reverts left the whole suite green. A reviewer found each of those by reverting
 // something and re-running. This did that as a gate until 2026-11-26. Since then no phase and no merge runs it
-// (CLAUDE.md, "A fix is proven once"); only its --anchors mode still runs.
+// (CLAUDE.md, "A fix is proven once"). Its --anchors mode runs on every change, and its by-file mode runs one
+// unit's entries against that unit's rewritten tests.
 //
 // It mutates a COPY. The repo is never written to.
 //
@@ -6213,13 +6214,21 @@ const MUTATIONS = [
     to: "host.typeText(s.paneId, s.terminal, text))" },
 ]
 
+// Only three argument shapes run anything: none (the full run), `--anchors` alone, and the by-file pair in either order.
+const ARGS = process.argv.slice(2)
+const ORACLE = ARGS.length === 4 && ['--file', '--tests'].every((f) => [ARGS[0], ARGS[2]].includes(f))
+if (ARGS.length && !(ARGS.length === 1 && ARGS[0] === '--anchors') && !ORACLE) {
+  console.log('usage: node hooks/dctr-mutations.mjs [--anchors | --file <unit> --tests <test file in hooks/>]')
+  process.exit(2)
+}
+
 // --anchors checks every entry's text and runs nothing: each `from` must still occur exactly once in its file, and
 // the table must not have grown. No gate runs the mutations any more (Scott's ruling, 2026-11-26), and an edit can
 // retire an entry's text without anyone noticing; this is what keeps the table usable for its one remaining job.
 // It is decided here, before DCTR_SHARD is read, so it always covers the whole table.
 /** The most entries the table may hold. Lower it in the commit that deletes entries; nothing raises it. */
 const TABLE_CEILING = 1743
-if (process.argv.includes('--anchors')) {
+if (ARGS.length === 1) {
   let bad = 0
   for (const m of MUTATIONS) {
     let text = ''
@@ -6236,7 +6245,6 @@ if (process.argv.includes('--anchors')) {
 // disjoint part of a full run; a malformed or empty selection throws here, before the work tree exists. The baseline
 // suites always all run. --anchors, above, is decided before this and always reads the whole table.
 // --file <unit> --tests <test file> judges one unit's entries against one test file and never reaches the full run below.
-const ORACLE = process.argv.includes('--file') || process.argv.includes('--tests')
 if (process.env.DCTR_SHARD && !ORACLE) {
   const keep = shardOf(process.env.DCTR_SHARD, MUTATIONS.length).map((i) => MUTATIONS[i])
   console.log(`shard ${process.env.DCTR_SHARD}: ${keep.length} of ${MUTATIONS.length} mutations`)
@@ -6266,10 +6274,11 @@ const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
 if (ORACLE) {
   console.log(`started ${new Date().toISOString()}`)
   const done = (code, line) => { console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
-  const arg = (flag) => { const i = process.argv.indexOf(flag); return i < 0 ? undefined : process.argv[i + 1] }
-  const unit = arg('--file')
-  const tests = arg('--tests')
-  if (!unit || !tests) done(2, 'usage: node hooks/dctr-mutations.mjs --file <unit> --tests <test file relative to hooks/>')
+  const opt = { [ARGS[0]]: ARGS[1], [ARGS[2]]: ARGS[3] }
+  const unit = opt['--file']
+  const tests = opt['--tests']
+  // Anything else could be this runner or an old selftest, and `node --test` would execute it in the copy.
+  if (/[/\\]|\.\./.test(tests) || !tests.endsWith('.test.mjs')) done(2, `--tests takes a bare file name ending in .test.mjs in hooks/, not ${tests}`)
   if (!fs.statSync(path.join(HERE, tests), { throwIfNoEntry: false })?.isFile()) done(2, `no test file at hooks/${tests}`)
   const selected = MUTATIONS.filter((m) => m.file === unit)
   if (!selected.length) done(2, `no table entry names ${unit}`)
@@ -6277,20 +6286,27 @@ if (ORACLE) {
     for (const f of [...FILES, tests]) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(dir, f)) }
   }
   const env = { ...process.env, CLAUDE_CODE_SESSION_ID: 'mutation-harness' }
-  // A runner started from inside another `node --test` would otherwise report to its parent instead of printing TAP.
+  // A runner started from inside another `node --test` would otherwise report to its parent instead of printing the reporter's lines.
   delete env.NODE_TEST_CONTEXT
-  /** Each TAP result line's name as passed or failed; skipped and todo results are neither. */
+  // A reporter printing one JSON line per result, so a result is read from node's own fields and never from text.
+  const reporter = path.join(work, 'results.reporter.mjs')
+  fs.writeFileSync(reporter, "export default async function* (source) { for await (const { type, data } of source) if (type === 'test:pass' || type === 'test:fail') yield JSON.stringify({ type, name: data.name, kind: data.details?.type, failureType: data.details?.error?.failureType, skip: data.skip, todo: data.todo }) + '\\n' }\n")
+  /** The names of real tests that passed and that failed in their own right. */
   const runTests = async (dir) => {
     let code = 0
     let out = ''
     try {
-      out = (await execFileAsync('node', ['--test', '--test-reporter=tap', path.join(dir, tests)], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
+      out = (await execFileAsync('node', ['--test', `--test-reporter=${reporter}`, tests], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
     } catch (e) { code = e.code ?? e.signal; out = String(e.stdout || '') }
     const passed = new Set()
     const failed = new Set()
     for (const l of out.split('\n')) {
-      const m = /^\s*(not )?ok \d+ - (.*?)( # (SKIP|TODO)\b.*)?$/i.exec(l)
-      if (m && !m[3]) (m[1] ? failed : passed).add(m[2])
+      let r
+      try { r = JSON.parse(l) } catch { continue }
+      // Node reports the file itself as a test named after it, and a suite, a skip and a todo are no test's own result.
+      if (r?.kind !== 'test' || r.name === tests || r.skip || r.todo) continue
+      if (r.type === 'test:pass') passed.add(r.name)
+      else if (r.failureType !== 'cancelledByParent' && r.failureType !== 'subtestsFailed') failed.add(r.name)
     }
     return { code, passed, failed }
   }
