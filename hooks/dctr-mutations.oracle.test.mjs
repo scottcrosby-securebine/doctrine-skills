@@ -56,8 +56,8 @@ const fixture = (t, entries) => {
   }
   return { dir, trip }
 }
-const run = (dir, args) => {
-  const env = { ...process.env, DCTR_JOBS: '2' }
+const run = (dir, args, extra = {}) => {
+  const env = { ...process.env, DCTR_JOBS: '2', ...extra }
   delete env.DCTR_SHARD
   return spawnSync('node', [path.join(dir, 'dctr-mutations.mjs'), ...args], { cwd: path.dirname(dir), encoding: 'utf8', env, timeout: 60000 })
 }
@@ -321,4 +321,77 @@ test('a test file that declares no test is a red baseline', (t) => {
   const r = run(dir, ['--file', UNIT, '--tests', 'notests.test.mjs'])
   assert.equal(r.status, 1, say(r))
   assert.match(r.stdout, /baseline is red/, say(r))
+})
+
+const pinned = (opts) => `import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { add } from './${UNIT}'\ntest('pin', ${opts}, () => assert.equal(add(2, 3), 5))\ntest('other', () => {})\n`
+
+test('a todo test with an empty reason that fails under the mutation is missed and exits 1', (t) => {
+  const { dir } = fixture(t, [E.sum])
+  fs.writeFileSync(path.join(dir, 'todoempty.test.mjs'), pinned("{ todo: '' }"))
+  const hand = byHand(t, dir, 'todoempty.test.mjs', E.sum)
+  assert.ok(hand.status === 0 && /^not ok \d+ - pin # TODO$/m.test(hand.stdout), say(hand))
+  const r = run(dir, ['--file', UNIT, '--tests', 'todoempty.test.mjs'])
+  assert.equal(r.status, 1, say(r))
+  assert.match(lineFor(r, E.sum.name)[0] || '', /^ +missed /, say(r))
+})
+
+test('a skipped test with an empty reason that fails under the mutation is missed and exits 1', (t) => {
+  const { dir } = fixture(t, [E.sum])
+  fs.writeFileSync(path.join(dir, 'skipempty.test.mjs'), pinned("{ skip: '' }"))
+  const hand = byHand(t, dir, 'skipempty.test.mjs', E.sum)
+  assert.ok(hand.status === 0 && /^not ok \d+ - pin # SKIP$/m.test(hand.stdout), say(hand))
+  const r = run(dir, ['--file', UNIT, '--tests', 'skipempty.test.mjs'])
+  assert.equal(r.status, 1, say(r))
+  assert.match(lineFor(r, E.sum.name)[0] || '', /^ +missed /, say(r))
+})
+
+test('a baseline whose only passing test is a todo with an empty reason is red', (t) => {
+  const { dir } = fixture(t, [E.sum])
+  fs.writeFileSync(path.join(dir, 'todoonly.test.mjs'), `import test from 'node:test'\ntest('only', { todo: '' }, () => {})\n`)
+  const hand = byHand(t, dir, 'todoonly.test.mjs')
+  assert.ok(hand.status === 0 && /^ok \d+ - only # TODO$/m.test(hand.stdout), say(hand))
+  const r = run(dir, ['--file', UNIT, '--tests', 'todoonly.test.mjs'])
+  assert.equal(r.status, 1, say(r))
+  assert.match(r.stdout, /baseline is red/, say(r))
+})
+
+test('a tests value that is a symbolic link exits 2 and runs nothing', (t) => {
+  const { dir, trip } = fixture(t, [E.sum])
+  fs.writeFileSync(path.join(dir, 'tripwire.mjs'), `import fs from 'node:fs'\nfs.appendFileSync(${JSON.stringify(trip)}, 'link\\n')\n`)
+  fs.symlinkSync('tripwire.mjs', path.join(dir, 'linked.test.mjs'))
+  const r = run(dir, ['--file', UNIT, '--tests', 'linked.test.mjs'])
+  assert.equal(r.status, 2, say(r))
+  assert.equal(fs.existsSync(trip), false, say(r))
+  spawnSync('node', [path.join(dir, 'linked.test.mjs')])
+  assert.equal(fs.existsSync(trip), true)
+})
+
+test('a bad tests value or unit exits 2 before any temp directory is made', (t) => {
+  const { dir, trip } = fixture(t, [E.sum])
+  fs.writeFileSync(path.join(dir, 'tripwire.mjs'), '')
+  fs.symlinkSync('tripwire.mjs', path.join(dir, 'linked.test.mjs'))
+  for (const [unit, tests] of [[UNIT, 'dctr-mutations.mjs'], [UNIT, 'absent.test.mjs'], [UNIT, 'linked.test.mjs'], ['dctr-nothing.mjs', 'catching.test.mjs']]) {
+    const r = run(dir, ['--file', unit, '--tests', tests], { TMPDIR: '/dev/null' })
+    assert.equal(r.status, 2, `${tests}\n${say(r)}`)
+    assert.match(lines(r)[0] || '', /^started /, `${tests}\n${say(r)}`)
+    assert.equal(fs.existsSync(trip), false, `${tests}\n${say(r)}`)
+  }
+  assert.throws(() => fs.mkdtempSync('/dev/null/x-'))
+})
+
+test('a test file whose name starts with a dash is judged like any other', (t) => {
+  const { dir } = fixture(t, [E.sum])
+  fs.copyFileSync(path.join(dir, 'catching.test.mjs'), path.join(dir, '-dash.test.mjs'))
+  const r = run(dir, ['--file', UNIT, '--tests', '-dash.test.mjs'])
+  assert.equal(r.status, 0, say(r))
+  assert.match(lineFor(r, E.sum.name)[0] || '', /^ +caught /, say(r))
+})
+
+test('a temp directory whose name holds a percent sign still judges entries', (t) => {
+  const { dir } = fixture(t, [E.sum])
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-oracle-pct%zz-'))
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }))
+  const r = run(dir, ['--file', UNIT, '--tests', 'catching.test.mjs'], { TMPDIR: tmp })
+  assert.equal(r.status, 0, say(r))
+  assert.match(lineFor(r, E.sum.name)[0] || '', /^ +caught /, say(r))
 })

@@ -30,7 +30,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mapPool, poolShortfall, anchorCount, anchorVerdict, shardOf, baselineReport, suiteOutcome, progressLine, ELAPSED_MS } from './dctr-lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -6251,6 +6251,23 @@ if (process.env.DCTR_SHARD && !ORACLE) {
   MUTATIONS.splice(0, MUTATIONS.length, ...keep)
 }
 
+// The by-file arguments are checked before the temp directory exists, so a bad one exits 2 whatever TMPDIR holds.
+let unit, tests, selected
+if (ORACLE) {
+  console.log(`started ${new Date().toISOString()}`)
+  const refuse = (line) => { console.log(line); process.exit(2) }
+  const opt = { [ARGS[0]]: ARGS[1], [ARGS[2]]: ARGS[3] }
+  unit = opt['--file']
+  tests = opt['--tests']
+  // Anything else could be this runner or an old selftest, and `node --test` would execute it in the copy.
+  if (/[/\\]|\.\./.test(tests) || !tests.endsWith('.test.mjs')) refuse(`--tests takes a bare file name ending in .test.mjs in hooks/, not ${tests}`)
+  const st = fs.lstatSync(path.join(HERE, tests), { throwIfNoEntry: false })
+  if (st?.isSymbolicLink()) refuse(`--tests takes a test file, not a symbolic link: hooks/${tests}`)
+  if (!st?.isFile()) refuse(`no test file at hooks/${tests}`)
+  selected = MUTATIONS.filter((m) => m.file === unit)
+  if (!selected.length) refuse(`no table entry names ${unit}`)
+}
+
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
 // Every copy sits one level under `work`, so a suite reading a skill's text at ../skills (the cycle suite reads
 // doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets skills/, so a link will do;
@@ -6272,16 +6289,7 @@ const JOBS = process.env.DCTR_JOBS && Number.isFinite(ENV_JOBS)
   : Math.min(8, os.availableParallelism?.() ?? 4)
 
 if (ORACLE) {
-  console.log(`started ${new Date().toISOString()}`)
   const done = (code, line) => { console.log(line); fs.rmSync(work, { recursive: true, force: true }); process.exit(code) }
-  const opt = { [ARGS[0]]: ARGS[1], [ARGS[2]]: ARGS[3] }
-  const unit = opt['--file']
-  const tests = opt['--tests']
-  // Anything else could be this runner or an old selftest, and `node --test` would execute it in the copy.
-  if (/[/\\]|\.\./.test(tests) || !tests.endsWith('.test.mjs')) done(2, `--tests takes a bare file name ending in .test.mjs in hooks/, not ${tests}`)
-  if (!fs.statSync(path.join(HERE, tests), { throwIfNoEntry: false })?.isFile()) done(2, `no test file at hooks/${tests}`)
-  const selected = MUTATIONS.filter((m) => m.file === unit)
-  if (!selected.length) done(2, `no table entry names ${unit}`)
   const copy = (dir) => {
     for (const f of [...FILES, tests]) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.copyFileSync(path.join(HERE, f), path.join(dir, f)) }
   }
@@ -6296,7 +6304,8 @@ if (ORACLE) {
     let code = 0
     let out = ''
     try {
-      out = (await execFileAsync('node', ['--test', `--test-reporter=${reporter}`, tests], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
+      // A file URL, because node reads a bare reporter path as a module specifier; an absolute path, because node hands a relative one to its child as an argument, where a leading dash is an option.
+      out = (await execFileAsync('node', ['--test', `--test-reporter=${pathToFileURL(reporter).href}`, path.join(dir, tests)], { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env })).stdout
     } catch (e) { code = e.code ?? e.signal; out = String(e.stdout || '') }
     const passed = new Set()
     const failed = new Set()
@@ -6304,7 +6313,8 @@ if (ORACLE) {
       let r
       try { r = JSON.parse(l) } catch { continue }
       // Node reports the file itself as a test named after it, and a suite, a skip and a todo are no test's own result.
-      if (r?.kind !== 'test' || r.name === tests || r.skip || r.todo) continue
+      // Node sets skip and todo only on a test so marked, and its reason may be an empty string, so presence is what counts.
+      if (r?.kind !== 'test' || r.name === path.join(dir, tests) || 'skip' in r || 'todo' in r) continue
       if (r.type === 'test:pass') passed.add(r.name)
       else if (r.failureType !== 'cancelledByParent' && r.failureType !== 'subtestsFailed') failed.add(r.name)
     }
@@ -6323,7 +6333,7 @@ if (ORACLE) {
     if (anchorVerdict(hits) !== 'apply') return ['unjudged', `its anchor occurs ${hits} times in ${m.file}`]
     fs.writeFileSync(target, before.replace(m.from, m.to))
     const r = await runTests(dir)
-    if ([...b.passed].some((n) => r.failed.has(n))) return ['caught']
+    if (r.code !== 0 && [...b.passed].some((n) => r.failed.has(n))) return ['caught']
     return r.code === 0 ? ['missed', `nothing in ${tests} pins "${m.clause}"`] : ['unjudged', `node --test exited ${r.code} with no baseline test failing`]
   })
   const count = { caught: 0, missed: 0, unjudged: 0 }

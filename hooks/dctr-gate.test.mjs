@@ -247,7 +247,7 @@ test('a transcript the launcher could not fully write gives a result saying capt
   assert.equal(verdict(out), 'exit=0')
   assert.ok(read(`${out}.result`).split('\n').includes('capture=incomplete'), read(`${out}.result`))
   const probe = spawnSync('bash', ['-c', `ulimit -f 1; head -c 8000 /dev/zero > ${shq(path.join(s.tmp, 'probe'))}`])
-  assert.ok(probe.status > 0, JSON.stringify({ status: probe.status, signal: probe.signal }))
+  assert.ok(probe.status > 0 || Boolean(probe.signal), JSON.stringify({ status: probe.status, signal: probe.signal }))
 })
 
 test('a previous result on the same path is gone when the launcher returns', async (t) => {
