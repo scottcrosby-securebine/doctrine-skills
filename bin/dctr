@@ -30,7 +30,7 @@ const out = (s) => process.stdout.write(s + '\n')
 const fail = (s) => { process.stderr.write(`dctr: ${s}\n`); process.exitCode = 2 }
 
 if (sub === '--version') out(VERSION)
-else if (!sub || sub === '--help' || sub === 'help') out(['usage:', ...Object.values(SUBS).flatMap((s) => s[2]).map((l) => '  ' + l), '  dctr --version'].join('\n'))
+else if (!sub || sub === '--help') out(['usage:', ...Object.values(SUBS).flatMap((s) => s[2]).map((l) => '  ' + l), '  dctr --version'].join('\n'))
 else if (!Object.hasOwn(SUBS, sub)) fail(`unknown subcommand ${sub}; dctr --help lists them`)
 else {
   const [script, words, usage] = SUBS[sub]
