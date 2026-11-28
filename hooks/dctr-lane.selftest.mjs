@@ -302,6 +302,11 @@ clause('clause 2i — at create\'s first herdr call the copied handoff, the reco
     e1.env.PATH === pathVar && e1.env.TMPDIR === childTmp, shown)
   clause('clause 2j2 — the same line, run again after the model file changes, starts claude on the model the file names when the line runs: claude-opus-5-5 first, claude-sonnet-5 second (E15-D219)',
     r.code === 0 && entries.length === 2 && argv(e1) === JSON.stringify(['--model', 'claude-opus-5-5']) && argv(e2) === JSON.stringify(['--model', 'claude-sonnet-5']), shown)
+  fs.rmSync(claudeLog, { force: true })
+  spawnSync('env', ['-i', 'sh', '-c', `${line || 'false'} --resume S-1`], { encoding: 'utf8' })
+  const resumed = (read(claudeLog) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l).argv)
+  clause('clause 2j3 — the same line with --resume and a session id after it, as wake-all\'s restart types it, starts claude with those two words last (L12)',
+    r.code === 0 && JSON.stringify(resumed) === JSON.stringify([['--model', 'claude-sonnet-5', '--resume', 'S-1']]), JSON.stringify([line, resumed]))
 }
 
 // ---------------------------------------------------------------- clause 2: the permission mode, read when the launch file runs

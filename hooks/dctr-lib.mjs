@@ -1250,7 +1250,7 @@ export function treeExcludes(recordPath, repo) {
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
-/** The shell fragment a launch command ends with, for the mode file at `file` (modeFile), or '' for null: evaluated
+/** The shell fragment a launch command carries after `--model`, before the file's own arguments, for the mode file at `file` (modeFile), or '' for null: evaluated
  *  when the command runs, so a launch file written once follows the mode last recorded for that pane. It adds the two
  *  words `--permission-mode bypassPermissions` while the file reads bypassPermissions and nothing otherwise, a missing
  *  file included; the file's text is only compared, so none of it reaches the command line. The file is trusted, not
@@ -1259,12 +1259,13 @@ export const launchFlags = (file) => (file === null ? ''
   : ` $([ "$(cat ${shq(file)} 2>/dev/null)" = bypassPermissions ] && echo --permission-mode bypassPermissions)`)
 
 /** The command a launch file holds: `claude` started in `cwd` with DCTR_ROLE and DCTR_CALLER `role`, DCTR_RUN `run`, and
- *  this process's config dir, PATH and TMPDIR, then `--model` and `model`, which is shell text, and `flags`, launchFlags's
- *  fragment. exec, so the shell reading the file reads nothing past it. */
+ *  this process's config dir, PATH and TMPDIR, then `--model` and `model`, which is shell text, `flags`, launchFlags's
+ *  fragment, and the file's own arguments, so wake-all's restart can add `--resume <session>`. exec, so the shell
+ *  reading the file reads nothing past it. */
 export const launchCommand = ({ cwd, role, run, model, flags }) =>
   `cd ${shq(cwd)} && exec env DCTR_ROLE=${shq(role)} DCTR_CALLER=${shq(role)} DCTR_RUN=${shq(run)} ` +
   `CLAUDE_CONFIG_DIR=${shq(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'))} PATH=${shq(process.env.PATH ?? '')} ` +
-  `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model ${model}${flags}`
+  `TMPDIR=${shq(process.env.TMPDIR || os.tmpdir())} claude --model ${model}${flags} "$@"`
 
 /**
  * The run's root directory (E15-D94): DCTR_RUN when set and non-empty; else, when the role is `orchestrator`, `<Records>/orchestrate`

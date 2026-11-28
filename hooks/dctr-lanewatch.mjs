@@ -14,8 +14,8 @@
 // another holds it. start waits up to WAIT_MS for a live holder carrying its own token, and only then writes its TMPDIR
 // to <run>/tmpdir, which wake-all reads, and appends an orchestrator `create` line to lane.log, under the caller tag
 // `orchestrator`, naming the orchestrator's herdr TUI pane (herdrPane: start refuses without one, in herdr-core too), its checkout and the launch line
-// `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment (ending in
-// launchFlags for the mode file of the pane start runs in, read when the file runs), so the line
+// `sh <run>/launch/orchestrator.sh`, the file holding the launch command built from its own environment (carrying
+// launchFlags for the mode file of the pane start runs in, read when the file runs, then the file's own arguments), so the line
 // stays short whatever the length of its PATH. A start whose tab, pane or wait fails closes the tab it made, releases
 // its lock, writes neither, and exits 1 with one line. Before each poll the watcher re-reads the lock and renews it,
 // and ends once it no longer names this watcher; herdr( calls renew it too. stop signals only a live holder whose lock

@@ -26,8 +26,8 @@
 // branch `<base>` itself, refused while any worktree of the repo holds it), copies the first handoff into its
 // docs/handoffs/, writes the record the handoff's `record:` line names (relative, inside the worktree) with the phase
 // name and one `State: Open` line, points the memory file kickoff at the copy, sets skip-worktree on a tracked memory
-// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh` (ending in
-// launchFlags for the mode file of the pane create runs in, so the session starts in bypassPermissions exactly when
+// file, makes the role's own herdr tab, writes the launch command to `<run>/launch/<role>.sh` (carrying
+// launchFlags, then the file's own arguments, for the mode file of the pane create runs in, so the session starts in bypassPermissions exactly when
 // that file reads it as the launch file runs, and with no permission flag when create runs outside a pane), types the launch line
 // `sh <run>/launch/<role>.sh`, `/clear` and RESUME_LINE each once the pane reads ready, and only then appends
 // `create <role> <pane> <worktree> <launch line>`. The launch line carries no PATH value, so it stays within herdr's
