@@ -991,8 +991,8 @@ clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended t
   const r = await proc(['start'], env, pm.repo)
   await proc(['stop'], env)
   const file = (() => { try { return fs.readFileSync(path.join(pm.run, 'launch', 'orchestrator.sh'), 'utf8') } catch { return '' } })()
-  clause('clause 2bi — start writes an orchestrator launch file whose claude command ends with launchFlags of its own pane\'s mode file',
-    r.code === 0 && / claude --model /.test(file) && file.trimEnd().endsWith(launchFlags(modeFile(pmPane))), JSON.stringify([r, file]))
+  clause('clause 2bi — start writes an orchestrator launch file whose claude command ends with launchFlags of its own pane\'s mode file, then its own arguments',
+    r.code === 0 && / claude --model /.test(file) && file.trimEnd().endsWith(`${launchFlags(modeFile(pmPane))} "$@"`), JSON.stringify([r, file]))
   const argvLog = path.join(tmp, 'pm-argv.log')
   const argvRun = (line) => {
     fs.writeFileSync(path.join(claudeStub, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$@" > ${shq(argvLog)}\n`); fs.rmSync(argvLog, { force: true })
@@ -1004,6 +1004,9 @@ clause('clause 2bh2 — the orchestrator\'s launch file start writes, appended t
   const off = argvRun(line)
   fs.rmSync(modeFile(pmPane))
   const gone = argvRun(line)
+  const resumed = argvRun(`${line} --resume S-1`)
+  clause('clause 2bi3 — that launch line with --resume and a session id after it starts claude with those two words last, as wake-all\'s restart types it (L12)',
+    JSON.stringify(resumed) === JSON.stringify(['--model', 'claude-opus-5-5', '--resume', 'S-1']), JSON.stringify([line, resumed]))
   clause('clause 2bi2 — that launch line starts claude with --permission-mode bypassPermissions while the mode file reads bypassPermissions, and, run again unchanged, with no permission flag once it reads default or is gone',
     JSON.stringify(on) === JSON.stringify(['--model', 'claude-opus-5-5', '--permission-mode', 'bypassPermissions']) &&
       JSON.stringify(off) === JSON.stringify(['--model', 'claude-opus-5-5']) && JSON.stringify(gone) === JSON.stringify(['--model', 'claude-opus-5-5']),

@@ -48,6 +48,11 @@
 // A retried role is tried again every DCTR_WAKEALL_RETRY_MS (30 s) until DCTR_WAKEALL_WINDOW_MS (10 min) after its
 // first retry, then gets `unwoken`. Each role's wake has its own give-up. It prints one line per role it selected or
 // reconciled with its last word, and exits 0 only when every one ended woken. Every events.log line starts with its time.
+// Before the wake steps it restarts the session (L12), since a running process keeps the login it started with: on a
+// pane with no other claim and a session id that is a plain token (else `retry <role> <L> session`), it types /exit,
+// waits up to WAKE_GIVE_UP_MS for a reading with no agent session, types the role's launch line from lane.log followed
+// by `--resume <session>`, and waits up to DCTR_WAKEALL_START_MS (60 s) for a reading ready on that same session. Every
+// line it types counts toward `woken`; a restart cut short ends `unfinished` and types nothing more.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -56,6 +61,7 @@ import { autoCycleDir, paneClaimHeld, writeMarker, restoreFile, restored, stateD
 import { laneOf, parseLimits, parseWakeLines, runRole, runRoot, followKickoff, repoOf, sessionWarned, pauseCode, transcriptEntries, READY_STATUSES, RESUME_LINE, paneToken } from './dctr-lib.mjs'
 
 const WAKE_GIVE_UP_MS = 10000
+const SESSION_ID = /^[A-Za-z0-9_-]+$/
 const POLL_MS = 250
 const NUDGE = 'Read your brief and your held folder, then act on them.'
 const KINDS = ['report', 'question', 'request']
@@ -216,7 +222,7 @@ function deliver(pane, lane, claim, role) {
   const lines = handedOff(rec, pane, first.session) ? ['/clear', RESUME_LINE, NUDGE] : [NUDGE]
   // A warned session that has not handed off is the cycle's to wake; wake-all still nudges it.
   if (sub === 'wake' && lines.length === 1 && sessionWarned(rec.record.entries, first.session)) return say(`a warned line names ${first.session}: nothing typed`)
-  typing.planned = lines.length
+  typing.planned += lines.length
   let session = first.session
   for (const [i, line] of lines.entries()) {
     // The first wait opened at the wake's start, so its window also bounds the first reading and handoff test.
@@ -303,6 +309,31 @@ function wakeAll() {
   process.exit([...last.values()].every((w) => w === 'woken') ? 0 : 1)
 }
 
+/** wake-all's restart (L12): /exit, then the role's launch line with `--resume <session>`, so the new process reads the
+ *  login the owner rolled to. True once a reading shows the pane ready on that same session; false, saying why, once a
+ *  line was not typed or a wait gave up, a reading with another session ending either wait at once. */
+function restart(pane, lane, session) {
+  typing.planned += 2
+  // herdr-lint: a failed read is no reading and only means look again until the wait gives up; nothing is closed on it.
+  const reading = () => { try { return herdr(['pane', 'get', pane], bound())?.result?.pane ?? null } catch { return null } }
+  const sessionOf = (p) => (typeof p?.agent_session?.value === 'string' ? p.agent_session.value : '')
+  if (!type(pane, '/exit')) return false
+  for (deadline = Date.now() + WAKE_GIVE_UP_MS; ; sleepMs(Math.min(POLL_MS, Math.max(0, left())))) {
+    if (left() <= 0) return say(`${pane} still runs ${session} after /exit: gave up`), false
+    const p = reading()
+    if (!p) continue
+    if (sessionOf(p) === '') break
+    if (sessionOf(p) !== session) return say(`${pane} reports ${sessionOf(p)}, not ${session}: nothing more typed`), false
+  }
+  if (!type(pane, `${lane.launch} --resume ${session}`)) return false
+  for (deadline = Date.now() + (Number(process.env.DCTR_WAKEALL_START_MS) || 60000); ; sleepMs(Math.min(POLL_MS, Math.max(0, left())))) {
+    if (left() <= 0) return say(`${pane} never read ready on ${session} after its restart: gave up`), false
+    const p = reading(), now = sessionOf(p)
+    if (now === session && READY_STATUSES.includes(p.agent_status)) return true
+    if (now !== '' && now !== session) return say(`${pane} reports ${now}, not ${session}: nothing more typed`), false
+  }
+}
+
 /** One try at one selected role, under its own claim and give-up: `[word, reading]`. The pane is classified here from
  *  its own reading: no agent session is no agent, a status not ready or a failed or empty read is a retry. */
 function wakeOne(r, log) {
@@ -316,9 +347,19 @@ function wakeOne(r, log) {
     if (!p) return ['retry', 'empty']
     if (typeof p.agent_session?.value !== 'string' || p.agent_session.value === '') return ['skip', 'no-agent']
     if (!READY_STATUSES.includes(p.agent_status)) return ['retry', String(p.agent_status ?? 'unknown').replace(/\s+/g, '_')]
+    // The id is typed into a shell, and another claim's holder may be typing: neither is a restart this try may start.
+    if (!SESSION_ID.test(p.agent_session.value)) return ['retry', 'session']
+    if (paneClaimHeld(pane, claim)) { say(`another claim on ${pane} is held: nothing typed`); return ['retry'] }
     log('intent', r.role, r.limit)
     Object.assign(typing, { planned: 0, calls: 0, ok: 0 })
-    deliver(pane, r.lane, claim, r.role)
+    // A restart cut short, or one with no line planned after it, left the session unwoken: one line counts as not typed.
+    if (!restart(pane, r.lane, p.agent_session.value)) typing.planned += 1
+    else {
+      const planned = typing.planned
+      deadline = Date.now() + WAKE_GIVE_UP_MS
+      deliver(pane, r.lane, claim, r.role)
+      if (typing.planned === planned) typing.planned += 1
+    }
     if (typing.planned > 0 && typing.ok === typing.planned) return ['woken']
     return [typing.calls > 0 ? 'unfinished' : 'retry']
   } finally { fs.rmSync(claim, { force: true }) }
