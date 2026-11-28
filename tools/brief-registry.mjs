@@ -53,7 +53,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const GAUNTLET = path.join(HERE, '..', 'skills', 'doctrine-gauntlet')
+const GAUNTLET = path.join(HERE, '..', 'plugins', 'doctrine', 'skills', 'doctrine-gauntlet')
 
 /** Where each text lives: the file key in the repo object, the `## ` heading of its section, and
  *  the opening its paragraph starts with (a `start` row starts the text and runs to the section end). */

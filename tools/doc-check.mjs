@@ -217,8 +217,8 @@ import fs from 'fs'
 import path from 'path'
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
-const GAUNTLET = path.join(ROOT, 'skills/doctrine-gauntlet')
-const SKILLS = path.join(ROOT, 'skills')
+const GAUNTLET = path.join(ROOT, 'plugins/doctrine/skills/doctrine-gauntlet')
+const SKILLS = path.join(ROOT, 'plugins/doctrine/skills')
 // Corpus keys are relative to `skills/`, and this repo writes `skills/<skill>/FILE.md` in its own
 // prose, so that one prefix is accepted on a label. Any other prefix names a different path.
 const CORPUS_ROOT = 'skills/'

@@ -622,7 +622,7 @@ clause('clause 2g — every paused line leaves the record\'s last state line as 
 // fixture writes it. The template is read verbatim from the skill (the mutation gate links skills/ beside its copies),
 // instantiated, and put to each reader over an Open and a Blocked record. The control is the same template written as
 // a state line, which status must then read differently: clause 3a18.
-const TEMPLATE = /`(- auto-cycle paused: first action ambiguous: <[^>`]+>)`/.exec(fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine-resume', 'SKILL.md'), 'utf8'))?.[1] ?? null
+const TEMPLATE = /`(- auto-cycle paused: first action ambiguous: <[^>`]+>)`/.exec(fs.readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'doctrine', 'skills', 'doctrine-resume', 'SKILL.md'), 'utf8'))?.[1] ?? null
 const SECTION5 = 'Run node --test test/limiter.test.js and record its result.'
 const projectCli = path.join(import.meta.dirname, 'dctr-project.mjs')
 const openRecords = (root) => {

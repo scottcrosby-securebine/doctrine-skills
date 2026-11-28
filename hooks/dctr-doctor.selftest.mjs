@@ -230,10 +230,11 @@ clause('1 a capture carrying account identifiers is caught: each planted identif
   finds(planted.composer.screen).some((f) => f.includes(PLANT.email)), JSON.stringify(finds(plantedText)))
 clause('3 the planted capture carries each identifier, read without the scanner', Q.every((v) => plantedText.includes(v)) && plantedText.includes('claude.ai Gmail') && ['creator_user_id', 'creator_account_id', 'userEmail', 'organizationUuid', 'account_id'].every((k) => plantedText.includes(k)), 'the plant is missing an identifier')
 const shipped = []
-// This file's own directory is hooks/ in the repo and the flat copy the mutation gate runs from, which holds no
-// skills/; skills/ is scanned wherever it sits beside it.
-const skillsDir = path.join(import.meta.dirname, '..', 'skills')
-for (const [top, base] of [['hooks', import.meta.dirname], ...(fs.existsSync(skillsDir) ? [['skills', skillsDir]] : [])]) {
+// This file's own directory is hooks/ in the repo and the flat copy the mutation gate runs from, which links the
+// skills plugin's skills beside it; a missing skills folder throws, so the scan never passes on hooks/ alone.
+const skillsDir = path.join(import.meta.dirname, '..', 'plugins', 'doctrine', 'skills')
+if (!fs.statSync(skillsDir).isDirectory()) throw new Error(`no skills folder at ${skillsDir}`)
+for (const [top, base] of [['hooks', import.meta.dirname], ['skills', skillsDir]]) {
   for (const f of fs.readdirSync(base, { recursive: true })) {
     const full = path.join(base, String(f))
     try { if (fs.statSync(full).isFile()) shipped.push([`${top}/${f}`, fs.readFileSync(full, 'utf8')]) } catch { /* gone */ }

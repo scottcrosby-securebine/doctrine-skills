@@ -274,6 +274,15 @@ clause('clause 2k2 — a second run reports the copied hooks directory current, 
     Buffer.compare(fs.readFileSync(bandCopy), fs.readFileSync(path.join(import.meta.dirname, 'band', 'band.ts'))) === 0,
   `second ${second.stdout} third ${third.stdout}`)
 
+// The runtime's dctr command is copied beside the hooks copy, so its ../hooks resolves there (E19, W11).
+const binCopy = path.join(home, 'doctrine', 'bin', 'dctr')
+const binRun = spawnSync(binCopy, ['--version'], { encoding: 'utf8' })
+const binHelp = spawnSync(binCopy, ['project', 'check', '--help'], { encoding: 'utf8' })
+clause('clause 2k3 — install copies bin/dctr to <CODEX_HOME>/doctrine/bin/dctr, executable, byte-identical, and it runs there by its own name',
+  fs.existsSync(binCopy) && (fs.statSync(binCopy).mode & 0o111) !== 0 && Buffer.compare(fs.readFileSync(binCopy), fs.readFileSync(path.join(import.meta.dirname, '..', 'bin', 'dctr'))) === 0 &&
+    binRun.status === 0 && /^\d+\.\d+\.\d+$/.test(binRun.stdout.trim()) && binHelp.status === 0,
+  `exists ${fs.existsSync(binCopy)} run ${JSON.stringify([binRun.status, binRun.stdout, binRun.stderr, String(binRun.error || '')])}`)
+
 // CODEX_HOME resolved as Codex resolves it: $CODEX_HOME when no flag, canonicalized, and ~/.codex otherwise.
 const realHome = fs.mkdtempSync(path.join(tmp, 'real-')), link = path.join(tmp, 'link-home')
 fs.symlinkSync(realHome, link)

@@ -7,8 +7,13 @@
   "plugins": [
     {
       "name": "doctrine",
+      "source": "./plugins/doctrine",
+      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, document writing, project and epic tracking (doctrine-project), and orchestrated runs of several phases at once (doctrine-orchestrate), plus doctrine-backup, doctrine-handoff, doctrine-resume and doctrine-primer for session continuity across cleared sessions, and doctrine-pane for an interactive terminal session — a router, a switch, a server — in a pane you watch and can take over. Three skills need something installed and none degrades quietly: the gauntlet renders and judges real pages, so it needs Playwright, and doctrine-pane needs herdr or Herdr.app, and doctrine-orchestrate needs herdr. The other twelve need nothing."
+    },
+    {
+      "name": "doctrine-runtime",
       "source": "./",
-      "description": "Execution doctrine: parallel agents in phases and waves, adversarial red-teaming, looping until confident, ruthless simplicity. Wrappers for coding, web design (the gauntlet loop), debugging, auditing, documentation sweeps, deep research, document writing, project and epic tracking (doctrine-project), and orchestrated runs of several phases at once (doctrine-orchestrate), plus doctrine-backup, doctrine-handoff, doctrine-resume and doctrine-primer for session continuity across cleared sessions, and doctrine-pane for an interactive terminal session \u2014 a router, a switch, a server \u2014 in a pane you watch and can take over. Three skills need something installed and none degrades quietly: the gauntlet renders and judges real pages, so it needs Playwright, and doctrine-pane needs herdr or Herdr.app, and doctrine-orchestrate needs herdr. The other twelve need nothing."
+      "description": "The doctrine skills' runtime: the hooks (seat panes, the gate launcher, the restore after /clear, the context gauge, auto-cycle, the round and write guards, the doctrine band) and the dctr command the skills call. Installed with the doctrine skills plugin, which depends on it."
     }
   ]
 }

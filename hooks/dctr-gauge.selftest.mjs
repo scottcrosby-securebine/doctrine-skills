@@ -159,8 +159,8 @@ clause('clause 1t — gaugeContext: the warning names used tokens, the window, t
 // - the keys: the warning carries each key phrase below exactly once, in this order, one key per action of the pinned
 //   sentence (the integrate verb and the final-message placement included).
 // Its limit: an action added only to the warning, or worded without a key, is not seen, so a new hub action needs a
-// new key when the pin is updated. The skill is read at ../skills, which the mutation gate links.
-const HUB = fs.readFileSync(path.join(import.meta.dirname, '..', 'skills', 'doctrine', 'SKILL.md'), 'utf8')
+// new key when the pin is updated. The skill is read at ../plugins/doctrine/skills, which the mutation gate links.
+const HUB = fs.readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'doctrine', 'skills', 'doctrine', 'SKILL.md'), 'utf8')
 const HUB_WARNING = /On the gauge's warning while auto-cycle is on,[^]*?as the message's last line\./.exec(HUB)?.[0] ?? ''
 const HUB_PIN = "On the gauge's warning while auto-cycle is on, start no new wave, round or repair, wait for the seats already out, integrate their returns and write their record lines, then write the record's state line, run `doctrine-handoff`, append the ready line (one of the auto-cycle lines above) to the record, and end the turn with `auto-cycle: ready` as the message's last line."
 const WARNING_KEYS = ['no new wave, round or repair', 'seats already out', 'integrat', 'record lines', 'state line', 'doctrine-handoff', 'ready line', 'last line']

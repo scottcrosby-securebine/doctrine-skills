@@ -3,7 +3,7 @@
 //   node hooks/dctr-codex.mjs install [--codex-home DIR]
 //
 // Copies this hooks directory to <CODEX_HOME>/doctrine/hooks, so a plugin update never strands the absolute paths
-// hooks.json holds, then writes the doctrine entries into <CODEX_HOME>/hooks.json, a trust line for each into
+// hooks.json holds, and the runtime's bin/dctr to <CODEX_HOME>/doctrine/bin/dctr, then writes the doctrine entries into <CODEX_HOME>/hooks.json, a trust line for each into
 // config.toml, and, each only where it is unset, sandbox_workspace_write.network_access = true, which a command Codex
 // runs in its workspace-write sandbox needs to reach herdr, and agents.max_concurrent_threads_per_session = 8. What it writes is codexInstallPlan's in dctr-lib.mjs; this file only reads, copies
 // and writes. CODEX_HOME is resolved as Codex resolves it: --codex-home, else $CODEX_HOME, each of which must be an
@@ -68,6 +68,15 @@ try {
     fs.mkdirSync(path.dirname(hookDir), { recursive: true })
     fs.renameSync(tmp, hookDir)
     console.log(`copied the doctrine hooks to ${hookDir}`)
+  }
+  // The runtime's dctr beside the hooks copy, so its ../hooks resolves to that copy.
+  const dctr = path.join(src, '..', 'bin', 'dctr'), dctrCopy = path.join(home, 'doctrine', 'bin', 'dctr')
+  if (fs.existsSync(dctr) && !same(dctr, dctrCopy)) {
+    fs.mkdirSync(path.dirname(dctrCopy), { recursive: true })
+    fs.copyFileSync(dctr, `${dctrCopy}.tmp.${process.pid}`)
+    fs.chmodSync(`${dctrCopy}.tmp.${process.pid}`, 0o755)
+    fs.renameSync(`${dctrCopy}.tmp.${process.pid}`, dctrCopy)
+    console.log(`copied dctr to ${dctrCopy}`)
   }
   if (plan.hooksJson !== before.hooks) writeAtomic(hooksPath, plan.hooksJson)
   if (plan.configToml !== before.config) writeAtomic(configPath, plan.configToml)

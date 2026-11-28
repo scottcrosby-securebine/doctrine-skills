@@ -6269,10 +6269,11 @@ if (ORACLE) {
 }
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'dctr-mutations-'))
-// Every copy sits one level under `work`, so a suite reading a skill's text at ../skills (the cycle suite reads
-// doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets skills/, so a link will do;
-// rmSync below removes the link, never what it points at.
-fs.symlinkSync(path.join(HERE, '..', 'skills'), path.join(work, 'skills'))
+// Every copy sits one level under `work`, so a suite reading a skill's text at ../plugins/doctrine/skills (the cycle
+// suite reads doctrine-resume's pause template, E8-D16) reads the real one here. No mutation targets the skills, so a
+// link will do; rmSync below removes the link, never what it points at.
+fs.mkdirSync(path.join(work, 'plugins', 'doctrine'), { recursive: true })
+fs.symlinkSync(path.join(HERE, '..', 'plugins', 'doctrine', 'skills'), path.join(work, 'plugins', 'doctrine', 'skills'))
 const execFileAsync = promisify(execFile)
 
 /** How many mutations run at once. Each works on its own copy of the tree and touches nothing

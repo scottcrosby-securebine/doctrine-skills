@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// dctr: the doctrine runtime's one entry command. Each subcommand runs one script in ../hooks with the arguments
+// after the subcommand name, stdio inherited, and exits with that script's code. `--help` anywhere after the
+// subcommand prints its usage and runs nothing. On Claude Code this file is on the Bash tool's PATH through the
+// runtime plugin's bin/; on Codex, `dctr codex install` copies it beside the hooks it copies.
+import fs from 'node:fs'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+
+// The runtime's version; hooks/dctr-bin.selftest.mjs pins it to .claude-plugin/plugin.json.
+const VERSION = '3.0.0'
+
+// name: [script, second words (null where the second word is an argument), usage lines]
+const SUBS = {
+  gate: ['dctr-gate.mjs', null, ['dctr gate <label> <out-file> -- <command...>']],
+  token: ['dctr-token.mjs', null, ['dctr token <round> <exit-count> <valve> [--epic <ID>] [--phase <name>] [--owed]']],
+  notify: ['dctr-notify.mjs', null, ['dctr notify <phase> <reason...>']],
+  pane: ['dctr-pane.mjs', ['open', 'read', 'profile', 'type', 'enter', 'own'], ['dctr pane open <label> [<tee-file>] <connect-command>', 'dctr pane read <tee-file>', 'dctr pane profile <tee-file> <description>', 'dctr pane type <tee-file> <text>', 'dctr pane enter <tee-file>', 'dctr pane own <tee-file>']],
+  project: ['dctr-project.mjs', ['check', 'status', 'board'], ['dctr project check [<repo-root>]', 'dctr project status [<repo-root>]', 'dctr project board [<repo-root>]']],
+  lane: ['dctr-lane.mjs', ['create', 'reset', 'archive', 'remove'], ['dctr lane create <role> <repo> <base> <handoff>', 'dctr lane reset <role> <revision>', 'dctr lane archive <role>', 'dctr lane remove <role>']],
+  lanewatch: ['dctr-lanewatch.mjs', ['start', 'stop'], ['dctr lanewatch start', 'dctr lanewatch stop']],
+  send: ['dctr-send.mjs', ['send', 'report', 'wake', 'wake-all'], ['dctr send send <role> <text>', 'dctr send report <kind> <text>', 'dctr send wake <role>', 'dctr send wake-all <run>']],
+  orchestrate: ['dctr-orchestrate.mjs', ['capacity', 'launch-flags', 'start'], ['dctr orchestrate capacity <tier> <transcript path>', 'dctr orchestrate launch-flags', 'dctr orchestrate start <model id> [<request file>]']],
+  codex: ['dctr-codex.mjs', ['install'], ['dctr codex install [--codex-home DIR]']],
+  doctor: ['dctr-doctor.mjs', [], ['dctr doctor [--host codex|claude] [--control] [--keep] [--save]']],
+}
+
+const [sub, ...args] = process.argv.slice(2)
+const out = (s) => process.stdout.write(s + '\n')
+const fail = (s) => { process.stderr.write(`dctr: ${s}\n`); process.exitCode = 2 }
+
+if (sub === '--version') out(VERSION)
+else if (!sub || sub === '--help' || sub === 'help') out(['usage:', ...Object.values(SUBS).flatMap((s) => s[2]).map((l) => '  ' + l), '  dctr --version'].join('\n'))
+else if (!Object.hasOwn(SUBS, sub)) fail(`unknown subcommand ${sub}; dctr --help lists them`)
+else {
+  const [script, words, usage] = SUBS[sub]
+  const word = args[0]
+  if (words && words.length && word && !word.startsWith('-') && !words.includes(word)) fail(`unknown ${sub} subcommand ${word}; dctr ${sub} --help lists them`)
+  else if ((args.includes('--') ? args.slice(0, args.indexOf('--')) : args).includes('--help')) out(usage.filter((l) => !words?.length || !word || word.startsWith('-') || l.startsWith(`dctr ${sub} ${word}`)).join('\n'))
+  else {
+    const hooks = path.join(path.dirname(fs.realpathSync(process.argv[1])), '..', 'hooks')
+    const r = spawnSync(process.execPath, [path.join(hooks, script), ...args], { stdio: 'inherit' })
+    process.exitCode = r.status ?? 1
+  }
+}

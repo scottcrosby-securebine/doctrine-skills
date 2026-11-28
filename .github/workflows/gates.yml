@@ -213,6 +213,11 @@ jobs:
         # byte-identical, a second run a no-op. Needs python3 with tomllib (3.11+).
         run: node hooks/dctr-codex.selftest.mjs
 
+      - name: dctr command tamper test
+        # bin/dctr: --version is the runtime's, every subcommand answers --help and runs nothing, a run passes argv
+        # and exit code through, and every dctr use the skills name answers.
+        run: node hooks/dctr-bin.selftest.mjs
+
       - name: pause notification tamper test
         # dctr-notify.mjs: one herdr notification with the hub's exact title and no body, and the stand-downs.
         run: node hooks/dctr-notify.selftest.mjs
@@ -237,15 +242,17 @@ jobs:
           python3 -m json.tool .claude-plugin/plugin.json > /dev/null
           python3 -m json.tool .claude-plugin/marketplace.json > /dev/null
           python3 -m json.tool plugin.json > /dev/null
+          python3 -m json.tool plugins/doctrine/.claude-plugin/plugin.json > /dev/null
+          python3 -m json.tool plugins/doctrine/plugin.json > /dev/null
 
       - name: workflow script syntax gate
         # Not `node --check`: the Workflow tool wraps the body in an async function, so the
         # script's top-level `return` is legal there and nowhere else. Same wrap as workflow.md.
-        working-directory: skills/doctrine-gauntlet/harness
+        working-directory: plugins/doctrine/skills/doctrine-gauntlet/harness
         run: |
           node -e 'const s=require("fs").readFileSync("round.workflow.mjs","utf8").replace(/^export const meta/m,"const meta");new Function("args","agent","parallel","pipeline","phase","log","budget","workflow","return (async()=>{"+s+"})()")'
 
       - name: Codex round runner tamper test
         # Every fixture in round.tamper.json through round.codex.mjs, each seat a stand-in returning
         # the text its stub prompt states. Needs only node.
-        run: node skills/doctrine-gauntlet/harness/round.codex.selftest.mjs
+        run: node plugins/doctrine/skills/doctrine-gauntlet/harness/round.codex.selftest.mjs
