@@ -15,6 +15,15 @@ The hub and the wrappers name actions. This file says how each is done on Claude
 | Notify the user | The PushNotification tool. |
 | Project instructions | Claude Code loads CLAUDE.md. It reads AGENTS.md only through an `@AGENTS.md` import, or when no CLAUDE.md exists. |
 
+## The dctr command
+
+The skills reach the doctrine runtime, the `doctrine-runtime` plugin, through one command, `dctr`, run through the Bash tool as `dctr <subcommand> ...`. On Claude Code it is on the Bash tool's PATH through the runtime plugin's `bin/` while that plugin is enabled. Installing or updating the `doctrine` plugin installs the runtime with it, since `doctrine` depends on it; the user can also run `/plugin install doctrine-runtime@doctrine-skills`.
+
+Every skill that names a `dctr` subcommand names the lowest runtime version that has it, and `dctr --version` prints the version installed. `dctr` itself, and each subcommand this file names, came with runtime 3.0.0. Where `dctr` is not found, or prints a version below the one the skill names, the runtime is absent or older than the skill needs, and the subcommand's fallback applies:
+
+- `dctr gate`: run the check directly, its output written to `<out-file>`, and when it ends write its exit status as the line `exit=N` that opens `<out-file>.result`, so the wait on the result file and the record read the same two files the launcher would have written.
+- Every other subcommand: do not run it. Say in your turn that the doctrine runtime is absent or older than the version the skill names, and which subcommand you skipped, and write the same in the record where the phase has one.
+
 ## The red team from the other model family
 
 The red team here is Codex, run as the `codex:codex-rescue` subagent.

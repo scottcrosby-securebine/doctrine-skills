@@ -10,7 +10,7 @@ sees exactly what you see and can take the keyboard whenever they want it. What 
 is in "In herdr-core" below.
 
 **On Codex CLI in a herdr TUI pane it needs the doctrine hooks installed**, which the user does, not you: ask them to run
-`node <plugin-root>/hooks/dctr-codex.mjs install` (`<plugin-root>` as "The launcher" below defines it). The install is what lets a command in Codex's
+the runtime's Codex install, which the `doctrine` skill's Codex reference gives in its "The dctr command" section. The install is what lets a command in Codex's
 workspace-write sandbox reach herdr. Without it the launcher's herdr calls fail and it refuses. The pane
 itself runs on the host, outside Codex's sandbox, so whatever you type into it runs unsandboxed.
 
@@ -39,7 +39,7 @@ Two kinds, and only one has any state:
 
 ## The launcher
 
-`node <plugin-root>/hooks/dctr-pane.mjs`, two directories above this skill's own base directory.
+`dctr pane`, the doctrine runtime's pane launcher, which needs runtime 3.0.0 or later. Your host reference's "The dctr command" section says how your host finds `dctr` and what to do where it is absent or older.
 
 ```
 open  <label> [<tee-file>] <connect-command>

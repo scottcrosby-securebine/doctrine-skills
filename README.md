@@ -197,11 +197,20 @@ In Claude Code:
 If the install message says to, run `/reload-plugins` or restart. A freshly installed plugin does not
 always load into the session that installed it.
 
+The repo holds two plugins. `doctrine` is the skills, markdown with one bundled exception: the
+gauntlet's own harness, `plugins/doctrine/skills/doctrine-gauntlet/harness/` in this repo and
+`skills/doctrine-gauntlet/harness/` in the installed plugin, which is that skill's code (its
+Playwright floor and its round scripts) and the only code the skills plugin ships. `doctrine-runtime`
+is everything else that runs: the hooks and the `dctr` command the skills call. `doctrine` depends on
+`doctrine-runtime`, so installing `doctrine` installs the runtime too, and so does
+`/plugin update doctrine@doctrine-skills` from a release before 3.0.0, when both were one plugin.
+
 In Codex CLI:
 
 ```text
 codex plugin marketplace add scottcrosby-securebine/doctrine-skills
 codex plugin add doctrine@doctrine-skills
+codex plugin add doctrine-runtime@doctrine-skills
 ```
 
 On Codex the hub reads a Codex reference file for its tools, and runs its red team through Claude.
@@ -209,10 +218,11 @@ Codex loads no plugin hooks, so the seat panes, the restore after `/clear`, the 
 auto-cycle need one install command, run again after each plugin update:
 
 ```text
-node ~/.codex/plugins/cache/doctrine-skills/doctrine/<version>/hooks/dctr-codex.mjs install
+node ~/.codex/plugins/cache/doctrine-skills/doctrine-runtime/<version>/bin/dctr codex install
 ```
 
-It writes the hook entries into `~/.codex/hooks.json` (or `$CODEX_HOME`'s) and trusts them in
+It copies the hooks and the `dctr` command to `~/.codex/doctrine/`, writes the hook entries into `~/.codex/hooks.json`
+(each under `$CODEX_HOME` where that is set) and trusts them in
 `config.toml`. Where `sandbox_workspace_write.network_access` is unset it sets it to `true`, so
 commands in the workspace-write sandbox can reach herdr, and where
 `agents.max_concurrent_threads_per_session` is unset it sets it to 8, so Codex does not refuse a seat
@@ -243,7 +253,7 @@ record gets a paused line saying the doctrine could not tell. On macOS `ps` show
 system binary such as `/bin/sleep` or `/bin/zsh`, so a background command run through one always reads
 that way and pauses after 60 seconds rather than waiting quietly for it to finish.
 
-After a Codex, Claude Code or herdr update, run `node <plugin-root>/hooks/dctr-doctor.mjs`, with
+After a Codex, Claude Code or herdr update, run `dctr doctor`, with
 `--host codex` or `--host claude` to check one. Without `--host` it drives both hosts, and either one
 missing makes it exit 2. It drives them in scratch homes under its own herdr server, copies your
 Claude Code login and `~/.codex/auth.json` into them, never writes `~/.codex` or `~/.claude`, and prints a row for each host signal

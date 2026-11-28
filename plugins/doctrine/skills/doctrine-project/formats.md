@@ -1,6 +1,6 @@
 # Project and epic formats
 
-The reference for writing `docs/PROJECT.md` and `docs/epics/<ID>.md`. `node <plugin-root>/hooks/dctr-project.mjs check` enforces this format and the evidence each state needs, and `status` reads it. `SKILL.md` beside this file says who writes what, and when.
+The reference for writing `docs/PROJECT.md` and `docs/epics/<ID>.md`. `dctr project check` (doctrine runtime 3.0.0 or later) enforces this format and the evidence each state needs, and `status` reads it. `SKILL.md` beside this file says who writes what, and when.
 
 ## General rules
 
