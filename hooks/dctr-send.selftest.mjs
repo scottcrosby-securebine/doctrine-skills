@@ -58,6 +58,7 @@ if (a[0] === 'pane' && a[1] === 'get') {
   if (p.failGets > 0) { p.failGets--; fail('{"error":{"code":"server_error"}}') }
   if (p.empty) out({})
   if (p.bare) { entry.status = 'bare'; out({ result: { pane: { pane_id: a[2], agent_status: 'working' } } }) }
+  if (p.odd) { entry.status = 'odd'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', agent_session: { value: 42 } } } }) }
   if (p.noAgent) { entry.status = 'no-agent'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', focused: false, ...(p.noAgent === 'null' ? { agent_session: null } : {}) } } }) }
   const status = p.busyUntil > Date.now() ? 'working' : p.busy > 0 ? (p.busy--, 'working') : p.status
   entry.status = status
@@ -76,7 +77,8 @@ if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send
   const resume = / --resume (\\S+)$/.exec(entry.typed.text)
   if (p && (entry.typed.text === '/exit' || resume)) {
     // exitBare: after /exit the pane reads working with no agent session field, a reading that proves nothing.
-    if (!resume) { if (s.exitBare) p.bare = true; else if (!s.exitIgnored) p.noAgent = true } else if (!s.resumeFails) Object.assign(p, { noAgent: false, bare: false, session: s.resumeAs || resume[1], status: 'idle', busy: 0, busyUntil: 0 })
+    // exitOdd: it reads unknown with a session value that is not a string.
+    if (!resume) { if (s.exitBare) p.bare = true; else if (s.exitOdd) p.odd = true; else if (!s.exitIgnored) p.noAgent = true } else if (!s.resumeFails) Object.assign(p, { noAgent: false, bare: false, odd: false, session: s.resumeAs || resume[1], status: 'idle', busy: 0, busyUntil: 0 })
     out({ result: {} })
   }
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) {
@@ -946,6 +948,7 @@ const rsCases = [
   ['another session comes back', { resumeAs: 'S-other' }, null, [0, 13000]],
   ['no session comes back', { resumeFails: true }, null, [1400, 5000]],
   ['the pane reads working with no session field after /exit', { exitBare: true }, ['/exit'], [9500, 13000]],
+  ['the pane reads unknown with a session value that is not a string after /exit', { exitOdd: true }, ['/exit'], [9500, 13000]],
 ]
 const rsBad = []
 for (const [label, shim, want, [lo, hi]] of rsCases) {
@@ -955,7 +958,7 @@ for (const [label, shim, want, [lo, hi]] of rsCases) {
   if (!(JSON.stringify(textsTo(fx, 'a')) === JSON.stringify(lines) && JSON.stringify(r.words) === '["a unfinished"]' && r.code === 1 &&
     JSON.stringify(evWords(fx)) === JSON.stringify([`intent a ${L(1)}`, `unfinished a ${L(1)}`]) && r.took >= lo && r.took <= hi)) rsBad.push(`${label}: took ${r.took} ${wshow(fx, r)}`)
 }
-clause('clause 2x22 — a restart cut short: /exit that never takes, or after which the pane reads working with no session field, types nothing more and ends after 9.5 s to 13 s; a session that comes back as another gets nothing after the restart line, and none within DCTR_WAKEALL_START_MS of 1.5 s gives up by 5 s; each unfinished, exit 1 (L12)',
+clause('clause 2x22 — a restart cut short: /exit that never takes, or after which the pane reads working with no session field or unknown with a session value that is not a string, types nothing more and ends after 9.5 s to 13 s; a session that comes back as another gets nothing after the restart line, and none within DCTR_WAKEALL_START_MS of 1.5 s gives up by 5 s; each unfinished, exit 1 (L12)',
   rsBad.length === 0, rsBad.join(' || '))
 
 // L12: a session id is typed into a shell, so one that is not a plain token is never typed: retry, then unwoken.
@@ -983,6 +986,8 @@ write(path.join(longLine.run, 'lane.log'), `2026-11-08T09:00:00Z orchestrator cr
 const [rNoRec, rLong] = [await wakeAll(noRec), await wakeAll(longLine)]
 const refusedOk = (fx, r, why) => typed(fx).length === 0 && r.code === 1 && evWords(fx).at(-1) === `unwoken a ${L(1)}` &&
   evWords(fx).slice(0, -1).length > 0 && evWords(fx).slice(0, -1).every((w) => w === `retry a ${L(1)} ${why}`)
+clause('clause 2x25b — a role whose record cannot be read is refused before its pane is read: no pane get at all, so no pane reading is older than the checks before /exit (L12)',
+  shimLog(noRec).filter((e) => e.argv[1] === 'get').length === 0 && shimLog(noRec).length === 0, JSON.stringify(shimLog(noRec).map((e) => e.argv.join(' '))))
 clause('clause 2x25 — a role whose record cannot be read, and one whose launch line with --resume and its session passes 1,024 bytes (its launch line alone within it): nothing typed, each try retry a <L> record or line, then unwoken; exit 1 (L12)',
   refusedOk(noRec, rNoRec, 'record') && refusedOk(longLine, rLong, 'line') && Buffer.byteLength(longLaunch) <= 1024 && Buffer.byteLength(`${longLaunch} --resume S-a`) > 1024,
   wshow(noRec, rNoRec) + wshow(longLine, rLong))
@@ -1481,11 +1486,14 @@ clause('clause 3l — without the sender: each class row carries its one defect 
   const u = wakeFx({ a: { session: 'S-a;touch x' } }), uRead = JSON.parse(spawnSync(path.join(u.bin, 'herdr'), ['pane', 'get', u.pane.a], { encoding: 'utf8' }).stdout).result.pane
   const nf = wakeFx({ a: {} }, { shim: { typeFailText: NUDGE } }), nfRun = (t) => spawnSync(path.join(nf.bin, 'herdr'), ['pane', 'run', nf.pane.a, t], { encoding: 'utf8' }).status
   const nfGot = [nfRun('/exit'), nfRun(NUDGE)]
+  const raw = (shim) => { const fx = wakeFx({ a: {} }, { shim }), h = (...a) => spawnSync(path.join(fx.bin, 'herdr'), a, { encoding: 'utf8' }); h('pane', 'run', fx.pane.a, '/exit'); return JSON.parse(h('pane', 'get', fx.pane.a).stdout).result.pane }
+  const bareRaw = raw({ exitBare: true }), oddRaw = raw({ exitOdd: true })
+  const rawOk = bareRaw.agent_status === 'working' && !Object.hasOwn(bareRaw, 'agent_session') && oddRaw.agent_status === 'unknown' && oddRaw.agent_session?.value === 42
   const sw = wakeFx({ a: {} }, { shim: { events: [{ n: 4, session: 'S-T' }] } }), swGets = [1, 2, 3, 4].map(() => JSON.parse(spawnSync(path.join(sw.bin, 'herdr'), ['pane', 'get', sw.pane.a], { encoding: 'utf8' }).stdout).result.pane.agent_session.value)
-  clause('clause 3x2 — without the sender: the restart shim reads no agent after /exit and S-a idle after the --resume line; exitIgnored still reads S-a, resumeAs reads S-other, resumeFails no agent, exitBare working with no session field; the unsafe fixture\'s pane reads idle on S-a;touch x; typeFailText fails the nudge alone; the swap fixture reads S-a three times and S-T on the fourth read',
+  clause('clause 3x2 — without the sender: the restart shim reads no agent after /exit and S-a idle after the --resume line; exitIgnored still reads S-a, resumeAs reads S-other, resumeFails no agent, exitBare working with no agent_session property at all, exitOdd unknown with session value 42; the unsafe fixture\'s pane reads idle on S-a;touch x; typeFailText fails the nudge alone; the swap fixture reads S-a three times and S-T on the fourth read',
     same(got, [[0, 'unknown:-', 0, 'idle:S-a'], [0, 'working:S-a', 0, 'idle:S-a'], [0, 'unknown:-', 0, 'idle:S-other'], [0, 'unknown:-', 0, 'unknown:-'], [0, 'working:-', 0, 'idle:S-a']]) &&
-    uRead.agent_status === 'idle' && uRead.agent_session.value === 'S-a;touch x' && same(nfGot, [0, 1]) && same(swGets, ['S-a', 'S-a', 'S-a', 'S-T']),
-    JSON.stringify([got, uRead, nfGot, swGets]))
+    uRead.agent_status === 'idle' && uRead.agent_session.value === 'S-a;touch x' && same(nfGot, [0, 1]) && same(swGets, ['S-a', 'S-a', 'S-a', 'S-T']) && rawOk,
+    JSON.stringify([got, uRead, nfGot, swGets, bareRaw, oddRaw]))
 }
 
 // WC2: the onType trigger, without the sender: a /clear typed through the shim succeeds and writes onto the file named,

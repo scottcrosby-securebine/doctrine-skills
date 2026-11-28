@@ -328,8 +328,8 @@ function restart(pane, line, session) {
     if (left() <= 0) return say(`${pane} still runs ${session} after /exit: gave up`), false
     const p = reading()
     if (!p) continue
-    // Exited only as a fresh shell reads (waitReady's fresh test): a reading with no session and any other status proves nothing.
-    if (sessionOf(p) === '' && p.agent_status === 'unknown') break
+    // Exited only as a fresh shell reads (waitReady's fresh test): any other reading with no string session proves nothing.
+    if (!p.agent_session?.value && p.agent_status === 'unknown') break
     if (sessionOf(p) === '') continue
     if (sessionOf(p) !== session) return say(`${pane} reports ${sessionOf(p)}, not ${session}: nothing more typed`), false
   }
@@ -349,6 +349,9 @@ function wakeOne(r, log) {
   const pane = r.lane.pane, claim = path.join(autoCycleDir(), `sender-${process.pid}.${paneToken(pane)}.claim`)
   writeMarker(claim, { pid: process.pid, pane })
   try {
+    // The record is read before the pane, so the reading /exit acts on is the last thing read before it.
+    const rec = recordOf(r.lane.worktree)
+    if (rec.why) { say(`the record cannot be read (${rec.why}): nothing typed`); return ['retry', 'record'] }
     let reply
     try { reply = herdr(['pane', 'get', pane], bound()) } catch { return ['retry', 'failed'] }
     const p = reply?.result?.pane
@@ -359,9 +362,7 @@ function wakeOne(r, log) {
     const session = p.agent_session.value, line = `${r.lane.launch} --resume ${session}`
     if (!SESSION_ID.test(session)) return ['retry', 'session']
     if (paneClaimHeld(pane, claim)) { say(`another claim on ${pane} is held: nothing typed`); return ['retry'] }
-    // Everything the wake after the restart needs is checked before /exit ends the session.
-    const rec = recordOf(r.lane.worktree)
-    if (rec.why) { say(`the record cannot be read (${rec.why}): nothing typed`); return ['retry', 'record'] }
+    // The record and the restart line's length are checked before /exit ends the session; the wake re-checks the rest after the restart.
     if (Buffer.byteLength(line) > LINE_LIMIT) { say(`${pane}'s restart line passes ${LINE_LIMIT} bytes: nothing typed`); return ['retry', 'line'] }
     log('intent', r.role, r.limit)
     Object.assign(typing, { planned: 0, calls: 0, ok: 0 })
