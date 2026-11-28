@@ -349,7 +349,7 @@ function wakeOne(r, log) {
   const pane = r.lane.pane, claim = path.join(autoCycleDir(), `sender-${process.pid}.${paneToken(pane)}.claim`)
   writeMarker(claim, { pid: process.pid, pane })
   try {
-    // The record is read before the pane, so the reading /exit acts on is the last thing read before it.
+    // The record is read before the pane, so the session /exit acts on is never older than the record lookup.
     const rec = recordOf(r.lane.worktree)
     if (rec.why) { say(`the record cannot be read (${rec.why}): nothing typed`); return ['retry', 'record'] }
     let reply

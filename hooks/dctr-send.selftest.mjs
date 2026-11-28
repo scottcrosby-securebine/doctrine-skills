@@ -948,7 +948,7 @@ const rsCases = [
   ['another session comes back', { resumeAs: 'S-other' }, null, [0, 13000]],
   ['no session comes back', { resumeFails: true }, null, [1400, 5000]],
   ['the pane reads working with no session field after /exit', { exitBare: true }, ['/exit'], [9500, 13000]],
-  ['the pane reads unknown with a session value that is not a string after /exit', { exitOdd: true }, ['/exit'], [9500, 13000]],
+  ['the pane reads unknown with a truthy session value that is not a string after /exit', { exitOdd: true }, ['/exit'], [9500, 13000]],
 ]
 const rsBad = []
 for (const [label, shim, want, [lo, hi]] of rsCases) {
@@ -958,7 +958,7 @@ for (const [label, shim, want, [lo, hi]] of rsCases) {
   if (!(JSON.stringify(textsTo(fx, 'a')) === JSON.stringify(lines) && JSON.stringify(r.words) === '["a unfinished"]' && r.code === 1 &&
     JSON.stringify(evWords(fx)) === JSON.stringify([`intent a ${L(1)}`, `unfinished a ${L(1)}`]) && r.took >= lo && r.took <= hi)) rsBad.push(`${label}: took ${r.took} ${wshow(fx, r)}`)
 }
-clause('clause 2x22 — a restart cut short: /exit that never takes, or after which the pane reads working with no session field or unknown with a session value that is not a string, types nothing more and ends after 9.5 s to 13 s; a session that comes back as another gets nothing after the restart line, and none within DCTR_WAKEALL_START_MS of 1.5 s gives up by 5 s; each unfinished, exit 1 (L12)',
+clause('clause 2x22 — a restart cut short: /exit that never takes, or after which the pane reads working with no session field or unknown with a truthy session value that is not a string (42), types nothing more and ends after 9.5 s to 13 s; a session that comes back as another gets nothing after the restart line, and none within DCTR_WAKEALL_START_MS of 1.5 s gives up by 5 s; each unfinished, exit 1 (L12)',
   rsBad.length === 0, rsBad.join(' || '))
 
 // L12: a session id is typed into a shell, so one that is not a plain token is never typed: retry, then unwoken.
@@ -986,7 +986,7 @@ write(path.join(longLine.run, 'lane.log'), `2026-11-08T09:00:00Z orchestrator cr
 const [rNoRec, rLong] = [await wakeAll(noRec), await wakeAll(longLine)]
 const refusedOk = (fx, r, why) => typed(fx).length === 0 && r.code === 1 && evWords(fx).at(-1) === `unwoken a ${L(1)}` &&
   evWords(fx).slice(0, -1).length > 0 && evWords(fx).slice(0, -1).every((w) => w === `retry a ${L(1)} ${why}`)
-clause('clause 2x25b — a role whose record cannot be read is refused before its pane is read: no pane get at all, so no pane reading is older than the checks before /exit (L12)',
+clause('clause 2x25b — a role whose record cannot be read is refused before its pane is read: no pane get at all, since wake-all looks the record up before it reads the pane (L12)',
   shimLog(noRec).filter((e) => e.argv[1] === 'get').length === 0 && shimLog(noRec).length === 0, JSON.stringify(shimLog(noRec).map((e) => e.argv.join(' '))))
 clause('clause 2x25 — a role whose record cannot be read, and one whose launch line with --resume and its session passes 1,024 bytes (its launch line alone within it): nothing typed, each try retry a <L> record or line, then unwoken; exit 1 (L12)',
   refusedOk(noRec, rNoRec, 'record') && refusedOk(longLine, rLong, 'line') && Buffer.byteLength(longLaunch) <= 1024 && Buffer.byteLength(`${longLaunch} --resume S-a`) > 1024,
