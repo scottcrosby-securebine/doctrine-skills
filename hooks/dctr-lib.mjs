@@ -1250,7 +1250,7 @@ export function treeExcludes(recordPath, repo) {
 /** The run's role (E15-D94): DCTR_ROLE, or null when it is unset or empty. */
 export const runRole = (env = process.env) => env.DCTR_ROLE || null
 
-/** The shell fragment a launch command ends with, for the mode file at `file` (modeFile), or '' for null: evaluated
+/** The shell fragment a launch command carries after `--model`, before the file's own arguments, for the mode file at `file` (modeFile), or '' for null: evaluated
  *  when the command runs, so a launch file written once follows the mode last recorded for that pane. It adds the two
  *  words `--permission-mode bypassPermissions` while the file reads bypassPermissions and nothing otherwise, a missing
  *  file included; the file's text is only compared, so none of it reaches the command line. The file is trusted, not

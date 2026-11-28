@@ -57,6 +57,7 @@ if (a[0] === 'pane' && a[1] === 'get') {
   for (const x of p.on || []) if (x.n === p.gets && x.rm) { fs.rmSync(x.rm, { force: true }); entry.removed = x.rm }
   if (p.failGets > 0) { p.failGets--; fail('{"error":{"code":"server_error"}}') }
   if (p.empty) out({})
+  if (p.bare) { entry.status = 'bare'; out({ result: { pane: { pane_id: a[2], agent_status: 'working' } } }) }
   if (p.noAgent) { entry.status = 'no-agent'; out({ result: { pane: { pane_id: a[2], agent_status: 'unknown', focused: false, ...(p.noAgent === 'null' ? { agent_session: null } : {}) } } }) }
   const status = p.busyUntil > Date.now() ? 'working' : p.busy > 0 ? (p.busy--, 'working') : p.status
   entry.status = status
@@ -71,9 +72,11 @@ if ([['pane', 'run'], ['agent', 'prompt'], ['pane', 'send-text'], ['pane', 'send
   if (p && p.typeFail) fail('{"error":{"code":"server_error"}}')
   // A restart (L12): /exit leaves the pane with no agent session, unless exitIgnored; a line ending --resume <id> starts
   // that session again, idle, or resumeAs in its place, unless resumeFails.
+  if (p && s.typeFailText === entry.typed.text) fail('{"error":{"code":"server_error"}}')
   const resume = / --resume (\\S+)$/.exec(entry.typed.text)
   if (p && (entry.typed.text === '/exit' || resume)) {
-    if (!resume) { if (!s.exitIgnored) p.noAgent = true } else if (!s.resumeFails) Object.assign(p, { noAgent: false, session: s.resumeAs || resume[1], status: 'idle', busy: 0, busyUntil: 0 })
+    // exitBare: after /exit the pane reads working with no agent session field, a reading that proves nothing.
+    if (!resume) { if (s.exitBare) p.bare = true; else if (!s.exitIgnored) p.noAgent = true } else if (!s.resumeFails) Object.assign(p, { noAgent: false, bare: false, session: s.resumeAs || resume[1], status: 'idle', busy: 0, busyUntil: 0 })
     out({ result: {} })
   }
   if (p) { p.busy = s.busyAfterType || 0; if (s.busyAfterTypeMs) p.busyUntil = Date.now() + s.busyAfterTypeMs; if (entry.typed.text === '/clear' && s.clearSession) {
@@ -941,7 +944,8 @@ clause('clause 2x21 — wake-all on an idle role types /exit, then its launch li
 const rsCases = [
   ['the session never exits', { exitIgnored: true }, ['/exit'], [9500, 13000]],
   ['another session comes back', { resumeAs: 'S-other' }, null, [0, 13000]],
-  ['no session comes back', { resumeFails: true }, null, [1400, 13000]],
+  ['no session comes back', { resumeFails: true }, null, [1400, 5000]],
+  ['the pane reads working with no session field after /exit', { exitBare: true }, ['/exit'], [9500, 13000]],
 ]
 const rsBad = []
 for (const [label, shim, want, [lo, hi]] of rsCases) {
@@ -951,7 +955,7 @@ for (const [label, shim, want, [lo, hi]] of rsCases) {
   if (!(JSON.stringify(textsTo(fx, 'a')) === JSON.stringify(lines) && JSON.stringify(r.words) === '["a unfinished"]' && r.code === 1 &&
     JSON.stringify(evWords(fx)) === JSON.stringify([`intent a ${L(1)}`, `unfinished a ${L(1)}`]) && r.took >= lo && r.took <= hi)) rsBad.push(`${label}: took ${r.took} ${wshow(fx, r)}`)
 }
-clause('clause 2x22 — a restart cut short: /exit that never takes types nothing more and ends after 9.5 s to 13 s; a session that comes back as another, or none within DCTR_WAKEALL_START_MS, gets nothing after the restart line; each unfinished, exit 1 (L12)',
+clause('clause 2x22 — a restart cut short: /exit that never takes, or after which the pane reads working with no session field, types nothing more and ends after 9.5 s to 13 s; a session that comes back as another gets nothing after the restart line, and none within DCTR_WAKEALL_START_MS of 1.5 s gives up by 5 s; each unfinished, exit 1 (L12)',
   rsBad.length === 0, rsBad.join(' || '))
 
 // L12: a session id is typed into a shell, so one that is not a plain token is never typed: retry, then unwoken.
@@ -959,7 +963,40 @@ const unsafe = wakeFx({ a: { session: 'S-a;touch x' } }, { limits: [`${L(1)} a a
 const rUnsafe = await wakeAll(unsafe)
 clause('clause 2x23 — a pane whose session id is not a plain token: nothing typed, each try retry a <L> session, then unwoken; exit 1 (L12)',
   typed(unsafe).length === 0 && rUnsafe.code === 1 && evWords(unsafe).includes(`retry a ${L(1)} session`) && evWords(unsafe).at(-1) === `unwoken a ${L(1)}` &&
+  evWords(unsafe).slice(0, -1).every((w) => w === `retry a ${L(1)} session`) &&
   !evWords(unsafe).some((w) => w.startsWith('intent ')), wshow(unsafe, rUnsafe))
+
+// L12 repair: the pane reports another session at deliver's first read, after the start wait read S-a ready (the shim
+// switches it on the fourth pane read: wake-all's, the exit wait's, the start wait's, deliver's). Nothing more is typed.
+const swapped = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`], shim: { events: [{ n: 4, session: 'S-T' }] } })
+const rSwapped = await wakeAll(swapped)
+clause('clause 2x24 — a pane that reports another session at the wake\'s first read after a restart read ready on S-a: nothing typed after the restart line, unfinished, exit 1 (L12)',
+  JSON.stringify(textsTo(swapped, 'a')) === JSON.stringify(restarted(swapped, 'a')) && JSON.stringify(rSwapped.words) === '["a unfinished"]' && rSwapped.code === 1, wshow(swapped, rSwapped))
+
+// L12 repair: a role whose record cannot be read, or whose restart line would pass herdr's 1,024-byte limit on a typed
+// line, is never restarted: nothing typed, each try retry with its reason, then unwoken.
+const noRec = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+fs.rmSync(path.join(noRec.lane, 'SESSION_MEMORY.md'))
+const longLine = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+const longLaunch = `sh '/${'d'.repeat(1010)}.sh'`
+write(path.join(longLine.run, 'lane.log'), `2026-11-08T09:00:00Z orchestrator create a ${PANE} ${longLine.lane} ${longLaunch}\n`)
+const [rNoRec, rLong] = [await wakeAll(noRec), await wakeAll(longLine)]
+const refusedOk = (fx, r, why) => typed(fx).length === 0 && r.code === 1 && evWords(fx).at(-1) === `unwoken a ${L(1)}` &&
+  evWords(fx).slice(0, -1).length > 0 && evWords(fx).slice(0, -1).every((w) => w === `retry a ${L(1)} ${why}`)
+clause('clause 2x25 — a role whose record cannot be read, and one whose launch line with --resume and its session passes 1,024 bytes (its launch line alone within it): nothing typed, each try retry a <L> record or line, then unwoken; exit 1 (L12)',
+  refusedOk(noRec, rNoRec, 'record') && refusedOk(longLine, rLong, 'line') && Buffer.byteLength(longLaunch) <= 1024 && Buffer.byteLength(`${longLaunch} --resume S-a`) > 1024,
+  wshow(noRec, rNoRec) + wshow(longLine, rLong))
+
+// L12 repair: after a successful restart, a nudge whose typing call fails, and a wake that plans no line because a claim
+// on the pane appeared during the start wait (an unreadable claim file counts as held): each unfinished, never woken.
+const nudgeFails = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`], shim: { typeFailText: NUDGE } })
+const lateClaim = wakeFx({ a: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`] })
+setShim(lateClaim, { events: [{ n: 3, file: at(lateClaim, () => path.join(autoCycleDir(), 'late.claim')), line: 'not json' }] })
+const [rNudgeFails, rLateClaim] = [await wakeAll(nudgeFails), await wakeAll(lateClaim)]
+clause('clause 2x26 — after a restart that read ready, a nudge whose typing call fails, and a wake that plans no line because a claim appeared: restart lines typed (and the failed nudge attempted), each unfinished, exit 1 (L12)',
+  JSON.stringify(textsTo(nudgeFails, 'a')) === JSON.stringify(restarted(nudgeFails, 'a', NUDGE)) && JSON.stringify(rNudgeFails.words) === '["a unfinished"]' && rNudgeFails.code === 1 &&
+  JSON.stringify(textsTo(lateClaim, 'a')) === JSON.stringify(restarted(lateClaim, 'a')) && JSON.stringify(rLateClaim.words) === '["a unfinished"]' && rLateClaim.code === 1,
+  wshow(nudgeFails, rNudgeFails) + wshow(lateClaim, rLateClaim))
 
 // WB41: a role whose wake was never tried because the lock was lost still gets its report line, and the exit is non-zero.
 const cut = wakeFx({ a: {}, b: {} }, { limits: [`${L(1)} a account 2026-11-09T12:00:00Z`, `${L(2)} b account 2026-11-09T12:00:00Z`] })
@@ -1440,9 +1477,15 @@ clause('clause 3l — without the sender: each class row carries its one defect 
     const e = h('pane', 'run', fx.pane.a, '/exit'), afterExit = read(), s = h('pane', 'run', fx.pane.a, 'sh x --resume S-a')
     return [e.status, afterExit, s.status, read()]
   }
-  const got = [play({}), play({ exitIgnored: true }), play({ resumeAs: 'S-other' }), play({ resumeFails: true })]
-  clause('clause 3x2 — without the sender: the restart shim reads no agent after /exit and S-a idle after the --resume line; exitIgnored still reads S-a, resumeAs reads S-other, resumeFails no agent',
-    same(got, [[0, 'unknown:-', 0, 'idle:S-a'], [0, 'working:S-a', 0, 'idle:S-a'], [0, 'unknown:-', 0, 'idle:S-other'], [0, 'unknown:-', 0, 'unknown:-']]), JSON.stringify(got))
+  const got = [play({}), play({ exitIgnored: true }), play({ resumeAs: 'S-other' }), play({ resumeFails: true }), play({ exitBare: true })]
+  const u = wakeFx({ a: { session: 'S-a;touch x' } }), uRead = JSON.parse(spawnSync(path.join(u.bin, 'herdr'), ['pane', 'get', u.pane.a], { encoding: 'utf8' }).stdout).result.pane
+  const nf = wakeFx({ a: {} }, { shim: { typeFailText: NUDGE } }), nfRun = (t) => spawnSync(path.join(nf.bin, 'herdr'), ['pane', 'run', nf.pane.a, t], { encoding: 'utf8' }).status
+  const nfGot = [nfRun('/exit'), nfRun(NUDGE)]
+  const sw = wakeFx({ a: {} }, { shim: { events: [{ n: 4, session: 'S-T' }] } }), swGets = [1, 2, 3, 4].map(() => JSON.parse(spawnSync(path.join(sw.bin, 'herdr'), ['pane', 'get', sw.pane.a], { encoding: 'utf8' }).stdout).result.pane.agent_session.value)
+  clause('clause 3x2 — without the sender: the restart shim reads no agent after /exit and S-a idle after the --resume line; exitIgnored still reads S-a, resumeAs reads S-other, resumeFails no agent, exitBare working with no session field; the unsafe fixture\'s pane reads idle on S-a;touch x; typeFailText fails the nudge alone; the swap fixture reads S-a three times and S-T on the fourth read',
+    same(got, [[0, 'unknown:-', 0, 'idle:S-a'], [0, 'working:S-a', 0, 'idle:S-a'], [0, 'unknown:-', 0, 'idle:S-other'], [0, 'unknown:-', 0, 'unknown:-'], [0, 'working:-', 0, 'idle:S-a']]) &&
+    uRead.agent_status === 'idle' && uRead.agent_session.value === 'S-a;touch x' && same(nfGot, [0, 1]) && same(swGets, ['S-a', 'S-a', 'S-a', 'S-T']),
+    JSON.stringify([got, uRead, nfGot, swGets]))
 }
 
 // WC2: the onType trigger, without the sender: a /clear typed through the shim succeeds and writes onto the file named,
